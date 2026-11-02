@@ -1,0 +1,57 @@
+name: Linux candidate artifacts
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Prerelease version (for example 0.1.0-rc.1)
+        required: true
+        default: 0.1.0-rc.1
+  push:
+    branches: ['release/**']
+
+permissions:
+  contents: read
+
+jobs:
+  validate-and-build:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 45
+    env:
+      CGO_ENABLED: '1'
+      CC: gcc
+      GOMAXPROCS: '2'
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version: '1.24.4'
+          cache: true
+      - name: Test application and isolated protocol baseline
+        run: |
+          mkdir -p candidate-logs
+          go test -mod=readonly -p 2 -count=1 -v -timeout 10m ./app ./x/validator/keeper ./x/upgrade ./cmd/config ./integration/ibclab |& tee candidate-logs/tests.log
+          for test in TestIntegrationUpgradeCrashRealEVM TestIntegrationAutoUnbondRealEVM TestIntegrationEventRollbackRealEVM; do
+            grep -q -- "^--- PASS: ${test} " candidate-logs/tests.log
+          done
+      - name: Build identical binaries and package source provenance
+        env:
+          CANDIDATE_VERSION: ${{ inputs.version || '0.1.0-rc.1' }}
+        run: bash scripts/release/build-linux-candidate.sh "$CANDIDATE_VERSION" "$RUNNER_TEMP/candidate"
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: linux-amd64-candidate-${{ github.sha }}
+          path: ${{ runner.temp }}/candidate/
+          retention-days: 30
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: always()
+        with:
+          name: candidate-validation-${{ github.run_id }}
+          path: candidate-logs/
+          retention-days: 30
+          if-no-files-found: warn
