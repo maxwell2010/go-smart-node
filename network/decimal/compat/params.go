@@ -22,17 +22,24 @@ const MaxParamsBytes = 64 * 1024
 // ParamsStore reads configuration from the caller's transactional context.
 // It deliberately retains no mutable configuration cache in the keeper.
 type ParamsStore[P proto.Message] struct {
-	service   store.KVStoreService
-	key       []byte
-	prototype P
-	validate  func(P) error
+	service  store.KVStoreService
+	key      []byte
+	fresh    func() P
+	validate func(P) error
 }
 
 func NewParamsStore[P proto.Message](service store.KVStoreService, key []byte, prototype P, validate func(P) error) (ParamsStore[P], error) {
 	if service == nil || len(key) == 0 || nilMessage(prototype) || validate == nil {
 		return ParamsStore[P]{}, errors.New("parameter store requires service, key, message and validator")
 	}
-	return ParamsStore[P]{service: service, key: append([]byte(nil), key...), prototype: proto.Clone(prototype).(P), validate: validate}, nil
+	messageType := reflect.TypeOf(prototype)
+	if messageType.Kind() != reflect.Pointer {
+		return ParamsStore[P]{}, errors.New("parameter message must be a concrete pointer")
+	}
+	// Retain only the concrete message type. Reflective proto.Clone can panic on
+	// populated SDK custom math fields and is unnecessary for an empty decoder.
+	fresh := func() P { return reflect.New(messageType.Elem()).Interface().(P) }
+	return ParamsStore[P]{service: service, key: append([]byte(nil), key...), fresh: fresh, validate: validate}, nil
 }
 
 func (s ParamsStore[P]) Get(ctx context.Context) (P, error) {
@@ -47,9 +54,8 @@ func (s ParamsStore[P]) Get(ctx context.Context) (P, error) {
 	if len(data) > MaxParamsBytes {
 		return empty, ErrParamsTooLarge
 	}
-	params := proto.Clone(s.prototype).(P)
-	// Discard prototype defaults: only committed bytes may supply stored fields.
-	params.Reset()
+	// Only committed bytes may supply stored fields, never prototype defaults.
+	params := s.fresh()
 	if err := proto.Unmarshal(data, params); err != nil {
 		return empty, fmt.Errorf("decode module parameters: %w", err)
 	}
