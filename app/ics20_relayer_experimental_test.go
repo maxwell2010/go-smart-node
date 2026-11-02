@@ -5,6 +5,7 @@ package app
 import (
 	cmdcfg "bitbucket.org/decimalteam/go-smart-node/cmd/config"
 	validator "bitbucket.org/decimalteam/go-smart-node/x/validator/types"
+	"bytes"
 	"context"
 	"debug/buildinfo"
 	"encoding/base64"
@@ -130,13 +131,17 @@ func runExternalIBCRelayer(t *testing.T, root, dest string) {
 	require.Equal(t, sdk.NewInt(100), allBalances(dst).AmountOf(voucher.Denom))
 	t.Log("External relayer delivered native transfer into exactly 100 voucher units")
 	beforeReturn := balance(dst)
-	run(false, "tx", "transfer", dst, src, "100"+voucher.Denom, addresses[src], "channel-0")
+	// Use a distinct recipient so relayer fees cannot obscure conservation.
+	returnRecipient := sdk.AccAddress(bytes.Repeat([]byte{0x37}, 20)).String()
+	returnBefore := externalBankBalance(t, 26757, returnRecipient, cmdcfg.BaseDenom).Amount
+	run(false, "tx", "transfer", dst, src, "100"+voucher.Denom, returnRecipient, "channel-0")
 	time.Sleep(3 * time.Second)
 	require.True(t, balance(dst).LT(beforeReturn), "return send must charge nonzero native fee")
 	run(false, "tx", "flush", "isolated-ics20", "channel-0")
 	time.Sleep(3 * time.Second)
 	require.True(t, allBalances(dst).AmountOf(voucher.Denom).IsZero())
 	require.True(t, externalBankBalance(t, 26757, transfer.GetEscrowAddress(transfer.PortID, "channel-0").String(), cmdcfg.BaseDenom).IsZero())
+	require.Equal(t, returnBefore.Add(sdk.NewInt(100)), externalBankBalance(t, 26757, returnRecipient, cmdcfg.BaseDenom).Amount, "return must release the exact native amount to its recipient")
 	assertExternalTxGas(t, 26757)
 	assertExternalTxGas(t, 26857)
 	t.Log("External relayer completed voucher return and native release")
