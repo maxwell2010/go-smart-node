@@ -1,20 +1,23 @@
-# Modern network dependency bootstrap
+# Separate network compatibility candidate
 
-This nested Go module is the compatibility baseline for a separate, fresh network. The repository root remains the legacy mainnet replay build. Their dependency graphs are separate; do not add a dependency on the legacy root module here.
+This nested module builds the owned application for a separate, fresh network. The repository root remains the legacy mainnet replay build, with its own dependency graph. Do not import that legacy module here.
 
-`family-check` constructs the pinned official Cosmos EVM example application in an empty in-memory database, checks that EVM, IBC and transfer keepers were wired, then exits. It opens no listeners and sends no transactions. It is a dependency wiring probe, not a runnable Decimal node, a completed feature port or a mainnet migration.
+The current candidate follows the active [2025.1 release family](https://docs.cosmos.network/sdk/latest/release-family): SDK `0.53.8`, CometBFT `0.38.26`, Cosmos EVM `0.6.3`, and IBC Go `10.7.0`. Its effective Ethereum implementation is the canonical Cosmos replacement `github.com/cosmos/go-ethereum v1.16.2-cosmos-1`. Exact source, checksums, test scope and remaining gates are recorded in `family-maintained53.json`.
 
-Run from this directory with the exact supported toolchain recorded in `family-manifest.json`:
+`family-check` constructs the owned application in an empty in-memory database, checks the EVM, IBC and transfer wiring, and exits. It opens no listeners or external connections. It is not a daemon or a completed native feature port.
+
+Run ordinary compatibility checks from this directory with the pinned Go `1.26.10` toolchain:
 
 ```sh
 GOTOOLCHAIN=local go mod download
 GOTOOLCHAIN=local go mod verify
-GOTOOLCHAIN=local go test -mod=readonly -p 1 -count=1 ./...
+GOTOOLCHAIN=local go test -mod=readonly -p 1 -count=1 ./identity ./decimal/... ./app ./internal/family ./internal/ibcharness ./internal/ibcreference/...
+GOTOOLCHAIN=local go test -mod=readonly -p 1 -count=1 -tags=test ./app -run '^TestOwnApplicationICS20TwoChains$'
 GOTOOLCHAIN=local go run -mod=readonly ./cmd/family-check
 ```
 
-The official reference is Cosmos EVM `v0.7.3`, exact source commit `c3ae9067a7eadcdea55a5192226916deb44c71c4`. Its `evmd/` example is a separate module; the nested module requires the exact matching pseudo-version while explicitly selecting root EVM `v0.7.3`. Dependency replacements are not inherited, so this module carries the reference's required replacements explicitly. SDK, Comet, IBC and transport patches are selected within the tested compatible family rather than mixing unrelated latest major versions.
+The production application tests exercise a signed EVM transfer, exact charged fees, signing-domain rejection and bounded financial rollback. The `test` tag enables independent in-process EVM configurations solely for the two-chain ICS20 harness. Installable daemons must use the default production build and actual separate processes.
 
-The Ethereum import path is replaced by the Cosmos geth fork. Its actual replacement version and checksum matter; the upstream `require` version alone does not describe the executable. Govulncheck queries the replacement module path, so a clean fork-path scan does not establish that upstream geth advisories have been reviewed or backported. The family manifest retains this coverage limitation.
+Generic SDK staking does not establish Decimal validator, delegation, rewards, coin or NFT parity. These native modules require explicit wiring and state tests. The canonical EVM proposer-address conversion also needs its separately reviewed source correction and an actual `COINBASE` execution regression. A guarded daemon, external relayer tests, feature parity and release review remain necessary before presenting this candidate as a network release.
 
-Decimal native coin creation, reserve accounting and conversion formulas, NFT semantics, delegation, rewards, validator selection, contract interfaces and events still require an explicit port and parity tests. Generic SDK staking and distribution are not substitutes for these financial semantics. Fresh chain identity, genesis, a local application constructor, a guarded daemon CLI and multi-chain tests must be completed before presenting this as a network release.
+The older `family-manifest.json` preserves the SDK `0.54` / EVM `0.7` bootstrap snapshot. Its validation and advisory findings describe that historical graph. The SDK `0.55` source adapter is retained on a separate development branch; it is not this maintained-family candidate.
