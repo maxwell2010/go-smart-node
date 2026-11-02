@@ -145,8 +145,21 @@ The source scan is retained in the local validation artifacts, not embedded in t
 
 ## Standalone security gate
 
-`python scripts/audit/govuln_gate.py SCAN.json --scanner-exit-code STATUS`
+Capture the actual process rather than adding a completion sidecar retrospectively:
 
-Pass the actual scanner process exit status, not an assumed zero. The gate requires a symbol-level scan and one supported configuration record. It returns 1 for deduplicated symbol advisory IDs even when govulncheck JSON mode returned zero, 2 for scanner failure or invalid/truncated/missing input, and 0 only for a successfully completed scanner process with no symbol findings. It does not accept a module-only scan as evidence of clean symbol reachability. There are no automatic exclusions.
+```sh
+python scripts/audit/capture_govuln.py --raw SCAN.json --manifest SCAN.complete.json \
+  --source-commit EXACT_40_CHARACTER_COMMIT --scope 'ordinary ./cmd/dscd' \
+  --go /path/to/go -- /path/to/govulncheck -json ./cmd/dscd
+python scripts/audit/govuln_gate.py SCAN.json --manifest SCAN.complete.json
+```
+
+The wrapper launches argv directly, captures stdout to a temporary file, flushes and fsyncs it after process exit, then publishes it atomically. It publishes the completion manifest last, with actual exit status, raw SHA256 and byte count, explicit source commit/scope, actual `go version` output and scanner argv. Existing completion evidence is invalidated before starting another capture. Use unique paths per scan. Do not put credentials in argv because argv is retained as evidence. A failed launch or interrupted capture cannot publish a new completion manifest.
+
+The gate validates the completion binding and requires a supported symbol-level scan. It returns 1 for deduplicated symbol advisory IDs even when govulncheck JSON mode returned zero, 2 for scanner failure, invalid JSON, missing completion evidence, invalid metadata or mismatched raw bytes, and 0 only for matching completed evidence without symbol findings. A module-only scan cannot establish clean symbol reachability. There are no automatic exclusions.
+
+Legacy `--scanner-exit-code STATUS` is diagnostic only. It reports findings but cannot return a release PASS; a clean diagnostic returns 2 with `diagnostic_clean: true` and `passed: false`.
+
+The JSON protocol has no terminal completion record. Syntax checks alone cannot distinguish a clean stream from truncation exactly between JSON objects. The sidecar detects alteration or truncation after a genuine completed capture by binding the exact bytes. A genuinely completed scanner that emits only a valid configuration can pass if its process returned zero. This is evidence consistency, not a signature or proof that a compromised scanner, caller-supplied source identity or forged manifest is trustworthy. Review the source commit, scope, toolchain, scanner identity and database timestamp with the release evidence. A binary scan describes the binary's build configuration; the wrapper's Go command identifies the scan environment.
 
 This standalone tool is not wired as an obligatory red integration CI check. It is a release decision aid; pass it the exact production entrypoint/flavor and toolchain to be released. Static findings still need exposure triage, and no findings alone does not prove exploit absence.

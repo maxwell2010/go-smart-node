@@ -2,14 +2,16 @@ import json
 import unittest
 from govuln_gate import evaluate
 
-CONFIG = {'config': {'protocol_version': 'v1.0.0', 'scan_level': 'symbol', 'scanner_version': 'test'}}
+CONFIG = {'config': {'protocol_version': 'v1.0.0', 'scan_level': 'symbol', 'scanner_version': 'test',
+                     'scanner_name': 'govulncheck', 'scan_mode': 'source', 'go_version': 'go1.26.10'}}
 
 
 class GateTests(unittest.TestCase):
-    def test_clean_complete_symbol_scan(self):
+    def test_clean_diagnostic_without_completion_cannot_pass(self):
         status, report = evaluate(json.dumps(CONFIG), 0)
-        self.assertEqual(status, 0)
-        self.assertTrue(report['passed'])
+        self.assertEqual(status, 2)
+        self.assertFalse(report['passed'])
+        self.assertTrue(report['diagnostic_clean'])
 
     def test_findings_fail_even_with_scanner_json_exit_zero(self):
         finding = {'finding': {'osv': 'GO-TEST', 'trace': [{'function': 'Vulnerable'}]}}
@@ -38,6 +40,20 @@ class GateTests(unittest.TestCase):
         text = json.dumps(CONFIG) + '\n' + json.dumps({'finding': {'trace': 'invalid'}})
         with self.assertRaises(ValueError):
             evaluate(text, 0)
+
+    def test_typed_scanner_fields_are_required(self):
+        for field in ['scanner_name', 'scanner_version', 'go_version', 'scan_mode']:
+            config = {'config': dict(CONFIG['config'], **{field: False})}
+            with self.assertRaises(ValueError):
+                evaluate(json.dumps(config), 0, completion_verified=True)
+
+    def test_typed_findings_are_required(self):
+        for finding in [{'osv': False, 'trace': []},
+                        {'osv': 'GO-TEST', 'trace': [1]},
+                        {'osv': 'GO-TEST', 'trace': [{'function': True}]}]:
+            with self.assertRaises(ValueError):
+                evaluate(json.dumps(CONFIG) + '\n' + json.dumps({'finding': finding}), 0,
+                         completion_verified=True)
 
 
 if __name__ == '__main__':
