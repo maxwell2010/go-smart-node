@@ -14,6 +14,9 @@ import (
 )
 
 func TestInitCmd(t *testing.T) {
+	if os.Getenv("DSC_LIVE_CONTRACT_READ_TESTS") != "1" {
+		t.Skip("legacy live devnet diagnostic; enable explicitly outside offline release tests")
+	}
 
 	web3Client, err := ethclient.Dial("https://devnet-val.decimalchain.com/web3/")
 	if err != nil {

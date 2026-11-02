@@ -2,7 +2,7 @@
 
 Status: NOT READY for a stable production IBC release. No stable tag or release should be published while a required gate below is outstanding.
 
-Verified: grouped reliability changes, actual EVM failures, two DSC application instances with signed messages and native fee debit, DEL/bank/EVM balance equivalence in tested flows, voucher return and refunds, LevelDB restart with a packet pending, proof rejection, client expiry, and a current-version module migration with a packet pending. The last test is not a major-version upgrade rehearsal.
+Verified: local default go test ./... completed successfully with the legacy public-devnet diagnostic explicitly opt-in. A verified pre-upgrade mainnet snapshot was restored and 69 contiguous blocks replayed with canonical AppHash agreement, including one real MsgSetOnline; the recovery height itself is not yet covered. Grouped reliability changes, actual EVM failures, two DSC application instances with signed messages and native fee debit, DEL/bank/EVM balance equivalence in tested flows, voucher return and refunds, LevelDB restart with a packet pending, proof rejection, client expiry, and a current-version module migration with a packet pending. The last test is not a major-version upgrade rehearsal.
 
 Required remaining evidence:
 

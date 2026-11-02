@@ -41,7 +41,7 @@ jobs:
       - name: Test application and isolated protocol baseline
         run: |
           mkdir -p candidate-logs
-          go test -mod=readonly -p 2 -count=1 -v -timeout 10m ./app ./app/ante ./integrationconfig ./x/validator/keeper ./x/upgrade ./cmd/config ./integration/ibclab |& tee candidate-logs/tests.log
+          go test -mod=readonly -p 2 -count=1 -v -timeout 10m ./... |& tee candidate-logs/tests.log
           for test in TestIntegrationUpgradeCrashRealEVM TestIntegrationAutoUnbondRealEVM TestIntegrationEventRollbackRealEVM; do
             grep -q -- "^--- PASS: ${test} " candidate-logs/tests.log
           done
