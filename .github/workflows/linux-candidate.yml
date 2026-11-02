@@ -49,6 +49,14 @@ jobs:
           for test in TestIntegrationUpgradeCrashRealEVM TestIntegrationAutoUnbondRealEVM TestIntegrationEventRollbackRealEVM; do
             grep -q -- "^--- PASS: ${test} " candidate-logs/tests.log
           done
+      - name: Build pinned official external relayer from source
+        if: matrix.flavor == 'experimental_ibc'
+        run: |
+          mkdir -p "$RUNNER_TEMP/relayer-bin"
+          go mod download -json github.com/cosmos/relayer/v2@v2.6.0 > "$RUNNER_TEMP/relayer-source.json"
+          python3 -c 'import json,sys; m=json.load(open(sys.argv[1])); assert m["Sum"] == "h1:JPUs8fyhC+Sz/lqBaITehf98NUqM6hru6QIFgUVKpYA=", "Unexpected relayer source checksum"' "$RUNNER_TEMP/relayer-source.json"
+          GOBIN="$RUNNER_TEMP/relayer-bin" go install github.com/cosmos/relayer/v2@v2.6.0
+          echo "DSC_IBC_RELAYER_BINARY=$RUNNER_TEMP/relayer-bin/relayer" >> "$GITHUB_ENV"
       - name: Test experimental DSC wiring and admission policy
         if: matrix.flavor == 'experimental_ibc'
         env:
