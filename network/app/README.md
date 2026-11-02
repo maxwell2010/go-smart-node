@@ -46,6 +46,13 @@ replace the ante handler. It checks escrow, voucher supply at the recipient and
 exact native release to a separate return recipient. The production application
 is unchanged by the test-only global configuration reset.
 
+The same IBC test checks error acknowledgement and timeout refunds with an
+independent source relayer, so exact user principal is separated from relay
+fees. Repeated timeout delivery is an IBC11 idempotent no-op and must not refund
+again. A genuinely signed receive message with altered packet bytes and the
+original membership proof is rejected without a destination receipt; the
+original proved packet remains relayable afterward.
+
 The default production-tag fresh-app test also runs a bounded financial rollback
 regression using the pinned upstream `StakingReverter` fixture. Two successful
 control delegations establish actual native precompile execution. One caught

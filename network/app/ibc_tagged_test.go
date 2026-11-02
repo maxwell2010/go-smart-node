@@ -20,6 +20,9 @@ import (
 	banktypes "github.com/cosmos/cosmos-sdk/x/bank/types"
 	evmtypes "github.com/cosmos/evm/x/vm/types"
 	transfer "github.com/cosmos/ibc-go/v11/modules/apps/transfer/types"
+	clienttypes "github.com/cosmos/ibc-go/v11/modules/core/02-client/types"
+	channeltypes "github.com/cosmos/ibc-go/v11/modules/core/04-channel/types"
+	host "github.com/cosmos/ibc-go/v11/modules/core/24-host"
 	ibctesting "github.com/cosmos/ibc-go/v11/testing"
 	"github.com/maxwell2010/go-smart-node/network/identity"
 	"github.com/stretchr/testify/require"
@@ -57,7 +60,10 @@ func newOwnIBCChain(t *testing.T, coordinator *ibctesting.Coordinator, evmID uin
 	// independently of the Ethereum signer used by the EVM transaction test.
 	key := secp256k1.GenPrivKey()
 	account := authtypes.NewBaseAccount(key.PubKey().Address().Bytes(), key.PubKey(), 0, 0)
-	genesis := fundedTestGenesis(t, a, vals, []authtypes.GenesisAccount{account}, banktypes.Balance{Address: account.GetAddress().String(), Coins: sdk.NewCoins(sdk.NewCoin(identity.BaseDenom, math.NewInt(1_000_000).Mul(math.NewInt(1_000_000_000_000_000_000))))})
+	relayerKey := secp256k1.GenPrivKey()
+	relayerAccount := authtypes.NewBaseAccount(relayerKey.PubKey().Address().Bytes(), relayerKey.PubKey(), 1, 0)
+	funds := sdk.NewCoins(sdk.NewCoin(identity.BaseDenom, math.NewInt(1_000_000).Mul(math.NewInt(1_000_000_000_000_000_000))))
+	genesis := fundedTestGenesis(t, a, vals, []authtypes.GenesisAccount{account, relayerAccount}, banktypes.Balance{Address: account.GetAddress().String(), Coins: funds}, banktypes.Balance{Address: relayerAccount.GetAddress().String(), Coins: funds})
 	data, err := json.Marshal(genesis)
 	require.NoError(t, err)
 	_, err = a.InitChain(&abci.RequestInitChain{ChainId: chainID, Time: coordinator.CurrentTime, AppStateBytes: data, ConsensusParams: simtestutil.DefaultConsensusParams})
@@ -67,7 +73,7 @@ func newOwnIBCChain(t *testing.T, coordinator *ibctesting.Coordinator, evmID uin
 		ProposedHeader: cmtproto.Header{ChainID: chainID, Height: 1, Time: coordinator.CurrentTime},
 		TxConfig:       fundedIBCConfig{a.TxConfig(), evmID}, Codec: a.AppCodec(), Vals: vals, NextVals: vals,
 		Signers: map[string]cmttypes.PrivValidator{pub.Address().String(): pv}, TrustedValidators: map[uint64]*cmttypes.ValidatorSet{},
-		SenderPrivKey: key, SenderAccount: account, SenderAccounts: []ibctesting.SenderAccount{{SenderPrivKey: key, SenderAccount: account}},
+		SenderPrivKey: key, SenderAccount: account, SenderAccounts: []ibctesting.SenderAccount{{SenderPrivKey: key, SenderAccount: account}, {SenderPrivKey: relayerKey, SenderAccount: relayerAccount}},
 	}
 	coordinator.Chains[chainID] = chain
 	chain.NextBlock()
@@ -112,4 +118,62 @@ func TestOwnApplicationICS20TwoChains(t *testing.T) {
 	require.Equal(t, coin.Amount, appA.BankKeeper.GetBalance(a.GetContext(), returnRecipient, identity.BaseDenom).Amount.Sub(beforeReturn))
 	require.True(t, appA.BankKeeper.GetBalance(a.GetContext(), escrow, identity.BaseDenom).IsZero())
 	require.True(t, appB.BankKeeper.GetBalance(b.GetContext(), b.SenderAccount.GetAddress(), denom).IsZero())
+	// Use an independent relayer on the source so exact user refunds are not
+	// obscured by client-update/acknowledgement/timeout transaction fees.
+	primary := a.SenderAccounts[0]
+	relayer := a.SenderAccounts[1]
+	setSigner := func(sender ibctesting.SenderAccount) {
+		a.SenderAccount = sender.SenderAccount
+		a.SenderPrivKey = sender.SenderPrivKey
+	}
+	beforeError := appA.BankKeeper.GetBalance(a.GetContext(), primary.SenderAccount.GetAddress(), identity.BaseDenom).Amount
+	msg = transfer.NewMsgTransfer(transfer.PortID, path.EndpointA.ChannelID, coin, primary.SenderAccount.GetAddress().String(), "invalid-destination", b.GetTimeoutHeight(), 0, "")
+	result, err = a.SendMsgs(msg)
+	require.NoError(t, err)
+	packet, err = ibctesting.ParsePacketFromEvents(result.Events)
+	require.NoError(t, err)
+	setSigner(relayer)
+	_, ackBytes, err := path.RelayPacketWithResults(packet)
+	require.NoError(t, err)
+	var acknowledgement channeltypes.Acknowledgement
+	require.NoError(t, a.Codec.UnmarshalJSON(ackBytes, &acknowledgement))
+	require.False(t, acknowledgement.Success())
+	require.Equal(t, beforeError.Sub(nativeIBCTransactionFee.Amount), appA.BankKeeper.GetBalance(a.GetContext(), primary.SenderAccount.GetAddress(), identity.BaseDenom).Amount, "error ack must refund all user principal; only send fee belongs to the user")
+	require.True(t, appA.BankKeeper.GetBalance(a.GetContext(), escrow, identity.BaseDenom).IsZero())
+	setSigner(primary)
+	beforeTimeout := appA.BankKeeper.GetBalance(a.GetContext(), primary.SenderAccount.GetAddress(), identity.BaseDenom).Amount
+	deadline := uint64(coordinator.CurrentTime.Add(time.Minute).UnixNano())
+	msg = transfer.NewMsgTransfer(transfer.PortID, path.EndpointA.ChannelID, coin, primary.SenderAccount.GetAddress().String(), b.SenderAccount.GetAddress().String(), clienttypes.ZeroHeight(), deadline, "")
+	result, err = a.SendMsgs(msg)
+	require.NoError(t, err)
+	packet, err = ibctesting.ParsePacketFromEvents(result.Events)
+	require.NoError(t, err)
+	coordinator.IncrementTimeBy(2 * time.Minute)
+	b.NextBlock()
+	setSigner(relayer)
+	require.NoError(t, path.EndpointA.UpdateClient())
+	require.NoError(t, path.EndpointA.TimeoutPacket(packet))
+	require.Equal(t, beforeTimeout.Sub(nativeIBCTransactionFee.Amount), appA.BankKeeper.GetBalance(a.GetContext(), primary.SenderAccount.GetAddress(), identity.BaseDenom).Amount, "timeout must refund exact principal")
+	require.True(t, appA.BankKeeper.GetBalance(a.GetContext(), escrow, identity.BaseDenom).IsZero())
+	require.NoError(t, path.EndpointA.TimeoutPacket(packet), "IBC11 treats repeated timeout delivery as an idempotent no-op")
+	require.Equal(t, beforeTimeout.Sub(nativeIBCTransactionFee.Amount), appA.BankKeeper.GetBalance(a.GetContext(), primary.SenderAccount.GetAddress(), identity.BaseDenom).Amount)
+	setSigner(primary)
+	beforeInvalidProof := appA.BankKeeper.GetBalance(a.GetContext(), primary.SenderAccount.GetAddress(), identity.BaseDenom).Amount
+	msg = transfer.NewMsgTransfer(transfer.PortID, path.EndpointA.ChannelID, coin, primary.SenderAccount.GetAddress().String(), "invalid-destination", b.GetTimeoutHeight(), 0, "")
+	result, err = a.SendMsgs(msg)
+	require.NoError(t, err)
+	packet, err = ibctesting.ParsePacketFromEvents(result.Events)
+	require.NoError(t, err)
+	require.NoError(t, path.EndpointB.UpdateClient())
+	proof, proofHeight := a.QueryProof(host.PacketCommitmentKey(packet.SourcePort, packet.SourceChannel, packet.Sequence))
+	altered := packet
+	altered.Data = append(append([]byte(nil), packet.Data...), byte(' '))
+	_, err = b.SendMsgs(channeltypes.NewMsgRecvPacket(altered, proof, proofHeight, b.SenderAccount.GetAddress().String()))
+	require.Error(t, err, "a real membership proof cannot authorize altered packet bytes")
+	_, received := appB.IBCKeeper.ChannelKeeper.GetPacketReceipt(b.GetContext(), packet.DestinationPort, packet.DestinationChannel, packet.Sequence)
+	require.False(t, received)
+	setSigner(relayer)
+	require.NoError(t, path.RelayPacket(packet), "original proved packet must remain relayable after rejected tampering")
+	require.Equal(t, beforeInvalidProof.Sub(nativeIBCTransactionFee.Amount), appA.BankKeeper.GetBalance(a.GetContext(), primary.SenderAccount.GetAddress(), identity.BaseDenom).Amount)
+	require.True(t, appA.BankKeeper.GetBalance(a.GetContext(), escrow, identity.BaseDenom).IsZero())
 }
