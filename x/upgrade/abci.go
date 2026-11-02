@@ -3,6 +3,7 @@ package upgrade
 import (
 	"fmt"
 	"os"
+	"sync"
 	"time"
 
 	abci "github.com/tendermint/tendermint/abci/types"
@@ -16,9 +17,43 @@ import (
 	cmdcfg "bitbucket.org/decimalteam/go-smart-node/cmd/config"
 )
 
-var (
-	downloadStat = make(map[string]bool)
-)
+type downloadAttempt struct {
+	running, complete bool
+	retryAfter        time.Time
+}
+
+var downloadMu sync.Mutex
+var downloadActive bool
+var downloadAttempts = make(map[string]downloadAttempt)
+
+// queueDownloadAt isolates retry bookkeeping from consensus state. A failed
+// attempt becomes eligible again after bounded backoff, without blocking BeginBlock.
+func queueDownloadAt(name string, now time.Time, attempt func() error) bool {
+	downloadMu.Lock()
+	state := downloadAttempts[name]
+	if downloadActive || state.running || state.complete || now.Before(state.retryAfter) {
+		downloadMu.Unlock()
+		return false
+	}
+	state.running = true
+	downloadActive = true
+	downloadAttempts[name] = state
+	downloadMu.Unlock()
+	go func() {
+		err := attempt()
+		downloadMu.Lock()
+		defer downloadMu.Unlock()
+		state := downloadAttempts[name]
+		state.running = false
+		downloadActive = false
+		state.complete = err == nil
+		if err != nil {
+			state.retryAfter = time.Now().Add(time.Minute)
+		}
+		downloadAttempts[name] = state
+	}()
+	return true
+}
 
 // BeginBlocker will check if there is a scheduled plan and if it is ready to be executed.
 // If the current height is in the provided set of heights to skip, it will skip and clear the upgrade plan.
@@ -61,10 +96,8 @@ func BeginBlocker(k keeper.Keeper, ctx sdk.Context, _ abci.RequestBeginBlock) {
 
 	// Only committed UpgradeKeeper state decides whether a migration is done.
 
-	_, ok := downloadStat[plan.Name]
-
 	// To make sure clear upgrade is executed at the same block
-	if ctx.BlockHeight() < plan.Height && !ok {
+	if ctx.BlockHeight() < plan.Height {
 		mapping := planMapping(plan)
 		if mapping == nil {
 			logger.Error("error: plan mapping decode")
@@ -76,7 +109,7 @@ func BeginBlocker(k keeper.Keeper, ctx sdk.Context, _ abci.RequestBeginBlock) {
 			]
 		*/
 		hashes, ok := mapping[osArchForURL()]
-		if !ok {
+		if !ok || len(hashes) == 0 {
 			logger.Error(fmt.Sprintf("error: plan mapping[os] for '%s' undefined", osArchForURL()))
 			return
 		}
@@ -89,17 +122,14 @@ func BeginBlocker(k keeper.Keeper, ctx sdk.Context, _ abci.RequestBeginBlock) {
 			return
 		}
 
-		if !doesPageExist(newUrl) {
-			logger.Error("error: url page is not exists")
-			return
-		}
-
-		downloadStat[plan.Name] = true
 		downloadName := getDownloadFileName(cmdcfg.AppBinName)
-
-		if _, err := os.Stat(downloadName); os.IsNotExist(err) {
-			go DownloadSecured(ctx, newUrl, downloadName, hashes[0])
-		}
+		queueDownloadAt(plan.Name+"|"+hashes[0], time.Now(), func() error {
+			err := DownloadSecured(ctx, newUrl, downloadName, hashes[0])
+			if err != nil {
+				logger.Error("upgrade download failed; will retry", "error", err)
+			}
+			return err
+		})
 	}
 
 	// To make sure clear upgrade is executed at the same block

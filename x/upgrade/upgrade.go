@@ -1,6 +1,7 @@
 package upgrade
 
 import (
+	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
@@ -13,7 +14,7 @@ import (
 	"path"
 	"path/filepath"
 	"runtime"
-	"syscall"
+	"time"
 
 	"gopkg.in/ini.v1"
 
@@ -25,49 +26,67 @@ import (
 )
 
 // DownloadSecured downloads file from provided URL to the specified path and checks it's hash.
-func DownloadSecured(ctx sdk.Context, url string, path string, hash string) {
-	// download
-	ctx.Logger().Info(fmt.Sprintf("start download binary \"%s\" to file \"%s\"", url, path))
-	err := downloadFile(url, path)
-	if err != nil {
-		ctx.Logger().Error(fmt.Sprintf("error while downloading binary \"%s\" to file \"%s\" with error '%s'", url, path, err.Error()))
-		return
+func DownloadSecured(ctx sdk.Context, sourceURL string, destination string, hash string) error {
+	if !validSHA256(hash) {
+		return fmt.Errorf("invalid SHA-256 checksum")
 	}
-	ctx.Logger().Info(fmt.Sprintf("successful download binary \"%s\" to file \"%s\"", url, path))
-	// check hash
-	if !checkFile(path, hash) {
-		err = os.Remove(path)
-		if err != nil {
-			ctx.Logger().Error(fmt.Sprintf("error while remove wrong file \"%s\": '%s'", path, err.Error()))
-		}
-		ctx.Logger().Error(fmt.Sprintf("error check hash for file \"%s\"", path))
-		return
+	if checkFile(destination, hash) {
+		return nil
 	}
-	ctx.Logger().Info(fmt.Sprintf("check hash successful for file \"%s\"", path))
-}
-
-// downloadFile downloads file from provided URL to the specified path.
-func downloadFile(url string, path string) error {
-	// Create the file
-	out, err := os.Create(path)
+	ctx.Logger().Info("downloading verified upgrade binary", "url", sourceURL)
+	tmp, err := os.CreateTemp(filepath.Dir(destination), ".upgrade-download-*")
 	if err != nil {
 		return err
 	}
-	defer out.Close()
+	name := tmp.Name()
+	if err = tmp.Close(); err != nil {
+		os.Remove(name)
+		return err
+	}
+	defer os.Remove(name)
+	if err = downloadFile(sourceURL, name); err != nil {
+		return err
+	}
+	if !checkFile(name, hash) {
+		return fmt.Errorf("download checksum mismatch")
+	}
+	// Rename replaces the destination atomically where supported; failure leaves it intact.
+	return os.Rename(name, destination)
+}
 
-	// Get the data
-	resp, err := http.Get(url)
+const downloadTimeout = 2 * time.Minute
+const probeTimeout = 5 * time.Second
+
+var downloadClient = &http.Client{Timeout: downloadTimeout}
+var probeClient = &http.Client{Timeout: probeTimeout}
+
+func validSHA256(value string) bool {
+	decoded, err := hex.DecodeString(value)
+	return err == nil && len(decoded) == sha256.Size && value == hex.EncodeToString(decoded)
+}
+
+// downloadFile uses a bounded request and syncs the completed temporary file.
+func downloadFile(sourceURL string, destination string) error {
+	resp, err := downloadClient.Get(sourceURL)
 	if err != nil {
 		return err
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
-		return fmt.Errorf("download '%s' reply code is %d", url, resp.StatusCode)
+		return fmt.Errorf("download reply code %d", resp.StatusCode)
 	}
-
-	// Write the body to file
-	_, err = io.Copy(out, resp.Body)
-	return err
+	out, err := os.Create(destination)
+	if err != nil {
+		return err
+	}
+	defer out.Close()
+	if _, err = io.Copy(out, resp.Body); err != nil {
+		return err
+	}
+	if err = out.Sync(); err != nil {
+		return err
+	}
+	return out.Close()
 }
 
 // checkFile gets the hash of the download file, then checks what was in the transaction.
@@ -111,7 +130,7 @@ func resolveDownloadURL(s string) string {
 
 // doesPageExist checks if the page at provided URL exists.
 func doesPageExist(s string) bool {
-	resp, err := http.Head(s)
+	resp, err := probeClient.Head(s)
 	if err != nil {
 		return false
 	}
@@ -123,58 +142,40 @@ func doesPageExist(s string) bool {
 // changeBinary changes the old binary to a new one.
 func changeBinary(plan types.Plan) error {
 	mapping := planMapping(plan)
-	if mapping == nil {
-		return fmt.Errorf("error: mapping decode")
+	hashes := mapping[osArchForURL()]
+	if len(hashes) == 0 {
+		return fmt.Errorf("missing or invalid platform checksum mapping")
 	}
-
 	ex, err := os.Executable()
 	if err != nil {
-		return fmt.Errorf("error: get current dir")
+		return fmt.Errorf("get executable: %w", err)
 	}
+	current := filepath.Join(filepath.Dir(ex), cmdcfg.AppBinName)
+	return replaceBinary(current, getDownloadFileName(cmdcfg.AppBinName), hashes[0], isRunSuccess)
+}
 
-	currPath := filepath.Dir(ex)
-
-	downloadName := getDownloadFileName(cmdcfg.AppBinName)
-	if _, err := os.Stat(downloadName); os.IsNotExist(err) {
-		return err
+// replaceBinary never unlinks the running executable. If the platform cannot replace
+// it with rename, leave it in place and require operator/supervisor intervention.
+func replaceBinary(current, candidate, hash string, validate func(string) bool) error {
+	if !validSHA256(hash) || !checkFile(candidate, hash) {
+		return fmt.Errorf("candidate checksum mismatch")
 	}
-
-	hashes, ok := mapping[osArchForURL()]
-	if !ok {
-		return fmt.Errorf("error: mapping[os] undefined")
-	}
-
-	if !checkFile(downloadName, hashes[0]) {
-		os.Remove(downloadName)
-		return fmt.Errorf("error: hash does not match")
-	}
-
-	currBin := filepath.Join(currPath, cmdcfg.AppBinName)
-	mode, err := getMode(currBin)
+	mode, err := getMode(current)
 	if err != nil {
-		os.Remove(downloadName)
 		return err
 	}
-
-	err = markExecutableWithMode(downloadName, mode)
-	if err != nil {
-		os.Remove(downloadName)
+	if err := markExecutableWithMode(candidate, mode); err != nil {
 		return err
 	}
-
-	ok = isRunSuccess(downloadName)
-	if !ok {
-		os.Remove(downloadName)
-		return fmt.Errorf("error: file not running")
+	if !validate(candidate) {
+		return fmt.Errorf("candidate version check failed")
 	}
-
-	syscall.Unlink(currBin)
-	err = os.Rename(downloadName, currBin)
-	if err != nil {
-		os.Remove(downloadName)
-		return err
+	if !checkFile(candidate, hash) {
+		return fmt.Errorf("candidate changed during validation")
 	}
-
+	if err := os.Rename(candidate, current); err != nil {
+		return fmt.Errorf("replace executable without unlink: %w", err)
+	}
 	return nil
 }
 
@@ -194,7 +195,9 @@ func markExecutableWithMode(path string, mode os.FileMode) error {
 
 // isRunSuccess runs specified file with argument `version` to check if it runs.
 func isRunSuccess(path string) bool {
-	cmd := exec.Command(path, "version")
+	ctx, cancel := context.WithTimeout(context.Background(), probeTimeout)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, path, "version")
 	err := cmd.Run()
 	return err == nil
 }
@@ -235,6 +238,16 @@ func planMapping(plan types.Plan) map[string][]string {
 	err := json.Unmarshal([]byte(plan.Info), &mapping)
 	if err != nil {
 		return nil
+	}
+	for platform, hashes := range mapping {
+		if platform == "" || len(hashes) == 0 {
+			return nil
+		}
+		for _, hash := range hashes {
+			if !validSHA256(hash) {
+				return nil
+			}
+		}
 	}
 	return mapping
 }
