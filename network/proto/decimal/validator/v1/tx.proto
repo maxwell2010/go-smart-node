@@ -1,0 +1,420 @@
+syntax = "proto3";
+package decimal.validator.v1;
+
+import "gogoproto/gogo.proto";
+import "google/protobuf/any.proto";
+import "google/protobuf/timestamp.proto";
+
+import "cosmos_proto/cosmos.proto";
+import "cosmos/base/v1beta1/coin.proto";
+import "cosmos/msg/v1/msg.proto";
+
+import "decimal/validator/v1/validator.proto";
+
+option go_package = "github.com/maxwell2010/go-smart-node/network/decimal/validator/types";
+
+// Msg defines the module Msg service.
+service Msg {
+  option (cosmos.msg.v1.service) = true;
+  // CreateValidator defines a method for creating a new validator.
+  rpc CreateValidator(MsgCreateValidator) returns (MsgCreateValidatorResponse);
+
+  // EditValidator defines a method for editing an existing validator.
+  rpc EditValidator(MsgEditValidator) returns (MsgEditValidatorResponse);
+
+  // SetOnline defines a method for turning on a validator into the blockchain consensus.
+  rpc SetOnline(MsgSetOnline) returns (MsgSetOnlineResponse);
+
+  // SetOffline defines a method for turning off a validator from the blockchain consensus.
+  rpc SetOffline(MsgSetOffline) returns (MsgSetOfflineResponse);
+
+  // Delegate defines a method for performing a delegation of coins from a delegator to a validator.
+  rpc Delegate(MsgDelegate) returns (MsgDelegateResponse);
+
+  // DelegateNFT defines a method for performing a delegation of NFTs from a delegator to a validator.
+  rpc DelegateNFT(MsgDelegateNFT) returns (MsgDelegateNFTResponse);
+
+  // Redelegate defines a method for performing a redelegation of coins from a source validator to destination one.
+  rpc Redelegate(MsgRedelegate) returns (MsgRedelegateResponse);
+
+  // RedelegateNFT defines a method for performing a redelegation of NFTs from a source validator to destination one.
+  rpc RedelegateNFT(MsgRedelegateNFT) returns (MsgRedelegateNFTResponse);
+
+  // Undelegate defines a method for performing an undelegation of coins from a validator.
+  rpc Undelegate(MsgUndelegate) returns (MsgUndelegateResponse);
+
+  // UndelegateNFT defines a method for performing an undelegation of NFTs from a validator.
+  rpc UndelegateNFT(MsgUndelegateNFT) returns (MsgUndelegateNFTResponse);
+
+  // CancelRedelegation defines a method for canceling the redelegation and delegate back the validator.
+  rpc CancelRedelegation(MsgCancelRedelegation) returns (MsgCancelRedelegationResponse);
+
+  // CancelRedelegationNFT defines a method for canceling the redelegation and delegate back the validator.
+  rpc CancelRedelegationNFT(MsgCancelRedelegationNFT) returns (MsgCancelRedelegationNFTResponse);
+
+  // CancelUndelegation defines a method for canceling the undelegation and delegate back to the validator.
+  rpc CancelUndelegation(MsgCancelUndelegation) returns (MsgCancelUndelegationResponse);
+
+  // CancelUndelegationNFT defines a method for canceling the undelegation and delegate back to the validator.
+  rpc CancelUndelegationNFT(MsgCancelUndelegationNFT) returns (MsgCancelUndelegationNFTResponse);
+
+  // HaltChain schedules a hard consensus halt of the chain (halt-admin only).
+  rpc HaltChain(MsgHaltChain) returns (MsgHaltChainResponse);
+
+  // ResumeChain clears a scheduled or active hard halt (halt-admin only).
+  rpc ResumeChain(MsgResumeChain) returns (MsgResumeChainResponse);
+
+  // FreezeChain soft-freezes the chain, rejecting all non-emergency transactions (halt-admin only).
+  rpc FreezeChain(MsgFreezeChain) returns (MsgFreezeChainResponse);
+
+  // UnfreezeChain lifts a soft freeze (halt-admin only).
+  rpc UnfreezeChain(MsgUnfreezeChain) returns (MsgUnfreezeChainResponse);
+}
+
+// MsgCreateValidator defines a SDK message for creating a new validator.
+message MsgCreateValidator {
+  option (cosmos.msg.v1.signer) = "operator_address";
+
+  option (gogoproto.equal) = false;
+  option (gogoproto.goproto_getters) = false;
+
+  string operator_address = 1 [ (cosmos_proto.scalar) = "cosmos.ValidatorAddressString" ];
+  string reward_address = 2 [ (cosmos_proto.scalar) = "cosmos.AddressString" ];
+  google.protobuf.Any consensus_pubkey = 3 [ (cosmos_proto.accepts_interface) = "cosmos.crypto.PubKey" ];
+  Description description = 4 [ (gogoproto.nullable) = false ];
+  string commission = 5 [
+    (cosmos_proto.scalar) = "cosmos.Dec",
+    (gogoproto.customtype) = "cosmossdk.io/math.LegacyDec",
+    (gogoproto.nullable) = false
+  ];
+  cosmos.base.v1beta1.Coin stake = 6 [ (gogoproto.nullable) = false ];
+}
+
+// MsgCreateValidatorResponse defines the Msg/CreateValidator response type.
+message MsgCreateValidatorResponse {}
+
+// MsgEditValidator defines a SDK message for editing an existing validator.
+message MsgEditValidator {
+  option (cosmos.msg.v1.signer) = "operator_address";
+
+  option (gogoproto.equal) = false;
+  option (gogoproto.goproto_getters) = false;
+
+  string operator_address = 1 [ (cosmos_proto.scalar) = "cosmos.ValidatorAddressString" ];
+  string reward_address = 2 [ (cosmos_proto.scalar) = "cosmos.AddressString" ];
+  Description description = 3 [ (gogoproto.nullable) = false ];
+}
+
+// MsgEditValidatorResponse defines the Msg/EditValidator response type.
+message MsgEditValidatorResponse {}
+
+// MsgSetOnline defines a SDK message for turning on a validator into the blockchain consensus.
+message MsgSetOnline {
+  option (cosmos.msg.v1.signer) = "validator";
+
+  option (gogoproto.equal) = false;
+  option (gogoproto.goproto_getters) = false;
+
+  // validator is the bech32-encoded address of the validator.
+  string validator = 1 [ (cosmos_proto.scalar) = "cosmos.ValidatorAddressString" ];
+}
+
+// MsgSetOnlineResponse defines the Msg/SetOnline response type.
+message MsgSetOnlineResponse {}
+
+// MsgSetOffline defines a SDK message for turning off a validator from the blockchain consensus.
+message MsgSetOffline {
+  option (cosmos.msg.v1.signer) = "validator";
+
+  option (gogoproto.equal) = false;
+  option (gogoproto.goproto_getters) = false;
+
+  // validator is the bech32-encoded address of the validator.
+  string validator = 1 [ (cosmos_proto.scalar) = "cosmos.ValidatorAddressString" ];
+}
+
+// MsgSetOfflineResponse defines the Msg/SetOffline response type.
+message MsgSetOfflineResponse {}
+
+// MsgDelegate defines a SDK message for performing a delegation of coins from a delegator to a validator.
+message MsgDelegate {
+  option (cosmos.msg.v1.signer) = "delegator";
+
+  option (gogoproto.equal) = false;
+  option (gogoproto.goproto_getters) = false;
+
+  // delegator is the bech32-encoded address of the delegator.
+  string delegator = 1 [ (cosmos_proto.scalar) = "cosmos.AddressString" ];
+  // validator is the bech32-encoded address of the validator.
+  string validator = 2 [ (cosmos_proto.scalar) = "cosmos.ValidatorAddressString" ];
+  // coin defines amount of the coin to delegate.
+  cosmos.base.v1beta1.Coin coin = 3 [ (gogoproto.nullable) = false ];
+}
+
+// MsgDelegateResponse defines the Msg/Delegate response type.
+message MsgDelegateResponse {}
+
+// MsgDelegateNFT defines a SDK message for performing a delegation of NFTs from a delegator to a validator.
+message MsgDelegateNFT {
+  option (cosmos.msg.v1.signer) = "delegator";
+
+  option (gogoproto.equal) = false;
+  option (gogoproto.goproto_getters) = false;
+
+  // delegator is the bech32-encoded address of the delegator.
+  string delegator = 1 [ (cosmos_proto.scalar) = "cosmos.AddressString" ];
+  // validator is the bech32-encoded address of the validator.
+  string validator = 2 [ (cosmos_proto.scalar) = "cosmos.ValidatorAddressString" ];
+  // token_id defines the NFT token ID.
+  string token_id = 3 [ (gogoproto.customname) = "TokenID" ];
+  // sub_token_ids defines list of NFT sub-token IDs.
+  repeated uint32 sub_token_ids = 4 [ (gogoproto.customname) = "SubTokenIDs" ];
+}
+
+// MsgDelegateNFTResponse defines the Msg/DelegateNFT response type.
+message MsgDelegateNFTResponse {}
+
+// MsgRedelegate defines a SDK message for performing a redelegation
+// of coins from a delegator and source validator to a destination validator.
+message MsgRedelegate {
+  option (cosmos.msg.v1.signer) = "delegator";
+
+  option (gogoproto.equal) = false;
+  option (gogoproto.goproto_getters) = false;
+
+  // delegator is the bech32-encoded address of the delegator.
+  string delegator = 1 [ (cosmos_proto.scalar) = "cosmos.AddressString" ];
+  // validator_src is the bech32-encoded address of the source validator.
+  string validator_src = 2 [ (cosmos_proto.scalar) = "cosmos.ValidatorAddressString" ];
+  // validator_dst is the bech32-encoded address of the destination validator.
+  string validator_dst = 3 [ (cosmos_proto.scalar) = "cosmos.ValidatorAddressString" ];
+  // coin defines amount of the coin to redelegate.
+  cosmos.base.v1beta1.Coin coin = 4 [ (gogoproto.nullable) = false ];
+}
+
+// MsgRedelegateResponse defines the Msg/Redelegate response type.
+message MsgRedelegateResponse {
+  google.protobuf.Timestamp completion_time = 1 [ (gogoproto.nullable) = false, (gogoproto.stdtime) = true ];
+}
+
+// MsgRedelegateNFT defines a SDK message for performing a redelegation
+// of NFTs from a delegator and source validator to a destination validator.
+message MsgRedelegateNFT {
+  option (cosmos.msg.v1.signer) = "delegator";
+
+  option (gogoproto.equal) = false;
+  option (gogoproto.goproto_getters) = false;
+
+  // delegator is the bech32-encoded address of the delegator.
+  string delegator = 1 [ (cosmos_proto.scalar) = "cosmos.AddressString" ];
+  // validator_src is the bech32-encoded address of the source validator.
+  string validator_src = 2 [ (cosmos_proto.scalar) = "cosmos.ValidatorAddressString" ];
+  // validator_dst is the bech32-encoded address of the destination validator.
+  string validator_dst = 3 [ (cosmos_proto.scalar) = "cosmos.ValidatorAddressString" ];
+  // token_id defines the NFT token ID.
+  string token_id = 4 [ (gogoproto.customname) = "TokenID" ];
+  // sub_token_ids defines list of NFT sub-token IDs.
+  repeated uint32 sub_token_ids = 5 [ (gogoproto.customname) = "SubTokenIDs" ];
+}
+
+// MsgRedelegateNFTResponse defines the Msg/RedelegateNFT response type.
+message MsgRedelegateNFTResponse {
+  google.protobuf.Timestamp completion_time = 1 [ (gogoproto.nullable) = false, (gogoproto.stdtime) = true ];
+}
+
+// MsgUndelegate defines a SDK message for performing an undelegation from a
+// delegate and a validator.
+message MsgUndelegate {
+  option (cosmos.msg.v1.signer) = "delegator";
+
+  option (gogoproto.equal) = false;
+  option (gogoproto.goproto_getters) = false;
+
+  // delegator is the bech32-encoded address of the delegator.
+  string delegator = 1 [ (cosmos_proto.scalar) = "cosmos.AddressString" ];
+  // validator is the bech32-encoded address of the validator.
+  string validator = 2 [ (cosmos_proto.scalar) = "cosmos.ValidatorAddressString" ];
+  // coin defines amount of the coin to undelegate.
+  cosmos.base.v1beta1.Coin coin = 3 [ (gogoproto.nullable) = false ];
+}
+
+// MsgUndelegateResponse defines the Msg/Undelegate response type.
+message MsgUndelegateResponse {
+  google.protobuf.Timestamp completion_time = 1 [ (gogoproto.nullable) = false, (gogoproto.stdtime) = true ];
+}
+
+// MsgUndelegateNFT defines a SDK message for performing an undelegation from a
+// delegate and a validator.
+message MsgUndelegateNFT {
+  option (cosmos.msg.v1.signer) = "delegator";
+
+  option (gogoproto.equal) = false;
+  option (gogoproto.goproto_getters) = false;
+
+  // delegator is the bech32-encoded address of the delegator.
+  string delegator = 1 [ (cosmos_proto.scalar) = "cosmos.AddressString" ];
+  // validator is the bech32-encoded address of the validator.
+  string validator = 2 [ (cosmos_proto.scalar) = "cosmos.ValidatorAddressString" ];
+  // token_id defines the NFT token ID.
+  string token_id = 3 [ (gogoproto.customname) = "TokenID" ];
+  // sub_token_ids defines list of NFT sub-token IDs.
+  repeated uint32 sub_token_ids = 4 [ (gogoproto.customname) = "SubTokenIDs" ];
+}
+
+// MsgUndelegateNFTResponse defines the Msg/UndelegateNFT response type.
+message MsgUndelegateNFTResponse {
+  google.protobuf.Timestamp completion_time = 1 [ (gogoproto.nullable) = false, (gogoproto.stdtime) = true ];
+}
+
+// MsgCancelRedelegation defines the SDK message for performing a cancel redelegation for delegator.
+message MsgCancelRedelegation {
+  option (cosmos.msg.v1.signer) = "delegator";
+
+  option (gogoproto.equal) = false;
+  option (gogoproto.goproto_getters) = false;
+
+  // delegator is the bech32-encoded address of the delegator.
+  string delegator = 1 [ (cosmos_proto.scalar) = "cosmos.AddressString" ];
+  // validator_src is the bech32-encoded address of the source validator.
+  string validator_src = 2 [ (cosmos_proto.scalar) = "cosmos.ValidatorAddressString" ];
+  // validator_dst is the bech32-encoded address of the destination validator.
+  string validator_dst = 3 [ (cosmos_proto.scalar) = "cosmos.ValidatorAddressString" ];
+  // creation_height defines number of the block at which redelegation was beginned.
+  int64 creation_height = 4;
+  // coin defines amount of the coin to cancel from redelegation.
+  cosmos.base.v1beta1.Coin coin = 5 [ (gogoproto.nullable) = false ];
+}
+
+// MsgCancelRedelegationResponse
+message MsgCancelRedelegationResponse {}
+
+// MsgCancelRedelegationNFT defines the SDK message for performing a cancel redelegation for delegator.
+message MsgCancelRedelegationNFT {
+  option (cosmos.msg.v1.signer) = "delegator";
+
+  option (gogoproto.equal) = false;
+  option (gogoproto.goproto_getters) = false;
+
+  // delegator is the bech32-encoded address of the delegator.
+  string delegator = 1 [ (cosmos_proto.scalar) = "cosmos.AddressString" ];
+  // validator_src is the bech32-encoded address of the source validator.
+  string validator_src = 2 [ (cosmos_proto.scalar) = "cosmos.ValidatorAddressString" ];
+  // validator_dst is the bech32-encoded address of the destination validator.
+  string validator_dst = 3 [ (cosmos_proto.scalar) = "cosmos.ValidatorAddressString" ];
+  // creation_height defines number of the block at which redelegation was beginned.
+  int64 creation_height = 4;
+  // token_id defines the NFT token ID.
+  string token_id = 5 [ (gogoproto.customname) = "TokenID" ];
+  // sub_token_ids defines list of NFT sub-token IDs.
+  repeated uint32 sub_token_ids = 6 [ (gogoproto.customname) = "SubTokenIDs" ];
+}
+
+// MsgCancelRedelegationNFTResponse
+message MsgCancelRedelegationNFTResponse {}
+
+// MsgCancelUndelegation defines the SDK message for performing a cancel undelegation for delegator.
+message MsgCancelUndelegation {
+  option (cosmos.msg.v1.signer) = "delegator";
+  option (gogoproto.equal) = false;
+  option (gogoproto.goproto_getters) = false;
+
+  // delegator is the bech32-encoded address of the delegator.
+  string delegator = 1 [ (cosmos_proto.scalar) = "cosmos.AddressString" ];
+  // validator is the bech32-encoded address of the validator.
+  string validator = 2 [ (cosmos_proto.scalar) = "cosmos.ValidatorAddressString" ];
+  // creation_height defines number of the block at which undelegation was beginned.
+  int64 creation_height = 3;
+  // coin defines amount of the coin to cancel from undelegation.
+  cosmos.base.v1beta1.Coin coin = 4 [ (gogoproto.nullable) = false ];
+}
+
+// MsgCancelUndelegationResponse
+message MsgCancelUndelegationResponse {}
+
+// MsgCancelUndelegationNFT defines the SDK message for performing a cancel undelegation for delegator.
+message MsgCancelUndelegationNFT {
+  option (cosmos.msg.v1.signer) = "delegator";
+
+  option (gogoproto.equal) = false;
+  option (gogoproto.goproto_getters) = false;
+
+  // delegator is the bech32-encoded address of the delegator.
+  string delegator = 1 [ (cosmos_proto.scalar) = "cosmos.AddressString" ];
+  // validator is the bech32-encoded address of the validator.
+  string validator = 2 [ (cosmos_proto.scalar) = "cosmos.ValidatorAddressString" ];
+  // creation_height defines number of the block at which undelegation was beginned.
+  int64 creation_height = 3;
+  // token_id defines the NFT token ID.
+  string token_id = 4 [ (gogoproto.customname) = "TokenID" ];
+  // sub_token_ids defines list of NFT sub-token IDs.
+  repeated uint32 sub_token_ids = 5 [ (gogoproto.customname) = "SubTokenIDs" ];
+}
+
+// MsgCancelUndelegationNFTResponse
+message MsgCancelUndelegationNFTResponse {}
+
+// MsgHaltChain defines a message to schedule a hard consensus halt of the chain.
+// Only the dedicated halt-admin may send it. The transaction merely records the
+// halt in state; the validator BeginBlocker performs the actual panic-halt.
+message MsgHaltChain {
+  option (cosmos.msg.v1.signer) = "sender";
+
+  option (gogoproto.equal) = false;
+  option (gogoproto.goproto_getters) = false;
+
+  // sender is the bech32-encoded address of the halt admin.
+  string sender = 1 [ (cosmos_proto.scalar) = "cosmos.AddressString" ];
+  // height is the block height at which the chain must halt.
+  // 0 means "halt at the next block"; otherwise it must be greater than the current height.
+  int64 height = 2;
+  // reason is a free-form human-readable explanation for the halt.
+  string reason = 3;
+}
+
+// MsgHaltChainResponse defines the Msg/HaltChain response type.
+message MsgHaltChainResponse {}
+
+// MsgResumeChain defines a message to clear a scheduled or active hard halt.
+message MsgResumeChain {
+  option (cosmos.msg.v1.signer) = "sender";
+
+  option (gogoproto.equal) = false;
+  option (gogoproto.goproto_getters) = false;
+
+  // sender is the bech32-encoded address of the halt admin.
+  string sender = 1 [ (cosmos_proto.scalar) = "cosmos.AddressString" ];
+}
+
+// MsgResumeChainResponse defines the Msg/ResumeChain response type.
+message MsgResumeChainResponse {}
+
+// MsgFreezeChain defines a message to soft-freeze the chain so that it rejects
+// all transactions except emergency admin messages.
+message MsgFreezeChain {
+  option (cosmos.msg.v1.signer) = "sender";
+
+  option (gogoproto.equal) = false;
+  option (gogoproto.goproto_getters) = false;
+
+  // sender is the bech32-encoded address of the halt admin.
+  string sender = 1 [ (cosmos_proto.scalar) = "cosmos.AddressString" ];
+  // reason is a free-form human-readable explanation for the freeze.
+  string reason = 2;
+}
+
+// MsgFreezeChainResponse defines the Msg/FreezeChain response type.
+message MsgFreezeChainResponse {}
+
+// MsgUnfreezeChain defines a message to lift a soft freeze.
+message MsgUnfreezeChain {
+  option (cosmos.msg.v1.signer) = "sender";
+
+  option (gogoproto.equal) = false;
+  option (gogoproto.goproto_getters) = false;
+
+  // sender is the bech32-encoded address of the halt admin.
+  string sender = 1 [ (cosmos_proto.scalar) = "cosmos.AddressString" ];
+}
+
+// MsgUnfreezeChainResponse defines the Msg/UnfreezeChain response type.
+message MsgUnfreezeChainResponse {}
