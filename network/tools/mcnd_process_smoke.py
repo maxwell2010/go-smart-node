@@ -4,6 +4,7 @@ parser.add_argument("--binary",required=True)
 parser.add_argument("--report",required=True)
 parser.add_argument("--home-parent",default=tempfile.gettempdir())
 args=parser.parse_args()
+pathlib.Path(args.report).parent.mkdir(parents=True,exist_ok=True)
 if os.readlink("/proc/self/ns/net")==os.readlink("/proc/1/ns/net"):
  raise SystemExit("private network namespace required; use unshare --net and bring loopback up")
 binary=str(pathlib.Path(args.binary).resolve(strict=True))
@@ -25,7 +26,7 @@ assert state['mint']['params']['mint_denom']=='del'
 assert float(state['mint']['params']['inflation_max'])==0
 assert state['bank']['balances']==[]
 report['checks'].append('owned empty-balance del genesis and inert generic mint')
-key=json.loads(run(['keys','add','validator','--algo','secp256k1','--keyring-backend','test','--output','json'],True))
+key=json.loads(run(['keys','add','validator','--key-type','secp256k1','--coin-type','60','--keyring-backend','test','--output','json'],True))
 address=key['address']; assert address.startswith('d0')
 run(['genesis','add-genesis-account',address,'1000000000000000000000000del'])
 run(['genesis','gentx','validator','1000000000000000000del','--chain-id',chain,'--keyring-backend','test'])

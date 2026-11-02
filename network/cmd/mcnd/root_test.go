@@ -6,6 +6,7 @@ import (
 
 	evmtypes "github.com/cosmos/evm/x/vm/types"
 	ownedapp "github.com/maxwell2010/go-smart-node/network/app"
+	"github.com/spf13/cobra"
 	"github.com/stretchr/testify/require"
 )
 
@@ -16,11 +17,19 @@ func TestCommandTreeDoesNotConstructApplication(t *testing.T) {
 	for range 2 {
 		root := NewRootCmd()
 		require.Nil(t, evmtypes.GetChainConfig(), "static CLI must not reserve the process-global EVM keeper configuration")
-		for _, path := range [][]string{{"init"}, {"genesis", "gentx"}, {"genesis", "collect-gentxs"}, {"start"}, {"keys", "add"}} {
+		for _, path := range [][]string{{"init"}, {"genesis", "gentx"}, {"genesis", "collect-gentxs"}, {"start"}, {"keys", "add"}, {"query", "bank", "balances"}, {"tx", "bank", "send"}, {"tx", "ibc-transfer", "transfer"}} {
 			command, _, err := root.Find(path)
 			require.NoError(t, err)
 			require.Equal(t, path[len(path)-1], command.Name())
 		}
+		var rejectDownloader func(*cobra.Command)
+		rejectDownloader = func(cmd *cobra.Command) {
+			require.NotEqual(t, "software-upgrade", cmd.Name())
+			for _, child := range cmd.Commands() {
+				rejectDownloader(child)
+			}
+		}
+		rejectDownloader(root)
 		keys, _, err := root.Find([]string{"keys"})
 		require.NoError(t, err)
 		for _, command := range keys.Commands() {

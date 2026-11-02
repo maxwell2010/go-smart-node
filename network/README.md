@@ -21,3 +21,33 @@ The production application tests exercise a signed EVM transfer, exact charged f
 Generic SDK staking does not establish Decimal validator, delegation, rewards, coin or NFT parity. These native modules require explicit wiring and state tests. The canonical EVM proposer-address conversion also needs its separately reviewed source correction and an actual `COINBASE` execution regression. A guarded daemon, external relayer tests, feature parity and release review remain necessary before presenting this candidate as a network release.
 
 The older `family-manifest.json` preserves the SDK `0.54` / EVM `0.7` bootstrap snapshot. Its validation and advisory findings describe that historical graph. The SDK `0.55` source adapter is retained on a separate development branch; it is not this maintained-family candidate.
+
+## Build and run a disposable node
+
+The `mcnd` command uses stateless codecs and genesis defaults, then constructs one application when starting. It validates the actual home's genesis signing domains before configuration writes and application creation, including restarts. Its separate default home is `~/.mcnd`; listeners default to loopback and peer discovery is disabled.
+
+Build with Go `1.26.10`, GCC and CGO enabled. Use the default production build, without the `test` tag:
+
+```sh
+go mod download
+go mod verify
+mkdir -p build
+CGO_ENABLED=1 go build -mod=readonly -trimpath -p 1 -o build/mcnd ./cmd/mcnd
+```
+
+For a new local network, the following creates test funds and a validator in a separate lab home. The example IDs are disposable lab values. The `test` keyring backend is used only for these newly generated lab keys.
+
+```sh
+MCND="$PWD/build/mcnd"
+NODE_HOME="$HOME/.mcnd-lab-990001"
+"$MCND" init local --home "$NODE_HOME" --chain-id mintcandy_990001-1 --evm.evm-chain-id 990001
+"$MCND" keys add operator --home "$NODE_HOME" --key-type secp256k1 --coin-type 60 --keyring-backend test
+ADDRESS=$("$MCND" keys show operator --home "$NODE_HOME" --keyring-backend test -a)
+"$MCND" genesis add-genesis-account "$ADDRESS" 1000000000000000000000000del --home "$NODE_HOME"
+"$MCND" genesis gentx operator 1000000000000000000del --home "$NODE_HOME" --chain-id mintcandy_990001-1 --keyring-backend test
+"$MCND" genesis collect-gentxs --home "$NODE_HOME"
+"$MCND" genesis validate --home "$NODE_HOME"
+"$MCND" start --home "$NODE_HOME" --chain-id mintcandy_990001-1 --evm.evm-chain-id 990001
+```
+
+The bounded Linux lifecycle gate in `tools/mcnd_process_smoke.py` requires a private network namespace. It creates its own new home, exercises initialization, signed gentx, real blocks, restart and EVM chain-ID queries, then checks that a mismatched restart cannot modify that home. It never uses existing node homes or external RPC endpoints.

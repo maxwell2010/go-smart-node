@@ -121,6 +121,9 @@ func NewRootCmd() *cobra.Command {
 	}
 
 	initRootCmd(rootCmd, encodingConfig, basics)
+	if err := enhanceModuleCommands(rootCmd, initClientCtx, basics); err != nil {
+		panic(err)
+	}
 	addDomainFlags(rootCmd)
 
 	return rootCmd
