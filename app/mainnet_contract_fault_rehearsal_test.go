@@ -13,12 +13,15 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	cmdcfg "bitbucket.org/decimalteam/go-smart-node/cmd/config"
 	"bitbucket.org/decimalteam/go-smart-node/contracts"
+	"bitbucket.org/decimalteam/go-smart-node/contracts/delegation"
 	"bitbucket.org/decimalteam/go-smart-node/contracts/delegationv7"
 	cointypes "bitbucket.org/decimalteam/go-smart-node/x/coin/types"
 	validatorkeeper "bitbucket.org/decimalteam/go-smart-node/x/validator/keeper"
+	validatortypes "bitbucket.org/decimalteam/go-smart-node/x/validator/types"
 	sdk "github.com/cosmos/cosmos-sdk/types"
 	authtypes "github.com/cosmos/cosmos-sdk/x/auth/types"
 	govtypes "github.com/cosmos/cosmos-sdk/x/gov/types"
@@ -163,6 +166,11 @@ func TestMainnetSystemContractFaultRehearsal(t *testing.T) {
 	funds := sdk.NewCoins(sdk.NewCoin(cmdcfg.BaseDenom, sdk.NewInt(1_000_000).Mul(sdk.NewInt(1_000_000_000_000_000_000))))
 	require.NoError(t, dsc.BankKeeper.MintCoins(ctx, cointypes.ModuleName, funds))
 	require.NoError(t, dsc.BankKeeper.SendCoinsFromModuleToAccount(ctx, cointypes.ModuleName, account.GetAddress(), funds))
+	if os.Getenv("DSC_MAINNET_AUTO_UNBOND_PROBE") == "1" {
+		require.NotEqual(t, "1", os.Getenv("DSC_REQUIRE_MAINNET_CONTRACT_FAULT_REHEARSAL"), "auto-unbond exploration cannot satisfy the separate post-recovery event-fault gate")
+		probeMainnetAutoUnbond(t, dsc, ctx, key, target, validator)
+		return
+	}
 	// Reconstruct the identical keeper only to install a test-only hook wrapper;
 	// all callers retain the same field pointer, stores and production dependencies.
 	dsc.EvmKeeper = *evmkeeper.NewKeeper(dsc.AppCodec(), dsc.GetKey(evmtypes.StoreKey), dsc.GetTKey(evmtypes.TransientKey), authtypes.NewModuleAddress(govtypes.ModuleName), dsc.AccountKeeper, dsc.BankKeeper, &dsc.ValidatorKeeper, dsc.FeeKeeper, nil, evmgeth.NewEVM, "", dsc.GetSubspace(evmtypes.ModuleName))
@@ -246,6 +254,125 @@ func TestMainnetSystemContractFaultRehearsal(t *testing.T) {
 	require.Equal(t, failedFee, new(big.Int).Sub(beforeAccount, afterAccount), "failed transaction debit must equal exact receipt gas fee with no extra stake-value loss")
 	t.Logf("snapshot height=%d actual delegation=%s injected hook error=%v fee debit=%s", block.Height-1, target, hooks.lastError, new(big.Int).Sub(beforeAccount, afterAccount))
 	// Deliberately do not Commit: every mutation exists only in this disposable copy.
+}
+
+func probeMainnetAutoUnbond(t *testing.T, dsc *DSC, ctx sdk.Context, key *ecdsa.PrivateKey, target, validator common.Address) {
+	t.Helper()
+	contractABI, err := delegation.DelegationMetaData.GetAbi()
+	require.NoError(t, err)
+	queueLength := func(c sdk.Context) *big.Int {
+		res, callErr := dsc.EvmKeeper.CallEVM(c, *contractABI, common.Address{}, target, false, "autoUnbondQueueLength")
+		require.NoError(t, callErr, "snapshot runtime must implement the actual queue getter before any batch rehearsal")
+		require.Empty(t, res.VmError)
+		values, unpackErr := contractABI.Unpack("autoUnbondQueueLength", res.Ret)
+		require.NoError(t, unpackErr)
+		return values[0].(*big.Int)
+	}
+	before := queueLength(ctx)
+	probe, _ := ctx.CacheContext()
+	from := crypto.PubkeyToAddress(key.PublicKey)
+	res, err := dsc.EvmKeeper.CallEVM(probe, *contractABI, common.Address{}, target, true, "autoUnbondEnqueue", validator, from, big.NewInt(100), common.Address{}, big.NewInt(0))
+	require.NoError(t, err, "actual node-only zero-sender enqueue must succeed in discarded cache")
+	require.Empty(t, res.VmError)
+	require.Equal(t, new(big.Int).Add(before, big.NewInt(1)), queueLength(probe))
+	require.Equal(t, before, queueLength(ctx), "discarded queue probe must not leak into parent state")
+	payload, err := contractABI.Pack("autoUnbondEnqueue", validator, from, big.NewInt(100), common.Address{}, big.NewInt(0))
+	require.NoError(t, err)
+	response, _ := rehearsalDeliver(t, dsc, ctx, key, target, big.NewInt(0), payload)
+	require.NotEmpty(t, response.VmError, "signed nonzero EOA must not have system enqueue authority")
+	reason, err := abi.UnpackRevert(response.Ret)
+	require.NoError(t, err)
+	require.Equal(t, "Not authorized", reason)
+	require.Equal(t, before, queueLength(ctx))
+	t.Logf("actual queue getter=%s; zero-sender discarded-cache enqueue succeeded; signed EOA enqueue rejected: %s", before, response.VmError)
+	if os.Getenv("DSC_MAINNET_AUTO_UNBOND_BATCH") != "1" {
+		return
+	}
+	// Prepare a genuine EVM stake using the snapshot's historical hook behavior.
+	// Do not pretend that strict activation alone migrates legacy native state.
+	strictActivation := validatorkeeper.ReliabilityFixActivationHeights
+	validatorkeeper.ReliabilityFixActivationHeights = map[string]int64{}
+	legacyABI, err := delegationv7.DelegationMetaData.GetAbi()
+	require.NoError(t, err)
+	payload, err = legacyABI.Pack("delegateDEL", validator)
+	require.NoError(t, err)
+	amount := big.NewInt(100_000_000_000_000_000)
+	baseline, _ := rehearsalDeliver(t, dsc, ctx, key, target, amount, payload)
+	validatorkeeper.ReliabilityFixActivationHeights = strictActivation
+	require.Empty(t, baseline.VmError, "genuine stake preparation must succeed under historical behavior")
+	var emitted delegationv7.DelegationStakeUpdated
+	found := false
+	for _, log := range baseline.Logs {
+		ethLog := log.ToEthereum()
+		if ethLog.Address == target && len(ethLog.Topics) > 0 && ethLog.Topics[0] == legacyABI.Events["StakeUpdated"].ID {
+			require.NoError(t, contracts.UnpackLog(legacyABI, &emitted, "StakeUpdated", ethLog))
+			found = true
+			break
+		}
+	}
+	require.True(t, found)
+	require.Equal(t, amount, emitted.Stake.Amount)
+	coin, err := dsc.CoinKeeper.GetCoin(ctx, cmdcfg.BaseDenom)
+	require.NoError(t, err)
+	require.Equal(t, common.HexToAddress(coin.DRC20Contract), emitted.Stake.Token)
+	batch, _ := ctx.CacheContext()
+	val := sdk.ValAddress(validator.Bytes())
+	delegator := sdk.AccAddress(from.Bytes())
+	// The native fixture deliberately isolates this validator's batch and mirrors
+	// the genuine stake. Existing production delegations remain in the parent.
+	store := batch.KVStore(dsc.GetKey(validatortypes.StoreKey))
+	for _, existing := range dsc.ValidatorKeeper.GetValidatorDelegations(batch, val) {
+		store.Delete(validatortypes.GetValidatorDelegatorDelegationKey(val, existing.GetDelegator(), existing.GetStake().GetID()))
+	}
+	var tracked []sdk.ValAddress
+	dsc.ValidatorKeeper.IterateValidatorOfflineSince(batch, func(address sdk.ValAddress, _ time.Time) bool {
+		tracked = append(tracked, append(sdk.ValAddress(nil), address...))
+		return false
+	})
+	for _, address := range tracked {
+		dsc.ValidatorKeeper.DeleteValidatorOfflineSince(batch, address)
+	}
+	valid := validatortypes.NewDelegation(delegator, val, validatortypes.NewStakeCoin(sdk.NewCoin(cmdcfg.BaseDenom, sdk.NewIntFromBigInt(amount))))
+	corrupt := validatortypes.NewDelegation(delegator, val, validatortypes.NewStakeCoin(sdk.NewCoin("zzinvalidcoin", sdk.NewIntFromBigInt(amount))))
+	dsc.ValidatorKeeper.SetDelegation(batch, valid)
+	dsc.ValidatorKeeper.SetDelegation(batch, corrupt)
+	ordered := dsc.ValidatorKeeper.GetValidatorDelegations(batch, val)
+	require.Len(t, ordered, 2)
+	require.Equal(t, cmdcfg.BaseDenom, ordered[0].GetStake().GetStake().Denom)
+	params := dsc.ValidatorKeeper.GetParams(batch)
+	params.AutoUnbondTimeout = time.Hour
+	dsc.ValidatorKeeper.SetParams(batch, params)
+	dsc.ValidatorKeeper.SetValidatorOfflineSince(batch, val, batch.BlockTime().Add(-2*time.Hour))
+	batchBefore := queueLength(batch)
+	prefixProbe, _ := batch.CacheContext()
+	require.NoError(t, dsc.ValidatorKeeper.ExecuteAutoUnbondEnqueue(prefixProbe, ordered[0]))
+	require.Equal(t, new(big.Int).Add(batchBefore, big.NewInt(1)), queueLength(prefixProbe), "first genuine enqueue must really write before the second failure")
+	require.Error(t, dsc.ValidatorKeeper.ExecuteAutoUnbondEnqueue(prefixProbe, ordered[1]))
+	dsc.ValidatorKeeper.ProcessAutoUnbond(batch)
+	require.Equal(t, batchBefore, queueLength(batch), "failed partial batch must roll back the first actual contract write")
+	_, remains := dsc.ValidatorKeeper.GetValidatorOfflineSince(batch, val)
+	require.True(t, remains, "failed batch must retain its retry tracker")
+	// Repair the controlled native input corruption, not the contract or registry.
+	store.Delete(validatortypes.GetDelegationKey(delegator, val, corrupt.GetStake().GetID()))
+	store.Delete(validatortypes.GetValidatorDelegatorDelegationKey(val, delegator, corrupt.GetStake().GetID()))
+	dsc.ValidatorKeeper.ProcessAutoUnbond(batch)
+	require.Equal(t, new(big.Int).Add(batchBefore, big.NewInt(1)), queueLength(batch))
+	entryResponse, err := dsc.EvmKeeper.CallEVM(batch, *contractABI, common.Address{}, target, false, "getAutoUnbondEntry", batchBefore)
+	require.NoError(t, err)
+	entryValues, err := contractABI.Unpack("getAutoUnbondEntry", entryResponse.Ret)
+	require.NoError(t, err)
+	entry := abi.ConvertType(entryValues[0], new(delegation.IDecimalDelegationAutoUnbondEntry)).(*delegation.IDecimalDelegationAutoUnbondEntry)
+	require.Equal(t, validator, entry.Validator)
+	require.Equal(t, from, entry.Delegator)
+	require.Equal(t, amount, entry.Amount)
+	require.Equal(t, emitted.Stake.Token, entry.Token)
+	require.Zero(t, entry.HoldTimestamp.Sign())
+	_, remains = dsc.ValidatorKeeper.GetValidatorOfflineSince(batch, val)
+	require.False(t, remains)
+	dsc.ValidatorKeeper.ProcessAutoUnbond(batch)
+	require.Equal(t, new(big.Int).Add(batchBefore, big.NewInt(1)), queueLength(batch), "successful retry must not enqueue a duplicate")
+	require.Equal(t, before, queueLength(ctx), "discarded controlled batch must not leak into parent")
+	t.Log("actual deployed auto-unbond partial write rolled back; tracker retained; corrupt native input removed; genuine stake enqueued exactly once on retry")
 }
 
 func rehearsalDeliver(t *testing.T, dsc *DSC, ctx sdk.Context, key *ecdsa.PrivateKey, to common.Address, amount *big.Int, data []byte) (*evmtypes.MsgEthereumTxResponse, *big.Int) {

@@ -61,8 +61,45 @@ value plus this gas fee. This legacy EVM path deducts gas-limit fees and refunds
 unused gas; the separate native-message commission schedule is not an additional
 charge. This is controlled
 receipt fault injection, not a claim that production contracts naturally emit
-malformed events. Auto-unbond fault rehearsal on migrated real contracts is
-still outstanding.
+malformed events. This post-recovery event-fault branch remains outstanding.
+
+## Actual deployed auto-unbond exploration
+
+Two additional opt-in settings select a separate scenario:
+
+```powershell
+$env:DSC_MAINNET_AUTO_UNBOND_PROBE='1'
+$env:DSC_MAINNET_AUTO_UNBOND_BATCH='1'
+```
+
+Do not combine this mode with `DSC_REQUIRE_MAINNET_CONTRACT_FAULT_REHEARSAL`:
+the two scenarios have different prerequisites and release claims.
+
+Exploratory execution on the copied pre-recovery snapshot confirmed a genuine
+queue length of 16952. The real deployed contract accepts `autoUnbondEnqueue`
+only from the system zero address; a signed generated EOA transaction reverts
+with decoded reason `Not authorized`. A zero-sender write in a discarded cache
+increments the actual queue and leaves its parent unchanged.
+
+The controlled batch scenario creates a genuine `delegateDEL` stake through a
+signed Ethereum transaction under the snapshot's historical hook behavior.
+It decodes the real emitted stake and checks its token against native metadata.
+Only in a discarded child context, it isolates that validator's native batch
+index and mirrors this genuine stake, adding a deliberately invalid second
+native coin record. It also isolates offline tracking and sets a local timeout.
+These are declared native test fixtures, not unchanged production state.
+
+The test proves that the first real contract enqueue writes, the second native
+coin lookup fails, the complete queue batch rolls back and the retry marker
+remains. Removing the corrupt native test record permits a successful retry.
+The resulting real queue entry must match validator, delegator, amount, token
+and hold timestamp of the genuine stake. Another retry does not duplicate it.
+The outer parent queue remains unchanged when the controlled cache is discarded.
+No contract runtime, registry mapping or ownership is replaced.
+
+This scenario passed during exploratory Windows execution, with the same
+dependency-provenance caveat above. It must be repeated with the verified Linux
+toolchain and clean restored state before it becomes final release evidence.
 
 ## Dependency diagnostic correction is consensus-visible
 
