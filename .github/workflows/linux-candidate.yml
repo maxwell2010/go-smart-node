@@ -42,6 +42,11 @@ jobs:
           echo "PYTHONPATH=$RUNNER_TEMP/sbom-validator" >> "$GITHUB_ENV"
       - name: Test SBOM parser and official schemas
         run: python3 -m unittest discover -s scripts/release -p "test_*.py"
+      - name: Verify dependency cache integrity
+        run: |
+          mkdir -p candidate-logs
+          go mod download
+          go mod verify |& tee candidate-logs/dependency-integrity.log
       - name: Test application and isolated protocol baseline
         run: |
           mkdir -p candidate-logs

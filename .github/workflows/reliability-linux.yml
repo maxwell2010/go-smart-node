@@ -48,6 +48,11 @@ jobs:
             gcc --version
           } | tee test-results/environment.log
 
+      - name: Verify dependency cache integrity
+        run: |
+          go mod download
+          go mod verify |& tee test-results/dependency-integrity.log
+
       - name: Test actual EVM crash recovery, auto-unbond and event rollback
         run: |
           go test -mod=readonly -p 2 -count=1 -v -timeout 10m \

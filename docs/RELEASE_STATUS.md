@@ -10,6 +10,7 @@ Grouped reliability changes, actual EVM failures, two DSC application instances 
 
 Required remaining evidence:
 
+- Independent dependency provenance for local Windows results: go mod verify found modified btcd v0.23.4 archive/source and go-getter v1.7.0 source in the shared module cache. Preserve those files for diagnosis; rebuild and rerun from a separately downloaded, verified cache. Earlier local AppHash agreement remains a behavioral observation, not certification of an official dependency build. Both Linux workflows now explicitly download and verify modules before testing.
 - Historical mainnet replay spanning recovery height34342701 and relevant earlier boundaries, with canonical AppHash agreement and actual deployed-contract state checks.
 - Maintained dependency/toolchain family or reviewed security remediation. A broad source-symbol scan has findings; they require CLI reachability and platform triage, not an assertion that every advisory is exploitable here.
 - Relayer restart and major-version upgrade-in-flight operation. The tested rly configuration needs an explicitly supplied unbonding period and zero declared gas price while Decimal still deducts its computed native commission; document and test an operator-compatible production policy.
