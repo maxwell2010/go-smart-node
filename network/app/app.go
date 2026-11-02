@@ -56,7 +56,6 @@ import (
 	ibcexported "github.com/cosmos/ibc-go/v11/modules/core/exported"
 	ibckeeper "github.com/cosmos/ibc-go/v11/modules/core/keeper"
 	ibctm "github.com/cosmos/ibc-go/v11/modules/light-clients/07-tendermint"
-	ibctesting "github.com/cosmos/ibc-go/v11/testing"
 
 	autocliv1 "cosmossdk.io/api/cosmos/autocli/v1"
 	reflectionv1 "cosmossdk.io/api/cosmos/reflection/v1"
@@ -160,7 +159,6 @@ var defaultNodeHome string
 var (
 	_ runtime.AppI                = (*App)(nil)
 	_ cosmosevmserver.Application = (*App)(nil)
-	_ ibctesting.TestingApp       = (*App)(nil)
 )
 
 // App extends an ABCI application, but with most of its parameters exported.
