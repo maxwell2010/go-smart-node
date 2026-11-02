@@ -55,6 +55,20 @@ class GateTests(unittest.TestCase):
                 evaluate(json.dumps(CONFIG) + '\n' + json.dumps({'finding': finding}), 0,
                          completion_verified=True)
 
+    def test_binary_go_version_comes_from_build_sbom(self):
+        config = dict(CONFIG['config'], scan_mode='binary')
+        del config['go_version']
+        text = json.dumps({'config': config}) + '\n' + json.dumps({'SBOM': {'go_version': 'go1.26.10'}})
+        status, report = evaluate(text, 0, completion_verified=True)
+        self.assertEqual(status, 0)
+        self.assertEqual(report['go_version'], 'go1.26.10')
+        for sbom in [None, {}, {'go_version': False}]:
+            with self.assertRaises(ValueError):
+                evaluate(json.dumps({'config': config}) + '\n' + json.dumps({'SBOM': sbom}), 0,
+                         completion_verified=True)
+        with self.assertRaises(ValueError):
+            evaluate(json.dumps({'config': config}), 0, completion_verified=True)
+
 
 if __name__ == '__main__':
     unittest.main()

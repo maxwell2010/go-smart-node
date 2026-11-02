@@ -52,11 +52,21 @@ def evaluate(text: str, scanner_exit_code: int, completion_verified: bool = Fals
     config = configs[0]
     if config.get('protocol_version') != 'v1.0.0' or config.get('scan_level') != 'symbol':
         raise ValueError('Unsupported protocol or non-symbol scan cannot pass this gate')
-    for field in ['scanner_name', 'scanner_version', 'go_version', 'scan_mode']:
+    for field in ['scanner_name', 'scanner_version', 'scan_mode']:
         if not isinstance(config.get(field), str) or not config[field]:
             raise ValueError('Scanner configuration string required: ' + field)
     if config['scanner_name'] != 'govulncheck' or config['scan_mode'] not in ['source', 'binary']:
         raise ValueError('Unsupported scanner identity or mode')
+    # Binary mode reports the binary's compiler in SBOM, not config.go_version.
+    if config['scan_mode'] == 'binary':
+        sboms = [record['SBOM'] for record in records if 'SBOM' in record]
+        if len(sboms) != 1 or not isinstance(sboms[0], dict):
+            raise ValueError('Binary scan requires one build SBOM record')
+        go_version = sboms[0].get('go_version')
+    else:
+        go_version = config.get('go_version')
+    if not isinstance(go_version, str) or not go_version:
+        raise ValueError('Actual scanned Go version is required')
     identifiers = set()
     for record in records:
         if 'finding' not in record:
@@ -76,7 +86,7 @@ def evaluate(text: str, scanner_exit_code: int, completion_verified: bool = Fals
               'distinct_symbol_advisories': len(identifiers),
               'advisory_ids': sorted(identifiers),
               'scanner_version': config.get('scanner_version'),
-              'go_version': config.get('go_version'),
+              'go_version': go_version,
               'db_last_modified': config.get('db_last_modified'),
               'completion_verified': completion_verified,
               'diagnostic_clean': scanner_exit_code == 0 and not identifiers,
