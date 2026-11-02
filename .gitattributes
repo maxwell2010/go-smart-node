@@ -6,3 +6,6 @@ docs/* linguist-documentation
 x/**/spec/* linguist-documentation
 **/*.pb.go linguist-generated
 **/*.pb.gw.go linguist-generated
+# Preserve exact upstream bytes used for pinned schema checksums.
+scripts/release/schemas/*.json -text
+scripts/release/schemas/LICENSE.cyclonedx -text

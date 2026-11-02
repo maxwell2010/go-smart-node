@@ -1,0 +1,6 @@
+jsonschema==4.23.0
+attrs==24.3.0
+jsonschema-specifications==2024.10.1
+referencing==0.35.1
+rpds-py==0.22.3
+typing_extensions==4.12.2

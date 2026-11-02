@@ -72,6 +72,7 @@ Path(sys.argv[1]).with_name('README.release.txt').write_text(notice)
 PY
 python3 scripts/release/generate_sbom.py "$stage/dscd" "$stage/SBOM.cdx.json" \
   --revision "$revision" --flavor "$flavor" --version "$version"
+python3 scripts/release/validate_sbom.py "$stage/SBOM.cdx.json"
 cp "$stage/SBOM.cdx.json" "$out/SBOM.cdx.json"
 # Version inspection uses a fresh disposable home and never starts consensus.
 mkdir "$stage/smoke-home"
