@@ -144,6 +144,13 @@ func run() error {
 		if v.Result.BlockHeight != height-1 {
 			return fmt.Errorf("wrong validator height")
 		}
+		previous, err := block(*dir, height-1)
+		if err != nil {
+			return fmt.Errorf("predecessor header required: %w", err)
+		}
+		if !bytes.Equal(tmtypes.NewValidatorSet(v.Result.Validators).Hash(), previous.Block.ValidatorsHash) {
+			return fmt.Errorf("validator cache hash mismatch at %d", height-1)
+		}
 		if b.LastCommit == nil || len(v.Result.Validators) != len(b.LastCommit.Signatures) {
 			return fmt.Errorf("incomplete previous validator set")
 		}
@@ -161,11 +168,34 @@ func run() error {
 		}
 		dsc.BeginBlock(req)
 		r := record{Height: height, Txs: len(b.Txs)}
-		for _, tx := range b.Txs {
+		var canonical struct {
+			Result coretypes.ResultBlockResults `json:"result"`
+		}
+		if len(b.Txs) > 0 {
+			resultData, err := os.ReadFile(filepath.Join(*dir, fmt.Sprintf("%d.results.json", height)))
+			if err != nil {
+				return err
+			}
+			if err := tmjson.Unmarshal(resultData, &canonical); err != nil {
+				return err
+			}
+			if canonical.Result.Height != height || len(canonical.Result.TxsResults) != len(b.Txs) {
+				return fmt.Errorf("canonical tx results missing")
+			}
+		}
+		var txResults []*abci.ResponseDeliverTx
+		for i, tx := range b.Txs {
 			res := dsc.DeliverTx(abci.RequestDeliverTx{Tx: tx})
+			if res.Code != canonical.Result.TxsResults[i].Code {
+				return fmt.Errorf("transaction code mismatch at %d index %d: %d != %d", height, i, res.Code, canonical.Result.TxsResults[i].Code)
+			}
+			txResults = append(txResults, &res)
 			r.Codes = append(r.Codes, res.Code)
 		}
 		dsc.EndBlock(abci.RequestEndBlock{Height: height})
+		if !bytes.Equal(tmtypes.NewResults(txResults).Hash(), next.Block.LastResultsHash) {
+			return fmt.Errorf("LastResultsHash mismatch at %d", height)
+		}
 		committed := dsc.Commit()
 		r.Hash = hex.EncodeToString(committed.Data)
 		records = append(records, r)
