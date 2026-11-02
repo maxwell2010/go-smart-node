@@ -3,7 +3,6 @@
   "recordedUtc": "2026-11-02T10:35:29.309350+00:00",
   "status": "maintained-family compatibility candidate; not a completed native feature port or certified network release",
   "module": "github.com/maxwell2010/go-smart-node/network",
-  "runtimeSourceRevision": "720f76b947657e63cdf66972472e92eeaf5b49bc",
   "releaseFamily": "2025.1",
   "maintenanceSource": "https://docs.cosmos.network/sdk/latest/release-family",
   "upstreamEVM": {
@@ -114,10 +113,30 @@
     "softwareToolchainAdjustment": "Canonical Sonic1.14.2 fails Go1.26 compilation; Sonic1.15.1 plus loader0.5.1 preserve the selected core family and compile successfully."
   },
   "remainingGates": [
-    "Guarded production daemon and real two-process relay validation.",
     "Native Decimal validator/delegation/reward and coin/NFT feature wiring/parity.",
     "Known canonical EVM block-proposer address conversion requires an independent reviewed source correction and COINBASE execution regression.",
     "This compatibility pass does not certify current advisory closure or mainnet replay compatibility."
   ],
-  "historicalReference": "family-manifest.json retains the earlier SDK0.54/EVM0.7 bootstrap snapshot; its checks and findings must not be attributed to this graph."
+  "historicalReference": "family-manifest.json retains the earlier SDK0.54/EVM0.7 bootstrap snapshot; its checks and findings must not be attributed to this graph.",
+  "coreCompatibilitySourceRevision": "720f76b947657e63cdf66972472e92eeaf5b49bc",
+  "daemonValidation": {
+    "runtimeSourceRevision": "e0f154d471971dca420ced7a33bd6d108d1bd9e2",
+    "binarySha256": "baa54620c5cb56322a0a9ebe2f4b6668f71e6ae98cfbc029e169e42efd1886d8",
+    "build": "Go1.26.10 linux/amd64, CGO1/GCC, default build without test tag; local disposable integration evidence",
+    "cliUnitTests": "PASS: repeated stateless root construction, exact owned genesis, operator/relayer public-key roles and resolved signing flags",
+    "processLifecycle": "PASS: real height3, native ETH-operator bank transaction, restart to height5 using persisted config, eth_chainId990001",
+    "operatorRoles": "PASS: actual SDK keyring eth_secp256k1/coin60 native d0 bytes equal geth-derived EOA. Separate Cosmos secp256k1 relayer address is not labelled an EVM owner. No private key export/logging.",
+    "nativeTransaction": "PASS: receiver123, exact operator debit1000000000000000123 del units (fee10^18 plus value123), native sequence+1 and same EOA nonce+1",
+    "rejectedRestart": "PASS: mismatched home/genesis domains rejected with all file SHAs, sizes, modification times and modes unchanged",
+    "externalICS20Control": {
+      "runtimeSourceRevision": "21e1c20",
+      "binarySha256": "e2d72ed9b86bacf2adae903db428ae59ce80bec940841f410698cbabd2aa4612",
+      "relayer": "official Hermes1.13.3",
+      "reference": "independent owned SDK0.53 application in a separate OS process",
+      "fixtureSourceRevision": "4ddc2a3",
+      "sanitizedEvidenceRevision": "39a9ed7",
+      "result": "PASS:26 committed transactions covering handshake, send, return, both-node pending-packet restart, decoded error acknowledgement and actual timeout; exact native fee/balance, escrow/voucher and commitment conservation checks"
+    },
+    "scope": "These fresh-network checks do not establish native Decimal feature parity or resolve the canonical proposer-address conversion defect."
+  }
 }

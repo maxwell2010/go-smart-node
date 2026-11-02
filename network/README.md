@@ -18,7 +18,7 @@ GOTOOLCHAIN=local go run -mod=readonly ./cmd/family-check
 
 The production application tests exercise a signed EVM transfer, exact charged fees, signing-domain rejection and bounded financial rollback. The `test` tag enables independent in-process EVM configurations solely for the two-chain ICS20 harness. Installable daemons must use the default production build and actual separate processes.
 
-Generic SDK staking does not establish Decimal validator, delegation, rewards, coin or NFT parity. These native modules require explicit wiring and state tests. The canonical EVM proposer-address conversion also needs its separately reviewed source correction and an actual `COINBASE` execution regression. A guarded daemon, external relayer tests, feature parity and release review remain necessary before presenting this candidate as a network release.
+Generic SDK staking does not establish Decimal validator, delegation, rewards, coin or NFT parity. These native modules require explicit wiring and state tests. The canonical EVM proposer-address conversion also needs its separately reviewed source correction and an actual `COINBASE` execution regression. The guarded daemon lifecycle and external Hermes ICS20 gates now pass on disposable networks. Native feature parity, the proposer correction and release review remain necessary before presenting this candidate as a network release.
 
 The older `family-manifest.json` preserves the SDK `0.54` / EVM `0.7` bootstrap snapshot. Its validation and advisory findings describe that historical graph. The SDK `0.55` source adapter is retained on a separate development branch; it is not this maintained-family candidate.
 

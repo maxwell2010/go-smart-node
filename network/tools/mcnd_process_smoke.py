@@ -47,8 +47,8 @@ def bank_balance(owner):
  balances=json.loads(run(['query','bank','balances',owner,'--node','tcp://127.0.0.1:28657','--output','json']))
  return next((int(c['amount']) for c in balances['balances'] if c['denom']=='del'),0)
 def account_sequence(owner):
- account=json.loads(run(['query','auth','account',owner,'--node','tcp://127.0.0.1:28657','--output','json']))['account']
- return int(account['sequence'])
+ account=json.loads(run(['query','auth','account-info',owner,'--node','tcp://127.0.0.1:28657','--output','json']))['info']
+ return int(account.get('sequence','0'))
 def evm_nonce(owner):
  req=urllib.request.Request('http://127.0.0.1:8645',data=json.dumps({'jsonrpc':'2.0','id':1,'method':'eth_getTransactionCount','params':[owner,'latest']}).encode(),headers={'Content-Type':'application/json'})
  with urllib.request.urlopen(req,timeout=2) as response:return int(json.load(response)['result'],16)
@@ -61,39 +61,44 @@ def operate(target, label):
  p=subprocess.Popen([binary,*effective,'--home',str(home)],stdout=log,stderr=log)
  try:
   deadline=time.monotonic()+100
-  while time.monotonic()<deadline:
-   if p.poll() is not None: raise RuntimeError('node exited '+str(p.returncode)+': '+(home/(label+'.log')).read_text()[-5000:])
+  while True:
+   if p.poll() is not None:
+    raise RuntimeError('node exited '+str(p.returncode)+': '+(home/(label+'.log')).read_text()[-5000:])
+   if time.monotonic()>=deadline:raise RuntimeError('node height deadline')
    try:
-    with urllib.request.urlopen('http://127.0.0.1:28657/status',timeout=2) as response: status=json.load(response)
-    height=int(status['result']['sync_info']['latest_block_height'])
-    if height>=target:
-     req=urllib.request.Request('http://127.0.0.1:8645',data=b'{"jsonrpc":"2.0","id":1,"method":"eth_chainId","params":[]}',headers={'Content-Type':'application/json'})
-     with urllib.request.urlopen(req,timeout=2) as response: assert int(json.load(response)['result'],16)==int(evm)
-     report['checks'].append(label+' actual height '+str(height)+' and eth_chainId '+evm)
-     if label=='first-start':
-      sender_before=bank_balance(address);nonce_before=account_sequence(address)
-      assert evm_nonce(eth_address)==nonce_before,'native and EVM APIs do not identify the same operator account'
-      sent=json.loads(run(['tx','bank','send','validator',receiver,'123del','--chain-id',chain,'--evm.evm-chain-id',evm,'--node','tcp://127.0.0.1:28657','--keyring-backend','test','--fees','1000000000000000000del','--gas','200000','--broadcast-mode','sync','--output','json','--yes']))
-      assert int(sent.get('code',0))==0,sent
-      txhash=sent['txhash']; committed=False
-      for _ in range(100):
-       try:
-        with urllib.request.urlopen('http://127.0.0.1:28657/tx?hash=0x'+txhash,timeout=2) as response: receipt=json.load(response)
-        if 'result' in receipt:
-         assert int(receipt['result']['tx_result']['code'])==0,receipt
-         committed=True;break
-       except OSError:pass
-       time.sleep(.3)
-      assert committed,'native CLI bank transaction was not committed'
-      assert bank_balance(receiver)==123
-      assert sender_before-bank_balance(address)==1000000000000000000+123,'operator debit must equal exact native fee plus transferred value'
-      assert account_sequence(address)==nonce_before+1
-      assert evm_nonce(eth_address)==nonce_before+1,'native signature must advance the same Ethereum operator account nonce'
-      report['checks'].append('Ethereum operator signs native bank tx; exact fee/value debit, receiver balance and SDK/EVM shared nonce')
-     return height
-   except (OSError,ValueError,KeyError): pass
+    with urllib.request.urlopen('http://127.0.0.1:28657/status',timeout=2) as response:status=json.load(response)
+   except (OSError,json.JSONDecodeError):
+    time.sleep(.3);continue
+   height=int(status['result']['sync_info']['latest_block_height'])
+   if height>=target:break
    time.sleep(.3)
-  raise RuntimeError('node height deadline')
+  # Readiness retries end here. Never retry a signed transaction or hide an
+  # assertion/schema failure inside a broad transport exception handler.
+  req=urllib.request.Request('http://127.0.0.1:8645',data=b'{"jsonrpc":"2.0","id":1,"method":"eth_chainId","params":[]}',headers={'Content-Type':'application/json'})
+  with urllib.request.urlopen(req,timeout=2) as response:assert int(json.load(response)['result'],16)==int(evm)
+  report['checks'].append(label+' actual height '+str(height)+' and eth_chainId '+evm)
+  if label=='first-start':
+   sender_before=bank_balance(address);nonce_before=account_sequence(address)
+   assert evm_nonce(eth_address)==nonce_before,'native and EVM APIs do not identify the same operator account'
+   sent=json.loads(run(['tx','bank','send','validator',receiver,'123del','--chain-id',chain,'--evm.evm-chain-id',evm,'--node','tcp://127.0.0.1:28657','--keyring-backend','test','--fees','1000000000000000000del','--gas','200000','--broadcast-mode','sync','--output','json','--yes']))
+   assert int(sent.get('code',0))==0,sent
+   txhash=sent['txhash'];committed=False
+   for _ in range(100):
+    try:
+     with urllib.request.urlopen('http://127.0.0.1:28657/tx?hash=0x'+txhash,timeout=2) as response:receipt=json.load(response)
+    except OSError:
+     time.sleep(.3);continue
+    if 'result' in receipt:
+     assert int(receipt['result']['tx_result'].get('code',0))==0,receipt
+     committed=True;break
+    time.sleep(.3)
+   assert committed,'native CLI bank transaction was not committed'
+   assert bank_balance(receiver)==123
+   assert sender_before-bank_balance(address)==1000000000000000000+123,'operator debit must equal exact native fee plus transferred value'
+   assert account_sequence(address)==nonce_before+1
+   assert evm_nonce(eth_address)==nonce_before+1,'native signature must advance the same Ethereum operator account nonce'
+   report['checks'].append('Ethereum operator signs native bank tx; exact fee/value debit, receiver balance and SDK/EVM shared nonce')
+  return height
  finally:
   if p.poll() is None:p.send_signal(signal.SIGINT)
   try:p.wait(timeout=20)
