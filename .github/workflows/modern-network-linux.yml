@@ -62,6 +62,9 @@ jobs:
       - name: Test security capture evidence
         working-directory: .
         run: python3 -m unittest discover -s scripts/audit -p "test_*.py"
+      - name: Test external relayer lab guards
+        working-directory: .
+        run: python3 -m unittest discover -s network/internal/ibclab -p "test_*.py"
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: always()
         with:

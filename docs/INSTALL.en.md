@@ -1,6 +1,14 @@
 # Installation for isolated integration testing
 
-No stable release has been published. Build instructions below are for isolated development only. Supported test target currently used by CI: Ubuntu 22.04 amd64, GCC, CGO and Go 1.24.4. This pinned historical toolchain is a reproducibility baseline, not a claim that its security patch level is current. Dependency/toolchain remediation is a production release gate.
+No stable release has been published. Build instructions below are for isolated
+development of the legacy root module. Its historical CI baseline is Ubuntu
+22.04 amd64, GCC, CGO and Go 1.24.4; this is not a new-network security recommendation.
+
+The fresh network is developed in the independent `network/` Go module with
+Go 1.26.10 and a separate dependency graph. Its daemon and complete native port
+remain in progress, including the supported SDK/EVM/IBC family and external
+relayer compatibility checks. The old experimental `dscd-ibc-lab` below is not
+that new daemon. See [the release status](RELEASE_STATUS.md).
 
 ## Build from source
 
@@ -14,7 +22,7 @@ CGO_ENABLED=1 go build -mod=readonly -trimpath -tags experimental_ibc -o build/d
 ./build/dscd-ibc-lab version --long
 ```
 
-Use dscd-replay only with separate disposable replay data. Use dscd-ibc-lab only with newly generated isolated fixtures. The experimental binary accepts only decimal_900001-1 and decimal_900002-1, with reliability rules starting at height1. Mainnet/public-testnet activation heights are absent. The ordinary journal/replay fix is unconditional and needs historical validation.
+Use dscd-replay only with separate disposable replay data. Use dscd-ibc-lab only with newly generated isolated fixtures. The experimental binary accepts only decimal_900001-1 and decimal_900002-1, with reliability rules starting at height1. Mainnet/public-testnet activation heights are absent. The ordinary journal/replay fix is unconditional; the [71,701-block historical reference](../integration/replay/MAINNET_RECOVERY_EVIDENCE.md) passed through recovery, without activating new fork rules on the public chain.
 
 ## Validate before running
 
