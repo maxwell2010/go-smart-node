@@ -11,7 +11,7 @@ import (
 	"path/filepath"
 	"time"
 
-	"cosmossdk.io/log/v2"
+	"cosmossdk.io/log"
 	"cosmossdk.io/math"
 	cmtconfig "github.com/cometbft/cometbft/config"
 	"github.com/cometbft/cometbft/p2p"
@@ -32,7 +32,7 @@ import (
 	banktypes "github.com/cosmos/cosmos-sdk/x/bank/types"
 	slashingtypes "github.com/cosmos/cosmos-sdk/x/slashing/types"
 	"github.com/cosmos/go-bip39"
-	"github.com/cosmos/ibc-go/v11/testing/simapp"
+	"github.com/maxwell2010/go-smart-node/network/internal/ibcreference/referenceapp"
 	"github.com/spf13/cobra"
 )
 
@@ -62,7 +62,7 @@ func run() error {
 		return err
 	}
 	defer os.RemoveAll(temp)
-	probe := simapp.NewSimApp(log.NewNopLogger(), dbm.NewMemDB(), nil, true, options{flags.FlagHome: temp})
+	probe := referenceapp.NewApp(log.NewNopLogger(), dbm.NewMemDB(), nil, true, options{flags.FlagHome: temp})
 	defer probe.Close()
 	clientCtx := client.Context{}.WithCodec(probe.AppCodec()).WithInterfaceRegistry(probe.InterfaceRegistry()).WithTxConfig(probe.GetTxConfig()).WithLegacyAmino(probe.LegacyAmino()).WithInput(os.Stdin).WithOutput(os.Stdout).WithChainID(chainID)
 	root := &cobra.Command{Use: "ibcreference", Short: "Disposable loopback-only SDK IBC counterparty", SilenceUsage: true}
@@ -95,7 +95,7 @@ func run() error {
 	prepare.Flags().Int("grpc-port", 28790, "Private loopback gRPC port")
 	root.AddCommand(prepare)
 	root.AddCommand(server.StartCmd(func(logger log.Logger, db dbm.DB, opts servertypes.AppOptions) servertypes.Application {
-		return simapp.NewSimApp(logger, db, nil, true, opts, append(server.DefaultBaseappOptions(opts), baseapp.SetChainID(chainID))...)
+		return referenceapp.NewApp(logger, db, nil, true, opts, append(server.DefaultBaseappOptions(opts), baseapp.SetChainID(chainID))...)
 	}, ""))
 	return servercmd.Execute(root, "IBCREFERENCE", "")
 }
@@ -194,7 +194,7 @@ func prepareFixture(home string, rpcPort, p2pPort, grpcPort int) error {
 		return err
 	}
 	vals := cmttypes.NewValidatorSet([]*cmttypes.Validator{cmttypes.NewValidator(pub, 1)})
-	app := simapp.NewSimApp(log.NewNopLogger(), dbm.NewMemDB(), nil, true, options{flags.FlagHome: home})
+	app := referenceapp.NewApp(log.NewNopLogger(), dbm.NewMemDB(), nil, true, options{flags.FlagHome: home})
 	defer app.Close()
 	genesis, err := simtestutil.GenesisStateWithValSet(app.AppCodec(), app.DefaultGenesis(), vals, []authtypes.GenesisAccount{account}, banktypes.Balance{Address: account.GetAddress().String(), Coins: sdk.NewCoins(sdk.NewCoin(sdk.DefaultBondDenom, math.NewInt(1_000_000_000_000_000_000)))})
 	if err != nil {

@@ -19,12 +19,12 @@ import (
 	authtypes "github.com/cosmos/cosmos-sdk/x/auth/types"
 	banktypes "github.com/cosmos/cosmos-sdk/x/bank/types"
 	evmtypes "github.com/cosmos/evm/x/vm/types"
-	transfer "github.com/cosmos/ibc-go/v11/modules/apps/transfer/types"
-	clienttypes "github.com/cosmos/ibc-go/v11/modules/core/02-client/types"
-	channeltypes "github.com/cosmos/ibc-go/v11/modules/core/04-channel/types"
-	host "github.com/cosmos/ibc-go/v11/modules/core/24-host"
-	ibctesting "github.com/maxwell2010/go-smart-node/network/internal/ibcharness"
+	transfer "github.com/cosmos/ibc-go/v10/modules/apps/transfer/types"
+	clienttypes "github.com/cosmos/ibc-go/v10/modules/core/02-client/types"
+	channeltypes "github.com/cosmos/ibc-go/v10/modules/core/04-channel/types"
+	host "github.com/cosmos/ibc-go/v10/modules/core/24-host"
 	"github.com/maxwell2010/go-smart-node/network/identity"
+	ibctesting "github.com/maxwell2010/go-smart-node/network/internal/ibcharness"
 	"github.com/stretchr/testify/require"
 )
 
@@ -155,7 +155,7 @@ func TestOwnApplicationICS20TwoChains(t *testing.T) {
 	require.NoError(t, path.EndpointA.TimeoutPacket(packet))
 	require.Equal(t, beforeTimeout.Sub(nativeIBCTransactionFee.Amount), appA.BankKeeper.GetBalance(a.GetContext(), primary.SenderAccount.GetAddress(), identity.BaseDenom).Amount, "timeout must refund exact principal")
 	require.True(t, appA.BankKeeper.GetBalance(a.GetContext(), escrow, identity.BaseDenom).IsZero())
-	require.NoError(t, path.EndpointA.TimeoutPacket(packet), "IBC11 treats repeated timeout delivery as an idempotent no-op")
+	require.NoError(t, path.EndpointA.TimeoutPacket(packet), "IBC treats repeated timeout delivery as an idempotent no-op")
 	require.Equal(t, beforeTimeout.Sub(nativeIBCTransactionFee.Amount), appA.BankKeeper.GetBalance(a.GetContext(), primary.SenderAccount.GetAddress(), identity.BaseDenom).Amount)
 	setSigner(primary)
 	beforeInvalidProof := appA.BankKeeper.GetBalance(a.GetContext(), primary.SenderAccount.GetAddress(), identity.BaseDenom).Amount

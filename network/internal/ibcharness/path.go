@@ -1,4 +1,4 @@
-// Derived from cosmos/ibc-go v11.2.0 testing/path.go. Apache-2.0; see LICENSE.
+// Derived from cosmos/ibc-go v10.7.0 testing/path.go. Apache-2.0; see LICENSE.
 package ibctesting
 
 import (
@@ -7,8 +7,8 @@ import (
 
 	abci "github.com/cometbft/cometbft/abci/types"
 
-	transfertypes "github.com/cosmos/ibc-go/v11/modules/apps/transfer/types"
-	channeltypes "github.com/cosmos/ibc-go/v11/modules/core/04-channel/types"
+	transfertypes "github.com/cosmos/ibc-go/v10/modules/apps/transfer/types"
+	channeltypes "github.com/cosmos/ibc-go/v10/modules/core/04-channel/types"
 )
 
 // Path contains two endpoints representing two chains connected over IBC

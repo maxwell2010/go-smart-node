@@ -1,16 +1,16 @@
 package ibctesting
 
 import (
+	storetypes "cosmossdk.io/store/types"
 	abci "github.com/cometbft/cometbft/abci/types"
 	"github.com/cosmos/cosmos-sdk/baseapp"
 	"github.com/cosmos/cosmos-sdk/client"
 	"github.com/cosmos/cosmos-sdk/codec"
 	cryptotypes "github.com/cosmos/cosmos-sdk/crypto/types"
 	servertypes "github.com/cosmos/cosmos-sdk/server/types"
-	storetypes "github.com/cosmos/cosmos-sdk/store/v2/types"
 	simtestutil "github.com/cosmos/cosmos-sdk/testutil/sims"
 	sdk "github.com/cosmos/cosmos-sdk/types"
-	"github.com/cosmos/ibc-go/v11/modules/core/keeper"
+	"github.com/cosmos/ibc-go/v10/modules/core/keeper"
 	"github.com/stretchr/testify/require"
 	"math/rand"
 	"testing"
@@ -28,7 +28,7 @@ type TestingApp interface {
 	LastBlockHeight() int64
 }
 
-// Derived from ibc-go v11.2.0 testing/simapp/test_helpers.go (Apache-2.0).
+// Derived from ibc-go v10.7.0 testing/simapp/test_helpers.go (Apache-2.0).
 // Deliver an encoded, signed native SDK transaction through actual FinalizeBlock.
 // The caller's TxConfig supplies its explicit fee before signing.
 func signAndDeliver(tb testing.TB, cfg client.TxConfig, app *baseapp.BaseApp, msgs []sdk.Msg, chainID string, nums, seqs []uint64, _ bool, blockTime time.Time, nextVals []byte, keys ...cryptotypes.PrivKey) (*abci.ResponseFinalizeBlock, error) {

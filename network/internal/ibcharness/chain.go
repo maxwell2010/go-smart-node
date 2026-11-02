@@ -1,4 +1,4 @@
-// Derived from cosmos/ibc-go v11.2.0 testing/chain.go. Apache-2.0; see LICENSE.
+// Derived from cosmos/ibc-go v10.7.0 testing/chain.go. Apache-2.0; see LICENSE.
 package ibctesting
 
 import (
@@ -23,12 +23,12 @@ import (
 	cmttypes "github.com/cometbft/cometbft/types"
 	cmtversion "github.com/cometbft/cometbft/version"
 
-	clienttypes "github.com/cosmos/ibc-go/v11/modules/core/02-client/types"
-	channeltypes "github.com/cosmos/ibc-go/v11/modules/core/04-channel/types"
-	commitmenttypes "github.com/cosmos/ibc-go/v11/modules/core/23-commitment/types"
-	host "github.com/cosmos/ibc-go/v11/modules/core/24-host"
-	"github.com/cosmos/ibc-go/v11/modules/core/exported"
-	ibctm "github.com/cosmos/ibc-go/v11/modules/light-clients/07-tendermint"
+	clienttypes "github.com/cosmos/ibc-go/v10/modules/core/02-client/types"
+	channeltypes "github.com/cosmos/ibc-go/v10/modules/core/04-channel/types"
+	commitmenttypes "github.com/cosmos/ibc-go/v10/modules/core/23-commitment/types"
+	host "github.com/cosmos/ibc-go/v10/modules/core/24-host"
+	"github.com/cosmos/ibc-go/v10/modules/core/exported"
+	ibctm "github.com/cosmos/ibc-go/v10/modules/light-clients/07-tendermint"
 )
 
 var MaxAccounts = 10
@@ -46,6 +46,7 @@ const (
 // header and the validators of the TestChain. It also contains a field called ChainID. This
 // is the clientID that *other* chains use to refer to this TestChain. The SenderAccount
 // is used for delivering transactions through the application state.
+
 type TestChain struct {
 	testing.TB
 
@@ -80,69 +81,45 @@ type TestChain struct {
 	// Short-term solution to override the logic of the standard SendMsgs function.
 	// See issue https://github.com/cosmos/ibc-go/issues/3123 for more information.
 	SendMsgsOverride func(msgs ...sdk.Msg) (*abci.ExecTxResult, error)
-
-	// Tracks whether the next block's finalize state has been initialized.
-	// Direct keeper writes in tests should target this state and only become
-	// committed once NextBlock/SendMsgs completes.
-	nextBlockContextInitialized bool
 }
 
-// GetContext returns the live, uncommitted finalize-block state.
-func (c *TestChain) GetContext() sdk.Context {
-	if !c.nextBlockContextInitialized {
-		// Try to get the existing finalize state first. If FinalizeBlock is
-		// in progress, the state already exists and we must not replace it
-		// with NewNextBlockContext.
-		if ctx, ok := c.tryGetContextLegacy(); ok {
-			return ctx
-		}
-		c.App.GetBaseApp().NewNextBlockContext(c.ProposedHeader)
-		c.nextBlockContextInitialized = true
-	}
-
-	return c.App.GetBaseApp().NewContextLegacy(false, c.ProposedHeader)
+// GetContext reads the committed application state.
+func (chain *TestChain) GetContext() sdk.Context {
+	return chain.App.GetBaseApp().NewUncachedContext(false, chain.ProposedHeader)
 }
 
-// tryGetContextLegacy attempts to get a context from the finalize state.
-// Returns false if the finalize state is not initialized (e.g. between blocks).
-func (c *TestChain) tryGetContextLegacy() (sdk.Context, bool) {
-	defer func() { recover() }() //nolint:errcheck // catch nil pointer panic
-	ctx := c.App.GetBaseApp().NewContextLegacy(false, c.ProposedHeader)
-	return ctx, true
-}
-
-// QueryProof queries the canonical committed IBC proof.
-func (c *TestChain) QueryProof(key []byte) ([]byte, clienttypes.Height) {
-	return c.QueryProofAtHeight(key, c.App.LastBlockHeight())
+// QueryProof obtains a genuine committed IBC proof.
+func (chain *TestChain) QueryProof(key []byte) ([]byte, clienttypes.Height) {
+	return chain.QueryProofAtHeight(key, chain.App.LastBlockHeight())
 }
 
 // QueryProofAtHeight performs an abci query with the given key and returns the proto encoded merkle proof
 // for the query and the height at which the proof will succeed on a tendermint verifier. Only the IBC
 // store is supported
-func (c *TestChain) QueryProofAtHeight(key []byte, height int64) ([]byte, clienttypes.Height) {
-	return c.QueryProofForStore(exported.StoreKey, key, height)
+func (chain *TestChain) QueryProofAtHeight(key []byte, height int64) ([]byte, clienttypes.Height) {
+	return chain.QueryProofForStore(exported.StoreKey, key, height)
 }
 
 // QueryProofForStore performs an abci query with the given key and returns the proto encoded merkle proof
 // for the query and the height at which the proof will succeed on a tendermint verifier.
-func (c *TestChain) QueryProofForStore(storeKey string, key []byte, height int64) ([]byte, clienttypes.Height) {
-	res, err := c.App.Query(
-		c.GetContext().Context(),
+func (chain *TestChain) QueryProofForStore(storeKey string, key []byte, height int64) ([]byte, clienttypes.Height) {
+	res, err := chain.App.Query(
+		chain.GetContext().Context(),
 		&abci.RequestQuery{
 			Path:   fmt.Sprintf("store/%s/key", storeKey),
 			Height: height - 1,
 			Data:   key,
 			Prove:  true,
 		})
-	require.NoError(c.TB, err)
+	require.NoError(chain.TB, err)
 
 	merkleProof, err := commitmenttypes.ConvertProofs(res.ProofOps)
-	require.NoError(c.TB, err)
+	require.NoError(chain.TB, err)
 
-	proof, err := c.App.AppCodec().Marshal(&merkleProof)
-	require.NoError(c.TB, err)
+	proof, err := chain.App.AppCodec().Marshal(&merkleProof)
+	require.NoError(chain.TB, err)
 
-	revision := clienttypes.ParseChainID(c.ChainID)
+	revision := clienttypes.ParseChainID(chain.ChainID)
 
 	// proof height + 1 is returned as the proof created corresponds to the height the proof
 	// was created in the IAVL tree. Tendermint and subsequently the clients that rely on it
@@ -152,24 +129,24 @@ func (c *TestChain) QueryProofForStore(storeKey string, key []byte, height int64
 
 // QueryUpgradeProof performs an abci query with the given key and returns the proto encoded merkle proof
 // for the query and the height at which the proof will succeed on a tendermint verifier.
-func (c *TestChain) QueryUpgradeProof(key []byte, height uint64) ([]byte, clienttypes.Height) {
-	res, err := c.App.Query(
-		c.GetContext().Context(),
+func (chain *TestChain) QueryUpgradeProof(key []byte, height uint64) ([]byte, clienttypes.Height) {
+	res, err := chain.App.Query(
+		chain.GetContext().Context(),
 		&abci.RequestQuery{
 			Path:   "store/upgrade/key",
 			Height: int64(height - 1),
 			Data:   key,
 			Prove:  true,
 		})
-	require.NoError(c.TB, err)
+	require.NoError(chain.TB, err)
 
 	merkleProof, err := commitmenttypes.ConvertProofs(res.ProofOps)
-	require.NoError(c.TB, err)
+	require.NoError(chain.TB, err)
 
-	proof, err := c.App.AppCodec().Marshal(&merkleProof)
-	require.NoError(c.TB, err)
+	proof, err := chain.App.AppCodec().Marshal(&merkleProof)
+	require.NoError(chain.TB, err)
 
-	revision := clienttypes.ParseChainID(c.ChainID)
+	revision := clienttypes.ParseChainID(chain.ChainID)
 
 	// proof height + 1 is returned as the proof created corresponds to the height the proof
 	// was created in the IAVL tree. Tendermint and subsequently the clients that rely on it
@@ -179,11 +156,11 @@ func (c *TestChain) QueryUpgradeProof(key []byte, height uint64) ([]byte, client
 
 // QueryConsensusStateProof performs an abci query for a consensus state
 // stored on the given clientID. The proof and consensusHeight are returned.
-func (c *TestChain) QueryConsensusStateProof(clientID string) ([]byte, clienttypes.Height) {
-	consensusHeight, ok := c.GetClientLatestHeight(clientID).(clienttypes.Height)
-	require.True(c.TB, ok)
+func (chain *TestChain) QueryConsensusStateProof(clientID string) ([]byte, clienttypes.Height) {
+	consensusHeight, ok := chain.GetClientLatestHeight(clientID).(clienttypes.Height)
+	require.True(chain.TB, ok)
 	consensusKey := host.FullConsensusStateKey(clientID, consensusHeight)
-	consensusProof, _ := c.QueryProof(consensusKey)
+	consensusProof, _ := chain.QueryProof(consensusKey)
 
 	return consensusProof, consensusHeight
 }
@@ -194,78 +171,77 @@ func (c *TestChain) QueryConsensusStateProof(clientID string) ([]byte, clienttyp
 // of the next block being created. This follows the Tendermint protocol of applying valset changes
 // returned on block `n` to the validators of block `n+2`.
 // It calls BeginBlock with the new block created before returning.
-func (c *TestChain) NextBlock() {
-	res, err := c.App.FinalizeBlock(&abci.RequestFinalizeBlock{
-		Height:             c.ProposedHeader.Height,
-		Time:               c.ProposedHeader.GetTime(),
-		NextValidatorsHash: c.NextVals.Hash(),
+func (chain *TestChain) NextBlock() {
+	res, err := chain.App.FinalizeBlock(&abci.RequestFinalizeBlock{
+		Height:             chain.ProposedHeader.Height,
+		Time:               chain.ProposedHeader.GetTime(),
+		NextValidatorsHash: chain.NextVals.Hash(),
 	})
-	require.NoError(c.TB, err)
-	c.commitBlock(res)
+	require.NoError(chain.TB, err)
+	chain.commitBlock(res)
 }
 
-func (c *TestChain) commitBlock(res *abci.ResponseFinalizeBlock) {
-	_, err := c.App.Commit()
-	require.NoError(c.TB, err)
-	c.nextBlockContextInitialized = false
+func (chain *TestChain) commitBlock(res *abci.ResponseFinalizeBlock) {
+	_, err := chain.App.Commit()
+	require.NoError(chain.TB, err)
 
 	// set the last header to the current header
 	// use nil trusted fields
-	c.LatestCommittedHeader = c.CurrentTMClientHeader()
+	chain.LatestCommittedHeader = chain.CurrentTMClientHeader()
 	// set the trusted validator set to the next validator set
 	// The latest trusted validator set is the next validator set
 	// associated with the header being committed in storage. This will
 	// allow for header updates to be proved against these validators.
-	c.TrustedValidators[uint64(c.ProposedHeader.Height)] = c.NextVals
+	chain.TrustedValidators[uint64(chain.ProposedHeader.Height)] = chain.NextVals
 
 	// val set changes returned from previous block get applied to the next validators
 	// of this block. See tendermint spec for details.
-	c.Vals = c.NextVals
-	c.NextVals = ApplyValSetChanges(c, c.Vals, res.ValidatorUpdates)
+	chain.Vals = chain.NextVals
+	chain.NextVals = ApplyValSetChanges(chain, chain.Vals, res.ValidatorUpdates)
 
 	// increment the proposer priority of validators
-	c.Vals.IncrementProposerPriority(1)
+	chain.Vals.IncrementProposerPriority(1)
 
 	// increment the current header
-	c.ProposedHeader = cmtproto.Header{
-		ChainID: c.ChainID,
-		Height:  c.App.LastBlockHeight() + 1,
-		AppHash: c.App.LastCommitID().Hash,
+	chain.ProposedHeader = cmtproto.Header{
+		ChainID: chain.ChainID,
+		Height:  chain.App.LastBlockHeight() + 1,
+		AppHash: chain.App.LastCommitID().Hash,
 		// NOTE: the time is increased by the coordinator to maintain time synchrony amongst
 		// chains.
-		Time:               c.ProposedHeader.Time,
-		ValidatorsHash:     c.Vals.Hash(),
-		NextValidatorsHash: c.NextVals.Hash(),
-		ProposerAddress:    c.Vals.Proposer.Address,
+		Time:               chain.ProposedHeader.Time,
+		ValidatorsHash:     chain.Vals.Hash(),
+		NextValidatorsHash: chain.NextVals.Hash(),
+		ProposerAddress:    chain.Vals.Proposer.Address,
 	}
 }
 
 // sendMsgs delivers a transaction through the application without returning the result.
-func (c *TestChain) sendMsgs(msgs ...sdk.Msg) error {
-	_, err := c.SendMsgs(msgs...)
+func (chain *TestChain) sendMsgs(msgs ...sdk.Msg) error {
+	_, err := chain.SendMsgs(msgs...)
 	return err
 }
 
 // SendMsgs delivers a transaction through the application using a predefined sender.
 // It updates the senders sequence number and updates the TestChain's headers.
 // It returns the result and error if one occurred.
-func (c *TestChain) SendMsgs(msgs ...sdk.Msg) (*abci.ExecTxResult, error) {
+func (chain *TestChain) SendMsgs(msgs ...sdk.Msg) (*abci.ExecTxResult, error) {
 	senderAccount := SenderAccount{
-		SenderPrivKey: c.SenderPrivKey,
-		SenderAccount: c.SenderAccount,
+		SenderPrivKey: chain.SenderPrivKey,
+		SenderAccount: chain.SenderAccount,
 	}
 
-	return c.SendMsgsWithSender(senderAccount, msgs...)
+	return chain.SendMsgsWithSender(senderAccount, msgs...)
 }
 
 // SendMsgsWithSender delivers a transaction through the application using the provided sender.
-func (c *TestChain) SendMsgsWithSender(sender SenderAccount, msgs ...sdk.Msg) (*abci.ExecTxResult, error) {
-	if c.SendMsgsOverride != nil {
-		return c.SendMsgsOverride(msgs...)
+func (chain *TestChain) SendMsgsWithSender(sender SenderAccount, msgs ...sdk.Msg) (*abci.ExecTxResult, error) {
+	if chain.SendMsgsOverride != nil {
+		return chain.SendMsgsOverride(msgs...)
 	}
 
 	// ensure the chain has the latest time
-	c.Coordinator.UpdateTimeForChain(c)
+	chain.Coordinator.UpdateTimeForChain(chain)
 
 	// increment acc sequence regardless of success or failure tx execution
 	defer func() {
@@ -276,83 +252,83 @@ func (c *TestChain) SendMsgsWithSender(sender SenderAccount, msgs ...sdk.Msg) (*
 	}()
 
 	resp, err := signAndDeliver(
-		c.TB,
-		c.TxConfig,
-		c.App.GetBaseApp(),
+		chain.TB,
+		chain.TxConfig,
+		chain.App.GetBaseApp(),
 		msgs,
-		c.ChainID,
+		chain.ChainID,
 		[]uint64{sender.SenderAccount.GetAccountNumber()},
 		[]uint64{sender.SenderAccount.GetSequence()},
 		true,
-		c.ProposedHeader.GetTime(),
-		c.NextVals.Hash(),
+		chain.ProposedHeader.GetTime(),
+		chain.NextVals.Hash(),
 		sender.SenderPrivKey,
 	)
 	if err != nil {
 		return nil, err
 	}
 
-	c.commitBlock(resp)
+	chain.commitBlock(resp)
 
-	require.Len(c.TB, resp.TxResults, 1)
+	require.Len(chain.TB, resp.TxResults, 1)
 	txResult := resp.TxResults[0]
 
 	if txResult.Code != 0 {
 		return txResult, fmt.Errorf("%s/%d: %q", txResult.Codespace, txResult.Code, txResult.Log)
 	}
 
-	c.Coordinator.IncrementTime()
+	chain.Coordinator.IncrementTime()
 
 	return txResult, nil
 }
 
 // GetClientState retrieves the client state for the provided clientID. The client is
 // expected to exist otherwise testing will fail.
-func (c *TestChain) GetClientState(clientID string) exported.ClientState {
-	clientState, found := c.App.GetIBCKeeper().ClientKeeper.GetClientState(c.GetContext(), clientID)
-	require.True(c.TB, found)
+func (chain *TestChain) GetClientState(clientID string) exported.ClientState {
+	clientState, found := chain.App.GetIBCKeeper().ClientKeeper.GetClientState(chain.GetContext(), clientID)
+	require.True(chain.TB, found)
 
 	return clientState
 }
 
 // GetConsensusState retrieves the consensus state for the provided clientID and height.
 // It will return a success boolean depending on if consensus state exists or not.
-func (c *TestChain) GetConsensusState(clientID string, height exported.Height) (exported.ConsensusState, bool) {
-	return c.App.GetIBCKeeper().ClientKeeper.GetClientConsensusState(c.GetContext(), clientID, height)
+func (chain *TestChain) GetConsensusState(clientID string, height exported.Height) (exported.ConsensusState, bool) {
+	return chain.App.GetIBCKeeper().ClientKeeper.GetClientConsensusState(chain.GetContext(), clientID, height)
 }
 
 // GetAcknowledgement retrieves an acknowledgement for the provided packet. If the
 // acknowledgement does not exist then testing will fail.
-func (c *TestChain) GetAcknowledgement(packet channeltypes.Packet) []byte {
-	ack, found := c.App.GetIBCKeeper().ChannelKeeper.GetPacketAcknowledgement(c.GetContext(), packet.GetDestPort(), packet.GetDestChannel(), packet.GetSequence())
-	require.True(c.TB, found)
+func (chain *TestChain) GetAcknowledgement(packet channeltypes.Packet) []byte {
+	ack, found := chain.App.GetIBCKeeper().ChannelKeeper.GetPacketAcknowledgement(chain.GetContext(), packet.GetDestPort(), packet.GetDestChannel(), packet.GetSequence())
+	require.True(chain.TB, found)
 
 	return ack
 }
 
 // GetPrefix returns the prefix for used by a chain in connection creation
-func (c *TestChain) GetPrefix() commitmenttypes.MerklePrefix {
-	return commitmenttypes.NewMerklePrefix(c.App.GetIBCKeeper().ConnectionKeeper.GetCommitmentPrefix().Bytes())
+func (chain *TestChain) GetPrefix() commitmenttypes.MerklePrefix {
+	return commitmenttypes.NewMerklePrefix(chain.App.GetIBCKeeper().ConnectionKeeper.GetCommitmentPrefix().Bytes())
 }
 
 // ExpireClient fast forwards the chain's block time by the provided amount of time which will
 // expire any clients with a trusting period less than or equal to this amount of time.
-func (c *TestChain) ExpireClient(amount time.Duration) {
-	c.Coordinator.IncrementTimeBy(amount)
+func (chain *TestChain) ExpireClient(amount time.Duration) {
+	chain.Coordinator.IncrementTimeBy(amount)
 }
 
 // CurrentTMClientHeader creates a TM header using the current header parameters
 // on the chain. The trusted fields in the header are set to nil.
-func (c *TestChain) CurrentTMClientHeader() *ibctm.Header {
-	return c.CreateTMClientHeader(
-		c.ChainID,
-		c.ProposedHeader.Height,
+func (chain *TestChain) CurrentTMClientHeader() *ibctm.Header {
+	return chain.CreateTMClientHeader(
+		chain.ChainID,
+		chain.ProposedHeader.Height,
 		clienttypes.Height{},
-		c.ProposedHeader.Time,
-		c.Vals,
-		c.NextVals,
+		chain.ProposedHeader.Time,
+		chain.Vals,
+		chain.NextVals,
 		nil,
-		c.Signers,
+		chain.Signers,
 	)
 }
 
@@ -368,7 +344,7 @@ func CommitHeader(proposedHeader cmttypes.Header, valSet *cmttypes.ValidatorSet,
 	// Thus we iterate over the ordered validator set and construct a signer array
 	// from the signer map in the same order.
 	signerArr := make([]cmttypes.PrivValidator, len(valSet.Validators))
-	for i, v := range valSet.Validators {
+	for i, v := range valSet.Validators { //nolint:staticcheck // need to check for nil validator set
 		signerArr[i] = signers[v.Address.String()]
 	}
 
@@ -387,12 +363,12 @@ func CommitHeader(proposedHeader cmttypes.Header, valSet *cmttypes.ValidatorSet,
 
 // CreateTMClientHeader creates a TM header to update the TM client. Args are passed in to allow
 // caller flexibility to use params that differ from the chain.
-func (c *TestChain) CreateTMClientHeader(chainID string, blockHeight int64, trustedHeight clienttypes.Height, timestamp time.Time, cmtValSet, nextVals, cmtTrustedVals *cmttypes.ValidatorSet, signers map[string]cmttypes.PrivValidator) *ibctm.Header {
+func (chain *TestChain) CreateTMClientHeader(chainID string, blockHeight int64, trustedHeight clienttypes.Height, timestamp time.Time, cmtValSet, nextVals, cmtTrustedVals *cmttypes.ValidatorSet, signers map[string]cmttypes.PrivValidator) *ibctm.Header {
 	var (
 		valSet      *cmtproto.ValidatorSet
 		trustedVals *cmtproto.ValidatorSet
 	)
-	require.NotNil(c.TB, cmtValSet)
+	require.NotNil(chain.TB, cmtValSet)
 
 	proposedHeader := cmttypes.Header{
 		Version:            cmtprotoversion.Consensus{Block: cmtversion.BlockProtocol, App: 2},
@@ -400,29 +376,29 @@ func (c *TestChain) CreateTMClientHeader(chainID string, blockHeight int64, trus
 		Height:             blockHeight,
 		Time:               timestamp,
 		LastBlockID:        MakeBlockID(make([]byte, tmhash.Size), 10_000, make([]byte, tmhash.Size)),
-		LastCommitHash:     c.App.LastCommitID().Hash,
+		LastCommitHash:     chain.App.LastCommitID().Hash,
 		DataHash:           unusedHash,
 		ValidatorsHash:     cmtValSet.Hash(),
 		NextValidatorsHash: nextVals.Hash(),
 		ConsensusHash:      unusedHash,
-		AppHash:            c.ProposedHeader.AppHash,
+		AppHash:            chain.ProposedHeader.AppHash,
 		LastResultsHash:    unusedHash,
 		EvidenceHash:       unusedHash,
-		ProposerAddress:    cmtValSet.Proposer.Address, //nolint:staticcheck // will not be nil
+		ProposerAddress:    cmtValSet.Proposer.Address, //nolint:staticcheck
 	}
 
 	signedHeader, err := CommitHeader(proposedHeader, cmtValSet, signers)
-	require.NoError(c.TB, err)
+	require.NoError(chain.TB, err)
 
 	if cmtValSet != nil { //nolint:staticcheck
 		valSet, err = cmtValSet.ToProto()
-		require.NoError(c.TB, err)
+		require.NoError(chain.TB, err)
 		valSet.TotalVotingPower = cmtValSet.TotalVotingPower()
 	}
 
 	if cmtTrustedVals != nil {
 		trustedVals, err = cmtTrustedVals.ToProto()
-		require.NoError(c.TB, err)
+		require.NoError(chain.TB, err)
 		trustedVals.TotalVotingPower = cmtTrustedVals.TotalVotingPower()
 	}
 
@@ -449,37 +425,37 @@ func MakeBlockID(hash []byte, partSetSize uint32, partSetHash []byte) cmttypes.B
 
 // GetClientLatestHeight returns the latest height for the client state with the given client identifier.
 // If an invalid client identifier is provided then a zero value height will be returned and testing will fail.
-func (c *TestChain) GetClientLatestHeight(clientID string) exported.Height {
-	latestHeight := c.App.GetIBCKeeper().ClientKeeper.GetClientLatestHeight(c.GetContext(), clientID)
-	require.False(c.TB, latestHeight.IsZero())
+func (chain *TestChain) GetClientLatestHeight(clientID string) exported.Height {
+	latestHeight := chain.App.GetIBCKeeper().ClientKeeper.GetClientLatestHeight(chain.GetContext(), clientID)
+	require.False(chain.TB, latestHeight.IsZero())
 	return latestHeight
 }
 
 // GetTimeoutHeight is a convenience function which returns a IBC packet timeout height
 // to be used for testing. It returns the current IBC height + 100 blocks
-func (c *TestChain) GetTimeoutHeight() clienttypes.Height {
-	return clienttypes.NewHeight(clienttypes.ParseChainID(c.ChainID), uint64(c.GetContext().BlockHeight())+100)
+func (chain *TestChain) GetTimeoutHeight() clienttypes.Height {
+	return clienttypes.NewHeight(clienttypes.ParseChainID(chain.ChainID), uint64(chain.GetContext().BlockHeight())+100)
 }
 
 // GetTimeoutTimestamp is a convenience function which returns a IBC packet timeout timestamp
 // to be used for testing. It returns the current block timestamp + default timestamp delta (1 hour).
-func (c *TestChain) GetTimeoutTimestamp() uint64 {
-	return uint64(c.GetContext().BlockTime().UnixNano()) + DefaultTimeoutTimestampDelta
+func (chain *TestChain) GetTimeoutTimestamp() uint64 {
+	return uint64(chain.GetContext().BlockTime().UnixNano()) + DefaultTimeoutTimestampDelta
 }
 
 // GetTimeoutTimestampSecs is a convenience function which returns a IBC packet timeout timestamp in seconds
 // to be used for testing. It returns the current block timestamp + default timestamp delta (1 hour).
-func (c *TestChain) GetTimeoutTimestampSecs() uint64 {
-	return uint64(c.GetContext().BlockTime().Unix()) + uint64(time.Hour.Seconds())
+func (chain *TestChain) GetTimeoutTimestampSecs() uint64 {
+	return uint64(chain.GetContext().BlockTime().Unix()) + uint64(time.Hour.Seconds())
 }
 
 // DeleteKey deletes the specified key from the ibc store.
-func (c *TestChain) IBCClientHeader(header *ibctm.Header, trustedHeight clienttypes.Height) (*ibctm.Header, error) {
+func (chain *TestChain) IBCClientHeader(header *ibctm.Header, trustedHeight clienttypes.Height) (*ibctm.Header, error) {
 	if trustedHeight.IsZero() {
 		return nil, errorsmod.Wrap(ibctm.ErrInvalidHeaderHeight, "trustedHeight must be a non-zero height")
 	}
 
-	cmtTrustedVals, ok := c.TrustedValidators[trustedHeight.RevisionHeight]
+	cmtTrustedVals, ok := chain.TrustedValidators[trustedHeight.RevisionHeight]
 	if !ok {
 		return nil, fmt.Errorf("unable to find trusted validators at height %d", trustedHeight.RevisionHeight)
 	}

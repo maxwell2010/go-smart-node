@@ -1,4 +1,4 @@
-// Derived from cosmos/ibc-go v11.2.0 testing/events.go. Apache-2.0; see LICENSE.
+// Derived from cosmos/ibc-go v10.7.0 testing/events.go. Apache-2.0; see LICENSE.
 package ibctesting
 
 import (
@@ -10,9 +10,9 @@ import (
 
 	abci "github.com/cometbft/cometbft/abci/types"
 
-	clienttypes "github.com/cosmos/ibc-go/v11/modules/core/02-client/types"
-	connectiontypes "github.com/cosmos/ibc-go/v11/modules/core/03-connection/types"
-	channeltypes "github.com/cosmos/ibc-go/v11/modules/core/04-channel/types"
+	clienttypes "github.com/cosmos/ibc-go/v10/modules/core/02-client/types"
+	connectiontypes "github.com/cosmos/ibc-go/v10/modules/core/03-connection/types"
+	channeltypes "github.com/cosmos/ibc-go/v10/modules/core/04-channel/types"
 )
 
 // ParseClientIDFromEvents parses events emitted from a MsgCreateClient and returns the
@@ -147,9 +147,8 @@ func ParseIBCV1Packets(eventType string, events []abci.Event) ([]channeltypes.Pa
 	return packets, nil
 }
 
-// ParseV1PacketFromEvents parses events emitted from a v2 send packet
-// and returns the first EventTypeSendPacket packet found.
-// Returns an error if no packet is found.
+// ParseIBCV2Packets parses events and returns all the v2 packets found.
+// Returns an error if no v2 packet is found.
 func ParseAckFromEvents(events []abci.Event) ([]byte, error) {
 	for _, ev := range events {
 		if ev.Type == channeltypes.EventTypeWriteAck {
@@ -165,8 +164,7 @@ func ParseAckFromEvents(events []abci.Event) ([]byte, error) {
 	return nil, errors.New("acknowledgement event attribute not found")
 }
 
-// ParseAckV2FromEvents parses events emitted from a MsgRecvPacket and returns the
-// acknowledgement for v2 packets.
+// ParseProposalIDFromEvents parses events emitted from MsgSubmitProposal and returns proposalID
 func ParsePacketFromEvents(events []abci.Event) (channeltypes.Packet, error) {
 	return ParseV1PacketFromEvents(events)
 }
