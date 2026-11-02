@@ -150,3 +150,49 @@ Do not reuse the mainnet owner or migration calldata in an isolated genesis.
 
 Read-only Sourcify full-match and partial-match queries for the registry at
 chain ID 75 both returned 404. No runtime state or keys were copied from mainnet.
+
+### Pinned implementation inventory
+
+Read-only calls to the official `https://node.decimalchain.com/web3/` endpoint
+at block `0x20cdcb6` resolved the following deployments. These addresses identify
+research inputs and must not become fresh-network authorities or allocations.
+
+| Component | Registry target | Implementation |
+| --- | --- | --- |
+| ContractCenter | `0xc108715a06f76caa96fa2c943ebf05159c29a87d` | `0x642b69a1adb72ab26b8d911887811f0e2ba11490` |
+| MasterValidator | `0x630b03ff9eed4c4a468da9f481df23f542070aa4` | `0xefedc75ee88d2a4e8163506ed769ebbacaa788d5` |
+| Delegation | `0xa16c34ed1c0601c0e749e17ebef19752a15faa01` | `0x2f29724dcf9e3fe2864db03c5310cb368aa96f09` |
+| DelegationNFT | `0xe45adfcc739a0d10ce9462b58866c9a1a06035e2` | `0xaffe98bbd4c74ccc95d7d99a684bd83fecaece6c` |
+| TokenCenter | `0x9113ba675aa8f2ef0c068cee2cdabab95b6437fb` | `0x0d01189be8dcab77b088a21353deff979dc83788` |
+| NFTCenter | `0x443cc8ac24630be9257483a09c34ffa81608eace` | `0xced55da70f42ab101b4ce10aa9e767607cef5146` |
+| Wrapped native | `0x1c5d8992da64c8d56ea413dd6f723061c29a7c0b` | No `getImpl()` result |
+
+For the registry, `getImpl()` and the ERC1967 implementation storage slot agree.
+The official explorer publishes flattened sources and metadata for all six
+proxies and implementations above; wrapped native has no published source in
+its explorer page. The Delegation implementation links `DelegationNFTLib` at
+`0x940171137d5ffddd440a6fd17bbbd64a2001199b`; its flattened source includes
+the library. A fresh deployment must deploy and relink this library.
+
+An isolated local Solidity 0.8.20 compiler, using each artifact's published
+settings, reproduced TokenCenter's complete on-chain runtime exactly. The
+other proxies and registry, MasterValidator, Delegation and DelegationNFT
+implementations matched executable runtime after removing the final CBOR
+metadata trailer. Their metadata trailers differ, so full bytecode identity
+has not been established. NFTCenter additionally differs in an embedded IPFS
+metadata hash near byte 16526 of its 16686-byte runtime. Preserve this distinction
+when deciding which artifacts are suitable for a reproducible genesis.
+
+The setup runtime is 2706 bytes and its CBOR metadata identifies Solidity 0.8.20
+with IPFS metadata CID `QmYmajmN1bdCBisPJ9ztfudvBm7HrbJ7q3CpgMDNVioiCU`.
+Attempts to retrieve that metadata encountered HTTP 403, timeout and TLS errors
+at public gateways. Certificate validation was retained. The official public
+RPC returned `null` for the registry creation transaction hash exposed by the
+explorer, so its historical input could not be independently retrieved there.
+No expensive execution trace was requested.
+
+Remaining external blockers are the setup source or verifiable deployment
+recipe, wrapped native source/artifact and initialization, complete authority
+initialization for each proxy, and an exact reproducible compilation manifest.
+Known published sources materially narrow the investigation but do not resolve
+the circular dependency between strict hooks and first deployment transactions.
