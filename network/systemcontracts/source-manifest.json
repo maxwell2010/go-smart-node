@@ -1,0 +1,23 @@
+{
+  "purpose": "Fresh-network bootstrap research; no mainnet authorities or state allocation",
+  "sources": [
+    {
+      "file": "DecimalContractCenter.sol",
+      "source_url": "https://explorer.decimalchain.com/contracts/0x642b69a1adb72ab26b8d911887811f0e2ba11490",
+      "sha256": "2c3f9834bfc7981323c2a10968a0e745f317266fef7fafb03f2230649c0a15eb",
+      "bytes": 53266,
+      "metadata_sha256": "043909fc83a4b79fe775b1872f42f9edaf81fbe1c3edf5fc9c994b682d485c9f",
+      "upstream_compiler": "0.8.20+commit.a1b79de6",
+      "license": "MIT"
+    },
+    {
+      "file": "DecimalContractCenterProxy.sol",
+      "source_url": "https://explorer.decimalchain.com/contracts/0xc108715a06f76caa96fa2c943ebf05159c29a87d",
+      "sha256": "278769c90cdd676abbf24742655e4563be9256806e180578ba8f81ac0b9efb6c",
+      "bytes": 22427,
+      "metadata_sha256": "055b5c66a2d765601f992d1ccfd627cfba05cdf901ab5acf5f7d3b0a24066c9b",
+      "upstream_compiler": "0.8.20+commit.a1b79de6",
+      "license": "MIT"
+    }
+  ]
+}

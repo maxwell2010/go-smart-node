@@ -1,1 +1,3 @@
 scripts/*.sh text eol=lf
+systemcontracts/sources/*.sol -text -whitespace
+systemcontracts/*.sol text eol=lf
