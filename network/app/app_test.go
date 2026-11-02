@@ -33,6 +33,7 @@ func (o options) Get(key string) interface{} { return o[key] }
 
 func testApp(t *testing.T, chainID string, evmID uint64) *App {
 	t.Helper()
+	resetEVMConfigurationForTest()
 	a := NewApp(log.NewNopLogger(), dbm.NewMemDB(), true, options{
 		flags.FlagHome: t.TempDir(), flags.FlagChainID: chainID, srvflags.EVMChainID: evmID,
 	})

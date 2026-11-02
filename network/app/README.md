@@ -30,3 +30,12 @@ cannot instantiate two different EVM configurations in one process. Future
 interchain process tests must use separate disposable daemons. Any use of the
 upstream `test` build tag to reset configuration in a unit harness must be
 identified as such, and cannot replace the process-level release gate.
+
+`go test -mod=readonly -tags test -run TestOwnApplicationICS20TwoChains ./app`
+runs two instances of this owned application with real Tendermint light-client
+proofs, client/connection/channel handshakes and ICS20 native send/return. A
+regular Cosmos secp256k1 relayer signer is supported by the actual native ante
+path. The test client sets a positive `del` fee before signing; it does not
+replace the ante handler. It checks escrow, voucher supply at the recipient and
+exact native release to a separate return recipient. The production application
+is unchanged by the test-only global configuration reset.
