@@ -49,8 +49,14 @@ jobs:
           go mod download
           git diff --exit-code -- go.mod go.sum
           go mod verify |& tee validation-logs/module-integrity.log
+      - name: Verify owned EVM source and integrity guards
+        run: |
+          python3 scripts/verify_owned_evm.py |& tee validation-logs/owned-evm-integrity.log
+          python3 -m unittest discover -s scripts -p 'test_*.py'
       - name: Test modern module and native feature port
         run: go test -mod=readonly -p 2 -count=1 -v -timeout 10m ./... |& tee validation-logs/tests.log
+      - name: Test native ownership against actual SDK governance tally
+        run: go test -mod=readonly -p 2 -count=1 -v -timeout 10m -tags sdk53 ./decimal/validator/governance |& tee validation-logs/native-governance-tally.log
       - name: Test owned application ICS20 with test-only configuration isolation
         run: go test -mod=readonly -p 2 -count=1 -v -timeout 10m -tags test -run '^TestOwnApplicationICS20TwoChains$' ./app |& tee validation-logs/ics20-unit.log
       - name: Build and execute memory-only family probe
