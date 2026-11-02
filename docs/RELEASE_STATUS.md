@@ -11,6 +11,7 @@ Required remaining evidence:
 - Two independent OS processes, an external operator relayer, fee/gas compatibility, relayer restart and upgrade-in-flight operation.
 - Rehearsal with deployed production contract implementations, complete outer ante/fee failure behavior and reconciliation of existing partial queues.
 - Bounded auto-unbond progress and poison-entry policy; conservation invariants; emergency authority and quota/asset policy.
+- Historical slashing/grace-period behavior before height29512330: legacy code still references UpdatesInfo there, while later heights have an unconditional grace override. Do not claim full-genesis replay or corrected slashing policy from the current newer snapshot window alone.
 - Linux release archives/checksums/provenance, clean install/bootstrap, independent review and tested rollback procedure.
 
 The experimental build is restricted to exact dedicated IDs. Production consensus activation requires a separate coordinated plan; publishing a fork is not that plan. This release gate document does not claim an audit certification.
