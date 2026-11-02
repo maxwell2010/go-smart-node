@@ -21,3 +21,9 @@ The static paths do not prove exploitability. The Cosmos EVM report's shortest p
 The actual Ethereum dependency is `github.com/cosmos/go-ethereum v1.17.2-cosmos-1`, not the upstream version named in the original require statement. Govulncheck queries replacement module identities, so upstream geth inheritance needs supplemental checks. GitHub's [exact commit comparison](https://github.com/cosmos/go-ethereum/compare/be4dc0c4be2fe316dbdd0a73e48421f64978232f...v1.17.2-cosmos-1) confirms the fork contains upstream tag 1.17.2 at `be4dc0c4be2fe316dbdd0a73e48421f64978232f`, with two additional commits and zero commits behind. An OSV API query for upstream 1.17.2 returned no matching published advisories, while a 1.13.12 positive control returned the known advisories. This checks the upstream base against that query's database state; it does not audit the Cosmos changes or cover future reports.
 
 The raw captures, completion manifests, summaries, official advisory JSON, ancestry response and binary build information remain in local validation artifacts. The tracked family manifest records their identities and the failed gate results. Further changes need tests and new captures, including a fresh scan of the eventual Decimal daemon and its native feature wiring.
+
+Follow-up [precompile rollback evidence](precompile-rollback-evidence.md)
+records fix ancestry, source ordering and a genuine owned-app financial
+regression. The subsequent [transport patch batch](transport-security-hardening.md)
+has new captures with three remaining IDs. These later checks do not rewrite
+the initial eight/nine-ID baseline or mark the final daemon security gate clean.

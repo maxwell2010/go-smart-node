@@ -23,7 +23,7 @@ The current tagged EVM reference pins SDK0.54/Comet0.39, while the published
 active family lists SDK0.55/Comet0.40. An active-family compile and behavior
 trial is in progress; matching EVM/IBC major versions alone is insufficient
 support evidence. Transport remediations and scanner evidence are documented
-under `network/reference/`; remaining advisories require individual disposition.
+under `network/docs/`; remaining advisories require individual disposition.
 
 Modern release blockers remain:
 
