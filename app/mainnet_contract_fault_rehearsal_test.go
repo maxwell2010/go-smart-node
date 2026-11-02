@@ -169,8 +169,14 @@ func TestMainnetSystemContractFaultRehearsal(t *testing.T) {
 	deliver := func(to common.Address, amount *big.Int, data []byte) *evmtypes.MsgEthereumTxResponse {
 		return rehearsalDeliver(t, dsc, context(), key, to, amount, data)
 	}
-	transfer := deliver(common.HexToAddress("0x1234567890123456789012345678901234567890"), big.NewInt(100), nil)
+	receiver := common.HexToAddress("0x1234567890123456789012345678901234567890")
+	transferBeforeSender := dsc.EvmKeeper.GetBalance(context(), from)
+	transferBeforeReceiver := dsc.EvmKeeper.GetBalance(context(), receiver)
+	transfer := deliver(receiver, big.NewInt(100), nil)
 	require.Empty(t, transfer.VmError, "real snapshot registry must permit ordinary native EVM transfer")
+	require.Equal(t, big.NewInt(100), new(big.Int).Sub(dsc.EvmKeeper.GetBalance(context(), receiver), transferBeforeReceiver))
+	transferDebit := new(big.Int).Sub(transferBeforeSender, dsc.EvmKeeper.GetBalance(context(), from))
+	require.True(t, transferDebit.Cmp(big.NewInt(100)) > 0, "actual native commission must be debited in addition to transferred value")
 	t.Log("actual snapshot native EVM transfer passed signature, outer ante, fee deduction and production hooks")
 	payload, err := legacyABI.Pack("delegateDEL", validator)
 	require.NoError(t, err)
