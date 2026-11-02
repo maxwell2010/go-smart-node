@@ -2,6 +2,7 @@
 """Disposable real-process IBC lab. Never use public homes, endpoints or keys."""
 import argparse
 import base64
+import calendar
 import hashlib
 import json
 import os
@@ -118,7 +119,8 @@ def escrow(port, denom):
 
 def commitments(port, channel):
     body = query(port, "/ibc.core.channel.v1.Query/PacketCommitments", field(1, "transfer") + field(2, channel))
-    return [fields(entry)[3][0] for entry in body.get(1, [])]
+    records = [fields(entry) for entry in body.get(1, [])]
+    return [{"sequence": record[3][0], "commitment": record[4][0].hex()} for record in records]
 
 
 def open_channel(port):
@@ -177,6 +179,13 @@ class Lab:
         require(status["node_info"]["network"] == chain, "wrong node signing domain")
         return int(status["sync_info"]["latest_block_height"])
 
+    def committed_time_ns(self, port):
+        timestamp = rpc(port, "status")["sync_info"]["latest_block_time"]
+        match = re.fullmatch(r"([0-9-]{10}T[0-9:]{8})(?:\.([0-9]{1,9}))?Z", timestamp)
+        require(match is not None, "unexpected committed timestamp encoding")
+        seconds = calendar.timegm(time.strptime(match.group(1), "%Y-%m-%dT%H:%M:%S"))
+        return seconds * 10**9 + int((match.group(2) or "0").ljust(9, "0"))
+
 
 def chain_config(chain, rpc_port, grpc_port, prefix, denom, keys):
     return f'''[[chains]]
@@ -231,6 +240,7 @@ def reference_probe(lab, reference, hermes):
     run("keys", "add", "--chain", B_ID, "--key-name", "lab", "--mnemonic-file", home / "mnemonic.txt", "--hd-path", "m/44'/118'/0'/0/0")
     health = health_check(run)
     lab.report["reference_probe"] = {"chain": B_ID, "height": lab.height(rpc_port, B_ID), "funded_address": marker["address"], "hermes_health": health}
+    print("independent reference and Hermes health: PASS", flush=True)
     return {"rpc": rpc_port, "grpc": grpc, "home": home, "address": marker["address"], "process": child, "start": [reference, "start", "--home", home, "--log_level", "error"]}, config
 
 
@@ -256,7 +266,7 @@ def prepare_owned(lab, mcnd):
     common = ["--home", home, "--chain-id", A_ID, "--evm.evm-chain-id", EVM_ID]
     command([mcnd, "init", "disposable-owned", *common], lab.env, timeout=60)
     # No stdout/stderr from a key-generating command is ever logged or persisted.
-    key = json.loads(command([mcnd, "keys", "add", "lab", "--algo", "secp256k1", "--coin-type", 60, "--keyring-backend", "test", "--output", "json", *common], lab.env, secret=True))
+    key = json.loads(command([mcnd, "keys", "add", "lab", "--key-type", "secp256k1", "--coin-type", 60, "--keyring-backend", "test", "--output", "json", *common], lab.env, secret=True))
     require(key.get("mnemonic") and key.get("address", "").startswith("d01"), "native Cosmos secp256k1 fixture key required")
     public = str(key.get("pubkey", ""))
     require("secp256k1" in public and "ethsecp256k1" not in public, "Hermes lab requires native SDK secp256k1")
@@ -267,6 +277,7 @@ def prepare_owned(lab, mcnd):
     command([mcnd, "genesis", "add-genesis-account", address, str(10**24) + "del", *common], lab.env)
     command([mcnd, "genesis", "gentx", "lab", str(10**18) + "del", "--keyring-backend", "test", *common], lab.env)
     command([mcnd, "genesis", "collect-gentxs", *common], lab.env)
+    command([mcnd, "genesis", "validate", *common], lab.env)
     ports = {name: lab.port() for name in ("rpc", "p2p", "grpc")}
     patch_toml(home / "config/config.toml", {
         ("rpc", "laddr"): f"tcp://127.0.0.1:{ports['rpc']}",
@@ -280,18 +291,26 @@ def prepare_owned(lab, mcnd):
         ("api", "enable"): False, ("grpc-web", "enable"): False,
         ("json-rpc", "enable"): False,
     })
-    start = [mcnd, "start", *common, "--log_level", "error"]
+    start = [mcnd, "start", *common, "--address", f"tcp://127.0.0.1:{lab.port()}", "--log_level", "error"]
     child = lab.spawn(start, "owned")
     lab.wait(lambda: lab.height(ports["rpc"], A_ID) >= 3, "owned node must advance", 60)
     require(amount(ports["rpc"], address, "del") > 10**23, "owned account funding unexpectedly missing")
     require(escrow(ports["rpc"], "del") == 0, "new owned escrow must be zero")
+    lab.report["owned_probe"] = {"chain": A_ID, "height": lab.height(ports["rpc"], A_ID), "funded_address": address}
+    print("owned production daemon lifecycle: PASS", flush=True)
     return {**ports, "home": home, "address": address, "mnemonic": mnemonic_file, "process": child, "start": start}
 
 
 def receipts(chain):
-    result = rpc(chain["rpc"], "tx_search", query="tx.height > 0", prove=False, page=1, per_page=100, order_by="asc")
+    result = rpc(chain["rpc"], "tx_search", query="tx.height > 0", prove=False, page="1", per_page="100", order_by="asc")
     require(int(result["total_count"]) <= 100, "bounded lab receipt limit exceeded")
     return {tx["hash"]: tx for tx in (result.get("txs") or [])}
+
+
+def new_events(chain, before, kind):
+    return [{item["key"]: item["value"] for item in event["attributes"]}
+            for tx_hash, tx in receipts(chain).items() if tx_hash not in before
+            for event in tx["tx_result"].get("events", []) if event["type"] == kind]
 
 
 def fees(chain, before, denom):
@@ -331,6 +350,7 @@ def phase_after(lab, label, a, b, before, native_a_delta=0):
     require(amount(a["rpc"], a["address"], "del") == before["a"] + native_a_delta - a_fee, "exact owned balance/principal/fee mismatch: " + label)
     require(amount(b["rpc"], b["address"], "stake") == before["b"] - b_fee, "exact counterparty native fee mismatch: " + label)
     lab.report.setdefault("phases", {})[label] = {"status": "PASS", "owned_fees": a_records, "counterparty_fees": b_records}
+    print(label + ": PASS", flush=True)
 
 
 def full_suite(lab, mcnd, reference, hermes):
@@ -375,35 +395,54 @@ def full_suite(lab, mcnd, reference, hermes):
     before = phase_before(a, b)
     transfer(A_ID, B_ID, a_channel, "del", value, b["address"])
     lab.wait(lambda: len(commitments(a["rpc"], a_channel)) == 1, "pending packet before restart")
+    pending = commitments(a["rpc"], a_channel)
     heights = [lab.height(a["rpc"], A_ID), lab.height(b["rpc"], B_ID)]
     lab.stop(a["process"]); lab.stop(b["process"])
     a["process"] = lab.spawn(a["start"], "owned-restarted")
     b["process"] = lab.spawn(b["start"], "reference-restarted")
     lab.wait(lambda: lab.height(a["rpc"], A_ID) > heights[0] and lab.height(b["rpc"], B_ID) > heights[1], "both actual processes must reopen and advance", 60)
-    require(len(commitments(a["rpc"], a_channel)) == 1 and escrow(a["rpc"], "del") == value, "in-flight commitment/escrow did not survive restart")
+    require(commitments(a["rpc"], a_channel) == pending and escrow(a["rpc"], "del") == value, "exact in-flight sequence/commitment hash/escrow did not survive restart")
     clear()
     require(amount(b["rpc"], b["address"], voucher) == value, "pending packet failed after disk reopen")
     phase_after(lab, "pending_packet_restart", a, b, before, -value)
+    lab.report["phases"]["pending_packet_restart"]["preserved_packets"] = pending
 
     before = phase_before(a, b)
     transfer(A_ID, B_ID, a_channel, "del", value, "not-a-valid-bech32-address")
     lab.wait(lambda: len(commitments(a["rpc"], a_channel)) == 1, "error-ACK source commitment")
+    error_sequence = commitments(a["rpc"], a_channel)[0]["sequence"]
     clear()
     require(amount(b["rpc"], b["address"], voucher) == value and escrow(a["rpc"], "del") == value, "error acknowledgement must refund only its packet")
     phase_after(lab, "error_ack_refund", a, b, before)
+    acks = [event for event in new_events(b, before["b_tx"], "write_acknowledgement") if event.get("packet_sequence") == str(error_sequence)]
+    require(len(acks) == 1, "actual error acknowledgement event required")
+    ack = json.loads(bytes.fromhex(acks[0]["packet_ack_hex"]))
+    require(ack.get("error") and "result" not in ack, "expected an actual error ACK, not a success or inferred timeout")
+    lab.report["phases"]["error_ack_refund"]["error_ack_sequence"] = error_sequence
 
     before = phase_before(a, b)
     transfer(A_ID, B_ID, a_channel, "del", value, b["address"], seconds=3)
     lab.wait(lambda: len(commitments(a["rpc"], a_channel)) == 1, "timeout source commitment")
-    deadline = time.monotonic() + 7
-    lab.wait(lambda: time.monotonic() >= deadline and lab.height(b["rpc"], B_ID) > 3, "allow local packet timeout", 12)
+    timeout_sequence = commitments(a["rpc"], a_channel)[0]["sequence"]
+    sends = [event for event in new_events(a, before["a_tx"], "send_packet") if event.get("packet_sequence") == str(timeout_sequence)]
+    require(len(sends) == 1, "actual outgoing packet deadline required")
+    timeout_timestamp = int(sends[0]["packet_timeout_timestamp"])
+    require(timeout_timestamp > 0, "timestamp timeout must be enabled")
+    # Hermes may add safety margins. Wait on the actual committed counterparty
+    # timestamp and emitted packet deadline, never a guessed wall-clock sleep.
+    lab.wait(lambda: lab.committed_time_ns(b["rpc"]) > timeout_timestamp + 10**9, "actual counterparty timestamp must exceed packet deadline", 120)
     clear()
     require(amount(b["rpc"], b["address"], voucher) == value and escrow(a["rpc"], "del") == value, "timeout must refund only its packet")
     phase_after(lab, "timeout_refund", a, b, before)
+    timeouts = [event for event in new_events(a, before["a_tx"], "timeout_packet") if event.get("packet_sequence") == str(timeout_sequence)]
+    require(len(timeouts) == 1, "actual timeout receipt event required")
+    lab.report["phases"]["timeout_refund"]["timeout_sequence"] = timeout_sequence
+    lab.report["phases"]["timeout_refund"]["packet_timeout_timestamp"] = timeout_timestamp
     require(len(lab.report.get("phases", {})) == 6, "all real two-process phases are mandatory")
     lab.report["status"] = "TWO_PROCESS_HERMES_PASS"
     lab.report["release_gate"] = True
     lab.report["scope"] = "Actual owned/reference IBC interoperability only; native Decimal economic parity is a separate gate."
+    lab.report["upgrade_scope"] = "Same-binary disk reopen only; no module migration, client upgrade or SDK major upgrade is verified."
 
 
 def main():
