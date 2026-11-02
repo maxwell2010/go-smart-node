@@ -6,4 +6,6 @@ The subset has no default application constructor, concrete SimApp import, mock 
 
 The tagged own-app test exercises actual ICS20 escrow, vouchers, return, error acknowledgement, timeout refund, duplicate-timeout handling and rejection of an altered packet with a genuine original commitment proof. This internal harness does not replace the production-binary, independent SDK counterparty and external-relayer gate.
 
-SDK 0.55/IBC11 work is preserved separately. The current SDK0.53/Comet0.38/IBC10 adaptation requires its coherent candidate graph and fresh execution; prior SDK54/55 passes are not evidence for this branch.
+SDK 0.55/IBC11 work is preserved separately. The current SDK0.53/Comet0.38/IBC10 validation is recorded below; prior SDK54/55 passes are not counted as evidence for this branch.
+
+The maintained53 tagged own-app scenario passed with a genuine expired-client rejection case: an actual committed packet proof first verifies, block time advances beyond its Tendermint client's trusting period, and signed reception then fails with the exact client-not-active code. No receipt or voucher is created; source escrow/commitment and latest client height remain intact. No client status flag is manually set. This unit clock progression and same-binary restart work are not SDK major-upgrade evidence.

@@ -30,4 +30,10 @@ Hermes `health-check` can exit zero and print a final `status=success` even whil
 
 The [official latest release](https://github.com/informalsystems/hermes/releases/tag/v1.13.3) remains v1.13.3. Its [immutable master compatibility source](https://github.com/informalsystems/hermes/blob/5e78a424904ff669a787a6c0eda53353c8096c11/crates/relayer/src/chain/cosmos/compatibility.rs) also restricts ibc-go to `>=6.3.1, <11`. Both [cosmos/relayer](https://github.com/cosmos/relayer) and [cosmos/ibc-relayer](https://github.com/cosmos/ibc-relayer) are archived. These observations do not establish an operational maintained SDK55/IBC11 relayer path.
 
-The next compatible-family trial is a separately preserved SDK 0.53 / Comet 0.38 / IBC10 reference/application branch. Version checks will not be widened to conceal an unsupported family. No current two-process handshake, transfer, refund or restart result is claimed.
+The compatible-family trial uses a separately preserved SDK 0.53 / Comet 0.38 / IBC10 reference/application branch, with component evidence below. Version checks will not be widened to conceal an unsupported family. No current two-process handshake, transfer, refund or restart result is claimed.
+
+## Maintained-family execution evidence
+
+On November 2, 2026, the SDK0.53.8 / Comet0.38.26 / IBC10.7 candidate passed the genuine signed native fee test (0.16 seconds) and a separate production-tag node process reached height3 (60.05 seconds including the cold binary link). Source `c911426c280024f7462e6a5946d5cf258717a4e2`, reference binary SHA256 `29f9d9188439750a7eae2e3e8574dc32ad2c4e4693cf990af7b037d28f70aa72`. The real official Hermes health check then passed without WARN/ERROR records, after configuring `max_block_time=30s` to match the chain's actual IBC connection parameter. Real bank and zero-escrow queries and ephemeral relayer-key import also passed. Full module verification passed after these component checks.
+
+This establishes an actual compatible independent counterparty/operator component, not a completed owned-daemon interoperability run. No client/channel handshake, packet transfer, refund or disk-reopen result is claimed by this probe. The planned restart phase reopens both databases using the same binaries. It is not proof of an SDK major-version upgrade, module migration or IBC client-upgrade workflow.

@@ -197,7 +197,7 @@ gas_multiplier = 1.3
 max_msg_num = 10
 max_tx_size = 1048576
 clock_drift = '5s'
-max_block_time = '5s'
+max_block_time = '30s'
 trusting_period = '14days'
 trust_threshold = '1/3'
 address_type = {{ derivation = 'cosmos' }}
@@ -350,7 +350,7 @@ def full_suite(lab, mcnd, reference, hermes):
     voucher = "ibc/" + hashlib.sha256(("transfer/" + b_channel + "/del").encode()).hexdigest().upper()
     value = 10**18
 
-    def transfer(source, dest, channel, denom, count, receiver, seconds=60):
+    def transfer(source, dest, channel, denom, count, receiver, seconds=300):
         run("tx", "ft-transfer", "--src-chain", source, "--dst-chain", dest, "--src-port", "transfer", "--src-channel", channel, "--denom", denom, "--amount", count, "--receiver", receiver, "--timeout-seconds", seconds)
 
     def clear():
@@ -432,7 +432,7 @@ def main():
             report["binaries"]["mcnd"] = {"sha256": mcnd_hash, "source_commit": args.mcnd_source_commit}
         with tempfile.TemporaryDirectory(prefix="mintcandy-hermes-lab-") as temp:
             root = Path(temp)
-            env = {**os.environ, "HOME": str(root / "tool-home"), "RUST_BACKTRACE": "0"}
+            env = {"PATH": os.environ.get("PATH", "/usr/bin:/bin"), "LANG": "C.UTF-8", "TZ": "UTC", "HOME": str(root / "tool-home"), "RUST_BACKTRACE": "0", "GOMAXPROCS": "1", "NO_PROXY": "127.0.0.1,localhost"}
             Path(env["HOME"]).mkdir(mode=0o700)
             lab = Lab(root, env, report)
             try:

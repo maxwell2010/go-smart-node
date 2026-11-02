@@ -176,3 +176,9 @@ not solve production bootstrap.
 Until these gates pass, the current scaffold, read-only projection design and
 successful generic SDK tests must not be described as complete native Decimal
 validator integration.
+
+## Maintained SDK53 / EVM0.6 family trial
+
+The separate maintained-family trial uses SDK0.53.8, Comet0.38.26, IBC10.7.0 and Cosmos EVM0.6.3. EVM0.6.3 retains the same four narrow staking methods described above, and ERC20 still requires only `BondDenom`. `CallEVM` retains its StateDB, commit, callFromPrecompile and gas-cap arguments. IBC10 core has no staking keeper dependency, but its constructor still requires a canonical legacy params subspace.
+
+SDK0.53 governance instead requests `TotalBondedTokens(context.Context) (math.Int, error)`, alongside the address codec and bonded-validator/delegation iterators. This differs from the later SDK `TotalValidatorPower` interface. It does not make the legacy zero-return alias or commented-out iteration callbacks acceptable. A weighted compatibility projection is not evidence of physical bonded DEL supply. Native multi-asset/NFT valuation and governance semantics must be specified and verified before exposing the stock governance tally against such a projection. Until then, no automatic generic-governance parity is claimed.
