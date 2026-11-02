@@ -4,6 +4,7 @@ import (
 	"os"
 	"testing"
 
+	sdkversion "github.com/cosmos/cosmos-sdk/version"
 	evmtypes "github.com/cosmos/evm/x/vm/types"
 	ownedapp "github.com/maxwell2010/go-smart-node/network/app"
 	"github.com/spf13/cobra"
@@ -47,4 +48,11 @@ func TestInitUsesOwnedGenesisWithoutKeeper(t *testing.T) {
 	require.Equal(t, ownedapp.DefaultGenesis(encoding.Codec), basics.DefaultGenesis(encoding.Codec))
 	require.NoError(t, basics.ValidateGenesis(encoding.Codec, encoding.TxConfig, basics.DefaultGenesis(encoding.Codec)))
 	require.Nil(t, evmtypes.GetChainConfig())
+}
+
+func TestDaemonUsesItsOwnApplicationIdentity(t *testing.T) {
+	require.Equal(t, "mcnd", sdkversion.AppName)
+	require.Equal(t, "MintCandy", sdkversion.Name)
+	require.Equal(t, buildVersion, sdkversion.Version)
+	require.Equal(t, buildCommit, sdkversion.Commit)
 }
