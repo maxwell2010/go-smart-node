@@ -39,18 +39,21 @@ import (
 // receiptCorruptionHooks injects a decode fault into a genuine contract event.
 // It never replaces deployed bytecode or skips the production hook chain.
 type receiptCorruptionHooks struct {
-	inner     evmtypes.EvmHooks
-	target    common.Address
-	armed     bool
-	injected  bool
-	lastError error
+	inner         evmtypes.EvmHooks
+	target        common.Address
+	topic         common.Hash
+	armed         bool
+	injected      bool
+	injectedTopic common.Hash
+	lastError     error
 }
 
 func (h *receiptCorruptionHooks) PostTxProcessing(ctx sdk.Context, msg core.Message, receipt *ethtypes.Receipt) error {
 	if h.armed {
 		for _, log := range receipt.Logs {
-			if log.Address == h.target && len(log.Topics) > 0 && len(log.Data) > 0 {
+			if log.Address == h.target && len(log.Topics) > 0 && log.Topics[0] == h.topic && len(log.Data) > 0 {
 				log.Data = nil
+				h.injectedTopic = log.Topics[0]
 				h.injected = true
 				break
 			}
@@ -164,24 +167,24 @@ func TestMainnetSystemContractFaultRehearsal(t *testing.T) {
 	// all callers retain the same field pointer, stores and production dependencies.
 	dsc.EvmKeeper = *evmkeeper.NewKeeper(dsc.AppCodec(), dsc.GetKey(evmtypes.StoreKey), dsc.GetTKey(evmtypes.TransientKey), authtypes.NewModuleAddress(govtypes.ModuleName), dsc.AccountKeeper, dsc.BankKeeper, &dsc.ValidatorKeeper, dsc.FeeKeeper, nil, evmgeth.NewEVM, "", dsc.GetSubspace(evmtypes.ModuleName))
 	dsc.EvmKeeper.WithChainID(ctx)
-	hooks := &receiptCorruptionHooks{inner: evmkeeper.NewMultiEvmHooks(dsc.CoinKeeper.Hooks(), dsc.NFTKeeper.Hooks(), dsc.ValidatorKeeper.Hooks()), target: target}
+	hooks := &receiptCorruptionHooks{inner: evmkeeper.NewMultiEvmHooks(dsc.CoinKeeper.Hooks(), dsc.NFTKeeper.Hooks(), dsc.ValidatorKeeper.Hooks()), target: target, topic: legacyABI.Events["StakeUpdated"].ID}
 	dsc.EvmKeeper.SetHooks(hooks)
-	deliver := func(to common.Address, amount *big.Int, data []byte) *evmtypes.MsgEthereumTxResponse {
+	deliver := func(to common.Address, amount *big.Int, data []byte) (*evmtypes.MsgEthereumTxResponse, *big.Int) {
 		return rehearsalDeliver(t, dsc, context(), key, to, amount, data)
 	}
 	receiver := common.HexToAddress("0x1234567890123456789012345678901234567890")
 	transferBeforeSender := dsc.EvmKeeper.GetBalance(context(), from)
 	transferBeforeReceiver := dsc.EvmKeeper.GetBalance(context(), receiver)
-	transfer := deliver(receiver, big.NewInt(100), nil)
+	transfer, transferFee := deliver(receiver, big.NewInt(100), nil)
 	require.Empty(t, transfer.VmError, "real snapshot registry must permit ordinary native EVM transfer")
 	require.Equal(t, big.NewInt(100), new(big.Int).Sub(dsc.EvmKeeper.GetBalance(context(), receiver), transferBeforeReceiver))
 	transferDebit := new(big.Int).Sub(transferBeforeSender, dsc.EvmKeeper.GetBalance(context(), from))
-	require.True(t, transferDebit.Cmp(big.NewInt(100)) > 0, "actual native commission must be debited in addition to transferred value")
+	require.Equal(t, new(big.Int).Add(transferFee, big.NewInt(100)), transferDebit, "actual debit must equal receipt charged gas times signed gas price plus transferred value")
 	t.Log("actual snapshot native EVM transfer passed signature, outer ante, fee deduction and production hooks")
 	payload, err := legacyABI.Pack("delegateDEL", validator)
 	require.NoError(t, err)
 	amount := big.NewInt(100_000_000_000_000_000)
-	baseline := deliver(target, amount, payload)
+	baseline, _ := deliver(target, amount, payload)
 	if !dsc.ValidatorKeeper.LegacyDelegationEventsEnabled(context()) {
 		require.Equal(t, evmtypes.ErrPostTxProcessing.Error(), baseline.VmError)
 		require.Error(t, hooks.lastError)
@@ -222,8 +225,9 @@ func TestMainnetSystemContractFaultRehearsal(t *testing.T) {
 	beforeAccount := dsc.EvmKeeper.GetBalance(context(), from)
 	beforeContract := dsc.EvmKeeper.GetBalance(context(), target)
 	hooks.armed = true
-	failed := deliver(target, amount, payload)
+	failed, failedFee := deliver(target, amount, payload)
 	require.True(t, hooks.injected, "fault must corrupt a real emitted event, not a fabricated deployment")
+	require.Equal(t, legacyABI.Events["StakeUpdated"].ID, hooks.injectedTopic)
 	require.Error(t, hooks.lastError)
 	require.Equal(t, evmtypes.ErrPostTxProcessing.Error(), failed.VmError)
 	require.Empty(t, failed.Logs)
@@ -233,12 +237,12 @@ func TestMainnetSystemContractFaultRehearsal(t *testing.T) {
 	require.Equal(t, beforeNative, afterNative, "native delegation state must also roll back")
 	require.Equal(t, beforeContract, dsc.EvmKeeper.GetBalance(context(), target), "contract value transfer must roll back")
 	afterAccount := dsc.EvmKeeper.GetBalance(context(), from)
-	require.Positive(t, new(big.Int).Sub(beforeAccount, afterAccount).Sign(), "failed transaction must still pay actual execution fees")
+	require.Equal(t, failedFee, new(big.Int).Sub(beforeAccount, afterAccount), "failed transaction debit must equal exact receipt gas fee with no extra stake-value loss")
 	t.Logf("snapshot height=%d actual delegation=%s injected hook error=%v fee debit=%s", block.Height-1, target, hooks.lastError, new(big.Int).Sub(beforeAccount, afterAccount))
 	// Deliberately do not Commit: every mutation exists only in this disposable copy.
 }
 
-func rehearsalDeliver(t *testing.T, dsc *DSC, ctx sdk.Context, key *ecdsa.PrivateKey, to common.Address, amount *big.Int, data []byte) *evmtypes.MsgEthereumTxResponse {
+func rehearsalDeliver(t *testing.T, dsc *DSC, ctx sdk.Context, key *ecdsa.PrivateKey, to common.Address, amount *big.Int, data []byte) (*evmtypes.MsgEthereumTxResponse, *big.Int) {
 	t.Helper()
 	from := crypto.PubkeyToAddress(key.PublicKey)
 	gasPrice := dsc.FeeKeeper.GetParams(ctx).MinGasPrice.Ceil().TruncateInt().BigInt()
@@ -256,5 +260,10 @@ func rehearsalDeliver(t *testing.T, dsc *DSC, ctx sdk.Context, key *ecdsa.Privat
 	require.Len(t, result.MsgResponses, 1)
 	response := &evmtypes.MsgEthereumTxResponse{}
 	require.NoError(t, response.Unmarshal(result.MsgResponses[0].Value))
-	return response
+	// For this legacy EVM transaction, ante deducts gasLimit*gasPrice and
+	// RefundGas returns (gasLimit-response.GasUsed)*gasPrice. Decimal's native
+	// message commission schedule is not an additional charge on this path.
+	chargedFee := new(big.Int).Mul(new(big.Int).SetUint64(response.GasUsed), gasPrice)
+	require.Positive(t, chargedFee.Sign())
+	return response, chargedFee
 }

@@ -52,7 +52,14 @@ delegation contract successfully and decode its genuine emitted event. It then
 corrupts that emitted receipt's event data through a test-only hook wrapper,
 while retaining the actual multi-module production hooks and deployed code.
 Assertions cover EVM stake storage, native delegation state and transferred
-value rollback, with real execution fees still debited. This is controlled
+value rollback. Fault injection targets the exact legacy `StakeUpdated` topic
+and asserts that the corrupted topic matches. The failed transaction's sender
+debit must equal exactly the signed legacy gas price multiplied by the EVM
+response's charged `GasUsed`, with no extra stake-value loss. The native transfer
+baseline likewise requires exact receiver credit and sender debit equal to
+value plus this gas fee. This legacy EVM path deducts gas-limit fees and refunds
+unused gas; the separate native-message commission schedule is not an additional
+charge. This is controlled
 receipt fault injection, not a claim that production contracts naturally emit
 malformed events. Auto-unbond fault rehearsal on migrated real contracts is
 still outstanding.
