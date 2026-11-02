@@ -153,7 +153,7 @@ func run() error {
 			if signature.BlockIDFlag != tmtypes.BlockIDFlagAbsent && !bytes.Equal(signature.ValidatorAddress, val.Address) {
 				return fmt.Errorf("validator ordering mismatch")
 			}
-			votes[i] = abci.VoteInfo{Validator: abci.Validator{Address: val.Address, Power: val.VotingPower}, SignedLastBlock: signature.BlockIDFlag == tmtypes.BlockIDFlagCommit}
+			votes[i] = abci.VoteInfo{Validator: abci.Validator{Address: val.Address, Power: val.VotingPower}, SignedLastBlock: signedLastBlock(signature)}
 		}
 		req := abci.RequestBeginBlock{Hash: b.Hash(), Header: *b.Header.ToProto(), LastCommitInfo: abci.LastCommitInfo{Round: b.LastCommit.Round, Votes: votes}}
 		for _, ev := range b.Evidence.Evidence {
@@ -200,3 +200,6 @@ func run() error {
 	fmt.Println(string(payload))
 	return nil
 }
+
+// CometBFT counts both commit and nil votes as signed; only absent is unsigned.
+func signedLastBlock(signature tmtypes.CommitSig) bool { return !signature.Absent() }
