@@ -7,10 +7,13 @@ import (
 	dsctest "bitbucket.org/decimalteam/go-smart-node/testutil/dsc"
 	"encoding/json"
 	sdk "github.com/cosmos/cosmos-sdk/types"
+	"github.com/cosmos/cosmos-sdk/types/module"
 	authtypes "github.com/cosmos/cosmos-sdk/x/auth/types"
 	banktypes "github.com/cosmos/cosmos-sdk/x/bank/types"
+	upgradetypes "github.com/cosmos/cosmos-sdk/x/upgrade/types"
 	transfer "github.com/cosmos/ibc-go/v6/modules/apps/transfer/types"
 	clienttypes "github.com/cosmos/ibc-go/v6/modules/core/02-client/types"
+	host "github.com/cosmos/ibc-go/v6/modules/core/24-host"
 	ibctesting "github.com/cosmos/ibc-go/v6/testing"
 	ibcmock "github.com/cosmos/ibc-go/v6/testing/mock"
 	ibctestingtypes "github.com/cosmos/ibc-go/v6/testing/types"
@@ -107,6 +110,32 @@ func TestExperimentalICS20TwoDSCChains(t *testing.T) {
 	a.App = dscIBCApp{DSC: reopened, home: old.home, db: reopenedDB}
 	reopened.BeginBlock(abci.RequestBeginBlock{Header: a.CurrentHeader})
 	bankA = reopened.BankKeeper
+
+	// Apply the actual upgrade keeper / module migration path with a packet pending.
+	const upgradeName = "isolated-ics20-module-migration"
+	upgradeHeight := a.CurrentHeader.Height + 1
+	reopened.UpgradeKeeper.SetUpgradeHandler(upgradeName, func(ctx sdk.Context, plan upgradetypes.Plan, versions module.VersionMap) (module.VersionMap, error) {
+		return reopened.mm.RunMigrations(ctx, reopened.configurator, versions)
+	})
+	commitment := reopened.IBCKeeper.ChannelKeeper.GetPacketCommitment(a.GetContext(), packet.SourcePort, packet.SourceChannel, packet.Sequence)
+	require.NotEmpty(t, commitment)
+	require.NoError(t, reopened.UpgradeKeeper.ScheduleUpgrade(a.GetContext(), upgradetypes.Plan{Name: upgradeName, Height: upgradeHeight}))
+	c.CommitBlock(a)
+	c.CommitBlock(a)
+	require.Equal(t, upgradeHeight, reopened.UpgradeKeeper.GetDoneHeight(a.GetContext(), upgradeName))
+	require.Equal(t, commitment, reopened.IBCKeeper.ChannelKeeper.GetPacketCommitment(a.GetContext(), packet.SourcePort, packet.SourceChannel, packet.Sequence))
+
+	// Verify a genuine membership proof cannot authorize changed packet bytes.
+	require.NoError(t, p.EndpointB.UpdateClient())
+	proof, proofHeight := a.QueryProof(host.PacketCommitmentKey(packet.SourcePort, packet.SourceChannel, packet.Sequence))
+	altered := packet
+	altered.Data = append(append([]byte(nil), packet.Data...), byte(' '))
+	cached, _ := b.GetContext().CacheContext()
+	cap := b.GetChannelCapability(transfer.PortID, p.EndpointB.ChannelID)
+	err = b.App.GetIBCKeeper().ChannelKeeper.RecvPacket(cached, cap, altered, proof, proofHeight)
+	require.ErrorContains(t, err, "failed packet commitment verification")
+	unchangedVoucher := transfer.GetTransferCoin(transfer.PortID, p.EndpointB.ChannelID, coin.Denom, coin.Amount)
+	require.True(t, b.App.(dscIBCApp).BankKeeper.GetBalance(b.GetContext(), b.SenderAccount.GetAddress(), unchangedVoucher.Denom).IsZero())
 	require.NoError(t, p.RelayPacket(packet))
 	voucher := transfer.GetTransferCoin(transfer.PortID, p.EndpointB.ChannelID, coin.Denom, coin.Amount)
 	require.Equal(t, voucher, b.App.(dscIBCApp).BankKeeper.GetBalance(b.GetContext(), b.SenderAccount.GetAddress(), voucher.Denom))
@@ -144,5 +173,10 @@ func TestExperimentalICS20TwoDSCChains(t *testing.T) {
 	require.True(t, bankA.GetBalance(a.GetContext(), escrow, coin.Denom).IsZero())
 	checkNative(a, a.SenderAccount.GetAddress())
 	checkNative(a, escrow)
+	// An expired Tendermint client rejects updates instead of accepting new roots.
+	c.IncrementTimeBy(15 * 24 * time.Hour)
+	cache, _ := b.GetContext().CacheContext()
+	err = b.App.GetIBCKeeper().ClientKeeper.UpdateClient(cache, p.EndpointB.ClientID, a.LastHeader)
+	require.ErrorContains(t, err, "not active")
 
 }
