@@ -39,3 +39,13 @@ path. The test client sets a positive `del` fee before signing; it does not
 replace the ante handler. It checks escrow, voucher supply at the recipient and
 exact native release to a separate return recipient. The production application
 is unchanged by the test-only global configuration reset.
+
+The default production-tag fresh-app test also runs a bounded financial rollback
+regression using the pinned upstream `StakingReverter` fixture. Two successful
+control delegations establish actual native precompile execution. One caught
+subcall and one reverted parent then preserve SDK delegation/validator tokens,
+native bank and EVM balances and suppress reverted financial events/logs. The
+outer counter commits in the caught case, and every transaction pays its exact
+charged gas fee. No load, network access or global test configuration reset is
+used for this regression. It validates canonical temporary SDK staking; the
+future native Decimal validator integration requires the same behavior again.

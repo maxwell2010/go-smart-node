@@ -17,6 +17,7 @@ import (
 	sdk "github.com/cosmos/cosmos-sdk/types"
 	authtypes "github.com/cosmos/cosmos-sdk/x/auth/types"
 	banktypes "github.com/cosmos/cosmos-sdk/x/bank/types"
+	stakingtypes "github.com/cosmos/cosmos-sdk/x/staking/types"
 	ethsecp "github.com/cosmos/evm/crypto/ethsecp256k1"
 	srvflags "github.com/cosmos/evm/server/flags"
 	evmtypes "github.com/cosmos/evm/x/vm/types"
@@ -39,6 +40,42 @@ func testApp(t *testing.T, chainID string, evmID uint64) *App {
 	})
 	t.Cleanup(func() { require.NoError(t, a.Close()) })
 	return a
+}
+
+func fundedTestGenesis(t *testing.T, a *App, vals *cmttypes.ValidatorSet, accounts []authtypes.GenesisAccount, balances ...banktypes.Balance) map[string]json.RawMessage {
+	t.Helper()
+	defaults := a.DefaultGenesis()
+	genesis, err := simtestutil.GenesisStateWithValSet(a.AppCodec(), defaults, vals, accounts, balances...)
+	require.NoError(t, err)
+	defaults = a.DefaultGenesis() // the SDK helper mutates the supplied map
+	// The SDK fixture replaces module defaults with its sample staking denom and
+	// drops bank metadata. Keep the real application configuration in the fixture.
+	var bankDefault, bankFunded banktypes.GenesisState
+	var stakingDefault, stakingFunded stakingtypes.GenesisState
+	a.AppCodec().MustUnmarshalJSON(defaults[banktypes.ModuleName], &bankDefault)
+	a.AppCodec().MustUnmarshalJSON(genesis[banktypes.ModuleName], &bankFunded)
+	a.AppCodec().MustUnmarshalJSON(defaults[stakingtypes.ModuleName], &stakingDefault)
+	a.AppCodec().MustUnmarshalJSON(genesis[stakingtypes.ModuleName], &stakingFunded)
+	stakingFunded.Params = stakingDefault.Params
+	bankFunded.DenomMetadata = bankDefault.DenomMetadata
+	pool := authtypes.NewModuleAddress(stakingtypes.BondedPoolName).String()
+	bankFunded.Supply = sdk.NewCoins()
+	for i, balance := range bankFunded.Balances {
+		if balance.Address == pool {
+			coins := sdk.NewCoins()
+			for _, coin := range balance.Coins {
+				if coin.Denom == sdk.DefaultBondDenom {
+					coin.Denom = stakingDefault.Params.BondDenom
+				}
+				coins = coins.Add(coin)
+			}
+			bankFunded.Balances[i].Coins = coins
+		}
+		bankFunded.Supply = bankFunded.Supply.Add(bankFunded.Balances[i].Coins...)
+	}
+	genesis[banktypes.ModuleName] = a.AppCodec().MustMarshalJSON(&bankFunded)
+	genesis[stakingtypes.ModuleName] = a.AppCodec().MustMarshalJSON(&stakingFunded)
+	return genesis
 }
 
 func assertOwnApplicationConstructorAndGenesis(t *testing.T, a *App) {
@@ -84,15 +121,7 @@ func TestFreshOwnApplicationSignedNativeEVMTransfer(t *testing.T) {
 	pub, err := pv.GetPubKey()
 	require.NoError(t, err)
 	valSet := cmttypes.NewValidatorSet([]*cmttypes.Validator{cmttypes.NewValidator(pub, 1)})
-	genesis, err := simtestutil.GenesisStateWithValSet(a.AppCodec(), a.DefaultGenesis(), valSet, []authtypes.GenesisAccount{account}, banktypes.Balance{Address: account.GetAddress().String(), Coins: sdk.NewCoins(sdk.NewCoin(identity.BaseDenom, math.NewInt(1_000_000).Mul(math.NewInt(1_000_000_000_000_000_000))))})
-	require.NoError(t, err)
-	// SDK's validator fixture replaces bank genesis; retain this chain's actual
-	// denomination metadata rather than importing the sample chain metadata.
-	var originalBank, fundedBank banktypes.GenesisState
-	a.AppCodec().MustUnmarshalJSON(a.DefaultGenesis()[banktypes.ModuleName], &originalBank)
-	a.AppCodec().MustUnmarshalJSON(genesis[banktypes.ModuleName], &fundedBank)
-	fundedBank.DenomMetadata = originalBank.DenomMetadata
-	genesis[banktypes.ModuleName] = a.AppCodec().MustMarshalJSON(&fundedBank)
+	genesis := fundedTestGenesis(t, a, valSet, []authtypes.GenesisAccount{account}, banktypes.Balance{Address: account.GetAddress().String(), Coins: sdk.NewCoins(sdk.NewCoin(identity.BaseDenom, math.NewInt(1_000_000).Mul(math.NewInt(1_000_000_000_000_000_000))))})
 	data, err := json.Marshal(genesis)
 	require.NoError(t, err)
 	now := time.Unix(1900000000, 0).UTC()
@@ -128,4 +157,7 @@ func TestFreshOwnApplicationSignedNativeEVMTransfer(t *testing.T) {
 	expectedFee := new(big.Int).Mul(price, new(big.Int).SetUint64(evmResponse.GasUsed))
 	expectedBalance := math.NewInt(1_000_000).Mul(math.NewInt(1_000_000_000_000_000_000)).Sub(math.NewInt(123)).Sub(math.NewIntFromBigInt(expectedFee))
 	require.Equal(t, expectedBalance, a.BankKeeper.GetBalance(ctx, sdk.AccAddress(from.Bytes()), identity.BaseDenom).Amount, "real sender debit must equal transferred value plus exact charged legacy gas fee")
+	t.Run("bounded_precompile_financial_rollback", func(t *testing.T) {
+		checkBoundedFinancialRollback(t, a, ethKey, valSet, now)
+	})
 }

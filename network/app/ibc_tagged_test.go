@@ -57,13 +57,7 @@ func newOwnIBCChain(t *testing.T, coordinator *ibctesting.Coordinator, evmID uin
 	// independently of the Ethereum signer used by the EVM transaction test.
 	key := secp256k1.GenPrivKey()
 	account := authtypes.NewBaseAccount(key.PubKey().Address().Bytes(), key.PubKey(), 0, 0)
-	genesis, err := simtestutil.GenesisStateWithValSet(a.AppCodec(), a.DefaultGenesis(), vals, []authtypes.GenesisAccount{account}, banktypes.Balance{Address: account.GetAddress().String(), Coins: sdk.NewCoins(sdk.NewCoin(identity.BaseDenom, math.NewInt(1_000_000).Mul(math.NewInt(1_000_000_000_000_000_000))))})
-	require.NoError(t, err)
-	var originalBank, fundedBank banktypes.GenesisState
-	a.AppCodec().MustUnmarshalJSON(a.DefaultGenesis()[banktypes.ModuleName], &originalBank)
-	a.AppCodec().MustUnmarshalJSON(genesis[banktypes.ModuleName], &fundedBank)
-	fundedBank.DenomMetadata = originalBank.DenomMetadata
-	genesis[banktypes.ModuleName] = a.AppCodec().MustMarshalJSON(&fundedBank)
+	genesis := fundedTestGenesis(t, a, vals, []authtypes.GenesisAccount{account}, banktypes.Balance{Address: account.GetAddress().String(), Coins: sdk.NewCoins(sdk.NewCoin(identity.BaseDenom, math.NewInt(1_000_000).Mul(math.NewInt(1_000_000_000_000_000_000))))})
 	data, err := json.Marshal(genesis)
 	require.NoError(t, err)
 	_, err = a.InitChain(&abci.RequestInitChain{ChainId: chainID, Time: coordinator.CurrentTime, AppStateBytes: data, ConsensusParams: simtestutil.DefaultConsensusParams})
