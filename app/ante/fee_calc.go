@@ -1,6 +1,7 @@
 package ante
 
 import (
+	"bitbucket.org/decimalteam/go-smart-node/integrationconfig"
 	sdkmath "cosmossdk.io/math"
 	"github.com/cosmos/cosmos-sdk/codec"
 	sdk "github.com/cosmos/cosmos-sdk/types"
@@ -138,7 +139,12 @@ func CalculateFee(cdc codec.BinaryCodec, msgs []sdk.Msg, txBytesLen int64, delPr
 		// legacy
 		case *legacy.MsgReturnLegacy:
 		default:
-			return sdkmath.ZeroInt(), UnknownTransaction
+			if integrationconfig.Enabled && experimentalIBCMessage(msg) {
+				// Isolated-network provisional schedule, using the existing bank-send fee.
+				msgsFee = msgsFee.Add(helpers.DecToDecWithE18(params.CoinSend))
+			} else {
+				return sdkmath.ZeroInt(), UnknownTransaction
+			}
 		}
 	}
 

@@ -1,6 +1,7 @@
 package ante
 
 import (
+	"bitbucket.org/decimalteam/go-smart-node/integrationconfig"
 	feetypes "bitbucket.org/decimalteam/go-smart-node/x/fee/types"
 	validatortypes "bitbucket.org/decimalteam/go-smart-node/x/validator/types"
 	sdk "github.com/cosmos/cosmos-sdk/types"
@@ -46,6 +47,12 @@ func NewAnteHandler(options HandlerOptions) sdk.AnteHandler {
 
 		switch tx.(type) {
 		case sdk.Tx:
+			if integrationconfig.Enabled && integrationconfig.AllowedChainID(ctx.ChainID()) {
+				if !experimentalNativeMessagesAllowed(tx.GetMsgs()) {
+					return ctx, sdkerrors.ErrUnknownRequest
+				}
+				return newCosmosAnteHandler(options)(ctx, tx, sim)
+			}
 			for _, msg := range tx.GetMsgs() {
 				if _, ok := msg.(*updatetypes.MsgSoftwareUpgrade); ok {
 					anteHandler = newCosmosAnteHandler(options)

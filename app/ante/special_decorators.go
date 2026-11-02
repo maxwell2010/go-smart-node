@@ -1,6 +1,7 @@
 package ante
 
 import (
+	"bitbucket.org/decimalteam/go-smart-node/integrationconfig"
 	coin "bitbucket.org/decimalteam/go-smart-node/x/coin/types"
 	sdk "github.com/cosmos/cosmos-sdk/types"
 	evmtypes "github.com/decimalteam/ethermint/x/evm/types"
@@ -15,7 +16,7 @@ func NewCountMsgDecorator() CountMsgDecorator {
 }
 
 func (cd CountMsgDecorator) AnteHandle(ctx sdk.Context, tx sdk.Tx, simulate bool, next sdk.AnteHandler) (newCtx sdk.Context, err error) {
-	if len(tx.GetMsgs()) > 1 {
+	if len(tx.GetMsgs()) > 1 && !(integrationconfig.Enabled && integrationconfig.AllowedChainID(ctx.ChainID()) && experimentalNativeMessagesAllowed(tx.GetMsgs())) {
 		return ctx, CountOfMsgsMustBeOne
 	}
 	return next(ctx, tx, simulate)
