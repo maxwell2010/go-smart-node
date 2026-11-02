@@ -1,4 +1,4 @@
-// Derived from cosmos/evm/evmd at c3ae9067a7eadcdea55a5192226916deb44c71c4.
+// Derived from cosmos/evm/evmd v0.6.3 at 71c78b5072a248bae5273c34ad2f53d349799ccd.
 // Licensed under Apache-2.0; see LICENSE.
 
 package app
@@ -7,29 +7,28 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+
+	govv1 "github.com/cosmos/cosmos-sdk/x/gov/types/v1"
+	"github.com/maxwell2010/go-smart-node/network/identity"
 	"os"
 	"path/filepath"
-	goruntime "runtime"
 
-	"github.com/ethereum/go-ethereum/common"
-	"github.com/maxwell2010/go-smart-node/network/identity"
 	"github.com/spf13/cast"
 
 	// Force-load the tracer engines to trigger registration due to Go-Ethereum v1.10.15 changes
+	"github.com/ethereum/go-ethereum/common"
 	_ "github.com/ethereum/go-ethereum/eth/tracers/js"
 	_ "github.com/ethereum/go-ethereum/eth/tracers/native"
 
 	abci "github.com/cometbft/cometbft/abci/types"
-	cmtproto "github.com/cometbft/cometbft/proto/tendermint/types"
 
 	dbm "github.com/cosmos/cosmos-db"
 	evmante "github.com/cosmos/evm/ante"
 	antetypes "github.com/cosmos/evm/ante/types"
+	evmconfig "github.com/cosmos/evm/config"
 	evmaddress "github.com/cosmos/evm/encoding/address"
-	evmconfig "github.com/cosmos/evm/evmd/config"
 	evmmempool "github.com/cosmos/evm/mempool"
 	precompiletypes "github.com/cosmos/evm/precompiles/types"
-	cosmosevmserver "github.com/cosmos/evm/server"
 	srvflags "github.com/cosmos/evm/server/flags"
 	"github.com/cosmos/evm/utils"
 	"github.com/cosmos/evm/x/erc20"
@@ -40,31 +39,40 @@ import (
 	feemarketkeeper "github.com/cosmos/evm/x/feemarket/keeper"
 	feemarkettypes "github.com/cosmos/evm/x/feemarket/types"
 	ibccallbackskeeper "github.com/cosmos/evm/x/ibc/callbacks/keeper"
+
 	"github.com/cosmos/evm/x/vm"
 	evmkeeper "github.com/cosmos/evm/x/vm/keeper"
-	vmrunner "github.com/cosmos/evm/x/vm/runner"
 	evmtypes "github.com/cosmos/evm/x/vm/types"
 	"github.com/cosmos/gogoproto/proto"
-	ibccallbacks "github.com/cosmos/ibc-go/v11/modules/apps/callbacks"
-	transfer "github.com/cosmos/ibc-go/v11/modules/apps/transfer"
-	transferkeeper "github.com/cosmos/ibc-go/v11/modules/apps/transfer/keeper"
-	ibctransfertypes "github.com/cosmos/ibc-go/v11/modules/apps/transfer/types"
-	transferv2 "github.com/cosmos/ibc-go/v11/modules/apps/transfer/v2"
-	ibc "github.com/cosmos/ibc-go/v11/modules/core"
-	porttypes "github.com/cosmos/ibc-go/v11/modules/core/05-port/types"
-	ibcapi "github.com/cosmos/ibc-go/v11/modules/core/api"
-	ibcexported "github.com/cosmos/ibc-go/v11/modules/core/exported"
-	ibckeeper "github.com/cosmos/ibc-go/v11/modules/core/keeper"
-	ibctm "github.com/cosmos/ibc-go/v11/modules/light-clients/07-tendermint"
+	ibccallbacks "github.com/cosmos/ibc-go/v10/modules/apps/callbacks"
+	transfer "github.com/cosmos/ibc-go/v10/modules/apps/transfer"
+	transferkeeper "github.com/cosmos/ibc-go/v10/modules/apps/transfer/keeper"
+	ibctransfertypes "github.com/cosmos/ibc-go/v10/modules/apps/transfer/types"
+	transferv2 "github.com/cosmos/ibc-go/v10/modules/apps/transfer/v2"
+	ibc "github.com/cosmos/ibc-go/v10/modules/core"
+	porttypes "github.com/cosmos/ibc-go/v10/modules/core/05-port/types"
+	ibcapi "github.com/cosmos/ibc-go/v10/modules/core/api"
+	ibcexported "github.com/cosmos/ibc-go/v10/modules/core/exported"
+	ibckeeper "github.com/cosmos/ibc-go/v10/modules/core/keeper"
+	ibctm "github.com/cosmos/ibc-go/v10/modules/light-clients/07-tendermint"
 
 	autocliv1 "cosmossdk.io/api/cosmos/autocli/v1"
 	reflectionv1 "cosmossdk.io/api/cosmos/reflection/v1"
 	"cosmossdk.io/client/v2/autocli"
 	"cosmossdk.io/core/appmodule"
-	"cosmossdk.io/log/v2"
+	"cosmossdk.io/log"
+	storetypes "cosmossdk.io/store/types"
+	"cosmossdk.io/x/evidence"
+	evidencekeeper "cosmossdk.io/x/evidence/keeper"
+	evidencetypes "cosmossdk.io/x/evidence/types"
+	"cosmossdk.io/x/feegrant"
+	feegrantkeeper "cosmossdk.io/x/feegrant/keeper"
+	feegrantmodule "cosmossdk.io/x/feegrant/module"
+	"cosmossdk.io/x/upgrade"
+	upgradekeeper "cosmossdk.io/x/upgrade/keeper"
+	upgradetypes "cosmossdk.io/x/upgrade/types"
 
 	"github.com/cosmos/cosmos-sdk/baseapp"
-	"github.com/cosmos/cosmos-sdk/baseapp/txnrunner"
 	"github.com/cosmos/cosmos-sdk/client"
 	"github.com/cosmos/cosmos-sdk/client/flags"
 	"github.com/cosmos/cosmos-sdk/client/grpc/cmtservice"
@@ -77,8 +85,6 @@ import (
 	"github.com/cosmos/cosmos-sdk/server/api"
 	"github.com/cosmos/cosmos-sdk/server/config"
 	servertypes "github.com/cosmos/cosmos-sdk/server/types"
-	storetypes "github.com/cosmos/cosmos-sdk/store/v2/types"
-	testdata_pulsar "github.com/cosmos/cosmos-sdk/testutil/testdata/testpb"
 	sdk "github.com/cosmos/cosmos-sdk/types"
 	sdkmempool "github.com/cosmos/cosmos-sdk/types/mempool"
 	"github.com/cosmos/cosmos-sdk/types/module"
@@ -106,18 +112,11 @@ import (
 	distr "github.com/cosmos/cosmos-sdk/x/distribution"
 	distrkeeper "github.com/cosmos/cosmos-sdk/x/distribution/keeper"
 	distrtypes "github.com/cosmos/cosmos-sdk/x/distribution/types"
-	"github.com/cosmos/cosmos-sdk/x/evidence"
-	evidencekeeper "github.com/cosmos/cosmos-sdk/x/evidence/keeper"
-	evidencetypes "github.com/cosmos/cosmos-sdk/x/evidence/types"
-	"github.com/cosmos/cosmos-sdk/x/feegrant"
-	feegrantkeeper "github.com/cosmos/cosmos-sdk/x/feegrant/keeper"
-	feegrantmodule "github.com/cosmos/cosmos-sdk/x/feegrant/module"
 	"github.com/cosmos/cosmos-sdk/x/genutil"
 	genutiltypes "github.com/cosmos/cosmos-sdk/x/genutil/types"
 	"github.com/cosmos/cosmos-sdk/x/gov"
 	govkeeper "github.com/cosmos/cosmos-sdk/x/gov/keeper"
 	govtypes "github.com/cosmos/cosmos-sdk/x/gov/types"
-	govv1 "github.com/cosmos/cosmos-sdk/x/gov/types/v1"
 	"github.com/cosmos/cosmos-sdk/x/mint"
 	mintkeeper "github.com/cosmos/cosmos-sdk/x/mint/keeper"
 	minttypes "github.com/cosmos/cosmos-sdk/x/mint/types"
@@ -127,9 +126,7 @@ import (
 	"github.com/cosmos/cosmos-sdk/x/staking"
 	stakingkeeper "github.com/cosmos/cosmos-sdk/x/staking/keeper"
 	stakingtypes "github.com/cosmos/cosmos-sdk/x/staking/types"
-	"github.com/cosmos/cosmos-sdk/x/upgrade"
-	upgradekeeper "github.com/cosmos/cosmos-sdk/x/upgrade/keeper"
-	upgradetypes "github.com/cosmos/cosmos-sdk/x/upgrade/types"
+	cosmosevmserver "github.com/cosmos/evm/server"
 )
 
 func init() {
@@ -164,19 +161,21 @@ var (
 // App extends an ABCI application, but with most of its parameters exported.
 type App struct {
 	*baseapp.BaseApp
-	chainID    string
-	evmChainID uint64
 
+	chainID           string
+	evmChainID        uint64
 	legacyAmino       *codec.LegacyAmino
 	appCodec          codec.Codec
 	interfaceRegistry types.InterfaceRegistry
 	txConfig          client.TxConfig
+	clientCtx         client.Context
 
 	pendingTxListeners []evmante.PendingTxListener
 
 	// keys to access the substores
-	keys  map[string]*storetypes.KVStoreKey
-	oKeys map[string]*storetypes.ObjectStoreKey
+	keys    map[string]*storetypes.KVStoreKey
+	tkeys   map[string]*storetypes.TransientStoreKey
+	memKeys map[string]*storetypes.MemoryStoreKey
 
 	// keepers
 	AccountKeeper         authkeeper.AccountKeeper
@@ -194,14 +193,14 @@ type App struct {
 
 	// IBC keepers
 	IBCKeeper      *ibckeeper.Keeper // IBC Keeper must be a pointer in the app, so we can SetRouter on it correctly
-	TransferKeeper *transferkeeper.Keeper
+	TransferKeeper transferkeeper.Keeper
 	CallbackKeeper ibccallbackskeeper.ContractKeeper
 
 	// Cosmos EVM keepers
 	FeeMarketKeeper feemarketkeeper.Keeper
 	EVMKeeper       *evmkeeper.Keeper
 	Erc20Keeper     erc20keeper.Keeper
-	EVMMempool      sdkmempool.ExtMempool
+	EVMMempool      *evmmempool.ExperimentalEVMMempool
 
 	// the module manager
 	ModuleManager      *module.Manager
@@ -227,27 +226,20 @@ func NewApp(
 	if err := identity.ValidateChainIDs(chainID, evmChainID); err != nil {
 		panic(err)
 	}
+	baseAppOptions = append(baseAppOptions, baseapp.SetChainID(chainID))
 	encodingConfig := MakeEncodingConfig(evmChainID)
 
 	appCodec := encodingConfig.Codec
 	legacyAmino := encodingConfig.Amino
 	interfaceRegistry := encodingConfig.InterfaceRegistry
 	txConfig := encodingConfig.TxConfig
-	txDecoder := encodingConfig.TxConfig.TxDecoder()
-
-	// enable optimistic execution
-	baseAppOptions = append(
-		baseAppOptions,
-		baseapp.SetOptimisticExecution(),
-		baseapp.SetChainID(chainID),
-	)
 
 	bApp := baseapp.NewBaseApp(
 		appName,
 		logger,
 		db,
 		// use transaction decoder to support the sdk.Tx interface instead of sdk.StdTx
-		txDecoder,
+		encodingConfig.TxConfig.TxDecoder(),
 		baseAppOptions...,
 	)
 	bApp.SetVersion(version.Version)
@@ -264,18 +256,8 @@ func NewApp(
 		// Cosmos EVM store keys
 		evmtypes.StoreKey, feemarkettypes.StoreKey, erc20types.StoreKey,
 	)
-	oKeys := storetypes.NewObjectStoreKeys(banktypes.ObjectStoreKey, evmtypes.ObjectKey)
 
-	var nonTransientKeys []storetypes.StoreKey
-	for _, k := range keys {
-		nonTransientKeys = append(nonTransientKeys, k)
-	}
-	for _, k := range oKeys {
-		nonTransientKeys = append(nonTransientKeys, k)
-	}
-
-	// disable block gas meter
-	bApp.SetDisableBlockGasMeter(true)
+	tkeys := storetypes.NewTransientStoreKeys(evmtypes.TransientKey, feemarkettypes.TransientKey)
 
 	// load state streaming if enabled
 	if err := bApp.RegisterStreamingServices(appOpts, keys); err != nil {
@@ -289,15 +271,14 @@ func NewApp(
 	}
 
 	app := &App{
-		BaseApp:           bApp,
-		chainID:           chainID,
-		evmChainID:        evmChainID,
+		BaseApp: bApp,
+		chainID: chainID, evmChainID: evmChainID,
 		legacyAmino:       legacyAmino,
 		appCodec:          appCodec,
 		txConfig:          txConfig,
 		interfaceRegistry: interfaceRegistry,
 		keys:              keys,
-		oKeys:             oKeys,
+		tkeys:             tkeys,
 	}
 
 	// removed x/params: no ParamsKeeper initialization
@@ -331,7 +312,6 @@ func NewApp(
 		authAddr,
 		logger,
 	)
-	app.BankKeeper = app.BankKeeper.WithObjStoreKey(oKeys[banktypes.ObjectStoreKey])
 
 	// optional: enable sign mode textual by overwriting the default tx config (after setting the bank keeper)
 	enabledSignModes := append(authtx.DefaultSignModes, signingtypes.SignMode_SIGN_MODE_TEXTUAL) //nolint:gocritic
@@ -421,6 +401,7 @@ func NewApp(
 	app.IBCKeeper = ibckeeper.NewKeeper(
 		appCodec,
 		runtime.NewKVStoreService(keys[ibcexported.StoreKey]),
+		nil,
 		app.UpgradeKeeper,
 		authAddr,
 	)
@@ -431,15 +412,8 @@ func NewApp(
 		govConfig.MaxMetadataLen = 10000
 	*/
 	govKeeper := govkeeper.NewKeeper(
-		appCodec,
-		runtime.NewKVStoreService(keys[govtypes.StoreKey]),
-		app.AccountKeeper,
-		app.BankKeeper,
-		app.DistrKeeper,
-		app.MsgServiceRouter(),
-		govConfig,
-		authAddr,
-		govkeeper.NewDefaultCalculateVoteResultsAndVotingPower(app.StakingKeeper),
+		appCodec, runtime.NewKVStoreService(keys[govtypes.StoreKey]), app.AccountKeeper, app.BankKeeper,
+		app.StakingKeeper, app.DistrKeeper, app.MsgServiceRouter(), govConfig, authAddr,
 	)
 
 	app.GovKeeper = *govKeeper.SetHooks(
@@ -464,18 +438,7 @@ func NewApp(
 	app.FeeMarketKeeper = feemarketkeeper.NewKeeper(
 		appCodec, authtypes.NewModuleAddress(govtypes.ModuleName),
 		keys[feemarkettypes.StoreKey],
-	)
-
-	// instantiate IBC transfer keeper before the EVM keeper so precompiles receive a non-nil reference
-	app.TransferKeeper = transferkeeper.NewKeeper(
-		appCodec,
-		evmaddress.NewEvmCodec(sdk.GetConfig().GetBech32AccountAddrPrefix()),
-		runtime.NewKVStoreService(keys[ibctransfertypes.StoreKey]),
-		app.IBCKeeper.ChannelKeeper,
-		app.MsgServiceRouter(),
-		app.AccountKeeper,
-		app.BankKeeper,
-		authAddr,
+		tkeys[feemarkettypes.TransientKey],
 	)
 
 	// Set up EVM keeper
@@ -484,7 +447,7 @@ func NewApp(
 	// NOTE: it's required to set up the EVM keeper before the ERC-20 keeper, because it is used in its instantiation.
 	app.EVMKeeper = evmkeeper.NewKeeper(
 		// TODO: check why this is not adjusted to use the runtime module methods like SDK native keepers
-		appCodec, keys[evmtypes.StoreKey], oKeys[evmtypes.ObjectKey], nonTransientKeys,
+		appCodec, keys[evmtypes.StoreKey], tkeys[evmtypes.TransientKey], keys,
 		authtypes.NewModuleAddress(govtypes.ModuleName),
 		app.AccountKeeper,
 		app.BankKeeper,
@@ -500,17 +463,13 @@ func NewApp(
 			app.DistrKeeper,
 			app.BankKeeper,
 			&app.Erc20Keeper,
-			app.TransferKeeper,
+			&app.TransferKeeper,
 			app.IBCKeeper.ChannelKeeper,
-			app.IBCKeeper.ClientKeeper,
 			app.GovKeeper,
 			app.SlashingKeeper,
 			appCodec,
 		),
 	)
-
-	// enable virtual fee collection
-	app.EVMKeeper.EnableVirtualFeeCollection()
 
 	app.Erc20Keeper = erc20keeper.NewKeeper(
 		keys[erc20types.StoreKey],
@@ -520,8 +479,22 @@ func NewApp(
 		app.BankKeeper,
 		app.EVMKeeper,
 		app.StakingKeeper,
-		app.TransferKeeper,
+		&app.TransferKeeper,
 	)
+
+	// instantiate IBC transfer keeper AFTER the ERC-20 keeper to use it in the instantiation
+	app.TransferKeeper = transferkeeper.NewKeeper(
+		appCodec,
+		runtime.NewKVStoreService(keys[ibctransfertypes.StoreKey]),
+		nil,
+		app.IBCKeeper.ChannelKeeper,
+		app.IBCKeeper.ChannelKeeper,
+		app.MsgServiceRouter(),
+		app.AccountKeeper,
+		app.BankKeeper,
+		authAddr,
+	)
+	app.TransferKeeper.SetAddressCodec(evmaddress.NewEvmCodec(sdk.GetConfig().GetBech32AccountAddrPrefix()))
 
 	/*
 		Create Transfer Stack
@@ -549,10 +522,7 @@ func NewApp(
 		app.EVMKeeper,
 		app.Erc20Keeper,
 	)
-	callbacksMiddleware := ibccallbacks.NewIBCMiddleware(app.CallbackKeeper, maxCallbackGas)
-	callbacksMiddleware.SetICS4Wrapper(app.IBCKeeper.ChannelKeeper)
-	callbacksMiddleware.SetUnderlyingApplication(transferStack)
-	transferStack = callbacksMiddleware
+	transferStack = ibccallbacks.NewIBCMiddleware(transferStack, app.IBCKeeper.ChannelKeeper, app.CallbackKeeper, maxCallbackGas)
 
 	var transferStackV2 ibcapi.IBCModule
 	transferStackV2 = transferv2.NewIBCModule(app.TransferKeeper)
@@ -574,8 +544,6 @@ func NewApp(
 
 	// Override the ICS20 app module
 	transferModule := transfer.NewAppModule(app.TransferKeeper)
-
-	vmModule := vm.NewAppModule(app.EVMKeeper, app.AccountKeeper, app.BankKeeper, app.AccountKeeper.AddressCodec())
 
 	/****  Module Options ****/
 
@@ -604,7 +572,7 @@ func NewApp(
 		ibctm.NewAppModule(tmLightClientModule),
 		transferModule,
 		// Cosmos EVM modules
-		vmModule,
+		vm.NewAppModule(app.EVMKeeper, app.AccountKeeper, app.BankKeeper, app.AccountKeeper.AddressCodec()),
 		feemarket.NewAppModule(app.FeeMarketKeeper),
 		erc20.NewAppModule(app.Erc20Keeper, app.AccountKeeper),
 	)
@@ -614,6 +582,8 @@ func NewApp(
 	// By default, it is composed of all the modules from the module manager.
 	// Additionally, app module basics can be overwritten by passing them as an argument.
 	app.BasicModuleManager = NewBasicModuleManager()
+	// MakeEncodingConfig already registered this exact stateless module set.
+	// SDK 0.53 legacy Amino does not permit registering it a second time.
 
 	// NOTE: upgrade module is required to be prioritized
 	app.ModuleManager.SetOrderPreBlockers(
@@ -650,10 +620,8 @@ func NewApp(
 	// NOTE: the feemarket module should go last in order of end blockers that are actually doing something,
 	// to get the full block gas used.
 	app.ModuleManager.SetOrderEndBlockers(
-		banktypes.ModuleName,
-		govtypes.ModuleName,
-		stakingtypes.ModuleName,
-		authtypes.ModuleName,
+		govtypes.ModuleName, stakingtypes.ModuleName,
+		authtypes.ModuleName, banktypes.ModuleName,
 
 		// Cosmos EVM EndBlockers
 		evmtypes.ModuleName, erc20types.ModuleName, feemarkettypes.ModuleName,
@@ -712,7 +680,6 @@ func NewApp(
 	reflectionv1.RegisterReflectionServiceServer(app.GRPCQueryRouter(), reflectionSvc)
 
 	// add test gRPC service for testing gRPC queries in isolation
-	testdata_pulsar.RegisterQueryServer(app.GRPCQueryRouter(), testdata_pulsar.QueryImpl{})
 
 	// create the simulation manager and define the order of the modules for deterministic simulations
 	//
@@ -727,7 +694,7 @@ func NewApp(
 
 	// initialize stores
 	app.MountKVStores(keys)
-	app.MountObjectStores(oKeys)
+	app.MountTransientStores(tkeys)
 
 	maxGasWanted := cast.ToUint64(appOpts.Get(srvflags.EVMMaxTxGasWanted))
 
@@ -783,25 +750,7 @@ func NewApp(
 			logger.Error("error on loading last version", "err", err)
 			os.Exit(1)
 		}
-
-		ctx := app.NewContextLegacy(true, cmtproto.Header{
-			Height:  app.LastBlockHeight(),
-			ChainID: app.ChainID(),
-		})
-
-		// set global evm variables from KV store
-		vmModule.HydrateGlobals(ctx)
 	}
-
-	vmrunner.SetRunner(bApp, txnrunner.NewSTMRunner(
-		txDecoder,
-		nonTransientKeys,
-		min(goruntime.GOMAXPROCS(0), goruntime.NumCPU()),
-		true,
-		func(ms storetypes.MultiStore) string {
-			return app.EVMKeeper.GetParams(sdk.NewContext(ms, cmtproto.Header{}, false, log.NewNopLogger())).EvmDenom
-		},
-	))
 
 	return app
 }
@@ -932,51 +881,25 @@ func (app *App) DefaultGenesis() map[string]json.RawMessage {
 	return DefaultGenesis(app.appCodec)
 }
 
-// DefaultGenesis returns the same owned genesis defaults for stateless CLI
-// commands and live application initialization, without constructing an app.
-func DefaultGenesis(cdc codec.Codec) map[string]json.RawMessage {
-	genesis := NewBasicModuleManager().DefaultGenesis(cdc)
-
-	mintGenState := NewMintGenesisState()
-	genesis[minttypes.ModuleName] = cdc.MustMarshalJSON(mintGenState)
-
-	evmGenState := NewEVMGenesisState()
-	genesis[evmtypes.ModuleName] = cdc.MustMarshalJSON(evmGenState)
-
-	// NOTE: for the example chain implementation we are also adding a default token pair,
-	// which is the base denomination of the chain (i.e. the WEVMOS contract)
-	erc20GenState := NewErc20GenesisState()
-	genesis[erc20types.ModuleName] = cdc.MustMarshalJSON(erc20GenState)
-	var stakingGenesis stakingtypes.GenesisState
-	cdc.MustUnmarshalJSON(genesis[stakingtypes.ModuleName], &stakingGenesis)
-	stakingGenesis.Params.BondDenom = identity.BaseDenom
-	genesis[stakingtypes.ModuleName] = cdc.MustMarshalJSON(&stakingGenesis)
-	var bankGenesis banktypes.GenesisState
-	cdc.MustUnmarshalJSON(genesis[banktypes.ModuleName], &bankGenesis)
-	bankGenesis.DenomMetadata = []banktypes.Metadata{{
-		Description: "Native token of the separate MintCandy network",
-		Base:        identity.BaseDenom, Display: "DEL", Name: "Native DEL", Symbol: "DEL",
-		DenomUnits: []*banktypes.DenomUnit{{Denom: identity.BaseDenom, Exponent: 0}, {Denom: "DEL", Exponent: 18}},
-	}}
-	genesis[banktypes.ModuleName] = cdc.MustMarshalJSON(&bankGenesis)
-	var govGenesis govv1.GenesisState
-	cdc.MustUnmarshalJSON(genesis[govtypes.ModuleName], &govGenesis)
-	for i := range govGenesis.Params.MinDeposit {
-		govGenesis.Params.MinDeposit[i].Denom = identity.BaseDenom
-	}
-	for i := range govGenesis.Params.ExpeditedMinDeposit {
-		govGenesis.Params.ExpeditedMinDeposit[i].Denom = identity.BaseDenom
-	}
-	genesis[govtypes.ModuleName] = cdc.MustMarshalJSON(&govGenesis)
-
-	return genesis
-}
-
 // GetKey returns the KVStoreKey for the provided store key.
 //
 // NOTE: This is solely to be used for testing purposes.
 func (app *App) GetKey(storeKey string) *storetypes.KVStoreKey {
 	return app.keys[storeKey]
+}
+
+// GetTKey returns the TransientStoreKey for the provided store key.
+//
+// NOTE: This is solely to be used for testing purposes.
+func (app *App) GetTKey(storeKey string) *storetypes.TransientStoreKey {
+	return app.tkeys[storeKey]
+}
+
+// GetMemKey returns the MemStoreKey for the provided mem key.
+//
+// NOTE: This is solely used for testing purposes.
+func (app *App) GetMemKey(storeKey string) *storetypes.MemoryStoreKey {
+	return app.memKeys[storeKey]
 }
 
 // SimulationManager implements the SimulationApp interface
@@ -1022,9 +945,7 @@ func (app *App) RegisterTendermintService(clientCtx client.Context) {
 }
 
 func (app *App) RegisterNodeService(clientCtx client.Context, cfg config.Config) {
-	node.RegisterNodeService(clientCtx, app.GRPCQueryRouter(), cfg, func() int64 {
-		return app.CommitMultiStore().EarliestVersion()
-	})
+	node.RegisterNodeService(clientCtx, app.GRPCQueryRouter(), cfg)
 }
 
 // ---------------------------------------------
@@ -1090,6 +1011,10 @@ func (app *App) GetAccountKeeper() authkeeper.AccountKeeper {
 	return app.AccountKeeper
 }
 
+func (app *App) GetAuthzKeeper() authzkeeper.Keeper {
+	return app.AuthzKeeper
+}
+
 func (app *App) GetDistrKeeper() distrkeeper.Keeper {
 	return app.DistrKeeper
 }
@@ -1106,11 +1031,11 @@ func (app *App) GetCallbackKeeper() ibccallbackskeeper.ContractKeeper {
 	return app.CallbackKeeper
 }
 
-func (app *App) GetTransferKeeper() *transferkeeper.Keeper {
+func (app *App) GetTransferKeeper() transferkeeper.Keeper {
 	return app.TransferKeeper
 }
 
-func (app *App) SetTransferKeeper(transferKeeper *transferkeeper.Keeper) {
+func (app *App) SetTransferKeeper(transferKeeper transferkeeper.Keeper) {
 	app.TransferKeeper = transferKeeper
 }
 
@@ -1119,7 +1044,7 @@ func (app *App) GetMempool() sdkmempool.ExtMempool {
 }
 
 func (app *App) GetAnteHandler() sdk.AnteHandler {
-	return app.AnteHandler()
+	return app.BaseApp.AnteHandler()
 }
 
 // GetTxConfig implements the TestingApp interface.
@@ -1127,10 +1052,14 @@ func (app *App) GetTxConfig() client.TxConfig {
 	return app.txConfig
 }
 
+func (app *App) SetClientCtx(clientCtx client.Context) { // TODO:VLAD - Remove this if possible
+	app.clientCtx = clientCtx
+}
+
 // Close unsubscribes from the CometBFT event bus (if set) and closes the mempool and underlying BaseApp.
 func (app *App) Close() error {
 	var err error
-	if m, ok := app.EVMMempool.(*evmmempool.Mempool); ok && m != nil {
+	if m, ok := app.GetMempool().(*evmmempool.ExperimentalEVMMempool); ok {
 		app.Logger().Info("Shutting down mempool")
 		err = m.Close()
 	}
@@ -1165,4 +1094,42 @@ func (app *App) AutoCliOpts() autocli.AppOptions {
 		ValidatorAddressCodec: evmaddress.NewEvmCodec(sdk.GetConfig().GetBech32ValidatorAddrPrefix()),
 		ConsensusAddressCodec: evmaddress.NewEvmCodec(sdk.GetConfig().GetBech32ConsensusAddrPrefix()),
 	}
+}
+
+func DefaultGenesis(cdc codec.Codec) map[string]json.RawMessage {
+	genesis := NewBasicModuleManager().DefaultGenesis(cdc)
+
+	mintGenState := NewMintGenesisState()
+	genesis[minttypes.ModuleName] = cdc.MustMarshalJSON(mintGenState)
+
+	evmGenState := NewEVMGenesisState()
+	genesis[evmtypes.ModuleName] = cdc.MustMarshalJSON(evmGenState)
+
+	// NOTE: for the example chain implementation we are also adding a default token pair,
+	// which is the base denomination of the chain (i.e. the WEVMOS contract)
+	erc20GenState := NewErc20GenesisState()
+	genesis[erc20types.ModuleName] = cdc.MustMarshalJSON(erc20GenState)
+	var stakingGenesis stakingtypes.GenesisState
+	cdc.MustUnmarshalJSON(genesis[stakingtypes.ModuleName], &stakingGenesis)
+	stakingGenesis.Params.BondDenom = identity.BaseDenom
+	genesis[stakingtypes.ModuleName] = cdc.MustMarshalJSON(&stakingGenesis)
+	var bankGenesis banktypes.GenesisState
+	cdc.MustUnmarshalJSON(genesis[banktypes.ModuleName], &bankGenesis)
+	bankGenesis.DenomMetadata = []banktypes.Metadata{{
+		Description: "Native token of the separate MintCandy network",
+		Base:        identity.BaseDenom, Display: "DEL", Name: "Native DEL", Symbol: "DEL",
+		DenomUnits: []*banktypes.DenomUnit{{Denom: identity.BaseDenom, Exponent: 0}, {Denom: "DEL", Exponent: 18}},
+	}}
+	genesis[banktypes.ModuleName] = cdc.MustMarshalJSON(&bankGenesis)
+	var govGenesis govv1.GenesisState
+	cdc.MustUnmarshalJSON(genesis[govtypes.ModuleName], &govGenesis)
+	for i := range govGenesis.Params.MinDeposit {
+		govGenesis.Params.MinDeposit[i].Denom = identity.BaseDenom
+	}
+	for i := range govGenesis.Params.ExpeditedMinDeposit {
+		govGenesis.Params.ExpeditedMinDeposit[i].Denom = identity.BaseDenom
+	}
+	genesis[govtypes.ModuleName] = cdc.MustMarshalJSON(&govGenesis)
+
+	return genesis
 }

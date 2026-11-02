@@ -33,12 +33,12 @@ func checkBoundedFinancialRollback(t *testing.T, a *App, key *ecdsa.PrivateKey, 
 	from := crypto.PubkeyToAddress(key.PublicKey)
 	price := big.NewInt(1_000_000_000_000)
 	ctx := func() sdk.Context {
-		return a.NewContextLegacy(false, cmtproto.Header{ChainID: a.chainID, Height: a.LastBlockHeight() + 1, Time: start.Add(time.Duration(a.LastBlockHeight()+1) * time.Second)})
+		return a.NewUncachedContext(false, cmtproto.Header{ChainID: a.chainID, Height: a.LastBlockHeight() + 1, Time: start.Add(time.Duration(a.LastBlockHeight()+1) * time.Second)})
 	}
 	send := func(to *common.Address, value *big.Int, input []byte, success bool) (*evmtypes.MsgEthereumTxResponse, *abci.ExecTxResult) {
 		height := a.LastBlockHeight() + 1
 		header := cmtproto.Header{ChainID: a.chainID, Height: height, Time: start.Add(time.Duration(height) * time.Second)}
-		current := a.NewNextBlockContext(header)
+		current := a.NewUncachedContext(false, header)
 		before := a.BankKeeper.GetBalance(current, sdk.AccAddress(from.Bytes()), identity.BaseDenom).Amount
 		raw := ethtypes.NewTx(&ethtypes.LegacyTx{Nonce: a.EVMKeeper.GetNonce(current, from), To: to, Value: value, Gas: 3_000_000, GasPrice: price, Data: input})
 		signer := ethtypes.NewEIP155Signer(new(big.Int).SetUint64(a.evmChainID))
@@ -71,11 +71,11 @@ func checkBoundedFinancialRollback(t *testing.T, a *App, key *ecdsa.PrivateKey, 
 		if success {
 			expectedDebit = expectedDebit.Add(math.NewIntFromBigInt(value))
 		}
-		require.Equal(t, expectedDebit, before.Sub(a.BankKeeper.GetBalance(ctx(), sdk.AccAddress(from.Bytes()), identity.BaseDenom).Amount), "every outer transaction must pay exactly its receipt gas fee plus committed value")
 		_, commitErr := a.Commit()
 		require.NoError(t, commitErr)
-		// Prepare the next block context for read-only assertions.
-		a.NewNextBlockContext(cmtproto.Header{ChainID: a.chainID, Height: a.LastBlockHeight() + 1, Time: start.Add(time.Duration(a.LastBlockHeight()+1) * time.Second)})
+		require.Equal(t, expectedDebit, before.Sub(a.BankKeeper.GetBalance(ctx(), sdk.AccAddress(from.Bytes()), identity.BaseDenom).Amount), "every outer transaction must pay exactly its receipt gas fee plus committed value")
+		// SDK 0.53 has no NewNextBlockContext helper. All subsequent assertions
+		// read the committed root store; no fixture writes occur between blocks.
 		return response, result
 	}
 	contract := crypto.CreateAddress(from, 1)

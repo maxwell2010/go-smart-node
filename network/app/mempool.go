@@ -1,18 +1,18 @@
-// Derived from cosmos/evm/evmd at c3ae9067a7eadcdea55a5192226916deb44c71c4.
-// Licensed under Apache-2.0; see LICENSE.
-
+// Derived from cosmos/evm/evmd v0.6.3; licensed under Apache-2.0, see LICENSE.
 package app
 
 import (
-	evmmempool "github.com/cosmos/evm/mempool"
-	"github.com/cosmos/evm/server"
-	evmtypes "github.com/cosmos/evm/x/vm/types"
+	"fmt"
 
-	"cosmossdk.io/log/v2"
+	"cosmossdk.io/log"
 
 	"github.com/cosmos/cosmos-sdk/baseapp"
 	servertypes "github.com/cosmos/cosmos-sdk/server/types"
-	sdk "github.com/cosmos/cosmos-sdk/types"
+	sdkmempool "github.com/cosmos/cosmos-sdk/types/mempool"
+
+	evmconfig "github.com/cosmos/evm/config"
+	evmmempool "github.com/cosmos/evm/mempool"
+	evmtypes "github.com/cosmos/evm/x/vm/types"
 )
 
 // configureEVMMempool sets up the EVM mempool and related handlers using viper configuration.
@@ -22,61 +22,51 @@ func (app *App) configureEVMMempool(appOpts servertypes.AppOptions, logger log.L
 		return nil
 	}
 
-	var (
-		mpConfig = server.ResolveMempoolConfig(app.GetAnteHandler(), appOpts, logger)
-
-		txEncoder       = evmmempool.NewTxEncoder(app.txConfig)
-		evmRechecker    = evmmempool.NewTxRechecker(mpConfig.AnteHandler, txEncoder)
-		cosmosRechecker = evmmempool.NewTxRechecker(mpConfig.AnteHandler, txEncoder)
-		cosmosPoolMaxTx = server.GetCosmosPoolMaxTx(appOpts, logger)
-		checkTxTimeout  = server.GetMempoolCheckTxTimeout(appOpts, logger)
-	)
-
+	cosmosPoolMaxTx := evmconfig.GetCosmosPoolMaxTx(appOpts, logger)
 	if cosmosPoolMaxTx < 0 {
-		logger.Debug("evm mempool is disabled, skipping configuration")
+		logger.Debug("app-side mempool is disabled, skipping evm mempool configuration")
 		return nil
 	}
 
-	if err := server.ValidateReapBounds(appOpts, mpConfig.BlockGasLimit); err != nil {
-		return err
+	mempoolConfig, err := app.createMempoolConfig(appOpts, logger)
+	if err != nil {
+		return fmt.Errorf("failed to get mempool config: %w", err)
 	}
 
-	// create mempool
-	mempool := evmmempool.NewMempool(
+	evmMempool := evmmempool.NewExperimentalEVMMempool(
 		app.CreateQueryContext,
 		logger,
 		app.EVMKeeper,
 		app.FeeMarketKeeper,
 		app.txConfig,
-		evmRechecker,
-		cosmosRechecker,
-		mpConfig,
+		app.clientCtx,
+		mempoolConfig,
 		cosmosPoolMaxTx,
 	)
-
-	app.EVMMempool = mempool
-
-	// create ABCI handlers
-	proposalHandler := baseapp.NewDefaultProposalHandler(mempool, NewNoCheckProposalTxVerifier(app.BaseApp))
-
-	insertTxHandler := mempool.NewInsertTxHandler(app.TxDecode)
-	reapTxsHandler := mempool.NewReapTxsHandler()
-	checkTxHandler := mempool.NewCheckTxHandler(app.TxDecode, checkTxTimeout)
-
-	// set handlers and the mempool
-	app.SetPrepareProposal(proposalHandler.PrepareProposalHandler())
-	app.SetProcessProposal(proposalHandler.ProcessProposalHandler())
-	app.SetInsertTxHandler(insertTxHandler)
-	app.SetReapTxsHandler(reapTxsHandler)
+	app.EVMMempool = evmMempool
+	app.SetMempool(evmMempool)
+	checkTxHandler := evmmempool.NewCheckTxHandler(evmMempool)
 	app.SetCheckTxHandler(checkTxHandler)
 
-	app.SetMempool(mempool)
-
-	app.SetPrepareCheckStater(func(_ sdk.Context) {
-		if !mempool.HasEventBus() {
-			mempool.NotifyNewBlock()
-		}
-	})
+	abciProposalHandler := baseapp.NewDefaultProposalHandler(evmMempool, app)
+	abciProposalHandler.SetSignerExtractionAdapter(
+		evmmempool.NewEthSignerExtractionAdapter(
+			sdkmempool.NewDefaultSignerExtractionAdapter(),
+		),
+	)
+	app.SetPrepareProposal(abciProposalHandler.PrepareProposalHandler())
+	app.SetProcessProposal(abciProposalHandler.ProcessProposalHandler())
 
 	return nil
+}
+
+// createMempoolConfig creates a new EVMMempoolConfig with the default configuration
+// and overrides it with values from appOpts if they exist and are non-zero.
+func (app *App) createMempoolConfig(appOpts servertypes.AppOptions, logger log.Logger) (*evmmempool.EVMMempoolConfig, error) {
+	return &evmmempool.EVMMempoolConfig{
+		AnteHandler:      app.GetAnteHandler(),
+		LegacyPoolConfig: evmconfig.GetLegacyPoolConfig(appOpts, logger),
+		BlockGasLimit:    evmconfig.GetBlockGasLimit(appOpts, logger),
+		MinTip:           evmconfig.GetMinTip(appOpts, logger),
+	}, nil
 }

@@ -8,7 +8,7 @@ import (
 
 	"cosmossdk.io/core/store"
 	"github.com/cosmos/cosmos-sdk/runtime"
-	storetypes "github.com/cosmos/cosmos-sdk/store/v2/types"
+	storetypes "cosmossdk.io/store/types"
 	"github.com/cosmos/cosmos-sdk/testutil"
 	"github.com/cosmos/gogoproto/types"
 	"github.com/stretchr/testify/require"

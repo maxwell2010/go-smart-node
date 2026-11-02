@@ -1,6 +1,9 @@
 package app
 
 import (
+	"cosmossdk.io/x/evidence"
+	feegrantmodule "cosmossdk.io/x/feegrant/module"
+	"cosmossdk.io/x/upgrade"
 	"github.com/cosmos/cosmos-sdk/types/module"
 	"github.com/cosmos/cosmos-sdk/x/auth"
 	"github.com/cosmos/cosmos-sdk/x/auth/vesting"
@@ -8,22 +11,19 @@ import (
 	"github.com/cosmos/cosmos-sdk/x/bank"
 	"github.com/cosmos/cosmos-sdk/x/consensus"
 	distr "github.com/cosmos/cosmos-sdk/x/distribution"
-	"github.com/cosmos/cosmos-sdk/x/evidence"
-	feegrantmodule "github.com/cosmos/cosmos-sdk/x/feegrant/module"
 	"github.com/cosmos/cosmos-sdk/x/genutil"
 	genutiltypes "github.com/cosmos/cosmos-sdk/x/genutil/types"
 	"github.com/cosmos/cosmos-sdk/x/gov"
 	"github.com/cosmos/cosmos-sdk/x/mint"
 	"github.com/cosmos/cosmos-sdk/x/slashing"
 	"github.com/cosmos/cosmos-sdk/x/staking"
-	"github.com/cosmos/cosmos-sdk/x/upgrade"
 	evmencoding "github.com/cosmos/evm/encoding"
 	"github.com/cosmos/evm/x/erc20"
 	"github.com/cosmos/evm/x/feemarket"
 	"github.com/cosmos/evm/x/vm"
-	transfer "github.com/cosmos/ibc-go/v11/modules/apps/transfer"
-	ibc "github.com/cosmos/ibc-go/v11/modules/core"
-	ibctm "github.com/cosmos/ibc-go/v11/modules/light-clients/07-tendermint"
+	transfer "github.com/cosmos/ibc-go/v10/modules/apps/transfer"
+	ibc "github.com/cosmos/ibc-go/v10/modules/core"
+	ibctm "github.com/cosmos/ibc-go/v10/modules/light-clients/07-tendermint"
 )
 
 // NewBasicModuleManager registers the owned application's stateless module set.
