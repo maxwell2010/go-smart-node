@@ -2,3 +2,5 @@ scripts/*.sh text eol=lf
 third_party/cosmos-evm/** -text -whitespace
 systemcontracts/sources/*.sol -text -whitespace
 systemcontracts/*.sol text eol=lf
+
+third_party/pion-stun-v2/** -text -whitespace

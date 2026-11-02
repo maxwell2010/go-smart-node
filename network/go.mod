@@ -3,6 +3,9 @@ module github.com/maxwell2010/go-smart-node/network
 // Owned source correction and canonical provenance: third_party/cosmos-evm/UPSTREAM.json.
 replace github.com/cosmos/evm => ./third_party/cosmos-evm
 
+// Backport the upstream STUN short-attribute guard without an API-major replacement.
+replace github.com/pion/stun/v2 => ./third_party/pion-stun-v2
+
 go 1.26.10
 
 require (

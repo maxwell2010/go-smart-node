@@ -52,6 +52,7 @@ jobs:
       - name: Verify owned EVM source and integrity guards
         run: |
           python3 scripts/verify_owned_evm.py |& tee validation-logs/owned-evm-integrity.log
+          python3 scripts/verify_owned_stun.py |& tee validation-logs/owned-stun-integrity.log
           python3 -m unittest discover -s scripts -p 'test_*.py'
       - name: Test modern module and native feature port
         run: go test -mod=readonly -p 2 -count=1 -v -timeout 10m ./... |& tee validation-logs/tests.log

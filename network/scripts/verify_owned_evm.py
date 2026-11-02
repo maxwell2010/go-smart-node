@@ -5,14 +5,20 @@ import json
 from pathlib import Path
 
 
-def verify(root):
+EVM_IDENTITY = {
+    "schemaVersion": 1,
+    "upstreamModule": "github.com/cosmos/evm",
+    "upstreamVersion": "v0.6.3",
+    "upstreamCommit": "71c78b5072a248bae5273c34ad2f53d349799ccd",
+    "upstreamModuleSum": "h1:1G8+iqyQWslZ2g7873h90Fcr3pL6RV24PgOS1wiK2SY=",
+}
+
+
+def verify(root, identity=None):
     root = root.resolve(strict=True)
     manifest = json.loads((root / "UPSTREAM.json").read_bytes())
-    if (manifest["schemaVersion"] != 1 or manifest["upstreamModule"] != "github.com/cosmos/evm"
-            or manifest["upstreamVersion"] != "v0.6.3"
-            or manifest["upstreamCommit"] != "71c78b5072a248bae5273c34ad2f53d349799ccd"
-            or manifest["upstreamModuleSum"] != "h1:1G8+iqyQWslZ2g7873h90Fcr3pL6RV24PgOS1wiK2SY="):
-        raise RuntimeError("Unexpected owned EVM source identity")
+    if any(manifest.get(key) != value for key, value in (identity or EVM_IDENTITY).items()):
+        raise RuntimeError("Unexpected owned source identity")
     expected = dict(manifest["canonicalFiles"])
     for name, digest in manifest["modifiedFiles"].items():
         if name not in expected:
