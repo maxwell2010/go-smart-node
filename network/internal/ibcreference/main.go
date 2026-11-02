@@ -5,6 +5,7 @@ package main
 import (
 	"encoding/json"
 	"fmt"
+	"io"
 	"net"
 	"net/url"
 	"os"
@@ -94,8 +95,8 @@ func run() error {
 	prepare.Flags().Int("p2p-port", 28756, "Private loopback P2P port")
 	prepare.Flags().Int("grpc-port", 28790, "Private loopback gRPC port")
 	root.AddCommand(prepare)
-	root.AddCommand(server.StartCmd(func(logger log.Logger, db dbm.DB, opts servertypes.AppOptions) servertypes.Application {
-		return referenceapp.NewApp(logger, db, nil, true, opts, append(server.DefaultBaseappOptions(opts), baseapp.SetChainID(chainID))...)
+	root.AddCommand(server.StartCmd(func(logger log.Logger, db dbm.DB, trace io.Writer, opts servertypes.AppOptions) servertypes.Application {
+		return referenceapp.NewApp(logger, db, trace, true, opts, append(server.DefaultBaseappOptions(opts), baseapp.SetChainID(chainID))...)
 	}, ""))
 	return servercmd.Execute(root, "IBCREFERENCE", "")
 }
