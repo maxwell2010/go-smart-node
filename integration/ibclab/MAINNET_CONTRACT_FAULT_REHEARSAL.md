@@ -115,6 +115,56 @@ This removes the earlier exploratory dependency-provenance limitation for
 these two scenarios. It does not validate the still-pending post-recovery
 receipt-corruption scenario or certify a separate modern application.
 
+### Clean post-recovery repetition
+
+Both scenarios passed on November 2, 2026 against the CLOSED clean replay state
+at height 34342701, using test commit `6445e29`. The canonical next-block header
+34342702 independently confirmed committed AppHash
+`3E4FA6EDCA1C4EFE905F032E5891632D5918481B5E95AB9151A8F129507F4E9B`.
+The official header response SHA256 was
+`e33a9032552626ea76e2c7cc01a73357d4ed85c855006afc8d100949eb50b278`;
+the public genesis SHA256 was
+`e3fa0c3d311c6ffcf49135f49e440e69fbe20077139b4535d60e2e3a80f3a58b`.
+
+The original v7-only fixture correctly stopped when the genuine post-recovery
+runtime emitted the current eight-field `StakeUpdated` tuple. The corrected
+test identifies only the two known current/v7 event IDs from the actual
+receipt, decodes with that ABI and queries the actual `getStake` layout. It
+does not replace bytecode, registry ownership or production hooks. The fault
+wrapper corrupts the exact observed `StakeUpdated` topic's data, rather than
+an arbitrary log. The final formatted test source SHA256 was
+`49c42e9fa9afbbc33c00a489b84c633c2a8a8c6824cf83e7ddf662cac2b6766c`.
+
+With the strict post-recovery gate required, the signed native transfer passed
+signature, outer ante, exact fee and production hook checks. A genuine
+`delegateDEL` transaction created matching contract/native delegation state.
+The injected event decode error then rolled back real contract stake storage,
+native delegation state, contract value transfer and response logs. The sender
+lost exactly the charged gas fee, `1587300000001500000` raw DEL, with no extra
+stake-value loss. This gate passed in 90.90 seconds. The actual delegation
+address was `0xA16c34Ed1c0601c0E749e17ebeF19752A15FaA01`.
+
+The separate controlled auto-unbond scenario observed the actual queue length
+17481. System authorization and signed EOA rejection passed. The first genuine
+enqueue wrote before the second controlled native-record failure; the whole
+queue batch rolled back and its retry tracker remained. Removing that corrupt
+record allowed exactly one matching real queue entry, removed the tracker and
+prevented a duplicate on another retry. The parent queue stayed unchanged.
+This scenario passed in 82.01 seconds.
+
+The entire run used Go 1.24.4 Linux CGO/GCC, `GOMAXPROCS=1`, `-p 1`,
+`GOMEMLIMIT=1GiB`, `GOPROXY=off` and a private network namespace. Full
+`go mod verify` passed before and after. Each test copied only the CLOSED
+application database and public genesis into its own temporary child directory
+on a separate volume; the two clones ran sequentially and were cleaned up.
+Neither the source nor working replay database was opened. No transaction was
+broadcast and no generated signing key was printed. Evidence log:
+`clean-go124-postH-contract-rehearsal-v2.log` (finished 09:46:43 UTC).
+
+This closes the stated post-recovery legacy contract fault gate. It does not
+certify the separate modern network, native financial port or external-relayer
+interoperability, and it does not activate these fork fixes on public mainnet.
+
 ## Dependency diagnostic correction is consensus-visible
 
 The pinned Decimal Ethermint dependency unconditionally overwrites
