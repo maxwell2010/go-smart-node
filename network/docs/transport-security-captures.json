@@ -1,0 +1,61 @@
+{
+  "coreVersionsUnchanged": true,
+  "sourceGateExit": 1,
+  "evidenceScope": "Patched official evmd reference entrypoint/binary, not a completed Decimal daemon",
+  "binary": {
+    "advisory_ids": [
+      "GO-2025-3684",
+      "GO-2026-4479",
+      "GO-2026-5932"
+    ],
+    "argv": [
+      "/opt/mintcandy-tools/vuln190/govulncheck",
+      "-json",
+      "-mode",
+      "binary",
+      "/opt/mintcandy-bin-modern-transport/upstream-evmd-reference"
+    ],
+    "completion_verified": true,
+    "db_last_modified": "2026-10-27T21:16:18Z",
+    "diagnostic_clean": false,
+    "distinct_symbol_advisories": 3,
+    "go_version": "go1.26.10",
+    "passed": false,
+    "raw_bytes": 3206050,
+    "raw_sha256": "ba20c52ce58368fe6aa143ad4c38ec8da2f0ce497344910fed72cc3e4eacecb0",
+    "scanner_exit_code": 0,
+    "scanner_version": "v1.9.0",
+    "scope": "official evmd c3ae9067a7ea reference binary with hardened transport/OTEL network graph; not a Decimal daemon",
+    "source_commit": "d86f095655cf9791b40a973d13b642e5b92a7014",
+    "toolchain": "go version go1.26.10 linux/amd64"
+  },
+  "schemaVersion": 1,
+  "standardLibraryFindings": 0,
+  "binaryGateExit": 1,
+  "sourceCommit": "d86f095655cf9791b40a973d13b642e5b92a7014",
+  "source": {
+    "advisory_ids": [
+      "GO-2025-3684",
+      "GO-2026-4479",
+      "GO-2026-5932"
+    ],
+    "argv": [
+      "/opt/mintcandy-tools/vuln190/govulncheck",
+      "-json",
+      "github.com/cosmos/evm/evmd/cmd/evmd"
+    ],
+    "completion_verified": true,
+    "db_last_modified": "2026-10-27T21:16:18Z",
+    "diagnostic_clean": false,
+    "distinct_symbol_advisories": 3,
+    "go_version": "go1.26.10",
+    "passed": false,
+    "raw_bytes": 14048728,
+    "raw_sha256": "972288edad80313db4eef378f0020892ee663e37866a3d8ccd1b1e3e32793002",
+    "scanner_exit_code": 0,
+    "scanner_version": "v1.9.0",
+    "scope": "official evmd c3ae9067a7ea reference CLI with hardened transport/OTEL network graph; not a Decimal daemon",
+    "source_commit": "d86f095655cf9791b40a973d13b642e5b92a7014",
+    "toolchain": "go version go1.26.10 linux/amd64"
+  }
+}
