@@ -122,3 +122,31 @@ executing the actual deployment/initialization code in an isolated genesis
 builder, verify hashes and storage through public getters, and export the
 resulting authentic EVM allocations. Only then rerun the strict fresh EVM gate
 and the broader validator/delegation integration matrix.
+
+## Read-only verified-source investigation
+
+The official explorer publishes source and compiler metadata in its page data.
+The [mainnet registry page](https://explorer.decimalchain.com/contracts/0xc108715a06f76caa96fa2c943ebf05159c29a87d)
+contains the `DecimalContractCenterProxy` flattened source. Its metadata states
+Solidity 0.8.20+commit.a1b79de6, optimizer enabled with 200 runs, Paris EVM and
+an ERC1967Proxy dependency from OpenZeppelin 5.0.2. The source SHA256 is
+`278769c90cdd676abbf24742655e4563be9256806e180578ba8f81ac0b9efb6c`.
+
+The [migration implementation page](https://explorer.decimalchain.com/contracts/0x87e94ae0c62d9078afdda9aadb42c80d21ac5ef5)
+contains `DecimalContractCenterMigration`, including the underlying registry
+implementation and its named storage location. Its source SHA256 is
+`52b27671e415837eb81c7d4f4aa17ee5e120d8a29fcceddcb9a837df7790d790`.
+These are explorer-published artifacts; independent bytecode reproduction and
+current implementation identification remain required.
+
+The proxy creation payload references a separate setup contract at
+`0x607b332529967c428b522fdc353b7299a9ade72c`. Its explorer page did not expose
+source verification data during this investigation. The verified registry
+implementation itself has no public initializer that initializes ownership.
+Consequently a direct deployment of that implementation and proxy is not a
+complete authenticated bootstrap recipe. Obtain or independently reconstruct
+and audit the setup source before producing a fresh deployment fixture.
+Do not reuse the mainnet owner or migration calldata in an isolated genesis.
+
+Read-only Sourcify full-match and partial-match queries for the registry at
+chain ID 75 both returned 404. No runtime state or keys were copied from mainnet.
