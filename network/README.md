@@ -11,6 +11,8 @@ Run ordinary compatibility checks from this directory with the pinned Go `1.26.1
 ```sh
 GOTOOLCHAIN=local go mod download
 GOTOOLCHAIN=local go mod verify
+python3 scripts/verify_owned_evm.py
+python3 scripts/verify_owned_stun.py
 GOTOOLCHAIN=local go test -mod=readonly -p 1 -count=1 ./identity ./decimal/... ./app ./internal/family ./internal/ibcharness ./internal/ibcreference/...
 GOTOOLCHAIN=local go test -mod=readonly -p 1 -count=1 -tags=test ./app -run '^TestOwnApplicationICS20TwoChains$'
 GOTOOLCHAIN=local go run -mod=readonly ./cmd/family-check
@@ -18,7 +20,7 @@ GOTOOLCHAIN=local go run -mod=readonly ./cmd/family-check
 
 The production application tests exercise a signed EVM transfer, exact charged fees, signing-domain rejection and bounded financial rollback. The `test` tag enables independent in-process EVM configurations solely for the two-chain ICS20 harness. Installable daemons must use the default production build and actual separate processes.
 
-Generic SDK staking does not establish Decimal validator, delegation, rewards, coin or NFT parity. These native modules require explicit wiring and state tests. The canonical EVM proposer-address conversion also needs its separately reviewed source correction and an actual `COINBASE` execution regression. The guarded daemon lifecycle and external Hermes ICS20 gates now pass on disposable networks. Native feature parity, the proposer correction and release review remain necessary before presenting this candidate as a network release.
+Generic SDK staking does not establish Decimal validator, delegation, rewards, coin or NFT parity. These native modules require explicit wiring and state tests. The owned EVM proposer-address correction and actual signed `COINBASE` execution regression now pass; its complete source provenance is checked separately from module integrity. The guarded daemon lifecycle and external Hermes ICS20 gates now pass on disposable networks. Native feature parity and final integrated release review remain necessary before presenting this candidate as a network release.
 
 The older `family-manifest.json` preserves the SDK `0.54` / EVM `0.7` bootstrap snapshot. Its validation and advisory findings describe that historical graph. The SDK `0.55` source adapter is retained on a separate development branch; it is not this maintained-family candidate.
 
@@ -31,6 +33,8 @@ Build with Go `1.26.10`, GCC and CGO enabled. Use the default production build, 
 ```sh
 go mod download
 go mod verify
+python3 scripts/verify_owned_evm.py
+python3 scripts/verify_owned_stun.py
 mkdir -p build
 CGO_ENABLED=1 go build -mod=readonly -trimpath -p 1 -o build/mcnd ./cmd/mcnd
 ```

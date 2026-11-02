@@ -9,7 +9,13 @@
     "tag": "v0.6.3",
     "commit": "71c78b5072a248bae5273c34ad2f53d349799ccd",
     "source": "https://github.com/cosmos/evm/tree/v0.6.3",
-    "applicationAdaptation": "Owned SDK 0.53 app layout with guarded fresh identities, static codecs, d0 prefixes, coin type60 and 18-decimal del. Direct SDK BankKeeper is used, as canonical EVM permits for an 18-decimal gas coin. No authenticated module cache was edited."
+    "applicationAdaptation": "Owned SDK 0.53 app layout with guarded fresh identities, static codecs, d0 prefixes, coin type60 and 18-decimal del. Direct SDK BankKeeper is used, as canonical EVM permits for an 18-decimal gas coin. No authenticated module cache was edited.",
+    "ownedSourceReplacement": {
+      "path": "./third_party/cosmos-evm",
+      "manifest": "third_party/cosmos-evm/UPSTREAM.json",
+      "patchLabel": "v0.6.3-mintcandy.1",
+      "scope": "Decode Bech32 validator operator for EVM COINBASE; canonical fail/owned pass through actual signed EVM execution."
+    }
   },
   "goToolchain": "go1.26.10 linux/amd64",
   "goArchiveSha256": "ccfe7ae822d2c2f41f4fe7c956199967a4dac22d0ee0d2b2bfdb440aab3b20c5",
@@ -18,6 +24,11 @@
       "importModule": "github.com/cosmos/evm",
       "selectedRequireVersion": "v0.6.3",
       "effectiveModule": {
+        "Path": "./third_party/cosmos-evm",
+        "Local": true,
+        "Manifest": "third_party/cosmos-evm/UPSTREAM.json"
+      },
+      "canonicalModule": {
         "Path": "github.com/cosmos/evm",
         "Version": "v0.6.3",
         "Sum": "h1:1G8+iqyQWslZ2g7873h90Fcr3pL6RV24PgOS1wiK2SY="
@@ -106,7 +117,7 @@
     }
   ],
   "validation": {
-    "wholeModuleIntegrity": "PASS: go mod verify on independently downloaded official modules in isolated Linux ext4 cache",
+    "wholeModuleIntegrity": "PASS: go mod verify on independently downloaded official modules in isolated Linux ext4 cache; this verifies external downloaded modules only, while owned replacements require their separate source verifiers.",
     "ordinaryBuild": "PASS: owned app, identity, decimal packages and constructor probe",
     "ordinaryTests": "PASS: identity, coin/NFT keeper and schema/params, compat signing, formulas, app signing-domain, real EVM transfer/exact fee and financial rollback checks",
     "taggedIBC": "PASS: real signed ICS20 transfer/return, altered proof, error acknowledgement and timeout/refund cases in owned harness",
@@ -114,8 +125,8 @@
   },
   "remainingGates": [
     "Native Decimal validator/delegation/reward and coin/NFT feature wiring/parity.",
-    "Known canonical EVM block-proposer address conversion requires an independent reviewed source correction and COINBASE execution regression.",
-    "This compatibility pass does not certify current advisory closure or mainnet replay compatibility."
+    "This compatibility pass does not certify current advisory closure or mainnet replay compatibility.",
+    "Final integrated daemon process/IBC rerun and complete current-graph security disposition, including owned replacements."
   ],
   "historicalReference": "family-manifest.json retains the earlier SDK0.54/EVM0.7 bootstrap snapshot; its checks and findings must not be attributed to this graph.",
   "coreCompatibilitySourceRevision": "720f76b947657e63cdf66972472e92eeaf5b49bc",
@@ -137,6 +148,16 @@
       "sanitizedEvidenceRevision": "39a9ed7",
       "result": "PASS:26 committed transactions covering handshake, send, return, both-node pending-packet restart, decoded error acknowledgement and actual timeout; exact native fee/balance, escrow/voucher and commitment conservation checks"
     },
-    "scope": "These fresh-network checks do not establish native Decimal feature parity or resolve the canonical proposer-address conversion defect."
-  }
+    "scope": "The recorded source-specific controls predate later owned EVM/STUN patches and do not establish native Decimal feature parity. Final integrated process gates must be rerun."
+  },
+  "ownedSourceBackports": [
+    {
+      "module": "github.com/pion/stun/v2",
+      "selectedRequireVersion": "v2.0.0",
+      "replacement": "./third_party/pion-stun-v2",
+      "manifest": "third_party/pion-stun-v2/UPSTREAM.json",
+      "patchLabel": "v2.0.0-mintcandy.1",
+      "scope": "Upstream short XOR-MAPPED-ADDRESS guard; canonical panic and owned pass on actual v2 parser."
+    }
+  ]
 }

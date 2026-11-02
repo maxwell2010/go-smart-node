@@ -11,19 +11,40 @@ Go module under `network/` does not change the root module's dependencies or
 claim compatibility with Decimal consensus. The older experimental IBC build
 is an integration reference, not the new-network release candidate.
 
-The owned modern ABCI application already passes genuine signed EVM transfer,
-exact gas accounting, precompile rollback and direct Ethereum signing-domain
-tests. An IBC11 unit harness checks native send/return, error acknowledgement,
-timeout refund and membership-proof rejection using the actual application.
-Its two in-process instances require the upstream `test` configuration reset;
-this does not satisfy the separate production-process release gate. A disposable
-independent SDK reference process has reached consensus height3 in a local lab.
+The candidate now selects the active 2025.1 family: SDK 0.53.8,
+CometBFT 0.38.26, Cosmos EVM 0.6.3 and IBC Go 10.7.0. The newer
+SDK55 trial is preserved separately; the official Hermes compatibility gate
+selected this maintained family. Historical SDK54 security evidence does not
+certify this selected graph. See `network/family-maintained53.json`.
 
-The current tagged EVM reference pins SDK0.54/Comet0.39, while the published
-active family lists SDK0.55/Comet0.40. An active-family compile and behavior
-trial is in progress; matching EVM/IBC major versions alone is insufficient
-support evidence. Transport remediations and scanner evidence are documented
-under `network/docs/`; remaining advisories require individual disposition.
+The default-build owned ABCI application passes genuine signed EVM transfer,
+exact gas accounting, financial rollback and signing-domain tests. Its owned
+EVM source correction decodes the validator operator's Bech32 address for the
+actual COINBASE opcode; the canonical source failed that execution regression.
+Owned source manifests are verified separately because Go module verification
+skips local replacements. The selected STUN v2 parser also needed the upstream
+short-attribute guard backported; its actual dependency regression now passes.
+Neither correction closes the final daemon's complete security review.
+
+Official Hermes and an independent SDK53 counterparty passed six phases in
+separate default-build OS processes: handshake, native DEL send, voucher return,
+both-node disk restart with the exact pending packet commitment, decoded error
+acknowledgement refund and an actual timeout refund. All 26 committed relayer
+transactions reconcile gas fees, balances, escrow, vouchers and commitments.
+This evidence binds source21e1c20, not every later development binary. No
+major-version or client-upgrade-in-flight gate is implied. The guarded CLI also
+passed operator signing, shared native/EVM nonce, exact fee and restart checks
+on its separately recorded source. See
+[the scoped process evidence](../network/internal/ibclab/MAINTAINED53_EVIDENCE.json).
+
+The selected governance policy gives native aggregate validator power its
+voting weight and divides delegator overrides by native ownership, including
+NFT reserve and hold-containing stakes without a hold bonus or double count.
+Actual SDK53 governance tally tests pass. Native state and read adapters remain
+staging components: long-lived authority wiring, custom-asset valuation,
+financial transitions and full application integration are required. The
+system-contract source/compiler recipe and registry tests are also staging;
+they do not establish a fully reconciled fresh genesis contract set.
 
 Modern release blockers remain:
 
@@ -34,9 +55,9 @@ Modern release blockers remain:
   final daemon, including the replacement Geth fork's upstream inheritance.
 - Authenticated system-contract bootstrap for a new genesis, with bank/EVM
   supply and reserve reconciliation and failure rollback.
-- Guarded production CLI, clean install and restart; separate OS processes,
-  maintained Hermes relayer and an independent counterparty, including refunds,
-  restart and upgrade with packets pending.
+- Repeat the established guarded CLI and independent Hermes process gates on
+  the final integrated daemon, test clean installation, and exercise actual
+  client/module upgrade with packets pending. Same-binary restart has passed.
 - Validator-set and consensus-parameter transitions, full event reconciliation,
   bounded auto-unbond work, operator authority and asset policy, independent
   review and a tested rollback procedure.
