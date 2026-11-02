@@ -13,15 +13,30 @@ go build -mod=readonly -o replay-window ./cmd/replay-window
 ./replay-window -home /isolated/new-home -blocks /isolated/cached-rpc -from 34271001 -to 34271010
 ```
 
-CGO and a supported C compiler are required. The output home must not already exist and must be outside the immutable input directory. Signing keys, signing state and keyrings must never be included.
+CGO and a supported C compiler are required. Use an isolated module/build cache and verify the official toolchain archive, compiler provenance and all modules before and after building. A failed `go mod verify` is a failed whole-module integrity gate, even when the missing file appears to be a test fixture. Do not repair or bypass endpoint protection to make this gate pass. Use a clean environment instead. Historical toolchains used to reproduce mainnet behavior are not a claim of supported release security.
+
+The output home must not already exist and must be outside the immutable input directory. Signing keys, signing state and keyrings must never be included. On Linux, isolate each application helper process at the operating-system level as well:
+
+```sh
+unshare --net -- ./replay-restore -input /isolated/input -home /isolated/new-home -trusted-app-hash E3770265509656FCB3752772DDDB54DC772C8CC9737B7A654C6A007142ACB378
+unshare --net -- ./replay-window -home /isolated/new-home -blocks /isolated/cached-rpc -from 34271001 -to 34271010
+```
+
+Keep the optional read-only RPC collector outside this network namespace. Retrieve bounded batches, retain canonical inputs and stop on source lag, excessive latency or response size. The application helper itself needs no network access.
 
 The block cache uses original Tendermint RPC envelopes named `HEIGHT.block.json` and `HEIGHT.validators.json`. Each replay block requires the prior height's validator set and the next block header. The runner validates block bodies, validator ordering, previous AppHash and the committed AppHash against the next canonical header. It includes canonical votes and Byzantine evidence, saves a checkpoint report after every successful block and requires application height to precede the next requested window. Cached validator sets are verified against the predecessor header hash and may be reused only when that hash is unchanged. Commit and nil votes both count as signed, matching CometBFT; only absent votes count as unsigned. Nonempty blocks require compact HEIGHT.results.json canonical transaction outcomes. A mismatch stops execution; do not continue from a failed committed checkpoint without restoring a clean copy.
 
 ## Evidence obtained
 
-On the reviewed reliability base at commit 6f9375335fefda08c3b66de64ef21c35030e1fe3, the existing mainnet snapshot restored with the exact trusted AppHash. All 569 contiguous blocks 34271001 through 34271569 matched canonical AppHashes. They include one real MsgSetOnline transaction and eight Ethereum transactions. Canonical transaction codes are checked, and the extended runner also verifies LastResultsHash (code, data and gas) against the next header. Contract implementation, owner and reward override were inspected on the isolated state.
+On runtime commit `8f1c8d43cc3fa0613404a7f5195309347467bf55`, a fresh Linux environment restored the existing mainnet snapshot with the exact trusted AppHash. The build used official Go 1.24.4, CGO and Ubuntu GCC 13.3, with no experimental IBC tag. Whole-module verification passed before and after helper builds, and the commit/nil/absent vote and checkpoint regression tests passed. Restore and replay helpers ran in separate network namespaces.
 
-This is a partial replay, not proof of the recovery at 34342701, full historical compatibility, EVM transaction coverage or activated reliability behavior. Rebuild and repeat the validation for the exact release candidate. Do not label a later revision verified merely because these commands passed on this base.
+All 7,070 contiguous blocks 34271001 through 34278070 matched canonical AppHashes and LastResultsHashes (code, data and gas). Canonical transaction codes also matched. This window contains one real MsgSetOnline transaction and 60 Ethereum transactions, including registry calls to delegateByPermit, delegateDEL, delegateHoldByPermit, hold, transfer and withdrawHold. These are observed historical calls; a Cosmos code of zero alone does not establish an empty EVM VmError. Contract implementation, owner and reward override were inspected on the isolated state.
+
+The imported checkpoint is `E3770265509656FCB3752772DDDB54DC772C8CC9737B7A654C6A007142ACB378` at 34271000. The verified checkpoint at 34278070 is `8858C306589DF2F5350AB84525F9CE9077770FEC3C3020B72F591F7C40CC968E`. The imported hash was compared with an independent official RPC endpoint. A later replay must independently confirm its terminal checkpoint as well.
+
+This remains a partial replay. It does not prove the recovery at 34342701, all EVM paths, activated reliability behavior, IBC production readiness or compatibility of a different release toolchain. The longer contiguous replay is still in progress. Rebuild and repeat the validation for the exact release runtime and toolchain. Earlier Windows results were superseded for dependency provenance by this clean Linux run; their shared module cache failed whole-module verification.
+
+For fault rehearsals, wait for the restore or window process to exit, then copy the closed disposable home to a separate location. Record its height, AppHash and build provenance and keep that source copy read-only. Never copy a live LevelDB directory or open the working replay database from another process.
 
 
 Long runs append verified records to replay-history.jsonl; the atomic JSON checkpoint contains only the current bounded window. Existing cumulative JSON history is seeded once, preserving all previous verified heights. The history stream is synced and an explicit window marker published at successful window completion. The runner checks database height and AppHash against the preceding checkpoint before resume. A crash between database commit and checkpoint publication requires investigation/rollback; it never silently skips unverified state.
