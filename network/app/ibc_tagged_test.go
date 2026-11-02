@@ -23,6 +23,8 @@ import (
 	clienttypes "github.com/cosmos/ibc-go/v10/modules/core/02-client/types"
 	channeltypes "github.com/cosmos/ibc-go/v10/modules/core/04-channel/types"
 	host "github.com/cosmos/ibc-go/v10/modules/core/24-host"
+	"github.com/cosmos/ibc-go/v10/modules/core/exported"
+	ibctm "github.com/cosmos/ibc-go/v10/modules/light-clients/07-tendermint"
 	"github.com/maxwell2010/go-smart-node/network/identity"
 	ibctesting "github.com/maxwell2010/go-smart-node/network/internal/ibcharness"
 	"github.com/stretchr/testify/require"
@@ -176,4 +178,35 @@ func TestOwnApplicationICS20TwoChains(t *testing.T) {
 	require.NoError(t, path.RelayPacket(packet), "original proved packet must remain relayable after rejected tampering")
 	require.Equal(t, beforeInvalidProof.Sub(nativeIBCTransactionFee.Amount), appA.BankKeeper.GetBalance(a.GetContext(), primary.SenderAccount.GetAddress(), identity.BaseDenom).Amount)
 	require.True(t, appA.BankKeeper.GetBalance(a.GetContext(), escrow, identity.BaseDenom).IsZero())
+
+	// A valid, committed packet proof must stop being usable when the actual
+	// Tendermint client expires. Advance real block time; never set a fake flag.
+	setSigner(primary)
+	msg = transfer.NewMsgTransfer(transfer.PortID, path.EndpointA.ChannelID, coin, primary.SenderAccount.GetAddress().String(), b.SenderAccount.GetAddress().String(), b.GetTimeoutHeight(), 0, "")
+	result, err = a.SendMsgs(msg)
+	require.NoError(t, err)
+	packet, err = ibctesting.ParsePacketFromEvents(result.Events)
+	require.NoError(t, err)
+	require.NoError(t, path.EndpointB.UpdateClient())
+	proof, proofHeight = a.QueryProof(host.PacketCommitmentKey(packet.SourcePort, packet.SourceChannel, packet.Sequence))
+	connection, found := appB.IBCKeeper.ConnectionKeeper.GetConnection(b.GetContext(), path.EndpointB.ConnectionID)
+	require.True(t, found)
+	require.NoError(t, appB.IBCKeeper.ConnectionKeeper.VerifyPacketCommitment(b.GetContext(), connection, proofHeight, proof, packet.SourcePort, packet.SourceChannel, packet.Sequence, channeltypes.CommitPacket(packet)), "the genuine proof must verify before expiration")
+	client := b.GetClientState(path.EndpointB.ClientID).(*ibctm.ClientState)
+	latestHeight := client.LatestHeight
+	coordinator.IncrementTimeBy(client.TrustingPeriod + time.Minute)
+	b.NextBlock()
+	require.Equal(t, exported.Expired, appB.IBCKeeper.ClientKeeper.GetClientStatus(b.GetContext(), path.EndpointB.ClientID))
+	beforeVoucher := appB.BankKeeper.GetBalance(b.GetContext(), b.SenderAccount.GetAddress(), denom)
+	result, err = b.SendMsgs(channeltypes.NewMsgRecvPacket(packet, proof, proofHeight, b.SenderAccount.GetAddress().String()))
+	require.Error(t, err)
+	require.NotNil(t, result)
+	require.Equal(t, clienttypes.ErrClientNotActive.ABCICode(), result.Code)
+	require.Equal(t, clienttypes.ErrClientNotActive.Codespace(), result.Codespace)
+	_, received = appB.IBCKeeper.ChannelKeeper.GetPacketReceipt(b.GetContext(), packet.DestinationPort, packet.DestinationChannel, packet.Sequence)
+	require.False(t, received)
+	require.Equal(t, beforeVoucher, appB.BankKeeper.GetBalance(b.GetContext(), b.SenderAccount.GetAddress(), denom))
+	require.Equal(t, coin.Amount, appA.BankKeeper.GetBalance(a.GetContext(), escrow, identity.BaseDenom).Amount)
+	require.Equal(t, channeltypes.CommitPacket(packet), appA.IBCKeeper.ChannelKeeper.GetPacketCommitment(a.GetContext(), packet.SourcePort, packet.SourceChannel, packet.Sequence))
+	require.Equal(t, latestHeight, b.GetClientState(path.EndpointB.ClientID).(*ibctm.ClientState).LatestHeight)
 }
