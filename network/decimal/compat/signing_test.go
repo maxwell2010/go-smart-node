@@ -9,7 +9,7 @@ import (
 	"github.com/cosmos/cosmos-sdk/codec/address"
 	codectypes "github.com/cosmos/cosmos-sdk/codec/types"
 	sdk "github.com/cosmos/cosmos-sdk/types"
-	"github.com/cosmos/cosmos-sdk/x/tx/signing"
+	"cosmossdk.io/x/tx/signing"
 	"github.com/cosmos/gogoproto/proto"
 	coin "github.com/maxwell2010/go-smart-node/network/decimal/coin/types"
 	"github.com/maxwell2010/go-smart-node/network/decimal/compat"

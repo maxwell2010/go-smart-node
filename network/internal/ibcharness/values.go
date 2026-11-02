@@ -1,12 +1,12 @@
-// Derived from ibc-go v11.2.0 testing/values.go, Apache-2.0.
+// Derived from ibc-go v10.7.0 testing/values.go, Apache-2.0.
 package ibctesting
 
 import (
 	"github.com/cometbft/cometbft/crypto/tmhash"
-	transfer "github.com/cosmos/ibc-go/v11/modules/apps/transfer/types"
-	connectiontypes "github.com/cosmos/ibc-go/v11/modules/core/03-connection/types"
-	commitmenttypes "github.com/cosmos/ibc-go/v11/modules/core/23-commitment/types"
-	ibctm "github.com/cosmos/ibc-go/v11/modules/light-clients/07-tendermint"
+	transfer "github.com/cosmos/ibc-go/v10/modules/apps/transfer/types"
+	connectiontypes "github.com/cosmos/ibc-go/v10/modules/core/03-connection/types"
+	commitmenttypes "github.com/cosmos/ibc-go/v10/modules/core/23-commitment/types"
+	ibctm "github.com/cosmos/ibc-go/v10/modules/light-clients/07-tendermint"
 	"time"
 )
 

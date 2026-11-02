@@ -5,7 +5,7 @@ import (
 
 	sdkmath "cosmossdk.io/math"
 	"github.com/cosmos/cosmos-sdk/runtime"
-	storetypes "github.com/cosmos/cosmos-sdk/store/v2/types"
+	storetypes "cosmossdk.io/store/types"
 	"github.com/cosmos/cosmos-sdk/testutil"
 	"github.com/maxwell2010/go-smart-node/network/decimal/compat"
 	"github.com/stretchr/testify/require"

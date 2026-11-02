@@ -19,5 +19,5 @@ func main() {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
 	}
-	fmt.Println("Upstream Cosmos EVM family wiring initialized in memory. Decimal feature port and runnable network daemon remain pending.")
+	fmt.Println("Owned Cosmos EVM application wiring initialized in memory. Full native feature parity and guarded daemon validation remain pending.")
 }

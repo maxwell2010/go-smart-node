@@ -1,4 +1,4 @@
-// Derived from cosmos/ibc-go v11.2.0 testing/utils.go. Apache-2.0; see LICENSE.
+// Derived from cosmos/ibc-go v10.7.0 testing/utils.go. Apache-2.0; see LICENSE.
 package ibctesting
 
 import (
