@@ -77,3 +77,48 @@ preservation through real signed transactions. Include deliberately missing,
 incorrect and unauthorized deployment states as failing cases. Keep ICS20
 send/return/refund and external-relayer tests passing against this same complete
 genesis before considering a full release.
+
+## Repository artifact inventory
+
+The current tree does not contain enough information to construct authentic
+bootstrap fixtures. `contracts/center/DecimalContractCenter.json` and
+`contracts/validator/DecimalMasterValidator.json` contain only ABI arrays.
+The same is true for DelegationNFT, TokenCenter, NFTCenter and the token/NFT
+implementation artifacts. Their generated Go metadata provides ABI, but no
+deployment bytecode or deployment function. No production Solidity source or
+deployment scripts accompany these files.
+
+The exception is `contracts/delegation/DecimalDelegation.json`: it contains
+Hardhat creation bytecode (23268 bytes) and runtime bytecode (23230 bytes), with
+empty link references. Its artifact SHA256 is
+`f4de3095b0bb70a689f742c2c3c5beb1da630114fd69195a2b6b31e0094aed59`.
+It names `contracts/DecimalDelegation.sol`, but that source and compiler build
+information are absent. The bytecode alone cannot establish the full network
+deployment or its storage initialization and authority guarantees.
+
+The following dependency edges are inferred from ABI and node usage, and must
+be confirmed against the real source and deployment scripts:
+
+| Component | Evidence | Bootstrap requirement |
+| --- | --- | --- |
+| ContractCenter | `getContractAddress`, `setContractAddress`, `owner`, `getImpl`, `upgrade` | Real deployment/proxy code, exact address, implementation, initialized owner and registry entries |
+| MasterValidator | `addValidatorDEL`, `getValidator`, `owner`, `getImpl`, `upgrade`; node queries registry slug `master-validator` | Real implementation/proxy and initialization, validator metadata consistent with native genesis, authority rules |
+| Delegation | `getContractCenter`, `setContractCenter`, `WETH`, `getFreezeTime`, `getImpl`, `upgrade` | Registry pointer, wrapped native token dependency, withdrawal configuration, real implementation/proxy storage |
+| DelegationNFT | `setContractCenter`, `getContractCenter`, `getFreezeTime`, `getImpl`, `upgrade` | Registry pointer, NFT implementation dependencies and authority initialization |
+| TokenCenter / NFTCenter | `initialize`, `setContractCenter` and node registry slugs | Center initialization, implementation addresses, metadata and reserve consistency |
+| Wrapped native token | Delegation exposes `WETH`; registry slug `wdel` | Actual source/artifact, constructor/initializer, native backing and accounting rules |
+
+`getImpl` and `upgrade` indicate implementation indirection, but ABI alone does
+not identify the proxy standard or storage slots. Writing guessed storage slots
+or putting a replacement registry contract at the fallback address would hide
+the bootstrap defect. Do not use the reliability regression mock contracts as
+deployment fixtures.
+
+The next required inputs are the pinned system-contract repository including
+proxy sources, compiler/optimizer settings and build metadata; a reproducible
+deployment manifest; initialization and ownership-transfer calldata; and the
+intended isolated-network authority model. Once obtained, create fixtures by
+executing the actual deployment/initialization code in an isolated genesis
+builder, verify hashes and storage through public getters, and export the
+resulting authentic EVM allocations. Only then rerun the strict fresh EVM gate
+and the broader validator/delegation integration matrix.
