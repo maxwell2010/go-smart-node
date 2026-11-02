@@ -2,7 +2,7 @@ name: Reliability Linux
 
 on:
   push:
-    branches: [master, stage, 'fix/**']
+    branches: [master, stage, 'fix/**', 'integration/**']
   pull_request:
   workflow_dispatch:
 
@@ -62,6 +62,11 @@ jobs:
           go test -mod=readonly -p 2 -count=1 -v -timeout 10m \
             ./app ./x/validator/keeper ./x/upgrade ./cmd/config \
             |& tee test-results/packages.log
+
+      - name: Test isolated ICS-20 protocol baseline
+        run: |
+          go test -mod=readonly -p 2 -count=1 -v -timeout 10m ./integration/ibclab \
+            |& tee test-results/ibc-protocol.log
 
       - name: Retain environment and test logs
         if: always()
