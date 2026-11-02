@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "recordedUtc": "2026-11-02T07:08:22.533736+00:00",
+  "recordedUtc": "2026-11-02T07:17:52.324686+00:00",
   "status": "upstream-application compatibility bootstrap; not a Decimal daemon or completed feature port",
   "module": "github.com/maxwell2010/go-smart-node/network",
   "repositoryParentRevision": "50df147e7056760fc8a52bbd2be57acd9853b922",
@@ -186,9 +186,13 @@
     }
   ],
   "evidenceScope": "Historical bootstrap snapshot; revalidate after network source or module changes.",
+  "binarySha256": {
+    "family-check": "1889316958f33f3c140a9fd20f3bf07625b3cbeeff1e0bb43ee05e15008025be",
+    "upstream-evmd-reference": "1550805085f4160cb86334ff1bb865e29c9662c192ee36d55ba0a243ef3e8d6d"
+  },
   "sourceFileSha256": {
     "go.mod": "7cd81d454fa04ee42dc24a247ca4829f2513e97390aba37ebef11887a0b0f4f5",
-    "go.sum": "f3ec4fc17d13df1f15abab5a9535b3077a7c51cbfd0acfff8b3e55bb27e45fc8",
+    "go.sum": "a5be27e8e6565c6e674f5dce46b84e8d8ee03cd1b15ed0cc399bb0c8ee7af3f4",
     "cmd/family-check/main.go": "7252059b5f396e02281d370fe83eea26a3a23c31682a89657b3bf9c4a3ffe340",
     "internal/family/probe.go": "f937f2eae856767b94ba35c44a692112902700dcda545e8bd838c25c6984561b",
     "internal/family/probe_test.go": "4914887bcedb2dbc7cc2cd934c08a086e4b42df2bf4b41dc9138f72eb096f93b"
@@ -210,7 +214,7 @@
     "result": "PASS",
     "wiringTest": "TestPatchedFamilyConstructsUpstreamApplication",
     "coverage": "constructs upstream ExampleApp in memory with non-nil EVM, IBC and ICS20 transfer keepers; no chain genesis or packets executed",
-    "binaryBuild": "in progress; separate build evidence pending",
+    "binaryBuild": "PASS: trimpath family-check build and execution; official upstream evmd reference CLI also compiled",
     "daemonReadiness": false,
     "transactionSubmission": false
   },
