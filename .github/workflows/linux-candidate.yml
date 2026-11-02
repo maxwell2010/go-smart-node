@@ -36,6 +36,8 @@ jobs:
         with:
           go-version: '1.24.4'
           cache: true
+      - name: Test SBOM parser
+        run: python3 -m unittest discover -s scripts/release -p "test_*.py"
       - name: Test application and isolated protocol baseline
         run: |
           mkdir -p candidate-logs

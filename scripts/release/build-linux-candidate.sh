@@ -70,11 +70,14 @@ not establish mainnet compatibility or authorize its use on production validator
 '''
 Path(sys.argv[1]).with_name('README.release.txt').write_text(notice)
 PY
+python3 scripts/release/generate_sbom.py "$stage/dscd" "$stage/SBOM.cdx.json" \
+  --revision "$revision" --flavor "$flavor" --version "$version"
+cp "$stage/SBOM.cdx.json" "$out/SBOM.cdx.json"
 # Version inspection uses a fresh disposable home and never starts consensus.
 mkdir "$stage/smoke-home"
 HOME="$stage/smoke-home" "$stage/dscd" version --long > "$out/version.txt"
 rm -rf -- "$stage/smoke-home"
 name="mintcandy-node-${version}-${flavor}-linux-amd64-${revision:0:12}.tar.gz"
-tar --sort=name --mtime="@$epoch" --owner=0 --group=0 --numeric-owner -C "$stage" -cf - dscd LICENSE README.release.txt BUILD.json | gzip -n > "$out/$name"
-(cd "$out" && sha256sum "$name" version.txt > SHA256SUMS)
+tar --sort=name --mtime="@$epoch" --owner=0 --group=0 --numeric-owner -C "$stage" -cf - dscd LICENSE README.release.txt BUILD.json SBOM.cdx.json | gzip -n > "$out/$name"
+(cd "$out" && sha256sum "$name" version.txt SBOM.cdx.json > SHA256SUMS)
 echo "$out/$name"
