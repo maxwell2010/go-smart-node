@@ -45,8 +45,11 @@ jobs:
           done
       - name: Test experimental DSC wiring and admission policy
         if: matrix.flavor == 'experimental_ibc'
+        env:
+          DSC_IBC_PROCESS_SMOKE: '1'
+          DSC_IBC_FIXTURE_DIR: '@test-temp'
         run: |
-          go test -mod=readonly -p 2 -count=1 -v -timeout 10m -tags experimental_ibc -run '^TestExperimental' ./app ./app/ante ./integrationconfig |& tee candidate-logs/experimental.log
+          go test -mod=readonly -p 2 -count=1 -v -timeout 10m -tags experimental_ibc -run '^(TestExperimental|TestExportIsolatedICS20Fixtures)' ./app ./app/ante ./integrationconfig |& tee candidate-logs/experimental.log
       - name: Build identical binaries and package source provenance
         env:
           CANDIDATE_VERSION: ${{ inputs.version || '0.1.0-alpha.1' }}
