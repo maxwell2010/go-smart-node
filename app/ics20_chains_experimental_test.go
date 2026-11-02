@@ -18,6 +18,7 @@ import (
 	ibcmock "github.com/cosmos/ibc-go/v6/testing/mock"
 	ibctestingtypes "github.com/cosmos/ibc-go/v6/testing/types"
 	ethsecp "github.com/decimalteam/ethermint/crypto/ethsecp256k1"
+	ethermint "github.com/decimalteam/ethermint/types"
 	evmtypes "github.com/decimalteam/ethermint/x/evm/types"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/stretchr/testify/require"
@@ -40,6 +41,10 @@ type dscIBCApp struct {
 func (a dscIBCApp) GetStakingKeeper() ibctestingtypes.StakingKeeper { return a.ValidatorKeeper }
 
 func newDSCChain(t *testing.T, c *ibctesting.Coordinator, id string, keys ...*ethsecp.PrivKey) *ibctesting.TestChain {
+	return newDSCChainAccount(t, c, id, false, keys...)
+}
+
+func newDSCChainAccount(t *testing.T, c *ibctesting.Coordinator, id string, ethereumAccount bool, keys ...*ethsecp.PrivKey) *ibctesting.TestChain {
 	pv := ibcmock.NewPV()
 	pub, err := pv.GetPubKey()
 	require.NoError(t, err)
@@ -49,7 +54,12 @@ func newDSCChain(t *testing.T, c *ibctesting.Coordinator, id string, keys ...*et
 	if len(keys) > 0 {
 		priv = keys[0]
 	}
-	acc := authtypes.NewBaseAccount(priv.PubKey().Address().Bytes(), priv.PubKey(), 0, 0)
+	var acc authtypes.GenesisAccount = authtypes.NewBaseAccount(priv.PubKey().Address().Bytes(), priv.PubKey(), 0, 0)
+	if ethereumAccount {
+		ethAcc := ethermint.ProtoAccount().(*ethermint.EthAccount)
+		ethAcc.BaseAccount = acc.(*authtypes.BaseAccount)
+		acc = ethAcc
+	}
 	bal := banktypes.Balance{Address: acc.GetAddress().String(), Coins: sdk.NewCoins(sdk.NewCoin(cmdcfg.BaseDenom, sdk.NewInt(1000000).Mul(sdk.NewInt(1000000000000000000))))}
 	home := t.TempDir()
 	require.NoError(t, os.MkdirAll(filepath.Join(home, "config"), 0700))
