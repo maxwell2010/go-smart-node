@@ -79,6 +79,11 @@ func fundedTestGenesis(t *testing.T, a *App, vals *cmttypes.ValidatorSet, accoun
 }
 
 func assertOwnApplicationConstructorAndGenesis(t *testing.T, a *App) {
+	basics := NewBasicModuleManager()
+	require.Len(t, basics, len(a.ModuleManager.Modules))
+	for name := range a.ModuleManager.Modules {
+		require.Contains(t, basics, name)
+	}
 	require.NotNil(t, a.EVMKeeper)
 	require.NotNil(t, a.IBCKeeper)
 	require.NotNil(t, a.TransferKeeper)
@@ -95,6 +100,20 @@ func assertOwnApplicationConstructorAndGenesis(t *testing.T, a *App) {
 	var evm evmtypes.GenesisState
 	a.AppCodec().MustUnmarshalJSON(g[evmtypes.ModuleName], &evm)
 	require.Equal(t, identity.BaseDenom, evm.Params.EvmDenom)
+}
+
+func TestStaticEncodingAndGenesisWithoutApplication(t *testing.T) {
+	before := evmtypes.GetChainConfig()
+	for _, evmID := range []uint64{990001, 990002} {
+		config := MakeEncodingConfig(evmID)
+		for _, url := range []string{"/cosmos.evm.vm.v1.MsgEthereumTx", "/ibc.applications.transfer.v1.MsgTransfer", "/cosmos.bank.v1beta1.MsgSend"} {
+			_, err := config.InterfaceRegistry.Resolve(url)
+			require.NoError(t, err)
+		}
+		genesis := DefaultGenesis(config.Codec)
+		require.NoError(t, NewBasicModuleManager().ValidateGenesis(config.Codec, config.TxConfig, genesis))
+	}
+	require.True(t, before == evmtypes.GetChainConfig(), "stateless CLI configuration must never initialize or replace the EVM keeper chain singleton")
 }
 
 func TestOwnApplicationRejectsLegacyAndMismatchedDomains(t *testing.T) {

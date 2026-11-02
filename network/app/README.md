@@ -6,6 +6,12 @@ under the Apache-2.0 license retained in this directory. It wires EVM,
 IBC11 clients/router, ICS20 and the upstream callback middleware directly.
 It does not wrap an upstream `NewExampleApp` instance.
 
+CLI commands can use `NewBasicModuleManager()`, `MakeEncodingConfig(evmID)` and
+`DefaultGenesis(codec)` without constructing an application or touching the EVM
+chain singleton. The constructor uses the same static module/codec factories;
+tests check module-set parity and stateless genesis validation. Importing this
+package installs and seals the fixed SDK address/coin-type configuration.
+
 The constructor and InitChain reject legacy Decimal signing domains and require
 matching `mintcandy_<evm-id>-<revision>` and EVM IDs. SDK address prefixes are
 fixed to `d0` and sealed. Default genesis uses `del`, has no preminted balances,

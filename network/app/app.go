@@ -25,7 +25,6 @@ import (
 	dbm "github.com/cosmos/cosmos-db"
 	evmante "github.com/cosmos/evm/ante"
 	antetypes "github.com/cosmos/evm/ante/types"
-	evmencoding "github.com/cosmos/evm/encoding"
 	evmaddress "github.com/cosmos/evm/encoding/address"
 	evmconfig "github.com/cosmos/evm/evmd/config"
 	evmmempool "github.com/cosmos/evm/mempool"
@@ -119,6 +118,7 @@ import (
 	"github.com/cosmos/cosmos-sdk/x/gov"
 	govkeeper "github.com/cosmos/cosmos-sdk/x/gov/keeper"
 	govtypes "github.com/cosmos/cosmos-sdk/x/gov/types"
+	govv1 "github.com/cosmos/cosmos-sdk/x/gov/types/v1"
 	"github.com/cosmos/cosmos-sdk/x/mint"
 	mintkeeper "github.com/cosmos/cosmos-sdk/x/mint/keeper"
 	minttypes "github.com/cosmos/cosmos-sdk/x/mint/types"
@@ -229,7 +229,7 @@ func NewApp(
 	if err := identity.ValidateChainIDs(chainID, evmChainID); err != nil {
 		panic(err)
 	}
-	encodingConfig := evmencoding.MakeConfig(evmChainID)
+	encodingConfig := MakeEncodingConfig(evmChainID)
 
 	appCodec := encodingConfig.Codec
 	legacyAmino := encodingConfig.Amino
@@ -615,17 +615,7 @@ func NewApp(
 	// non-dependant module elements, such as codec registration and genesis verification.
 	// By default, it is composed of all the modules from the module manager.
 	// Additionally, app module basics can be overwritten by passing them as an argument.
-	app.BasicModuleManager = module.NewBasicManagerFromManager(
-		app.ModuleManager,
-		map[string]module.AppModuleBasic{
-			genutiltypes.ModuleName:     genutil.NewAppModuleBasic(genutiltypes.DefaultMessageValidator),
-			stakingtypes.ModuleName:     staking.AppModuleBasic{},
-			govtypes.ModuleName:         gov.NewAppModuleBasic(nil),
-			ibctransfertypes.ModuleName: transfer.AppModuleBasic{},
-		},
-	)
-	app.BasicModuleManager.RegisterLegacyAminoCodec(legacyAmino)
-	app.BasicModuleManager.RegisterInterfaces(interfaceRegistry)
+	app.BasicModuleManager = NewBasicModuleManager()
 
 	// NOTE: upgrade module is required to be prioritized
 	app.ModuleManager.SetOrderPreBlockers(
@@ -941,30 +931,45 @@ func (app *App) TxConfig() client.TxConfig {
 
 // DefaultGenesis returns a default genesis from the registered AppModuleBasic's.
 func (app *App) DefaultGenesis() map[string]json.RawMessage {
-	genesis := app.BasicModuleManager.DefaultGenesis(app.appCodec)
+	return DefaultGenesis(app.appCodec)
+}
+
+// DefaultGenesis returns the same owned genesis defaults for stateless CLI
+// commands and live application initialization, without constructing an app.
+func DefaultGenesis(cdc codec.Codec) map[string]json.RawMessage {
+	genesis := NewBasicModuleManager().DefaultGenesis(cdc)
 
 	mintGenState := NewMintGenesisState()
-	genesis[minttypes.ModuleName] = app.appCodec.MustMarshalJSON(mintGenState)
+	genesis[minttypes.ModuleName] = cdc.MustMarshalJSON(mintGenState)
 
 	evmGenState := NewEVMGenesisState()
-	genesis[evmtypes.ModuleName] = app.appCodec.MustMarshalJSON(evmGenState)
+	genesis[evmtypes.ModuleName] = cdc.MustMarshalJSON(evmGenState)
 
 	// NOTE: for the example chain implementation we are also adding a default token pair,
 	// which is the base denomination of the chain (i.e. the WEVMOS contract)
 	erc20GenState := NewErc20GenesisState()
-	genesis[erc20types.ModuleName] = app.appCodec.MustMarshalJSON(erc20GenState)
+	genesis[erc20types.ModuleName] = cdc.MustMarshalJSON(erc20GenState)
 	var stakingGenesis stakingtypes.GenesisState
-	app.appCodec.MustUnmarshalJSON(genesis[stakingtypes.ModuleName], &stakingGenesis)
+	cdc.MustUnmarshalJSON(genesis[stakingtypes.ModuleName], &stakingGenesis)
 	stakingGenesis.Params.BondDenom = identity.BaseDenom
-	genesis[stakingtypes.ModuleName] = app.appCodec.MustMarshalJSON(&stakingGenesis)
+	genesis[stakingtypes.ModuleName] = cdc.MustMarshalJSON(&stakingGenesis)
 	var bankGenesis banktypes.GenesisState
-	app.appCodec.MustUnmarshalJSON(genesis[banktypes.ModuleName], &bankGenesis)
+	cdc.MustUnmarshalJSON(genesis[banktypes.ModuleName], &bankGenesis)
 	bankGenesis.DenomMetadata = []banktypes.Metadata{{
 		Description: "Native token of the separate MintCandy network",
 		Base:        identity.BaseDenom, Display: "DEL", Name: "Native DEL", Symbol: "DEL",
 		DenomUnits: []*banktypes.DenomUnit{{Denom: identity.BaseDenom, Exponent: 0}, {Denom: "DEL", Exponent: 18}},
 	}}
-	genesis[banktypes.ModuleName] = app.appCodec.MustMarshalJSON(&bankGenesis)
+	genesis[banktypes.ModuleName] = cdc.MustMarshalJSON(&bankGenesis)
+	var govGenesis govv1.GenesisState
+	cdc.MustUnmarshalJSON(genesis[govtypes.ModuleName], &govGenesis)
+	for i := range govGenesis.Params.MinDeposit {
+		govGenesis.Params.MinDeposit[i].Denom = identity.BaseDenom
+	}
+	for i := range govGenesis.Params.ExpeditedMinDeposit {
+		govGenesis.Params.ExpeditedMinDeposit[i].Denom = identity.BaseDenom
+	}
+	genesis[govtypes.ModuleName] = cdc.MustMarshalJSON(&govGenesis)
 
 	return genesis
 }
