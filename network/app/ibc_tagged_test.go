@@ -23,7 +23,7 @@ import (
 	clienttypes "github.com/cosmos/ibc-go/v11/modules/core/02-client/types"
 	channeltypes "github.com/cosmos/ibc-go/v11/modules/core/04-channel/types"
 	host "github.com/cosmos/ibc-go/v11/modules/core/24-host"
-	ibctesting "github.com/cosmos/ibc-go/v11/testing"
+	ibctesting "github.com/maxwell2010/go-smart-node/network/internal/ibcharness"
 	"github.com/maxwell2010/go-smart-node/network/identity"
 	"github.com/stretchr/testify/require"
 )
