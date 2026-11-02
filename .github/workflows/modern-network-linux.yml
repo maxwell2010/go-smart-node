@@ -51,9 +51,13 @@ jobs:
           go mod verify |& tee validation-logs/module-integrity.log
       - name: Test modern module and native feature port
         run: go test -mod=readonly -p 2 -count=1 -v -timeout 10m ./... |& tee validation-logs/tests.log
+      - name: Test owned application ICS20 with test-only configuration isolation
+        run: go test -mod=readonly -p 2 -count=1 -v -timeout 10m -tags test -run '^TestOwnApplicationICS20TwoChains$' ./app |& tee validation-logs/ics20-unit.log
       - name: Build and execute memory-only family probe
         run: |
           go build -mod=readonly -p 2 -trimpath -o "$RUNNER_TEMP/family-check" ./cmd/family-check
+          go version -m "$RUNNER_TEMP/family-check" > validation-logs/family-check-build.log
+          sha256sum "$RUNNER_TEMP/family-check" >> validation-logs/family-check-build.log
           "$RUNNER_TEMP/family-check" |& tee validation-logs/family-check.log
       - name: Test security capture evidence
         working-directory: .
