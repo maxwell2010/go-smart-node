@@ -33,6 +33,10 @@ func (a *Adapter) IterateBondedValidatorsByPower(ctx context.Context, fn func(in
 	if e := a.guard(ctx); e != nil {
 		return e
 	}
+	return a.iterateValidators(fn)
+}
+
+func (a *Adapter) iterateValidators(fn func(int64, stakingtypes.ValidatorI) bool) error {
 	for i, v := range a.validators {
 		pk, e := v.native.ConsensusPubKey()
 		if e != nil {
@@ -65,6 +69,10 @@ func (a *Adapter) IterateDelegations(ctx context.Context, delegator sdk.AccAddre
 	if e := a.guard(ctx); e != nil {
 		return e
 	}
+	return a.iterateDelegations(delegator, fn)
+}
+
+func (a *Adapter) iterateDelegations(delegator sdk.AccAddress, fn func(int64, stakingtypes.DelegationI) bool) error {
 	owner, e := address.NewBech32Codec(identity.Bech32PrefixAccAddr).BytesToString(delegator)
 	if e != nil {
 		return e

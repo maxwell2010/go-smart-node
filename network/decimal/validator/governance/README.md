@@ -67,17 +67,17 @@ such positions. A valuation ID is an audit identifier, not authentication of an
 untrusted source; application configuration must choose a reviewed source.
 
 Source reads execute in a disposable SDK cache. Their native-state writes cause
-an error, and no child writes/events are committed. Every adapter read verifies
-the native record digest and chain/height again, preventing stale parent/child
-cache snapshots or mixed tally states. The snapshot is captured at tally time,
-not at proposal creation. Repeated full-export guards are intentionally strict;
-production gas/performance policy needs review or a genuine transactional native
-revision mechanism before wiring large validator/delegator sets.
-An immutable snapshot must not be installed once at application startup and
-reused across heights. Application wiring needs a reviewed per-tally session,
-including multiple proposals whose execution changes native state in one block.
-The SDK tally tests construct one governance keeper around each tested snapshot;
-they do not claim a completed long-lived application session mechanism.
+an error, and no child writes/events are committed. The low-level `Adapter`
+verifies its native record digest on every read and is intended for an explicit
+immutable tally-time snapshot, not a long-lived application dependency.
+
+[Scoped sessions](SESSIONS.md) provide the staged SDK53 lifecycle: a fresh
+snapshot at validator iteration, indexed ownership reads per voter and one final
+native fingerprint check at total/close. Canonical EndBlock and read-only v1
+tally-query wrappers are tested across multiple proposals and same-height native
+changes. Application route/module wiring, production gas sizing and any legacy
+query boundary still require deliberate integration; no global weight cache is
+introduced.
 
 ## Verified scope and remaining gates
 
