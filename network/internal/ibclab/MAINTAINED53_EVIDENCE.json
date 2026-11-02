@@ -1,0 +1,108 @@
+{
+  "schema_version": 1,
+  "component": "isolated classic ICS20 process interoperability",
+  "result": "TWO_PROCESS_HERMES_PASS",
+  "overall_release_ready": false,
+  "date_utc": "2026-11-02",
+  "harness_commit": "4ddc2a3584aa2dec61a68001ac4cf28c71da6903",
+  "source_report_sha256": "a069e968a6663355d59253ba216e744b7a7af898dcd7747a3862cf9cdc26ef9a",
+  "binaries": {
+    "reference": {
+      "sha256": "29f9d9188439750a7eae2e3e8574dc32ad2c4e4693cf990af7b037d28f70aa72",
+      "source_commit": "c911426c280024f7462e6a5946d5cf258717a4e2"
+    },
+    "hermes": {
+      "sha256": "ed8d57781f57a93e74259c12c8feee661b9633c882307f3a6236e41dbf5ffe35",
+      "official_release": "v1.13.3"
+    },
+    "mcnd": {
+      "sha256": "e2d72ed9b86bacf2adae903db428ae59ce80bec940841f410698cbabd2aa4612",
+      "source_commit": "21e1c205daaf7564d316a9e130f129d93c36cc83"
+    }
+  },
+  "hermes_reported_version": "hermes 1.13.2+bab3b80",
+  "compiled_node_family": {
+    "go": "1.26.10",
+    "sdk": "0.53.8",
+    "cometbft": "0.38.26",
+    "ibc-go": "10.7.0",
+    "cosmos-evm": "0.6.3",
+    "geth_effective_replacement": "github.com/cosmos/go-ethereum v1.16.2-cosmos-1"
+  },
+  "channels": {
+    "a": "channel-0",
+    "b": "channel-0"
+  },
+  "phases": {
+    "client_connection_channel_handshake": {
+      "status": "PASS",
+      "owned_tx_count": 6,
+      "counterparty_tx_count": 6,
+      "owned_fee_raw_del": 791890000000000,
+      "counterparty_fee_raw_stake": 24021,
+      "charged_gas_positive": true
+    },
+    "native_send": {
+      "status": "PASS",
+      "owned_tx_count": 2,
+      "counterparty_tx_count": 1,
+      "owned_fee_raw_del": 314242000000000,
+      "counterparty_fee_raw_stake": 6629,
+      "charged_gas_positive": true
+    },
+    "voucher_return": {
+      "status": "PASS",
+      "owned_tx_count": 1,
+      "counterparty_tx_count": 2,
+      "owned_fee_raw_del": 204142000000000,
+      "counterparty_fee_raw_stake": 7608,
+      "charged_gas_positive": true
+    },
+    "pending_packet_restart": {
+      "status": "PASS",
+      "owned_tx_count": 2,
+      "counterparty_tx_count": 1,
+      "owned_fee_raw_del": 296570000000000,
+      "counterparty_fee_raw_stake": 5748,
+      "charged_gas_positive": true,
+      "preserved_packets": [
+        {
+          "sequence": 2,
+          "commitment": "7e9c9dd8f7faf171216fd46c5b9653d5761bf64cd247caef8bf19a856f1a0b7a"
+        }
+      ]
+    },
+    "error_ack_refund": {
+      "status": "PASS",
+      "owned_tx_count": 2,
+      "counterparty_tx_count": 1,
+      "owned_fee_raw_del": 326027000000000,
+      "counterparty_fee_raw_stake": 4523,
+      "charged_gas_positive": true,
+      "error_ack_sequence": 3
+    },
+    "timeout_refund": {
+      "status": "PASS",
+      "owned_tx_count": 2,
+      "counterparty_tx_count": 0,
+      "owned_fee_raw_del": 331813000000000,
+      "counterparty_fee_raw_stake": 0,
+      "charged_gas_positive": true,
+      "timeout_sequence": 4,
+      "packet_timeout_timestamp": 1793618119511200509
+    }
+  },
+  "not_proven": [
+    "native Decimal financial/validator parity",
+    "system-contract bootstrap",
+    "module migration",
+    "IBC client upgrade",
+    "SDK major-version upgrade"
+  ],
+  "safety": {
+    "network": "private Linux namespace, loopback only, no routes",
+    "public_transactions": false,
+    "fixture_keys_or_genesis_included": false,
+    "homes": "fresh temporary homes only; removed after child shutdown"
+  }
+}
