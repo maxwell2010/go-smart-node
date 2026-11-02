@@ -60,6 +60,8 @@ func newDSCChain(t *testing.T, c *ibctesting.Coordinator, id string) *ibctesting
 	gs[evmtypes.ModuleName] = app.AppCodec().MustMarshalJSON(evmGenesis)
 	state, err := json.Marshal(gs)
 	require.NoError(t, err)
+	g.AppState = state
+	require.NoError(t, g.SaveAs(filepath.Join(home, "config", "genesis.json")))
 	app.InitChain(abci.RequestInitChain{ChainId: id, ConsensusParams: dsctest.DefaultConsensusParams, AppStateBytes: state})
 	header := tmproto.Header{ChainID: id, Height: 1, Time: c.CurrentTime, ProposerAddress: pub.Address()}
 	chain := &ibctesting.TestChain{T: t, Coordinator: c, App: dscIBCApp{DSC: app, home: home, db: db}, ChainID: id, CurrentHeader: header, QueryServer: app.IBCKeeper, TxConfig: app.GetTxConfig(), Codec: app.AppCodec(), Vals: vals, NextVals: vals, Signers: map[string]tmtypes.PrivValidator{pub.Address().String(): pv}, SenderPrivKey: priv, SenderAccount: acc, SenderAccounts: []ibctesting.SenderAccount{{SenderPrivKey: priv, SenderAccount: acc}}}
