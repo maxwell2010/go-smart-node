@@ -60,7 +60,7 @@ jobs:
       - name: Test all affected packages
         run: |
           go test -mod=readonly -p 2 -count=1 -v -timeout 10m \
-            ./app ./x/validator/keeper ./x/upgrade ./cmd/config \
+            ./app ./app/ante ./integrationconfig ./x/validator/keeper ./x/upgrade ./cmd/config \
             |& tee test-results/packages.log
 
       - name: Test isolated ICS-20 protocol baseline
