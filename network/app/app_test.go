@@ -214,4 +214,7 @@ func TestFreshOwnApplicationSignedNativeEVMTransfer(t *testing.T) {
 	t.Run("bounded_precompile_financial_rollback", func(t *testing.T) {
 		checkBoundedFinancialRollback(t, a, ethKey, valSet, now)
 	})
+	t.Run("proposer_coinbase_address", func(t *testing.T) {
+		checkCoinbaseOpcode(t, a, ethKey, valSet, now)
+	})
 }

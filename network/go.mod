@@ -1,5 +1,8 @@
 module github.com/maxwell2010/go-smart-node/network
 
+// Owned source correction and canonical provenance: third_party/cosmos-evm/UPSTREAM.json.
+replace github.com/cosmos/evm => ./third_party/cosmos-evm
+
 go 1.26.10
 
 require (
