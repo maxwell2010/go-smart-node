@@ -15,17 +15,24 @@ import (
 	ibcmock "github.com/cosmos/ibc-go/v6/testing/mock"
 	ibctestingtypes "github.com/cosmos/ibc-go/v6/testing/types"
 	ethsecp "github.com/decimalteam/ethermint/crypto/ethsecp256k1"
+	evmtypes "github.com/decimalteam/ethermint/x/evm/types"
+	"github.com/ethereum/go-ethereum/common"
 	"github.com/stretchr/testify/require"
 	abci "github.com/tendermint/tendermint/abci/types"
 	tmproto "github.com/tendermint/tendermint/proto/tendermint/types"
 	tmtypes "github.com/tendermint/tendermint/types"
+	dbm "github.com/tendermint/tm-db"
 	"os"
 	"path/filepath"
 	"testing"
 	"time"
 )
 
-type dscIBCApp struct{ *DSC }
+type dscIBCApp struct {
+	*DSC
+	home string
+	db   dbm.DB
+}
 
 func (a dscIBCApp) GetStakingKeeper() ibctestingtypes.StakingKeeper { return a.ValidatorKeeper }
 
@@ -42,14 +49,17 @@ func newDSCChain(t *testing.T, c *ibctesting.Coordinator, id string) *ibctesting
 	require.NoError(t, os.MkdirAll(filepath.Join(home, "config"), 0700))
 	g := tmtypes.GenesisDoc{ChainID: id, GenesisTime: c.CurrentTime, ConsensusParams: tmtypes.DefaultConsensusParams(), AppState: json.RawMessage(`{}`)}
 	require.NoError(t, g.SaveAs(filepath.Join(home, "config", "genesis.json")))
-	app, _ := reliabilityOpen(t, home)
+	app, db := reliabilityOpen(t, home)
 	gs, err := dsctest.GenesisStateWithValSet(app.AppCodec(), NewDefaultGenesisState(app.AppCodec()), vals, []authtypes.GenesisAccount{acc}, bal)
 	require.NoError(t, err)
+	evmGenesis := evmtypes.DefaultGenesisState()
+	evmGenesis.Params.EvmDenom = cmdcfg.BaseDenom
+	gs[evmtypes.ModuleName] = app.AppCodec().MustMarshalJSON(evmGenesis)
 	state, err := json.Marshal(gs)
 	require.NoError(t, err)
 	app.InitChain(abci.RequestInitChain{ChainId: id, ConsensusParams: dsctest.DefaultConsensusParams, AppStateBytes: state})
 	header := tmproto.Header{ChainID: id, Height: 1, Time: c.CurrentTime, ProposerAddress: pub.Address()}
-	chain := &ibctesting.TestChain{T: t, Coordinator: c, App: dscIBCApp{app}, ChainID: id, CurrentHeader: header, QueryServer: app.IBCKeeper, TxConfig: app.GetTxConfig(), Codec: app.AppCodec(), Vals: vals, NextVals: vals, Signers: map[string]tmtypes.PrivValidator{pub.Address().String(): pv}, SenderPrivKey: priv, SenderAccount: acc, SenderAccounts: []ibctesting.SenderAccount{{SenderPrivKey: priv, SenderAccount: acc}}}
+	chain := &ibctesting.TestChain{T: t, Coordinator: c, App: dscIBCApp{DSC: app, home: home, db: db}, ChainID: id, CurrentHeader: header, QueryServer: app.IBCKeeper, TxConfig: app.GetTxConfig(), Codec: app.AppCodec(), Vals: vals, NextVals: vals, Signers: map[string]tmtypes.PrivValidator{pub.Address().String(): pv}, SenderPrivKey: priv, SenderAccount: acc, SenderAccounts: []ibctesting.SenderAccount{{SenderPrivKey: priv, SenderAccount: acc}}}
 	app.BeginBlock(abci.RequestBeginBlock{Header: header})
 	c.CommitBlock(chain)
 	return chain
@@ -71,15 +81,32 @@ func TestExperimentalICS20TwoDSCChains(t *testing.T) {
 	c.Setup(p)
 	coin := sdk.NewInt64Coin(cmdcfg.BaseDenom, 100)
 	bankA := a.App.(dscIBCApp).BankKeeper
+	checkNative := func(chain *ibctesting.TestChain, addr sdk.AccAddress) {
+		dsc := chain.App.(dscIBCApp)
+		bankBalance := dsc.BankKeeper.GetBalance(chain.GetContext(), addr, cmdcfg.BaseDenom).Amount.BigInt()
+		evmBalance := dsc.EvmKeeper.GetBalance(chain.GetContext(), common.BytesToAddress(addr.Bytes()))
+		require.Equal(t, bankBalance, evmBalance, "native bank and EVM views must represent one balance")
+	}
+	checkNative(a, a.SenderAccount.GetAddress())
 	before := bankA.GetBalance(a.GetContext(), a.SenderAccount.GetAddress(), coin.Denom).Amount
 
 	msg := transfer.NewMsgTransfer(transfer.PortID, p.EndpointA.ChannelID, coin, a.SenderAccount.GetAddress().String(), b.SenderAccount.GetAddress().String(), b.GetTimeoutHeight(), 0, "")
 	result, err := a.SendMsgs(msg)
 	require.NoError(t, err)
 	after := bankA.GetBalance(a.GetContext(), a.SenderAccount.GetAddress(), coin.Denom).Amount
+	checkNative(a, a.SenderAccount.GetAddress())
 	require.True(t, before.Sub(after).GT(coin.Amount), "signed send must deduct a nonzero native fee in addition to escrow")
 	packet, err := ibctesting.ParsePacketFromEvents(result.GetEvents())
 	require.NoError(t, err)
+	// Restart the real sender application after commit but before relaying.
+	old := a.App.(dscIBCApp)
+	committed := old.LastCommitID()
+	require.NoError(t, old.db.Close())
+	reopened, reopenedDB := reliabilityOpen(t, old.home)
+	require.Equal(t, committed, reopened.LastCommitID())
+	a.App = dscIBCApp{DSC: reopened, home: old.home, db: reopenedDB}
+	reopened.BeginBlock(abci.RequestBeginBlock{Header: a.CurrentHeader})
+	bankA = reopened.BankKeeper
 	require.NoError(t, p.RelayPacket(packet))
 	voucher := transfer.GetTransferCoin(transfer.PortID, p.EndpointB.ChannelID, coin.Denom, coin.Amount)
 	require.Equal(t, voucher, b.App.(dscIBCApp).BankKeeper.GetBalance(b.GetContext(), b.SenderAccount.GetAddress(), voucher.Denom))
@@ -91,6 +118,8 @@ func TestExperimentalICS20TwoDSCChains(t *testing.T) {
 	require.NoError(t, p.RelayPacket(returnPacket))
 	escrow := transfer.GetEscrowAddress(transfer.PortID, p.EndpointA.ChannelID)
 	require.True(t, bankA.GetBalance(a.GetContext(), escrow, coin.Denom).IsZero())
+	checkNative(a, a.SenderAccount.GetAddress())
+	checkNative(a, escrow)
 	require.True(t, b.App.(dscIBCApp).BankKeeper.GetSupply(b.GetContext(), voucher.Denom).IsZero())
 
 	badMsg := transfer.NewMsgTransfer(transfer.PortID, p.EndpointA.ChannelID, coin, a.SenderAccount.GetAddress().String(), "invalid-receiver", b.GetTimeoutHeight(), 0, "")
@@ -100,6 +129,8 @@ func TestExperimentalICS20TwoDSCChains(t *testing.T) {
 	require.NoError(t, err)
 	require.NoError(t, p.RelayPacket(badPacket))
 	require.True(t, bankA.GetBalance(a.GetContext(), escrow, coin.Denom).IsZero())
+	checkNative(a, a.SenderAccount.GetAddress())
+	checkNative(a, escrow)
 
 	timedMsg := transfer.NewMsgTransfer(transfer.PortID, p.EndpointA.ChannelID, coin, a.SenderAccount.GetAddress().String(), b.SenderAccount.GetAddress().String(), clienttypes.ZeroHeight(), uint64(c.CurrentTime.Add(time.Minute).UnixNano()), "")
 	timedResult, err := a.SendMsgs(timedMsg)
@@ -111,5 +142,7 @@ func TestExperimentalICS20TwoDSCChains(t *testing.T) {
 	require.NoError(t, p.EndpointA.UpdateClient())
 	require.NoError(t, p.EndpointA.TimeoutPacket(timedPacket))
 	require.True(t, bankA.GetBalance(a.GetContext(), escrow, coin.Denom).IsZero())
+	checkNative(a, a.SenderAccount.GetAddress())
+	checkNative(a, escrow)
 
 }
