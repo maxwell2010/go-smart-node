@@ -19,6 +19,9 @@ func protectEthereumDomain(next sdk.AnteHandler, evmID uint64) sdk.AnteHandler {
 			if !ok {
 				continue
 			}
+			if eth == nil {
+				return ctx, sdkerrors.ErrUnauthorized.Wrap("missing Ethereum envelope")
+			}
 			raw := eth.AsTransaction()
 			if raw == nil || !raw.Protected() || raw.ChainId().Cmp(expected) != 0 {
 				return ctx, sdkerrors.ErrUnauthorized.Wrap("a protected Ethereum signature for this network's EVM chain ID is required")

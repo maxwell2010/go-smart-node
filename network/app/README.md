@@ -26,6 +26,10 @@ owned application rejects unprotected legacy signatures as fixed network
 policy. Production-tag tests submit chain 75, a different EVM ID and both legacy
 v27/v28 signatures in the same block before a valid transfer, checking rejection,
 exact recipient credit, unchanged invalid-transaction nonce and exact sender fee.
+This guard covers direct Ethereum envelopes. Static review of the pinned
+canonical native ante confirms its existing authz limiter rejects Ethereum
+messages in grants/exec; the current module set has no group module. These
+observations do not certify every possible future privileged dispatch route.
 
 The current application still uses canonical SDK staking, distribution and
 slashing as temporary constructor dependencies. It does not implement Decimal
