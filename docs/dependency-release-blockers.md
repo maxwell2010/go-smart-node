@@ -141,3 +141,12 @@ Fixed versions are only those recorded for the affected modules present in the s
 `python -m unittest discover -s scripts/audit -p "test_*.py"`
 
 The source scan is retained in the local validation artifacts, not embedded in the repository. The script emits advisory counts, module provenance, fixed versions, entrypoints and shortest static paths. JSON-mode scanner exit zero alone is not an advisory-free result.
+
+
+## Standalone security gate
+
+`python scripts/audit/govuln_gate.py SCAN.json --scanner-exit-code STATUS`
+
+Pass the actual scanner process exit status, not an assumed zero. The gate requires a symbol-level scan and one supported configuration record. It returns 1 for deduplicated symbol advisory IDs even when govulncheck JSON mode returned zero, 2 for scanner failure or invalid/truncated/missing input, and 0 only for a successfully completed scanner process with no symbol findings. It does not accept a module-only scan as evidence of clean symbol reachability. There are no automatic exclusions.
+
+This standalone tool is not wired as an obligatory red integration CI check. It is a release decision aid; pass it the exact production entrypoint/flavor and toolchain to be released. Static findings still need exposure triage, and no findings alone does not prove exploit absence.
