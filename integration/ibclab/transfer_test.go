@@ -5,6 +5,7 @@ import (
 	transfer "github.com/cosmos/ibc-go/v6/modules/apps/transfer/types"
 	client "github.com/cosmos/ibc-go/v6/modules/core/02-client/types"
 	channel "github.com/cosmos/ibc-go/v6/modules/core/04-channel/types"
+	host "github.com/cosmos/ibc-go/v6/modules/core/24-host"
 	ibctesting "github.com/cosmos/ibc-go/v6/testing"
 	"github.com/stretchr/testify/require"
 	"testing"
@@ -92,4 +93,25 @@ func TestICS20TimeoutRefund(t *testing.T) {
 	// Duplicate timeout may be accepted as an idempotent no-op by this IBC version.
 	_ = a.TimeoutPacket(packet)
 	require.Equal(t, before, bank.GetBalance(a.Chain.GetContext(), sender, coin.Denom))
+}
+
+func TestICS20RejectsAlteredPacketProof(t *testing.T) {
+	_, p := setup(t)
+	a, b := p.EndpointA, p.EndpointB
+	receiver := b.Chain.SenderAccount.GetAddress()
+	coin := sdk.NewInt64Coin(sdk.DefaultBondDenom, 100)
+	packet := send(t, a, b, coin, receiver.String(), 0)
+	altered := packet
+	altered.Data = append(append([]byte(nil), packet.Data...), byte(' '))
+	require.NoError(t, b.UpdateClient())
+	// RecvPacket verifies a source commitment proof against altered packet bytes.
+	proof, height := a.Chain.QueryProof(host.PacketCommitmentKey(packet.SourcePort, packet.SourceChannel, packet.Sequence))
+	cap := b.Chain.GetChannelCapability(b.ChannelConfig.PortID, b.ChannelID)
+	ctx, _ := b.Chain.GetContext().CacheContext()
+	err := b.Chain.App.GetIBCKeeper().ChannelKeeper.RecvPacket(ctx, cap, altered, proof, height)
+	require.ErrorContains(t, err, "failed packet commitment verification")
+	voucher := transfer.GetTransferCoin(b.ChannelConfig.PortID, b.ChannelID, coin.Denom, coin.Amount)
+	require.True(t, b.Chain.GetSimApp().BankKeeper.GetBalance(b.Chain.GetContext(), receiver, voucher.Denom).IsZero())
+	require.NoError(t, p.RelayPacket(packet))
+	require.Equal(t, voucher, b.Chain.GetSimApp().BankKeeper.GetBalance(b.Chain.GetContext(), receiver, voucher.Denom))
 }
