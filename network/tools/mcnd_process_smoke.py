@@ -26,18 +26,39 @@ assert state['mint']['params']['mint_denom']=='del'
 assert float(state['mint']['params']['inflation_max'])==0
 assert state['bank']['balances']==[]
 report['checks'].append('owned empty-balance del genesis and inert generic mint')
-key=json.loads(run(['keys','add','validator','--key-type','secp256k1','--coin-type','60','--keyring-backend','test','--output','json'],True))
+key=json.loads(run(['keys','add','validator','--coin-type','60','--keyring-backend','test','--output','json'],True))
 address=key['address']; assert address.startswith('d0')
+public=key['pubkey']; public=json.loads(public) if isinstance(public,str) else public
+assert 'ethsecp256k1' in public['@type'],public['@type']
+alphabet='qpzry9x8gf2tvdw0s3jn54khce6mua7l'
+hrp,encoded=address.rsplit('1',1);assert hrp=='d0'
+bits=''.join(f'{alphabet.index(c):05b}' for c in encoded[:-6]);assert len(bits)==160
+eth_address='0x'+bytes(int(bits[n:n+8],2) for n in range(0,160,8)).hex()
+report['operatorAddress']=address;report['operatorEthereumAddress']=eth_address
+report['operatorKeyType']='eth_secp256k1';report['relayerKeyType']='secp256k1'
 receiver=json.loads(run(['keys','add','receiver','--key-type','secp256k1','--coin-type','60','--keyring-backend','test','--output','json'],True))['address']
 run(['genesis','add-genesis-account',address,'1000000000000000000000000del'])
 run(['genesis','gentx','validator','1000000000000000000del','--chain-id',chain,'--keyring-backend','test'])
 run(['genesis','collect-gentxs'])
 run(['genesis','validate-genesis'])
-report['checks'].append('native secp256k1 key, funded genesis and signed validator gentx')
+report['checks'].append('Ethereum operator key with coin60, funded genesis and native signed validator gentx')
 start=['start','--chain-id',chain,'--evm.evm-chain-id',evm,'--rpc.laddr','tcp://127.0.0.1:28657','--p2p.laddr','tcp://127.0.0.1:28656','--grpc.address','127.0.0.1:9190','--api.enable=false','--grpc-web.enable=false','--json-rpc.enable=true','--json-rpc.address','127.0.0.1:8645','--json-rpc.ws-address','127.0.0.1:8646','--log_level','error']
+def bank_balance(owner):
+ balances=json.loads(run(['query','bank','balances',owner,'--node','tcp://127.0.0.1:28657','--output','json']))
+ return next((int(c['amount']) for c in balances['balances'] if c['denom']=='del'),0)
+def account_sequence(owner):
+ account=json.loads(run(['query','auth','account',owner,'--node','tcp://127.0.0.1:28657','--output','json']))['account']
+ return int(account['sequence'])
+def evm_nonce(owner):
+ req=urllib.request.Request('http://127.0.0.1:8645',data=json.dumps({'jsonrpc':'2.0','id':1,'method':'eth_getTransactionCount','params':[owner,'latest']}).encode(),headers={'Content-Type':'application/json'})
+ with urllib.request.urlopen(req,timeout=2) as response:return int(json.load(response)['result'],16)
 def operate(target, label):
  log=open(home/(label+'.log'),'w')
- p=subprocess.Popen([binary,*start,'--home',str(home)],stdout=log,stderr=log)
+ effective=list(start)
+ if label=='restart':
+  for flag in ['--chain-id','--evm.evm-chain-id']:
+   position=effective.index(flag);del effective[position:position+2]
+ p=subprocess.Popen([binary,*effective,'--home',str(home)],stdout=log,stderr=log)
  try:
   deadline=time.monotonic()+100
   while time.monotonic()<deadline:
@@ -50,6 +71,8 @@ def operate(target, label):
      with urllib.request.urlopen(req,timeout=2) as response: assert int(json.load(response)['result'],16)==int(evm)
      report['checks'].append(label+' actual height '+str(height)+' and eth_chainId '+evm)
      if label=='first-start':
+      sender_before=bank_balance(address);nonce_before=account_sequence(address)
+      assert evm_nonce(eth_address)==nonce_before,'native and EVM APIs do not identify the same operator account'
       sent=json.loads(run(['tx','bank','send','validator',receiver,'123del','--chain-id',chain,'--evm.evm-chain-id',evm,'--node','tcp://127.0.0.1:28657','--keyring-backend','test','--fees','1000000000000000000del','--gas','200000','--broadcast-mode','sync','--output','json','--yes']))
       assert int(sent.get('code',0))==0,sent
       txhash=sent['txhash']; committed=False
@@ -62,9 +85,11 @@ def operate(target, label):
        except OSError:pass
        time.sleep(.3)
       assert committed,'native CLI bank transaction was not committed'
-      balances=json.loads(run(['query','bank','balances',receiver,'--node','tcp://127.0.0.1:28657','--output','json']))
-      assert next(int(c['amount']) for c in balances['balances'] if c['denom']=='del')==123,balances
-      report['checks'].append('native bank CLI signing/broadcast/commit and stateless AutoCLI balance query')
+      assert bank_balance(receiver)==123
+      assert sender_before-bank_balance(address)==1000000000000000000+123,'operator debit must equal exact native fee plus transferred value'
+      assert account_sequence(address)==nonce_before+1
+      assert evm_nonce(eth_address)==nonce_before+1,'native signature must advance the same Ethereum operator account nonce'
+      report['checks'].append('Ethereum operator signs native bank tx; exact fee/value debit, receiver balance and SDK/EVM shared nonce')
      return height
    except (OSError,ValueError,KeyError): pass
    time.sleep(.3)

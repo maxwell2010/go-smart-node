@@ -35,13 +35,13 @@ mkdir -p build
 CGO_ENABLED=1 go build -mod=readonly -trimpath -p 1 -o build/mcnd ./cmd/mcnd
 ```
 
-For a new local network, the following creates test funds and a validator in a separate lab home. The example IDs are disposable lab values. The `test` keyring backend is used only for these newly generated lab keys.
+For a new local network, the following creates test funds and a validator in a separate lab home. The example IDs are disposable lab values. The `test` keyring backend is used only for these newly generated lab keys. `keys add` defaults to `eth_secp256k1`. Operator and governance-owner templates use `eth_secp256k1` with coin type 60, so their native `d0` address and Ethereum EOA share the same 20 bytes. IBC relayers use a separate native Cosmos `secp256k1` fixture; its RIPEMD address is not an Ethereum operator address.
 
 ```sh
 MCND="$PWD/build/mcnd"
 NODE_HOME="$HOME/.mcnd-lab-990001"
 "$MCND" init local --home "$NODE_HOME" --chain-id mintcandy_990001-1 --evm.evm-chain-id 990001
-"$MCND" keys add operator --home "$NODE_HOME" --key-type secp256k1 --coin-type 60 --keyring-backend test
+"$MCND" keys add operator --home "$NODE_HOME" --key-type eth_secp256k1 --coin-type 60 --keyring-backend test
 ADDRESS=$("$MCND" keys show operator --home "$NODE_HOME" --keyring-backend test -a)
 "$MCND" genesis add-genesis-account "$ADDRESS" 1000000000000000000000000del --home "$NODE_HOME"
 "$MCND" genesis gentx operator 1000000000000000000del --home "$NODE_HOME" --chain-id mintcandy_990001-1 --keyring-backend test

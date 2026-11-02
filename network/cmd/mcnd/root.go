@@ -83,6 +83,9 @@ func NewRootCmd() *cobra.Command {
 				return err
 			}
 			if guarded {
+				if err := bindResolvedDomainFlags(cmd, chainID, evmID); err != nil {
+					return err
+				}
 				initClientCtx = initClientCtx.WithChainID(chainID)
 			}
 			initClientCtx, err = clientcfg.ReadFromClientConfig(initClientCtx)
@@ -373,6 +376,20 @@ func defaultNodeHome() string {
 }
 func safeKeyCommands() *cobra.Command {
 	cmd := keys.Commands()
+	add, _, err := cmd.Find([]string{"add"})
+	if err != nil {
+		panic(err)
+	}
+	// Operators use Ethereum account bytes by default. Native Cosmos relayers
+	// explicitly request --key-type secp256k1 in their separate fixture.
+	keyType := add.Flags().Lookup("key-type")
+	if keyType == nil {
+		panic("SDK keys add has no key-type flag")
+	}
+	if err := keyType.Value.Set("eth_secp256k1"); err != nil {
+		panic(err)
+	}
+	keyType.DefValue = "eth_secp256k1"
 	for _, sub := range cmd.Commands() {
 		switch sub.Name() {
 		case "export", "import", "rename", "unsafe-export-eth-key":

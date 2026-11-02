@@ -62,7 +62,20 @@ func enhanceModuleCommands(root *cobra.Command, ctx client.Context, basics modul
 	// These public SDK command constructors need only client address codecs.
 	// Their AppModuleBasic zero values hold unexported codec fields, so do not
 	// call those Basic GetTxCmd methods or fabricate an account keeper for CLI.
-	tx.AddCommand(bankcli.NewTxCmd(accountCodec), stakingcli.NewTxCmd(validatorCodec, accountCodec), distrcli.NewTxCmd(validatorCodec, accountCodec), vestingcli.GetTxCmd(accountCodec), authzcli.GetTxCmd(accountCodec), feegrantcli.GetTxCmd(accountCodec), vmcli.NewTxCmd(accountCodec))
+	manual := map[string]func() *cobra.Command{
+		"bank":         func() *cobra.Command { return bankcli.NewTxCmd(accountCodec) },
+		"staking":      func() *cobra.Command { return stakingcli.NewTxCmd(validatorCodec, accountCodec) },
+		"distribution": func() *cobra.Command { return distrcli.NewTxCmd(validatorCodec, accountCodec) },
+		"vesting":      func() *cobra.Command { return vestingcli.GetTxCmd(accountCodec) },
+		"authz":        func() *cobra.Command { return authzcli.GetTxCmd(accountCodec) },
+		"feegrant":     func() *cobra.Command { return feegrantcli.GetTxCmd(accountCodec) },
+		"evm":          func() *cobra.Command { return vmcli.NewTxCmd(accountCodec) },
+	}
+	for name, constructor := range manual {
+		if basics[name] != nil {
+			tx.AddCommand(constructor())
+		}
+	}
 	providers := map[string]any{
 		"auth": auth.AppModule{}, "bank": bank.AppModule{}, "staking": staking.AppModule{},
 		"distribution": distr.AppModule{}, "gov": gov.AppModule{}, "mint": mint.AppModule{},
@@ -71,8 +84,20 @@ func enhanceModuleCommands(root *cobra.Command, ctx client.Context, basics modul
 		"evm": vm.AppModule{}, "erc20": erc20.AppModule{}, "feemarket": feemarket.AppModule{},
 		"ibc": ibc.AppModule{}, "transfer": transfer.AppModule{},
 	}
+	// Native module basics may provide their own stateless descriptors. The
+	// registered module set, rather than this fallback list, defines exposure.
+	for name, basic := range basics {
+		if _, ok := basic.(interface {
+			AutoCLIOptions() *autocliv1.ModuleOptions
+		}); ok {
+			providers[name] = basic
+		}
+	}
 	options := map[string]*autocliv1.ModuleOptions{}
 	for name, provider := range providers {
+		if basics[name] == nil {
+			continue
+		}
 		if descriptor, ok := provider.(interface {
 			AutoCLIOptions() *autocliv1.ModuleOptions
 		}); ok {

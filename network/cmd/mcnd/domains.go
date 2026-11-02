@@ -105,3 +105,17 @@ func addDomainFlags(cmd *cobra.Command) {
 		addDomainFlags(sub)
 	}
 }
+
+// Legacy SDK command bodies sometimes read flags directly instead of the
+// resolved client context. Keep those values bound to the validated home,
+// including an EVM ID loaded from app.toml rather than supplied on the CLI.
+func bindResolvedDomainFlags(cmd *cobra.Command, chainID string, evmID uint64) error {
+	for name, value := range map[string]string{flags.FlagChainID: chainID, srvflags.EVMChainID: strconv.FormatUint(evmID, 10)} {
+		if flag := cmd.Flag(name); flag != nil && !flag.Changed {
+			if err := flag.Value.Set(value); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}

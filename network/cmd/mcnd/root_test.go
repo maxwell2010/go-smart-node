@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	sdkversion "github.com/cosmos/cosmos-sdk/version"
+	srvflags "github.com/cosmos/evm/server/flags"
 	evmtypes "github.com/cosmos/evm/x/vm/types"
 	ownedapp "github.com/maxwell2010/go-smart-node/network/app"
 	"github.com/spf13/cobra"
@@ -31,6 +32,9 @@ func TestCommandTreeDoesNotConstructApplication(t *testing.T) {
 			}
 		}
 		rejectDownloader(root)
+		keyAdd, _, err := root.Find([]string{"keys", "add"})
+		require.NoError(t, err)
+		require.Equal(t, "eth_secp256k1", keyAdd.Flag("key-type").Value.String())
 		keys, _, err := root.Find([]string{"keys"})
 		require.NoError(t, err)
 		for _, command := range keys.Commands() {
@@ -55,4 +59,14 @@ func TestDaemonUsesItsOwnApplicationIdentity(t *testing.T) {
 	require.Equal(t, "MintCandy", sdkversion.Name)
 	require.Equal(t, buildVersion, sdkversion.Version)
 	require.Equal(t, buildCommit, sdkversion.Commit)
+}
+
+func TestCommandFlagsUseValidatedPersistedDomain(t *testing.T) {
+	root := NewRootCmd()
+	start, _, err := root.Find([]string{"start"})
+	require.NoError(t, err)
+	require.NoError(t, bindResolvedDomainFlags(start, "mintcandy_990002-1", 990002))
+	require.Equal(t, "990002", start.Flag(srvflags.EVMChainID).Value.String())
+	require.Equal(t, "mintcandy_990002-1", start.Flag("chain-id").Value.String())
+	require.False(t, start.Flag(srvflags.EVMChainID).Changed)
 }
