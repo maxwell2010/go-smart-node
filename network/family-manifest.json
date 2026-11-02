@@ -1,0 +1,233 @@
+{
+  "schemaVersion": 1,
+  "recordedUtc": "2026-11-02T07:08:22.533736+00:00",
+  "status": "upstream-application compatibility bootstrap; not a Decimal daemon or completed feature port",
+  "module": "github.com/maxwell2010/go-smart-node/network",
+  "repositoryParentRevision": "50df147e7056760fc8a52bbd2be57acd9853b922",
+  "upstream": {
+    "repository": "https://github.com/cosmos/evm",
+    "tag": "v0.7.3",
+    "commit": "c3ae9067a7eadcdea55a5192226916deb44c71c4",
+    "nestedExampleModule": "github.com/cosmos/evm/evmd",
+    "nestedExampleVersion": "v0.0.0-20260903174530-c3ae9067a7ea",
+    "rootModuleExplicitlySelected": "github.com/cosmos/evm v0.7.3",
+    "replacementInheritance": "Dependency replacements are not inherited; local go.mod explicitly preserves the official replacement set with the published cosmos geth -1 patch."
+  },
+  "goToolchain": "go version go1.26.10 linux/amd64",
+  "goArchiveSha256": "ccfe7ae822d2c2f41f4fe7c956199967a4dac22d0ee0d2b2bfdb440aab3b20c5",
+  "goArchiveSource": "https://go.dev/dl/?mode=json&include=all",
+  "selectedModules": [
+    {
+      "importModule": "github.com/cosmos/evm",
+      "selectedRequireVersion": "v0.7.3",
+      "goModuleChecksum": "h1:20lfSIAtjjllv8pGWYX5P0YRC1NdxGGt1y+daIymh8Y=",
+      "effectiveModule": {
+        "path": "github.com/cosmos/evm",
+        "version": "v0.7.3",
+        "goModuleChecksum": "h1:20lfSIAtjjllv8pGWYX5P0YRC1NdxGGt1y+daIymh8Y="
+      }
+    },
+    {
+      "importModule": "github.com/cosmos/evm/evmd",
+      "selectedRequireVersion": "v0.0.0-20260903174530-c3ae9067a7ea",
+      "goModuleChecksum": "h1:g3urBlsE3LpxAL+shwSYu3FsasT8IBHoW/tVbnjWKFI=",
+      "effectiveModule": {
+        "path": "github.com/cosmos/evm/evmd",
+        "version": "v0.0.0-20260903174530-c3ae9067a7ea",
+        "goModuleChecksum": "h1:g3urBlsE3LpxAL+shwSYu3FsasT8IBHoW/tVbnjWKFI="
+      }
+    },
+    {
+      "importModule": "github.com/cosmos/cosmos-sdk",
+      "selectedRequireVersion": "v0.54.4",
+      "goModuleChecksum": "h1:wAnD6LSv9fQRu079n/tGGUA/dMvNmzFhlCJM8qkFSHM=",
+      "effectiveModule": {
+        "path": "github.com/cosmos/cosmos-sdk",
+        "version": "v0.54.4",
+        "goModuleChecksum": "h1:wAnD6LSv9fQRu079n/tGGUA/dMvNmzFhlCJM8qkFSHM="
+      }
+    },
+    {
+      "importModule": "github.com/cosmos/cosmos-sdk/store/v2",
+      "selectedRequireVersion": "v2.0.0",
+      "goModuleChecksum": "h1:5CFXBU5cHIvxMpz5QBrTwR5DL/W3uZL2BYYMoDp4siY=",
+      "effectiveModule": {
+        "path": "github.com/cosmos/cosmos-sdk/store/v2",
+        "version": "v2.0.0",
+        "goModuleChecksum": "h1:5CFXBU5cHIvxMpz5QBrTwR5DL/W3uZL2BYYMoDp4siY="
+      }
+    },
+    {
+      "importModule": "github.com/cometbft/cometbft",
+      "selectedRequireVersion": "v0.39.4",
+      "goModuleChecksum": "h1:Bm7xbN18VfNueEd7cZumACbvVE+Lf9N58sz3oBOVPbw=",
+      "effectiveModule": {
+        "path": "github.com/cometbft/cometbft",
+        "version": "v0.39.4",
+        "goModuleChecksum": "h1:Bm7xbN18VfNueEd7cZumACbvVE+Lf9N58sz3oBOVPbw="
+      }
+    },
+    {
+      "importModule": "github.com/cosmos/ibc-go/v11",
+      "selectedRequireVersion": "v11.2.0",
+      "goModuleChecksum": "h1:CgCJYCwf3FlA9U3IovQq/q7lfTJ0pll3GgqWAwWO0wY=",
+      "effectiveModule": {
+        "path": "github.com/cosmos/ibc-go/v11",
+        "version": "v11.2.0",
+        "goModuleChecksum": "h1:CgCJYCwf3FlA9U3IovQq/q7lfTJ0pll3GgqWAwWO0wY="
+      }
+    },
+    {
+      "importModule": "github.com/ethereum/go-ethereum",
+      "selectedRequireVersion": "v1.16.8",
+      "goModuleChecksum": null,
+      "effectiveModule": {
+        "path": "github.com/cosmos/go-ethereum",
+        "version": "v1.17.2-cosmos-1",
+        "goModuleChecksum": "h1:X1Ln0NzGajUJ7Cuvgoj6i/604RqPww2A9BX0ozSJrj8="
+      }
+    },
+    {
+      "importModule": "cosmossdk.io/math",
+      "selectedRequireVersion": "v1.5.3",
+      "goModuleChecksum": "h1:WH6tu6Z3AUCeHbeOSHg2mt9rnoiUWVWaQ2t6Gkll96U=",
+      "effectiveModule": {
+        "path": "cosmossdk.io/math",
+        "version": "v1.5.3",
+        "goModuleChecksum": "h1:WH6tu6Z3AUCeHbeOSHg2mt9rnoiUWVWaQ2t6Gkll96U="
+      }
+    },
+    {
+      "importModule": "google.golang.org/grpc",
+      "selectedRequireVersion": "v1.85.0",
+      "goModuleChecksum": "h1:BPBCfuVRQ1qvBhKDOq9uvQllMvO59rKsYhXpp7Dd8vw=",
+      "effectiveModule": {
+        "path": "google.golang.org/grpc",
+        "version": "v1.85.0",
+        "goModuleChecksum": "h1:BPBCfuVRQ1qvBhKDOq9uvQllMvO59rKsYhXpp7Dd8vw="
+      }
+    },
+    {
+      "importModule": "golang.org/x/crypto",
+      "selectedRequireVersion": "v0.58.0",
+      "goModuleChecksum": "h1:COkYLr4k7nDI4r6QtMML2AfzeIswWHAJthLS6K/M/54=",
+      "effectiveModule": {
+        "path": "golang.org/x/crypto",
+        "version": "v0.58.0",
+        "goModuleChecksum": "h1:COkYLr4k7nDI4r6QtMML2AfzeIswWHAJthLS6K/M/54="
+      }
+    },
+    {
+      "importModule": "golang.org/x/net",
+      "selectedRequireVersion": "v0.62.0",
+      "goModuleChecksum": "h1:18ELalfM5+XNRwzM2nYqXsZQ9ByS1uhj2O/U7+5jqRY=",
+      "effectiveModule": {
+        "path": "golang.org/x/net",
+        "version": "v0.62.0",
+        "goModuleChecksum": "h1:18ELalfM5+XNRwzM2nYqXsZQ9ByS1uhj2O/U7+5jqRY="
+      }
+    },
+    {
+      "importModule": "golang.org/x/text",
+      "selectedRequireVersion": "v0.43.0",
+      "goModuleChecksum": "h1:1QivrlhwAsnMOcqgOdl9my7s9OyZl8O5/UGUTJVXoWc=",
+      "effectiveModule": {
+        "path": "golang.org/x/text",
+        "version": "v0.43.0",
+        "goModuleChecksum": "h1:1QivrlhwAsnMOcqgOdl9my7s9OyZl8O5/UGUTJVXoWc="
+      }
+    }
+  ],
+  "declaredReplacements": [
+    {
+      "Old": {
+        "Path": "github.com/99designs/keyring"
+      },
+      "New": {
+        "Path": "github.com/cosmos/keyring",
+        "Version": "v1.2.0"
+      }
+    },
+    {
+      "Old": {
+        "Path": "github.com/ethereum/go-ethereum"
+      },
+      "New": {
+        "Path": "github.com/cosmos/go-ethereum",
+        "Version": "v1.17.2-cosmos-1"
+      }
+    },
+    {
+      "Old": {
+        "Path": "github.com/gin-gonic/gin"
+      },
+      "New": {
+        "Path": "github.com/gin-gonic/gin",
+        "Version": "v1.9.1"
+      }
+    },
+    {
+      "Old": {
+        "Path": "github.com/syndtr/goleveldb"
+      },
+      "New": {
+        "Path": "github.com/syndtr/goleveldb",
+        "Version": "v1.0.1-0.20210819022825-2ae1ddf74ef7"
+      }
+    },
+    {
+      "Old": {
+        "Path": "github.com/tidwall/btree"
+      },
+      "New": {
+        "Path": "github.com/cosmos/btree",
+        "Version": "v0.0.0-20250924232609-2c6195d95951"
+      }
+    }
+  ],
+  "evidenceScope": "Historical bootstrap snapshot; revalidate after network source or module changes.",
+  "sourceFileSha256": {
+    "go.mod": "7cd81d454fa04ee42dc24a247ca4829f2513e97390aba37ebef11887a0b0f4f5",
+    "go.sum": "f3ec4fc17d13df1f15abab5a9535b3077a7c51cbfd0acfff8b3e55bb27e45fc8",
+    "cmd/family-check/main.go": "7252059b5f396e02281d370fe83eea26a3a23c31682a89657b3bf9c4a3ffe340",
+    "internal/family/probe.go": "f937f2eae856767b94ba35c44a692112902700dcda545e8bd838c25c6984561b",
+    "internal/family/probe_test.go": "4914887bcedb2dbc7cc2cd934c08a086e4b42df2bf4b41dc9138f72eb096f93b"
+  },
+  "validation": {
+    "moduleIntegrityBeforeTest": "PASS: all modules verified",
+    "command": [
+      "go",
+      "test",
+      "-mod=readonly",
+      "-p",
+      "1",
+      "-count=1",
+      "-v",
+      "-timeout",
+      "10m",
+      "./..."
+    ],
+    "result": "PASS",
+    "wiringTest": "TestPatchedFamilyConstructsUpstreamApplication",
+    "coverage": "constructs upstream ExampleApp in memory with non-nil EVM, IBC and ICS20 transfer keepers; no chain genesis or packets executed",
+    "binaryBuild": "in progress; separate build evidence pending",
+    "daemonReadiness": false,
+    "transactionSubmission": false
+  },
+  "security": {
+    "state": "pending modern reference source and binary scans",
+    "exclusions": [],
+    "forkCoverageLimitation": "govulncheck queries the replacement module path. The cosmos/go-ethereum fork is not automatically matched against upstream ethereum/go-ethereum advisories. Review upstream inheritance and backports independently; a clean fork scan is not proof of patched geth.",
+    "scannerImplementation": "https://go.googlesource.com/vuln/+/refs/tags/v1.9.0/internal/vulncheck/fetch.go",
+    "cosmosGethPatchReference": "https://github.com/cosmos/go-ethereum/compare/v1.17.2-cosmos-0...v1.17.2-cosmos-1"
+  },
+  "remainingFeatureWork": [
+    "Decimal native coin, reserves and conversion formulas",
+    "NFT ownership and delegation",
+    "native validator selection, delegation and rewards with explicit staking adapter",
+    "Decimal EVM contract and event compatibility",
+    "fresh isolated chain identity and genesis",
+    "guarded local daemon CLI",
+    "actual EVM and cross-chain behavioral tests"
+  ]
+}
