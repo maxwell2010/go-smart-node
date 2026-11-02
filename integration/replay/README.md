@@ -2,6 +2,8 @@
 
 These tools operate only on local copies. They never start consensus, connect peers, sign transactions or open a production database. The window runner disables the default Go HTTP transport to stop legacy upgrade downloads during replay.
 
+This is a reference harness for the legacy mainnet runtime. The separate modern-network module has its own genesis, dependencies and release gates. Legacy replay results, including a newer Go toolchain comparison, do not certify that new network binary or its dependency graph.
+
 ## Verified input and limits
 
 The restore helper currently targets snapshot height 34271000, format 2, chunks 0 through 12. Supply immutable chunk files under `INPUT/snapshots/34271000/2/` and the matching public genesis under `INPUT/config/genesis.json`. Derive trusted AppHash from canonical block 34271001, because a header records the preceding committed application's hash. Compare checkpoints from independent endpoints.
@@ -28,15 +30,16 @@ The block cache uses original Tendermint RPC envelopes named `HEIGHT.block.json`
 
 ## Evidence obtained
 
-On runtime commit `8f1c8d43cc3fa0613404a7f5195309347467bf55`, a fresh Linux environment restored the existing mainnet snapshot with the exact trusted AppHash. The build used official Go 1.24.4, CGO and Ubuntu GCC 13.3, with no experimental IBC tag. Whole-module verification passed before and after helper builds, and the commit/nil/absent vote and checkpoint regression tests passed. Restore and replay helpers ran in separate network namespaces.
+The completed legacy mainnet reference covers all 71,701 contiguous blocks
+34271001 through 34342701 and 862 canonical transactions on both Linux Go 1.24.4
+and Go 1.26.10. State/result hashes and transaction codes matched, and the final
+AppHash matched an independent official header. A documented preceding-plan
+registration bridge was required before the recovery height; this is not a
+single-binary or modern-network certification claim.
 
-All 7,070 contiguous blocks 34271001 through 34278070 matched canonical AppHashes and LastResultsHashes (code, data and gas). Canonical transaction codes also matched. This window contains one real MsgSetOnline transaction and 60 Ethereum transactions, including registry calls to delegateByPermit, delegateDEL, delegateHoldByPermit, hold, transfer and withdrawHold. These are observed historical calls; a Cosmos code of zero alone does not establish an empty EVM VmError. Contract implementation, owner and reward override were inspected on the isolated state.
-
-The imported checkpoint is `E3770265509656FCB3752772DDDB54DC772C8CC9737B7A654C6A007142ACB378` at 34271000. The verified checkpoint at 34278070 is `8858C306589DF2F5350AB84525F9CE9077770FEC3C3020B72F591F7C40CC968E`. The imported hash was compared with an independent official RPC endpoint. A later replay must independently confirm its terminal checkpoint as well.
-
-This remains a partial replay. It does not prove the recovery at 34342701, all EVM paths, activated reliability behavior, IBC production readiness or compatibility of a different release toolchain. The longer contiguous replay is still in progress. Rebuild and repeat the validation for the exact release runtime and toolchain. Earlier Windows results were superseded for dependency provenance by this clean Linux run; their shared module cache failed whole-module verification.
-
-For fault rehearsals, wait for the restore or window process to exit, then copy the closed disposable home to a separate location. Record its height, AppHash and build provenance and keep that source copy read-only. Never copy a live LevelDB directory or open the working replay database from another process.
-
+See [the final evidence record](MAINNET_RECOVERY_EVIDENCE.md) for exact source,
+linker flags, binary hashes, execution ranges, contract transition, closed-copy
+handoff and ABCI-output limitations. Keep those qualifications with any summary
+of the successful replay.
 
 Long runs append verified records to replay-history.jsonl; the atomic JSON checkpoint contains only the current bounded window. Existing cumulative JSON history is seeded once, preserving all previous verified heights. The history stream is synced and an explicit window marker published at successful window completion. The runner checks database height and AppHash against the preceding checkpoint before resume. A crash between database commit and checkpoint publication requires investigation/rollback; it never silently skips unverified state.
