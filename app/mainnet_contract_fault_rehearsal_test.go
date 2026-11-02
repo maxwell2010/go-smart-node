@@ -184,11 +184,17 @@ func TestMainnetSystemContractFaultRehearsal(t *testing.T) {
 	payload, err := legacyABI.Pack("delegateDEL", validator)
 	require.NoError(t, err)
 	amount := big.NewInt(100_000_000_000_000_000)
-	baseline, _ := deliver(target, amount, payload)
+	baselineBeforeSender := dsc.EvmKeeper.GetBalance(context(), from)
+	baselineBeforeContract := dsc.EvmKeeper.GetBalance(context(), target)
+	baseline, baselineFee := deliver(target, amount, payload)
 	if !dsc.ValidatorKeeper.LegacyDelegationEventsEnabled(context()) {
 		require.Equal(t, evmtypes.ErrPostTxProcessing.Error(), baseline.VmError)
 		require.Error(t, hooks.lastError)
 		require.Contains(t, hooks.lastError.Error(), "financial contract emitted unknown event")
+		require.Equal(t, baselineFee, new(big.Int).Sub(baselineBeforeSender, dsc.EvmKeeper.GetBalance(context(), from)), "real pre-recovery event error must refund all stake value and charge only the exact gas fee")
+		require.Equal(t, baselineBeforeContract, dsc.EvmKeeper.GetBalance(context(), target))
+		_, found := dsc.ValidatorKeeper.GetDelegation(context(), account.GetAddress(), validatorAddress, cmdcfg.BaseDenom)
+		require.False(t, found, "rejected genuine event must not create a native delegation")
 		t.Logf("pre-recovery activation incompatibility confirmed: %v", hooks.lastError)
 		if os.Getenv("DSC_REQUIRE_MAINNET_CONTRACT_FAULT_REHEARSAL") == "1" {
 			t.Fatal("fault rehearsal gate requires an actual post-recovery snapshot with committed legacy-event migration; do not set the flag manually")
