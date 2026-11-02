@@ -51,7 +51,23 @@ patches; a fresh modern network requires its own genesis and financial tests.
 
 Verified: local default go test ./... completed successfully with the legacy public-devnet diagnostic explicitly opt-in. Linux validation and both candidate artifact jobs passed for commit be3cf30, including explicit whole-module verification, two independent DSC OS processes and source-built official rly v2.6.0, signed native DEL send/return, exact native credit to a distinct return recipient, bounded positive gas and actual native fee debit. Candidate archives include checksums, build provenance and a CycloneDX SBOM validated against pinned official schemas. These are development artifacts, not a production release.
 
-A verified pre-upgrade mainnet snapshot was restored at height34271000 using exact runtime 8f1c8d4, independently downloaded Go1.24.4 and a fresh Linux module cache. Whole-module verification passed before and after helper builds. The first 7,070 blocks through34278070 passed every AppHash, LastResultsHash and canonical transaction-code check, including 60 EVM transactions and one native transaction. Actual inputs include delegation, held delegation and withdrawal calls. Continuation is in progress; the recovery height itself is not yet covered. The replay harness maps NIL votes exactly as Tendermint does. Progress beyond this documented checkpoint requires local replay evidence rather than inference from a running process. This is not yet proof for a different compiler or dependency graph.
+Legacy mainnet reference replay completed 71,701 contiguous blocks
+(34271001-34342701) and 862 canonical transactions on clean Linux Go 1.24.4 and
+Go 1.26.10. State/result hashes and transaction codes matched, including an
+independent official terminal header. Explicit preceding-plan registration
+bridges were required before recovery, with the original binaries selected at
+the recovery height. Whole-module verification passed before and after builds.
+This is legacy state/transaction-result evidence, not complete ABCI-output or
+modern-network certification. See the
+[exact replay provenance and limitations](../integration/replay/MAINNET_RECOVERY_EVIDENCE.md).
+
+The strict post-upgrade actual-contract test also passed on a disposable copy
+of the closed restored state. A genuine delegation event failure rolled back
+native delegation, contract state and transaction value while retaining the
+exact gas fee. The actual auto-unbond test passed partial failure, retained
+retry state, repaired input and exactly-once queue append on retry. Full module
+verification passed before and after these Linux tests. See
+[the contract rehearsal evidence](../integration/ibclab/MAINNET_CONTRACT_FAULT_REHEARSAL.md).
 
 Windows provenance limitation: whole-module verification failed for the shared cache. Comparison against official archives found missing documentation and a non-compilation zip-bomb fixture, with no detected Go source differences. That cache was preserved. Clean Linux verification and execution are the preferred evidence; do not describe the Windows whole-module gate as passed.
 
@@ -59,13 +75,16 @@ Production security evidence requires a completed scanner capture bound to its a
 
 Grouped reliability changes, actual EVM failures, two DSC application instances with signed messages and native fee debit, DEL/bank/EVM balance equivalence in tested flows, voucher return and refunds, LevelDB restart with a packet pending, proof rejection, client expiry, and a current-version module migration with a packet pending are tested. The last test is not a major-version upgrade rehearsal.
 
-Required remaining evidence:
+Remaining limitations of the legacy and experimental reference builds:
 
-- Historical mainnet replay spanning recovery height34342701 and relevant earlier boundaries, with canonical AppHash agreement and actual deployed-contract state checks.
+- The completed snapshot window covers recovery height 34342701; it does not
+  cover full genesis or unrelated earlier consensus boundaries.
 - Maintained dependency/toolchain family or reviewed security remediation. A broad source-symbol scan has findings; they require CLI reachability and platform triage, not an assertion that every advisory is exploitable here.
 - Relayer restart and major-version upgrade-in-flight operation. The tested rly configuration needs an explicitly supplied unbonding period and zero declared gas price while Decimal still deducts its computed native commission; document and test an operator-compatible production policy.
 - Real fresh-network system-contract bootstrap. A signed Ethereum transfer with the real outer ante and no mock contracts currently pays a fee and rolls back because ContractCenter is absent. The opt-in DSC_REQUIRE_FRESH_EVM_BOOTSTRAP=1 test intentionally fails until this is resolved; ordinary green tests do not satisfy this gate. See integration/ibclab/SYSTEM_CONTRACT_BOOTSTRAP.md.
-- Rehearsal with deployed production contract implementations, complete outer ante/fee failure behavior and reconciliation of existing partial queues.
+- Actual post-upgrade contract/fee failure and controlled partial auto-unbond
+  retry passed. This does not certify arbitrary pre-existing corrupt queues or
+  every deployed-contract execution path.
 - Bounded auto-unbond progress and poison-entry policy; conservation invariants; emergency authority and quota/asset policy.
 - Historical slashing/grace-period behavior before height29512330: legacy code still references UpdatesInfo there, while later heights have an unconditional grace override. Do not claim full-genesis replay or corrected slashing policy from the current newer snapshot window alone.
 - Clean install/bootstrap, independent review and tested rollback procedure. Linux candidate packaging has passed; production artifact publication remains blocked by the other gates.
