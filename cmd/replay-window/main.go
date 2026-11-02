@@ -115,6 +115,33 @@ func run() error {
 			return fmt.Errorf("checkpoint report does not precede replay start")
 		}
 	}
+	if !*inspect && len(records) > 0 && records[len(records)-1].Hash != hex.EncodeToString(dsc.CommitMultiStore().LastCommitID().Hash) {
+		return fmt.Errorf("checkpoint AppHash does not match application database")
+	}
+	var history *os.File
+	if !*inspect {
+		historyPath := filepath.Join(*home, "replay-history.jsonl")
+		_, statErr := os.Stat(historyPath)
+		history, e = os.OpenFile(historyPath, os.O_WRONLY|os.O_CREATE|os.O_APPEND, 0600)
+		if e != nil {
+			return e
+		}
+		defer history.Close()
+		defer history.Sync()
+		if os.IsNotExist(statErr) {
+			for _, old := range records {
+				line, _ := json.Marshal(old)
+				if _, e = history.Write(append(line, '\n')); e != nil {
+					return e
+				}
+			}
+			if e = history.Sync(); e != nil {
+				return e
+			}
+		}
+		// Keep the legacy JSON checkpoint bounded to this replay window.
+		records = nil
+	}
 	for height := *from; height <= *to; height++ {
 		entry, e := block(*dir, height)
 		if e != nil {
@@ -204,9 +231,21 @@ func run() error {
 		}
 		out, _ := json.Marshal(r)
 		fmt.Println(string(out))
-		payload, _ := json.MarshalIndent(records, "", "  ")
-		if e = os.WriteFile(filepath.Join(*home, "replay-window-report.json"), payload, 0600); e != nil {
+		if _, e = history.Write(append(out, '\n')); e != nil {
 			return e
+		}
+		payload, _ := json.MarshalIndent(records, "", "  ")
+		if e = atomicCheckpoint(filepath.Join(*home, "replay-window-report.json"), payload); e != nil {
+			return e
+		}
+	}
+	if history != nil {
+		if err := history.Sync(); err != nil {
+			return err
+		}
+		marker, _ := json.Marshal(map[string]interface{}{"from": *from, "to": *to, "database_height": dsc.LastBlockHeight(), "app_hash": hex.EncodeToString(dsc.CommitMultiStore().LastCommitID().Hash)})
+		if err := atomicCheckpoint(filepath.Join(*home, "replay-window-marker.json"), marker); err != nil {
+			return err
 		}
 	}
 	last, err := block(*dir, *to)
