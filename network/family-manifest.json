@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "recordedUtc": "2026-11-02T07:17:52.324686+00:00",
+  "recordedUtc": "2026-11-02T14:17:52.324686+07:00",
   "status": "upstream-application compatibility bootstrap; not a Decimal daemon or completed feature port",
   "module": "github.com/maxwell2010/go-smart-node/network",
   "repositoryParentRevision": "50df147e7056760fc8a52bbd2be57acd9853b922",
@@ -216,14 +216,74 @@
     "coverage": "constructs upstream ExampleApp in memory with non-nil EVM, IBC and ICS20 transfer keepers; no chain genesis or packets executed",
     "binaryBuild": "PASS: trimpath family-check build and execution; official upstream evmd reference CLI also compiled",
     "daemonReadiness": false,
-    "transactionSubmission": false
+    "transactionSubmission": false,
+    "referenceCliHelp": "PASS: --help in disposable cwd/home, exit 0; no start, listener or transaction"
   },
   "security": {
-    "state": "pending modern reference source and binary scans",
+    "state": "Reference source and binary scans completed with unresolved findings; not a clean security gate or a network release",
     "exclusions": [],
     "forkCoverageLimitation": "govulncheck queries the replacement module path. The cosmos/go-ethereum fork is not automatically matched against upstream ethereum/go-ethereum advisories. Review upstream inheritance and backports independently; a clean fork scan is not proof of patched geth.",
     "scannerImplementation": "https://go.googlesource.com/vuln/+/refs/tags/v1.9.0/internal/vulncheck/fetch.go",
-    "cosmosGethPatchReference": "https://github.com/cosmos/go-ethereum/compare/v1.17.2-cosmos-0...v1.17.2-cosmos-1"
+    "cosmosGethPatchReference": "https://github.com/cosmos/go-ethereum/compare/v1.17.2-cosmos-0...v1.17.2-cosmos-1",
+    "scannerVersion": "v1.9.0",
+    "referenceSourceScan": {
+      "passed": false,
+      "distinctAdvisoryIds": 8,
+      "rawSha256": "c9079bc1ca44cd01c9ba530a0bdf267ce517fc63b0c014959f29e36be394a3f8",
+      "rawBytes": 14832645,
+      "advisoryIds": [
+        "GO-2025-3684",
+        "GO-2026-4479",
+        "GO-2026-5932",
+        "GO-2026-6099",
+        "GO-2026-6165",
+        "GO-2026-6505",
+        "GO-2026-6508",
+        "GO-2026-6615"
+      ],
+      "sourceCommit": "a7db7ed413e39b7b8f1bf0846adf247ad7816db2",
+      "databaseModified": "2026-10-27T21:16:18Z",
+      "gateExitCode": 1
+    },
+    "referenceBinaryScan": {
+      "binarySha256": "1550805085f4160cb86334ff1bb865e29c9662c192ee36d55ba0a243ef3e8d6d",
+      "passed": false,
+      "distinctAdvisoryIds": 9,
+      "rawSha256": "5315d019568099d933687c7304893838bbe8d83333f9e56927350118ec0da6eb",
+      "rawBytes": 3312067,
+      "advisoryIds": [
+        "GO-2025-3684",
+        "GO-2026-4479",
+        "GO-2026-5932",
+        "GO-2026-6099",
+        "GO-2026-6163",
+        "GO-2026-6165",
+        "GO-2026-6505",
+        "GO-2026-6508",
+        "GO-2026-6615"
+      ],
+      "databaseModified": "2026-10-27T21:16:18Z",
+      "gateExitCode": 1
+    },
+    "cosmosEvmAdvisoryRangeConflict": {
+      "goReport": "unreviewed all-versions range",
+      "goId": "GO-2025-3684",
+      "conclusion": "Metadata conflict; no claim of confirmed exploit on v0.7.3. Source and behavioral audit required. No scanner exclusion.",
+      "primarySource": "https://api.github.com/advisories/GHSA-mjfq-3qr2-6g84",
+      "primaryGitHubRange": "= 0.1.0"
+    },
+    "upstreamGethSupplement": {
+      "upstreamVersion": "v1.17.2",
+      "positiveControlVersion": "v1.13.12",
+      "osvEndpoint": "https://api.osv.dev/v1/query",
+      "behind": 0,
+      "upstreamAdvisoryCount": 0,
+      "ancestrySource": "https://api.github.com/repos/cosmos/go-ethereum/compare/be4dc0c4be2fe316dbdd0a73e48421f64978232f...v1.17.2-cosmos-1",
+      "queriedUtc": "2026-11-02",
+      "upstreamTagCommit": "be4dc0c4be2fe316dbdd0a73e48421f64978232f",
+      "scope": "Published upstream-base advisories at query time, not security review of Cosmos fork delta or future database updates.",
+      "ahead": 2
+    }
   },
   "remainingFeatureWork": [
     "Decimal native coin, reserves and conversion formulas",
