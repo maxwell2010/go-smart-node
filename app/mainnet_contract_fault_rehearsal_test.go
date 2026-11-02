@@ -51,6 +51,38 @@ type receiptCorruptionHooks struct {
 	lastError     error
 }
 
+// rehearsalEmittedStake selects only an ABI identified by the genuine receipt's
+// event topic. The post-recovery runtime may emit the current eight-field tuple;
+// the pre-recovery runtime emits the seven-field tuple. Never rewrite receipts.
+func rehearsalEmittedStake(t *testing.T, response *evmtypes.MsgEthereumTxResponse, target common.Address) (*abi.ABI, common.Hash, delegation.IDecimalDelegationCommonStake) {
+	t.Helper()
+	current, err := delegation.DelegationMetaData.GetAbi()
+	require.NoError(t, err)
+	legacy, err := delegationv7.DelegationMetaData.GetAbi()
+	require.NoError(t, err)
+	var topics []common.Hash
+	for _, log := range response.Logs {
+		entry := log.ToEthereum()
+		if entry.Address != target || len(entry.Topics) == 0 {
+			continue
+		}
+		topics = append(topics, entry.Topics[0])
+		if entry.Topics[0] == current.Events["StakeUpdated"].ID {
+			var event delegation.DelegationStakeUpdated
+			require.NoError(t, contracts.UnpackLog(current, &event, "StakeUpdated", entry))
+			return current, entry.Topics[0], event.Stake
+		}
+		if entry.Topics[0] == legacy.Events["StakeUpdated"].ID {
+			var event delegationv7.DelegationStakeUpdated
+			require.NoError(t, contracts.UnpackLog(legacy, &event, "StakeUpdated", entry))
+			s := event.Stake
+			return legacy, entry.Topics[0], delegation.IDecimalDelegationCommonStake{Validator: s.Validator, Delegator: s.Delegator, Token: s.Token, Amount: s.Amount, TokenId: s.TokenId, TokenType: s.TokenType, HoldTimestamp: s.HoldTimestamp, HoldStartTime: new(big.Int)}
+		}
+	}
+	t.Fatalf("genuine receipt must contain a supported StakeUpdated topic; actual topics=%v", topics)
+	return nil, common.Hash{}, delegation.IDecimalDelegationCommonStake{}
+}
+
 func (h *receiptCorruptionHooks) PostTxProcessing(ctx sdk.Context, msg core.Message, receipt *ethtypes.Receipt) error {
 	if h.armed {
 		for _, log := range receipt.Logs {
@@ -211,26 +243,22 @@ func TestMainnetSystemContractFaultRehearsal(t *testing.T) {
 	}
 	require.Empty(t, baseline.VmError, "baseline must execute the genuine delegation runtime and hooks: %v", hooks.lastError)
 	require.NotEmpty(t, baseline.Logs)
-	var emitted delegationv7.DelegationStakeUpdated
-	foundStakeEvent := false
-	for _, log := range baseline.Logs {
-		ethLog := log.ToEthereum()
-		if ethLog.Address == target && len(ethLog.Topics) > 0 && ethLog.Topics[0] == legacyABI.Events["StakeUpdated"].ID {
-			require.NoError(t, contracts.UnpackLog(legacyABI, &emitted, "StakeUpdated", ethLog))
-			foundStakeEvent = true
-			break
-		}
-	}
-	require.True(t, foundStakeEvent, "baseline must emit a genuine legacy StakeUpdated event")
-	require.Positive(t, emitted.Stake.Amount.Sign())
+	actualABI, actualTopic, emitted := rehearsalEmittedStake(t, baseline, target)
+	hooks.topic = actualTopic
+	require.Positive(t, emitted.Amount.Sign())
 	queryStake := func() []byte {
-		res, callErr := dsc.EvmKeeper.CallEVM(context(), *legacyABI, from, target, false, "getStake", validator, from, emitted.Stake.Token)
+		res, callErr := dsc.EvmKeeper.CallEVM(context(), *actualABI, from, target, false, "getStake", validator, from, emitted.Token)
 		require.NoError(t, callErr)
 		require.Empty(t, res.VmError)
-		values, unpackErr := legacyABI.Unpack("getStake", res.Ret)
+		values, unpackErr := actualABI.Unpack("getStake", res.Ret)
 		require.NoError(t, unpackErr)
-		stake := abi.ConvertType(values[0], new(delegationv7.IDecimalDelegationCommonStake)).(*delegationv7.IDecimalDelegationCommonStake)
-		require.Positive(t, stake.Amount.Sign(), "the queried real contract stake must exist")
+		if actualTopic == legacyABI.Events["StakeUpdated"].ID {
+			stake := abi.ConvertType(values[0], new(delegationv7.IDecimalDelegationCommonStake)).(*delegationv7.IDecimalDelegationCommonStake)
+			require.Positive(t, stake.Amount.Sign())
+		} else {
+			stake := abi.ConvertType(values[0], new(delegation.IDecimalDelegationCommonStake)).(*delegation.IDecimalDelegationCommonStake)
+			require.Positive(t, stake.Amount.Sign())
+		}
 		return append([]byte(nil), res.Ret...)
 	}
 	beforeStake := queryStake()
@@ -241,7 +269,7 @@ func TestMainnetSystemContractFaultRehearsal(t *testing.T) {
 	hooks.armed = true
 	failed, failedFee := deliver(target, amount, payload)
 	require.True(t, hooks.injected, "fault must corrupt a real emitted event, not a fabricated deployment")
-	require.Equal(t, legacyABI.Events["StakeUpdated"].ID, hooks.injectedTopic)
+	require.Equal(t, actualTopic, hooks.injectedTopic)
 	require.Error(t, hooks.lastError)
 	require.Equal(t, evmtypes.ErrPostTxProcessing.Error(), failed.VmError)
 	require.Empty(t, failed.Logs)
@@ -300,21 +328,11 @@ func probeMainnetAutoUnbond(t *testing.T, dsc *DSC, ctx sdk.Context, key *ecdsa.
 	baseline, _ := rehearsalDeliver(t, dsc, ctx, key, target, amount, payload)
 	validatorkeeper.ReliabilityFixActivationHeights = strictActivation
 	require.Empty(t, baseline.VmError, "genuine stake preparation must succeed under historical behavior")
-	var emitted delegationv7.DelegationStakeUpdated
-	found := false
-	for _, log := range baseline.Logs {
-		ethLog := log.ToEthereum()
-		if ethLog.Address == target && len(ethLog.Topics) > 0 && ethLog.Topics[0] == legacyABI.Events["StakeUpdated"].ID {
-			require.NoError(t, contracts.UnpackLog(legacyABI, &emitted, "StakeUpdated", ethLog))
-			found = true
-			break
-		}
-	}
-	require.True(t, found)
-	require.Equal(t, amount, emitted.Stake.Amount)
+	_, _, emitted := rehearsalEmittedStake(t, baseline, target)
+	require.Equal(t, amount, emitted.Amount)
 	coin, err := dsc.CoinKeeper.GetCoin(ctx, cmdcfg.BaseDenom)
 	require.NoError(t, err)
-	require.Equal(t, common.HexToAddress(coin.DRC20Contract), emitted.Stake.Token)
+	require.Equal(t, common.HexToAddress(coin.DRC20Contract), emitted.Token)
 	batch, _ := ctx.CacheContext()
 	val := sdk.ValAddress(validator.Bytes())
 	delegator := sdk.AccAddress(from.Bytes())
@@ -365,7 +383,7 @@ func probeMainnetAutoUnbond(t *testing.T, dsc *DSC, ctx sdk.Context, key *ecdsa.
 	require.Equal(t, validator, entry.Validator)
 	require.Equal(t, from, entry.Delegator)
 	require.Equal(t, amount, entry.Amount)
-	require.Equal(t, emitted.Stake.Token, entry.Token)
+	require.Equal(t, emitted.Token, entry.Token)
 	require.Zero(t, entry.HoldTimestamp.Sign())
 	_, remains = dsc.ValidatorKeeper.GetValidatorOfflineSince(batch, val)
 	require.False(t, remains)
