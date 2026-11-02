@@ -101,6 +101,20 @@ This scenario passed during exploratory Windows execution, with the same
 dependency-provenance caveat above. It must be repeated with the verified Linux
 toolchain and clean restored state before it becomes final release evidence.
 
+### Clean Linux repetition
+
+Both pre-recovery scenarios were repeated successfully on November 2, 2026
+using source commit `719aa70` and the CLOSED clean-restored snapshot at height
+34271000, with the committed AppHash checked against header 34271001. Go 1.24.4,
+CGO/GCC, `GOMAXPROCS=1`, `-p 1` and `GOMEMLIMIT=1GiB` were used. The entire
+run occurred in an isolated network namespace with `GOPROXY=off`. Full
+`go mod verify` passed before and after both tests. Native transfer/exact fee
+and the genuine pre-recovery event rollback passed; the deployed auto-unbond
+authorization, partial queue rollback and repaired exact-once retry passed.
+This removes the earlier exploratory dependency-provenance limitation for
+these two scenarios. It does not validate the still-pending post-recovery
+receipt-corruption scenario or certify a separate modern application.
+
 ## Dependency diagnostic correction is consensus-visible
 
 The pinned Decimal Ethermint dependency unconditionally overwrites
