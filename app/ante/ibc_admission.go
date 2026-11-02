@@ -17,8 +17,10 @@ import (
 func experimentalIBCMessage(msg sdk.Msg) bool {
 	switch m := msg.(type) {
 	case *transfer.MsgTransfer:
-		if m==nil {return false}
-        if m.Token.Denom == cmdcfg.BaseDenom {
+		if m == nil {
+			return false
+		}
+		if m.Token.Denom == cmdcfg.BaseDenom {
 			return true
 		}
 		if !strings.HasPrefix(m.Token.Denom, "ibc/") || len(m.Token.Denom) != 68 {

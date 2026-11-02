@@ -10,7 +10,7 @@ Branch: integration/reliability-ibc. Upstream baseline: a46cb48d7965c1a64a495ceb
 4. Actual EVM subprocess crash, partial-unbond and event-rollback tests, plus Linux CI.
 5. Isolated ICS-20 proof/escrow/refund baseline using two SDK applications. See integration/ibclab/README.md for its explicit limits.
 
-The reliability activation-height table is intentionally empty. There is no production IBC route in DSC. No mainnet consensus changes are activated by publishing this branch.
+The reliability rules activate at height 1 only for exact isolated IDs decimal_900001-1 and decimal_900002-1. Production IDs remain absent. Experimental ICS-20 requires a separate tagged build that refuses production genesis IDs. The journal/replay correction is unconditional and still requires historical replay validation before any mainnet use.
 
 ## Historical replay input still required
 
