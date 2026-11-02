@@ -1,0 +1,459 @@
+#!/usr/bin/env python3
+"""Disposable real-process IBC lab. Never use public homes, endpoints or keys."""
+import argparse
+import base64
+import hashlib
+import json
+import os
+from pathlib import Path
+import re
+import socket
+import subprocess
+import tempfile
+import time
+import urllib.request
+
+HERMES_SHA256 = "ed8d57781f57a93e74259c12c8feee661b9633c882307f3a6236e41dbf5ffe35"
+A_ID, B_ID, EVM_ID = "mintcandy_990001-1", "ibc-reference-1", 990001
+HTTP = urllib.request.build_opener(urllib.request.ProxyHandler({}))
+
+
+def require(condition, message):
+    if not condition:
+        raise RuntimeError(message)
+
+
+def private_namespace():
+    require(os.name == "posix" and Path("/proc/self/ns/net").exists(), "Linux network namespace required")
+    require(os.readlink("/proc/self/ns/net") != os.readlink("/proc/1/ns/net"), "refuse initial network namespace")
+    require(sorted(name for _, name in socket.if_nameindex()) == ["lo"], "only loopback interface is permitted")
+    require(len(Path("/proc/net/route").read_text().splitlines()) == 1, "routing table must be empty")
+
+
+def binary(path, expected):
+    path = Path(path).resolve(strict=True)
+    require(path.is_file() and os.access(path, os.X_OK), "executable required")
+    actual = hashlib.sha256(path.read_bytes()).hexdigest()
+    require(re.fullmatch(r"[0-9a-f]{64}", expected or "") and actual == expected, "binary SHA256 mismatch: " + path.name)
+    return path, actual
+
+
+def command(args, env, timeout=45, secret=False, stdin=None):
+    result = subprocess.run([str(a) for a in args], input=stdin, text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, env=env, timeout=timeout)
+    if result.returncode:
+        detail = "private key command output suppressed" if secret else (result.stdout + result.stderr)[-6000:]
+        raise RuntimeError("command failed: " + str(args[0]) + " " + str(args[1]) + ": " + detail)
+    return result.stdout
+
+
+def rpc(port, method, **params):
+    data = json.dumps({"jsonrpc": "2.0", "id": 1, "method": method, "params": params}).encode()
+    req = urllib.request.Request(f"http://127.0.0.1:{port}", data, {"Content-Type": "application/json"})
+    with HTTP.open(req, timeout=4) as response:
+        body = json.load(response)
+    require("error" not in body, "local RPC error: " + str(body.get("error")))
+    return body["result"]
+
+
+# Wire decoding is restricted to ordinary standard protobuf query responses.
+# Consensus proofs and packet verification are executed by the real chain/relayer.
+def varint(value):
+    out = bytearray()
+    while value > 127:
+        out.append((value & 127) | 128)
+        value >>= 7
+    return bytes(out + bytes([value]))
+
+
+def field(number, value):
+    value = value.encode() if isinstance(value, str) else value
+    return varint(number * 8 + 2) + varint(len(value)) + value
+
+
+def fields(data):
+    offset = 0
+    def read_int():
+        nonlocal offset
+        value, shift = 0, 0
+        while True:
+            require(offset < len(data) and shift < 70, "malformed protobuf varint")
+            part = data[offset]; offset += 1
+            value |= (part & 127) << shift
+            if part < 128:
+                return value
+            shift += 7
+    out = {}
+    while offset < len(data):
+        tag = read_int(); number, wire = tag >> 3, tag & 7
+        require(number > 0, "invalid protobuf field")
+        if wire == 0:
+            value = read_int()
+        elif wire in (1, 2, 5):
+            size = read_int() if wire == 2 else (8 if wire == 1 else 4)
+            require(offset + size <= len(data), "truncated protobuf response")
+            value = data[offset:offset + size]; offset += size
+        else:
+            raise RuntimeError("unsupported protobuf wire type")
+        out.setdefault(number, []).append(value)
+    return out
+
+
+def query(port, path, request=b""):
+    response = rpc(port, "abci_query", path=path, data=request.hex(), prove=False)["response"]
+    require(int(response.get("code", 0)) == 0, "actual ABCI query failed: " + str(response.get("log")))
+    return fields(base64.b64decode(response.get("value", "")))
+
+
+def amount(port, address, denom):
+    body = query(port, "/cosmos.bank.v1beta1.Query/Balance", field(1, address) + field(2, denom))
+    coin = fields(body[1][0]) if body.get(1) else {}
+    return int(coin.get(2, [b"0"])[0])
+
+
+def escrow(port, denom):
+    body = query(port, "/ibc.applications.transfer.v1.Query/TotalEscrowForDenom", field(1, denom))
+    coin = fields(body[1][0]) if body.get(1) else {}
+    return int(coin.get(2, [b"0"])[0])
+
+
+def commitments(port, channel):
+    body = query(port, "/ibc.core.channel.v1.Query/PacketCommitments", field(1, "transfer") + field(2, channel))
+    return [fields(entry)[3][0] for entry in body.get(1, [])]
+
+
+def open_channel(port):
+    body = query(port, "/ibc.core.channel.v1.Query/Channels")
+    channels = [fields(entry) for entry in body.get(1, [])]
+    channels = [entry for entry in channels if entry.get(6) == [b"transfer"] and entry.get(1) == [3]]
+    require(len(channels) == 1, "expected exactly one genuine OPEN transfer channel")
+    return channels[0][7][0].decode(), fields(channels[0][3][0])[2][0].decode()
+
+
+class Lab:
+    def __init__(self, root, env, report):
+        self.root, self.env, self.report = root, env, report
+        self.children, self.handles, self.ports = [], [], set()
+
+    def port(self):
+        while True:
+            with socket.socket() as sock:
+                sock.bind(("127.0.0.1", 0)); port = sock.getsockname()[1]
+            if port not in self.ports:
+                self.ports.add(port); return port
+
+    def spawn(self, args, name):
+        log = open(self.root / (name + ".log"), "w", encoding="utf8")
+        self.handles.append(log)
+        child = subprocess.Popen([str(a) for a in args], env=self.env, stdout=log, stderr=subprocess.STDOUT)
+        self.children.append(child)
+        return child
+
+    def stop(self, child):
+        if child.poll() is None:
+            child.terminate()
+            try:
+                child.wait(timeout=10)
+            except subprocess.TimeoutExpired:
+                child.kill(); child.wait(timeout=10)
+
+    def close(self):
+        for child in reversed(self.children):
+            self.stop(child)
+        for handle in self.handles:
+            handle.close()
+
+    def wait(self, condition, message, timeout=45):
+        deadline, last = time.monotonic() + timeout, None
+        while time.monotonic() < deadline:
+            try:
+                if condition(): return
+            except (RuntimeError, OSError, ValueError) as error:
+                last = str(error)
+            time.sleep(0.25)
+        raise RuntimeError(message + ": " + str(last))
+
+    def height(self, port, chain):
+        status = rpc(port, "status")
+        require(status["node_info"]["network"] == chain, "wrong node signing domain")
+        return int(status["sync_info"]["latest_block_height"])
+
+
+def chain_config(chain, rpc_port, grpc_port, prefix, denom, keys):
+    return f'''[[chains]]
+id = '{chain}'
+rpc_addr = 'http://127.0.0.1:{rpc_port}'
+grpc_addr = 'http://127.0.0.1:{grpc_port}'
+event_source = {{ mode = 'push', url = 'ws://127.0.0.1:{rpc_port}/websocket', batch_delay = '200ms' }}
+rpc_timeout = '10s'
+trusted_node = false
+account_prefix = '{prefix}'
+key_name = 'lab'
+key_store_folder = '{keys}'
+store_prefix = 'ibc'
+default_gas = 200000
+max_gas = 4000000
+gas_price = {{ price = {1000000000 if denom == 'del' else 0.025}, denom = '{denom}' }}
+gas_multiplier = 1.3
+max_msg_num = 10
+max_tx_size = 1048576
+clock_drift = '5s'
+max_block_time = '5s'
+trusting_period = '14days'
+trust_threshold = '1/3'
+address_type = {{ derivation = 'cosmos' }}
+'''
+
+
+def health_check(run):
+    # Hermes can exit zero and print final status=success while per-chain health
+    # failed in WARN records. A command exit code alone is not a health gate.
+    output = run("health-check")
+    documents = [json.loads(line) for line in output.splitlines() if line.strip()]
+    warnings = [item for item in documents if item.get("level") in ("WARN", "ERROR")]
+    require(not warnings, "Hermes chain health warnings: " + json.dumps(warnings))
+    require(any(item.get("status") == "success" for item in documents), "Hermes health result missing")
+    return output
+
+
+def reference_probe(lab, reference, hermes):
+    rpc_port, p2p, grpc = lab.port(), lab.port(), lab.port()
+    home = lab.root / "reference"
+    command([reference, "prepare", "--home", home, "--rpc-port", rpc_port, "--p2p-port", p2p, "--grpc-port", grpc], lab.env, timeout=60)
+    marker = json.loads((home / "disposable-ibc-reference.json").read_text())
+    require(marker["chain_id"] == B_ID, "wrong generated counterparty")
+    child = lab.spawn([reference, "start", "--home", home, "--log_level", "error"], "reference")
+    lab.wait(lambda: lab.height(rpc_port, B_ID) >= 3, "reference must advance", 60)
+    require(amount(rpc_port, marker["address"], "stake") == 10**18, "unexpected reference account funding")
+    require(escrow(rpc_port, "stake") == 0, "new reference escrow must be zero")
+    config = lab.root / "hermes.toml"
+    config.write_text("[global]\nlog_level = 'warn'\n" + chain_config(B_ID, rpc_port, grpc, "cosmos", "stake", lab.root / "hermes-keys"))
+    run = lambda *args: command([hermes, "--config", config, "--json", *args], lab.env, timeout=60)
+    run("keys", "add", "--chain", B_ID, "--key-name", "lab", "--mnemonic-file", home / "mnemonic.txt", "--hd-path", "m/44'/118'/0'/0/0")
+    health = health_check(run)
+    lab.report["reference_probe"] = {"chain": B_ID, "height": lab.height(rpc_port, B_ID), "funded_address": marker["address"], "hermes_health": health}
+    return {"rpc": rpc_port, "grpc": grpc, "home": home, "address": marker["address"], "process": child, "start": [reference, "start", "--home", home, "--log_level", "error"]}, config
+
+
+def patch_toml(path, changes):
+    """Edit only a newly generated fixture, failing on unknown config keys."""
+    lines, section, found = path.read_text().splitlines(), "", set()
+    for index, line in enumerate(lines):
+        match = re.match(r"^\s*\[([^]]+)\]\s*$", line)
+        if match:
+            section = match.group(1)
+        match = re.match(r"^\s*([\w-]+)\s*=", line)
+        key = (section, match.group(1)) if match else None
+        if key in changes:
+            require(key not in found, "duplicate fixture config key")
+            lines[index] = key[1] + " = " + json.dumps(changes[key])
+            found.add(key)
+    require(found == set(changes), "unsupported CLI fixture config keys: " + str(set(changes) - found))
+    path.write_text("\n".join(lines) + "\n")
+
+
+def prepare_owned(lab, mcnd):
+    home = lab.root / "owned"
+    common = ["--home", home, "--chain-id", A_ID, "--evm.evm-chain-id", EVM_ID]
+    command([mcnd, "init", "disposable-owned", *common], lab.env, timeout=60)
+    # No stdout/stderr from a key-generating command is ever logged or persisted.
+    key = json.loads(command([mcnd, "keys", "add", "lab", "--algo", "secp256k1", "--coin-type", 60, "--keyring-backend", "test", "--output", "json", *common], lab.env, secret=True))
+    require(key.get("mnemonic") and key.get("address", "").startswith("d01"), "native Cosmos secp256k1 fixture key required")
+    public = str(key.get("pubkey", ""))
+    require("secp256k1" in public and "ethsecp256k1" not in public, "Hermes lab requires native SDK secp256k1")
+    mnemonic_file = home / "ephemeral-relayer-mnemonic.txt"
+    with open(mnemonic_file, "x", encoding="utf8") as output:
+        os.chmod(mnemonic_file, 0o600); output.write(key["mnemonic"] + "\n")
+    address = key["address"]
+    command([mcnd, "genesis", "add-genesis-account", address, str(10**24) + "del", *common], lab.env)
+    command([mcnd, "genesis", "gentx", "lab", str(10**18) + "del", "--keyring-backend", "test", *common], lab.env)
+    command([mcnd, "genesis", "collect-gentxs", *common], lab.env)
+    ports = {name: lab.port() for name in ("rpc", "p2p", "grpc")}
+    patch_toml(home / "config/config.toml", {
+        ("rpc", "laddr"): f"tcp://127.0.0.1:{ports['rpc']}",
+        ("p2p", "laddr"): f"tcp://127.0.0.1:{ports['p2p']}",
+        ("p2p", "seeds"): "", ("p2p", "persistent_peers"): "", ("p2p", "pex"): False,
+        ("consensus", "timeout_commit"): "500ms",
+    })
+    patch_toml(home / "config/app.toml", {
+        ("", "minimum-gas-prices"): "1000000000del",
+        ("grpc", "enable"): True, ("grpc", "address"): f"127.0.0.1:{ports['grpc']}",
+        ("api", "enable"): False, ("grpc-web", "enable"): False,
+        ("json-rpc", "enable"): False,
+    })
+    start = [mcnd, "start", *common, "--log_level", "error"]
+    child = lab.spawn(start, "owned")
+    lab.wait(lambda: lab.height(ports["rpc"], A_ID) >= 3, "owned node must advance", 60)
+    require(amount(ports["rpc"], address, "del") > 10**23, "owned account funding unexpectedly missing")
+    require(escrow(ports["rpc"], "del") == 0, "new owned escrow must be zero")
+    return {**ports, "home": home, "address": address, "mnemonic": mnemonic_file, "process": child, "start": start}
+
+
+def receipts(chain):
+    result = rpc(chain["rpc"], "tx_search", query="tx.height > 0", prove=False, page=1, per_page=100, order_by="asc")
+    require(int(result["total_count"]) <= 100, "bounded lab receipt limit exceeded")
+    return {tx["hash"]: tx for tx in (result.get("txs") or [])}
+
+
+def fees(chain, before, denom):
+    paid, records = 0, []
+    for tx_hash, tx in receipts(chain).items():
+        if tx_hash in before:
+            continue
+        result = tx["tx_result"]
+        require(int(result.get("code", 0)) == 0 and int(result["gas_used"]) > 0, "relayer committed failed/zero-gas transaction")
+        fee_events = []
+        for event in result.get("events", []):
+            if event["type"] == "tx":
+                attributes = {item["key"]: item["value"] for item in event["attributes"]}
+                if "fee" in attributes:
+                    fee_events.append(attributes)
+        require(len(fee_events) == 1, "receipt must expose exactly one native fee event")
+        event = fee_events[0]
+        require(event.get("fee_payer") == chain["address"], "unexpected relayer fee payer")
+        match = re.fullmatch(r"([0-9]+)" + re.escape(denom), event["fee"])
+        require(match and int(match.group(1)) > 0, "actual positive native fee required")
+        value = int(match.group(1)); paid += value
+        records.append({"hash": tx_hash, "height": tx["height"], "gas_used": result["gas_used"], "fee": value, "denom": denom})
+    return paid, records
+
+
+def phase_before(a, b):
+    return {"a": amount(a["rpc"], a["address"], "del"), "b": amount(b["rpc"], b["address"], "stake"), "a_tx": receipts(a), "b_tx": receipts(b)}
+
+
+def phase_after(lab, label, a, b, before, native_a_delta=0):
+    # Let the independent Comet indexers catch up before checking receipt fees.
+    heights = [lab.height(a["rpc"], A_ID), lab.height(b["rpc"], B_ID)]
+    lab.wait(lambda: lab.height(a["rpc"], A_ID) > heights[0] and lab.height(b["rpc"], B_ID) > heights[1], "post-transaction indexing block")
+    a_fee, a_records = fees(a, before["a_tx"], "del")
+    b_fee, b_records = fees(b, before["b_tx"], "stake")
+    require(a_records or b_records, "phase must contain real committed relayer transactions")
+    require(amount(a["rpc"], a["address"], "del") == before["a"] + native_a_delta - a_fee, "exact owned balance/principal/fee mismatch: " + label)
+    require(amount(b["rpc"], b["address"], "stake") == before["b"] - b_fee, "exact counterparty native fee mismatch: " + label)
+    lab.report.setdefault("phases", {})[label] = {"status": "PASS", "owned_fees": a_records, "counterparty_fees": b_records}
+
+
+def full_suite(lab, mcnd, reference, hermes):
+    b, config = reference_probe(lab, reference, hermes)
+    a = prepare_owned(lab, mcnd)
+    config.write_text("[global]\nlog_level = 'warn'\n" + chain_config(A_ID, a["rpc"], a["grpc"], "d0", "del", lab.root / "hermes-keys") + chain_config(B_ID, b["rpc"], b["grpc"], "cosmos", "stake", lab.root / "hermes-keys"))
+    run = lambda *args: command([hermes, "--config", config, "--json", *args], lab.env, timeout=120)
+    run("keys", "add", "--chain", A_ID, "--key-name", "lab", "--mnemonic-file", a["mnemonic"], "--hd-path", "m/44'/60'/0'/0/0")
+    health_check(run)
+    before = phase_before(a, b)
+    run("create", "channel", "--a-chain", A_ID, "--b-chain", B_ID, "--a-port", "transfer", "--b-port", "transfer", "--new-client-connection", "--channel-version", "ics20-1", "--yes")
+    a_channel, a_counterparty = open_channel(a["rpc"])
+    b_channel, b_counterparty = open_channel(b["rpc"])
+    require(a_counterparty == b_channel and b_counterparty == a_channel, "actual channel counterparties differ")
+    phase_after(lab, "client_connection_channel_handshake", a, b, before)
+    lab.report["channel"] = {"a": a_channel, "b": b_channel}
+    voucher = "ibc/" + hashlib.sha256(("transfer/" + b_channel + "/del").encode()).hexdigest().upper()
+    value = 10**18
+
+    def transfer(source, dest, channel, denom, count, receiver, seconds=60):
+        run("tx", "ft-transfer", "--src-chain", source, "--dst-chain", dest, "--src-port", "transfer", "--src-channel", channel, "--denom", denom, "--amount", count, "--receiver", receiver, "--timeout-seconds", seconds)
+
+    def clear():
+        run("clear", "packets", "--chain", A_ID, "--port", "transfer", "--channel", a_channel)
+        lab.wait(lambda: not commitments(a["rpc"], a_channel) and not commitments(b["rpc"], b_channel), "all actual packet commitments must clear", 60)
+
+    before = phase_before(a, b)
+    transfer(A_ID, B_ID, a_channel, "del", value, b["address"])
+    lab.wait(lambda: len(commitments(a["rpc"], a_channel)) == 1, "genuine outbound commitment")
+    require(escrow(a["rpc"], "del") == value, "outbound native escrow mismatch")
+    clear()
+    require(amount(b["rpc"], b["address"], voucher) == value, "actual ICS20 voucher not received")
+    phase_after(lab, "native_send", a, b, before, -value)
+
+    before = phase_before(a, b)
+    transfer(B_ID, A_ID, b_channel, voucher, value, a["address"])
+    lab.wait(lambda: len(commitments(b["rpc"], b_channel)) == 1, "genuine return commitment")
+    clear()
+    require(amount(b["rpc"], b["address"], voucher) == 0 and escrow(a["rpc"], "del") == 0, "voucher return/unescrow mismatch")
+    phase_after(lab, "voucher_return", a, b, before, value)
+
+    before = phase_before(a, b)
+    transfer(A_ID, B_ID, a_channel, "del", value, b["address"])
+    lab.wait(lambda: len(commitments(a["rpc"], a_channel)) == 1, "pending packet before restart")
+    heights = [lab.height(a["rpc"], A_ID), lab.height(b["rpc"], B_ID)]
+    lab.stop(a["process"]); lab.stop(b["process"])
+    a["process"] = lab.spawn(a["start"], "owned-restarted")
+    b["process"] = lab.spawn(b["start"], "reference-restarted")
+    lab.wait(lambda: lab.height(a["rpc"], A_ID) > heights[0] and lab.height(b["rpc"], B_ID) > heights[1], "both actual processes must reopen and advance", 60)
+    require(len(commitments(a["rpc"], a_channel)) == 1 and escrow(a["rpc"], "del") == value, "in-flight commitment/escrow did not survive restart")
+    clear()
+    require(amount(b["rpc"], b["address"], voucher) == value, "pending packet failed after disk reopen")
+    phase_after(lab, "pending_packet_restart", a, b, before, -value)
+
+    before = phase_before(a, b)
+    transfer(A_ID, B_ID, a_channel, "del", value, "not-a-valid-bech32-address")
+    lab.wait(lambda: len(commitments(a["rpc"], a_channel)) == 1, "error-ACK source commitment")
+    clear()
+    require(amount(b["rpc"], b["address"], voucher) == value and escrow(a["rpc"], "del") == value, "error acknowledgement must refund only its packet")
+    phase_after(lab, "error_ack_refund", a, b, before)
+
+    before = phase_before(a, b)
+    transfer(A_ID, B_ID, a_channel, "del", value, b["address"], seconds=3)
+    lab.wait(lambda: len(commitments(a["rpc"], a_channel)) == 1, "timeout source commitment")
+    deadline = time.monotonic() + 7
+    lab.wait(lambda: time.monotonic() >= deadline and lab.height(b["rpc"], B_ID) > 3, "allow local packet timeout", 12)
+    clear()
+    require(amount(b["rpc"], b["address"], voucher) == value and escrow(a["rpc"], "del") == value, "timeout must refund only its packet")
+    phase_after(lab, "timeout_refund", a, b, before)
+    require(len(lab.report.get("phases", {})) == 6, "all real two-process phases are mandatory")
+    lab.report["status"] = "TWO_PROCESS_HERMES_PASS"
+    lab.report["release_gate"] = True
+    lab.report["scope"] = "Actual owned/reference IBC interoperability only; native Decimal economic parity is a separate gate."
+
+
+def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--mode", choices=["reference-probe", "full"], required=True)
+    parser.add_argument("--reference-binary", required=True)
+    parser.add_argument("--reference-sha256", required=True)
+    parser.add_argument("--reference-source-commit", required=True)
+    parser.add_argument("--hermes-binary", required=True)
+    parser.add_argument("--report", required=True)
+    parser.add_argument("--mcnd-binary")
+    parser.add_argument("--mcnd-sha256")
+    parser.add_argument("--mcnd-source-commit")
+    args = parser.parse_args()
+    report = {"status": "FAIL", "mode": args.mode, "release_gate": False}
+    try:
+        private_namespace()
+        require(re.fullmatch(r"[0-9a-f]{40}", args.reference_source_commit), "full reference source commit required")
+        reference, ref_hash = binary(args.reference_binary, args.reference_sha256)
+        hermes, hermes_hash = binary(args.hermes_binary, HERMES_SHA256)
+        report["binaries"] = {"reference": {"sha256": ref_hash, "source_commit": args.reference_source_commit}, "hermes": {"sha256": hermes_hash, "official_release": "v1.13.3"}}
+        mcnd = None
+        if args.mode == "full":
+            require(args.mcnd_binary and re.fullmatch(r"[0-9a-f]{40}", args.mcnd_source_commit or ""), "full mcnd binary/source commit required")
+            mcnd, mcnd_hash = binary(args.mcnd_binary, args.mcnd_sha256)
+            report["binaries"]["mcnd"] = {"sha256": mcnd_hash, "source_commit": args.mcnd_source_commit}
+        with tempfile.TemporaryDirectory(prefix="mintcandy-hermes-lab-") as temp:
+            root = Path(temp)
+            env = {**os.environ, "HOME": str(root / "tool-home"), "RUST_BACKTRACE": "0"}
+            Path(env["HOME"]).mkdir(mode=0o700)
+            lab = Lab(root, env, report)
+            try:
+                report["hermes_version"] = command([hermes, "version"], env).strip()
+                if args.mode == "full":
+                    full_suite(lab, mcnd, reference, hermes)
+                else:
+                    reference_probe(lab, reference, hermes)
+                    report["status"] = "REFERENCE_PROBE_PASS"
+                    report["remaining"] = ["owned mcnd CLI", "two-process handshake", "send/return/refund", "pending-packet restart"]
+            finally:
+                lab.close()
+    except Exception as error:
+        report["error"] = str(error)
+    finally:
+        # A report contains public addresses/receipts only, never fixture mnemonics.
+        with open(args.report, "x", encoding="utf8") as output:
+            json.dump(report, output, indent=2)
+        print(report["status"])
+    return 0 if report["status"] in ("REFERENCE_PROBE_PASS", "TWO_PROCESS_HERMES_PASS") else 1
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
