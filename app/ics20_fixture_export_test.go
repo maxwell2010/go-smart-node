@@ -28,6 +28,10 @@ func TestExportIsolatedICS20Fixtures(t *testing.T) {
 	if dest == "@test-temp" {
 		dest = filepath.Join(t.TempDir(), "export")
 	}
+	exportIsolatedICS20Fixtures(t, dest)
+}
+
+func exportIsolatedICS20Fixtures(t *testing.T, dest string) {
 	require.True(t, filepath.IsAbs(dest), "fixture directory must be absolute")
 	require.NoError(t, os.Mkdir(dest, 0700), "refusing to overwrite any existing output")
 	c := &ibctesting.Coordinator{T: t, CurrentTime: time.Now().UTC().Add(-time.Minute), Chains: map[string]*ibctesting.TestChain{}}
