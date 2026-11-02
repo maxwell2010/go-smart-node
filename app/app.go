@@ -1,6 +1,14 @@
 package app
 
 import (
+	"bitbucket.org/decimalteam/go-smart-node/integrationconfig"
+	transfer "github.com/cosmos/ibc-go/v6/modules/apps/transfer"
+	transferkeeper "github.com/cosmos/ibc-go/v6/modules/apps/transfer/keeper"
+	transfertypes "github.com/cosmos/ibc-go/v6/modules/apps/transfer/types"
+	porttypes "github.com/cosmos/ibc-go/v6/modules/core/05-port/types"
+)
+
+import (
 	"context"
 	"encoding/json"
 	"fmt"
@@ -260,7 +268,9 @@ type DSC struct {
 	//EvidenceKeeper   evidencekeeper.Keeper
 
 	// IBC keepers
-	IBCKeeper *ibckeeper.Keeper // IBC Keeper must be a pointer in the app, so we can SetRouter on it correctly
+	TransferKeeper       transferkeeper.Keeper
+	ScopedTransferKeeper capabilitykeeper.ScopedKeeper
+	IBCKeeper            *ibckeeper.Keeper // IBC Keeper must be a pointer in the app, so we can SetRouter on it correctly
 
 	// Make scoped keepers public for test purposes
 	ScopedIBCKeeper capabilitykeeper.ScopedKeeper
@@ -321,6 +331,10 @@ func NewDSC(
 		}
 	}
 
+	if integrationconfig.Enabled && !integrationconfig.AllowedChainID(genDoc.ChainID) {
+		panic("experimental IBC binary requires dedicated isolated genesis chain ID")
+	}
+
 	appCodec := encodingConfig.Codec
 	cdc := encodingConfig.Amino
 	interfaceRegistry := encodingConfig.InterfaceRegistry
@@ -368,6 +382,9 @@ func NewDSC(
 		upgradetypes.StoreKey,
 	)
 
+	if integrationconfig.Enabled {
+		keys[transfertypes.StoreKey] = sdk.NewKVStoreKey(transfertypes.StoreKey)
+	}
 	// Add the EVM transient store key
 	tkeys := sdk.NewTransientStoreKeys(paramstypes.TStoreKey, evmtypes.TransientKey, feemarkettypes.TransientKey)
 	memKeys := sdk.NewMemoryStoreKeys(capabilitytypes.MemStoreKey)
@@ -401,6 +418,9 @@ func NewDSC(
 
 	// Applications that wish to enforce statically created ScopedKeepers should call `Seal`
 	// after creating their scoped modules in `NewApp` with `ScopeToModule`
+	if integrationconfig.Enabled {
+		app.ScopedTransferKeeper = app.CapabilityKeeper.ScopeToModule(transfertypes.ModuleName)
+	}
 	app.CapabilityKeeper.Seal()
 
 	// Create SDK keepers
@@ -564,6 +584,10 @@ func NewDSC(
 		scopedIBCKeeper,
 	)
 
+	if integrationconfig.Enabled {
+		app.TransferKeeper = transferkeeper.NewKeeper(appCodec, keys[transfertypes.StoreKey], app.GetSubspace(transfertypes.ModuleName), app.IBCKeeper.ChannelKeeper, app.IBCKeeper.ChannelKeeper, &app.IBCKeeper.PortKeeper, app.AccountKeeper, app.BankKeeper, app.ScopedTransferKeeper)
+		app.IBCKeeper.SetRouter(porttypes.NewRouter().AddRoute(transfertypes.ModuleName, transfer.NewIBCModule(app.TransferKeeper)))
+	}
 	// Register the proposal types
 	govLegacyRouter := govtypesv1beta1.NewRouter()
 	govLegacyRouter.AddRoute(govtypes.RouterKey, govtypesv1beta1.ProposalHandler).
@@ -741,6 +765,16 @@ func NewDSC(
 		crisistypes.ModuleName,
 	)
 
+	if integrationconfig.Enabled {
+		app.mm.Modules[transfertypes.ModuleName] = transfer.NewAppModule(app.TransferKeeper)
+		app.mm.SetOrderBeginBlockers(append(app.mm.OrderBeginBlockers, transfertypes.ModuleName)...)
+		app.mm.SetOrderEndBlockers(append(app.mm.OrderEndBlockers, transfertypes.ModuleName)...)
+		order := app.mm.OrderInitGenesis
+		// Keep crisis invariants last, after transfer genesis binds its port.
+		order = append(order[:len(order)-1], transfertypes.ModuleName, crisistypes.ModuleName)
+		app.mm.SetOrderInitGenesis(order...)
+		app.mm.SetOrderExportGenesis(append(app.mm.OrderExportGenesis, transfertypes.ModuleName)...)
+	}
 	app.mm.RegisterInvariants(&app.CrisisKeeper)
 	app.mm.RegisterRoutes(app.Router(), app.QueryRouter(), encodingConfig.Amino)
 	app.configurator = module.NewConfigurator(app.appCodec, app.MsgServiceRouter(), app.GRPCQueryRouter())
@@ -855,6 +889,9 @@ func (app *DSC) DeliverTx(req abci.RequestDeliverTx) (res abci.ResponseDeliverTx
 
 // InitChainer updates at chain initialization.
 func (app *DSC) InitChainer(ctx sdk.Context, req abci.RequestInitChain) abci.ResponseInitChain {
+	if integrationconfig.Enabled && !integrationconfig.AllowedChainID(req.ChainId) {
+		panic("experimental IBC genesis chain ID forbidden")
+	}
 	var gs simapp.GenesisState
 	if err := json.Unmarshal(req.AppStateBytes, &gs); err != nil {
 		panic(err)
@@ -1069,6 +1106,9 @@ func initParamsKeeper(
 	paramsKeeper.Subspace(crisistypes.ModuleName)
 	// IBC subspaces
 	paramsKeeper.Subspace(ibchost.ModuleName)
+	if integrationconfig.Enabled {
+		paramsKeeper.Subspace(transfertypes.ModuleName)
+	}
 	// Ethermint subspaces
 	paramsKeeper.Subspace(evmtypes.ModuleName).WithKeyTable(evmtypes.ParamKeyTable())
 	//paramsKeeper.Subspace(recoverytypes.ModuleName)
@@ -1205,3 +1245,10 @@ func (app *DSC) setupUpgradeHandlers(chainID string) {
 // 	//     app.SetStoreLoader(upgradetypes.UpgradeStoreLoader(upgradeInfo.Height, storeUpgrades))
 // 	// }
 // }
+
+func init() {
+	if integrationconfig.Enabled {
+		ModuleBasics[transfertypes.ModuleName] = transfer.AppModuleBasic{}
+		maccPerms[transfertypes.ModuleName] = []string{authtypes.Minter, authtypes.Burner}
+	}
+}
