@@ -46,6 +46,7 @@ jobs:
         run: |
           mkdir -p candidate-logs
           go mod download
+          git diff --exit-code -- go.mod go.sum
           go mod verify |& tee candidate-logs/dependency-integrity.log
       - name: Test application and isolated protocol baseline
         run: |
