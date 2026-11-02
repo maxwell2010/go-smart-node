@@ -4,17 +4,21 @@ on:
   workflow_dispatch:
     inputs:
       version:
-        description: Prerelease version (for example 0.1.0-rc.1)
+        description: Alpha version (for example 0.1.0-alpha.1)
         required: true
-        default: 0.1.0-rc.1
+        default: 0.1.0-alpha.1
   push:
-    branches: ['release/**']
+    branches: ['release/**', 'integration/**']
 
 permissions:
   contents: read
 
 jobs:
   validate-and-build:
+    strategy:
+      fail-fast: false
+      matrix:
+        flavor: [ordinary, experimental_ibc]
     runs-on: ubuntu-22.04
     timeout-minutes: 45
     env:
@@ -39,19 +43,23 @@ jobs:
           for test in TestIntegrationUpgradeCrashRealEVM TestIntegrationAutoUnbondRealEVM TestIntegrationEventRollbackRealEVM; do
             grep -q -- "^--- PASS: ${test} " candidate-logs/tests.log
           done
+      - name: Test experimental DSC wiring and admission policy
+        if: matrix.flavor == 'experimental_ibc'
+        run: |
+          go test -mod=readonly -p 2 -count=1 -v -timeout 10m -tags experimental_ibc -run '^TestExperimental' ./app ./app/ante ./integrationconfig |& tee candidate-logs/experimental.log
       - name: Build identical binaries and package source provenance
         env:
-          CANDIDATE_VERSION: ${{ inputs.version || '0.1.0-rc.1' }}
-        run: bash scripts/release/build-linux-candidate.sh "$CANDIDATE_VERSION" "$RUNNER_TEMP/candidate"
+          CANDIDATE_VERSION: ${{ inputs.version || '0.1.0-alpha.1' }}
+        run: bash scripts/release/build-linux-candidate.sh "$CANDIDATE_VERSION" "$RUNNER_TEMP/candidate" "${{ matrix.flavor }}"
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
-          name: linux-amd64-candidate-${{ github.sha }}
+          name: linux-amd64-${{ matrix.flavor }}-${{ github.sha }}
           path: ${{ runner.temp }}/candidate/
           retention-days: 30
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: always()
         with:
-          name: candidate-validation-${{ github.run_id }}
+          name: candidate-validation-${{ matrix.flavor }}-${{ github.run_id }}
           path: candidate-logs/
           retention-days: 30
           if-no-files-found: warn
