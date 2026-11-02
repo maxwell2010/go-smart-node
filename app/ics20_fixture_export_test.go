@@ -6,8 +6,11 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"github.com/cosmos/go-bip39"
 	ibctesting "github.com/cosmos/ibc-go/v6/testing"
 	ibcmock "github.com/cosmos/ibc-go/v6/testing/mock"
+	ethsecp "github.com/decimalteam/ethermint/crypto/ethsecp256k1"
+	ethhd "github.com/decimalteam/ethermint/crypto/hd"
 	"github.com/stretchr/testify/require"
 	tmconfig "github.com/tendermint/tendermint/config"
 	tmed25519 "github.com/tendermint/tendermint/crypto/ed25519"
@@ -36,7 +39,13 @@ func exportIsolatedICS20Fixtures(t *testing.T, dest string) {
 	require.NoError(t, os.Mkdir(dest, 0700), "refusing to overwrite any existing output")
 	c := &ibctesting.Coordinator{T: t, CurrentTime: time.Now().UTC().Add(-time.Minute), Chains: map[string]*ibctesting.TestChain{}}
 	for i, id := range []string{"decimal_900001-1", "decimal_900002-1"} {
-		chain := newDSCChain(t, c, id)
+		entropy, err := bip39.NewEntropy(256)
+		require.NoError(t, err)
+		mnemonic, err := bip39.NewMnemonic(entropy)
+		require.NoError(t, err)
+		rawKey, err := ethhd.EthSecp256k1.Derive()(mnemonic, "", "m/44'/60'/0'/0/0")
+		require.NoError(t, err)
+		chain := newDSCChain(t, c, id, &ethsecp.PrivKey{Key: rawKey})
 		app := chain.App.(dscIBCApp)
 		home := filepath.Join(dest, id)
 		require.NoError(t, os.MkdirAll(filepath.Join(home, "config"), 0700))
@@ -57,7 +66,7 @@ func exportIsolatedICS20Fixtures(t *testing.T, dest string) {
 			pv := privval.NewFilePV(tmed25519.PrivKey(key), filepath.Join(home, "config", "priv_validator_key.json"), filepath.Join(home, "data", "priv_validator_state.json"))
 			pv.Save()
 		}
-		metadata := map[string]any{"warning": "DISPOSABLE ISOLATED TEST KEY - NEVER FUND ON PUBLIC NETWORKS OR PUBLISH", "chain_id": id, "address": chain.SenderAccount.GetAddress().String(), "private_key_hex": hex.EncodeToString(chain.SenderPrivKey.Bytes())}
+		metadata := map[string]any{"warning": "DISPOSABLE ISOLATED TEST KEY - NEVER FUND ON PUBLIC NETWORKS OR PUBLISH", "chain_id": id, "address": chain.SenderAccount.GetAddress().String(), "private_key_hex": hex.EncodeToString(chain.SenderPrivKey.Bytes()), "mnemonic": mnemonic}
 		keyJSON, err := json.MarshalIndent(metadata, "", "  ")
 		require.NoError(t, err)
 		require.NoError(t, os.WriteFile(filepath.Join(home, "relayer-test-key.json"), keyJSON, 0600))

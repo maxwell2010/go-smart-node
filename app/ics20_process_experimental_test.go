@@ -44,7 +44,8 @@ func TestExperimentalICS20ProcessSmoke(t *testing.T) {
 		template, raw := etherconfig.AppConfig(cmdcfg.BaseDenom)
 		config := raw.(etherconfig.Config)
 		config.API.Enable = false
-		config.GRPC.Enable = false
+		config.GRPC.Enable = os.Getenv("DSC_IBC_RELAYER_BINARY") != ""
+		config.GRPC.Address = fmt.Sprintf("127.0.0.1:%d", 26790+i*100)
 		config.GRPCWeb.Enable = false
 		config.JSONRPC.Enable = false
 		config.MinGasPrices = "0del"
@@ -63,7 +64,7 @@ func TestExperimentalICS20ProcessSmoke(t *testing.T) {
 		tmconfig.WriteConfigFile(filepath.Join(home, "config", "config.toml"), cfg)
 		log, err := os.OpenFile(filepath.Join(root, id+".log"), os.O_CREATE|os.O_WRONLY, 0600)
 		require.NoError(t, err)
-		ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
+		ctx, cancel := context.WithTimeout(context.Background(), 180*time.Second)
 		cmd := exec.CommandContext(ctx, binary, "start", "--home", home)
 		hideTestWindow(cmd)
 		cmd.Stdout = log
@@ -98,6 +99,9 @@ func TestExperimentalICS20ProcessSmoke(t *testing.T) {
 		}
 		if heights[26757] >= 3 && heights[26857] >= 3 {
 			t.Logf("Two isolated OS processes advanced: %v", heights)
+			if os.Getenv("DSC_IBC_RELAYER_BINARY") != "" {
+				runExternalIBCRelayer(t, root, dest)
+			}
 			return
 		}
 		time.Sleep(time.Second)

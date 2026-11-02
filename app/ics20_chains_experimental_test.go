@@ -39,13 +39,16 @@ type dscIBCApp struct {
 
 func (a dscIBCApp) GetStakingKeeper() ibctestingtypes.StakingKeeper { return a.ValidatorKeeper }
 
-func newDSCChain(t *testing.T, c *ibctesting.Coordinator, id string) *ibctesting.TestChain {
+func newDSCChain(t *testing.T, c *ibctesting.Coordinator, id string, keys ...*ethsecp.PrivKey) *ibctesting.TestChain {
 	pv := ibcmock.NewPV()
 	pub, err := pv.GetPubKey()
 	require.NoError(t, err)
 	vals := tmtypes.NewValidatorSet([]*tmtypes.Validator{tmtypes.NewValidator(pub, 1000)})
 	priv, err := ethsecp.GenerateKey()
 	require.NoError(t, err)
+	if len(keys) > 0 {
+		priv = keys[0]
+	}
 	acc := authtypes.NewBaseAccount(priv.PubKey().Address().Bytes(), priv.PubKey(), 0, 0)
 	bal := banktypes.Balance{Address: acc.GetAddress().String(), Coins: sdk.NewCoins(sdk.NewCoin(cmdcfg.BaseDenom, sdk.NewInt(1000000).Mul(sdk.NewInt(1000000000000000000))))}
 	home := t.TempDir()
