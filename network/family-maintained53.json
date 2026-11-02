@@ -1,0 +1,123 @@
+{
+  "schemaVersion": 1,
+  "recordedUtc": "2026-11-02T10:35:29.309350+00:00",
+  "status": "maintained-family compatibility candidate; not a completed native feature port or certified network release",
+  "module": "github.com/maxwell2010/go-smart-node/network",
+  "runtimeSourceRevision": "720f76b947657e63cdf66972472e92eeaf5b49bc",
+  "releaseFamily": "2025.1",
+  "maintenanceSource": "https://docs.cosmos.network/sdk/latest/release-family",
+  "upstreamEVM": {
+    "tag": "v0.6.3",
+    "commit": "71c78b5072a248bae5273c34ad2f53d349799ccd",
+    "source": "https://github.com/cosmos/evm/tree/v0.6.3",
+    "applicationAdaptation": "Owned SDK 0.53 app layout with guarded fresh identities, static codecs, d0 prefixes, coin type60 and 18-decimal del. Direct SDK BankKeeper is used, as canonical EVM permits for an 18-decimal gas coin. No authenticated module cache was edited."
+  },
+  "goToolchain": "go1.26.10 linux/amd64",
+  "goArchiveSha256": "ccfe7ae822d2c2f41f4fe7c956199967a4dac22d0ee0d2b2bfdb440aab3b20c5",
+  "selectedModules": [
+    {
+      "importModule": "github.com/cosmos/evm",
+      "selectedRequireVersion": "v0.6.3",
+      "effectiveModule": {
+        "Path": "github.com/cosmos/evm",
+        "Version": "v0.6.3",
+        "Sum": "h1:1G8+iqyQWslZ2g7873h90Fcr3pL6RV24PgOS1wiK2SY="
+      }
+    },
+    {
+      "importModule": "github.com/cosmos/cosmos-sdk",
+      "selectedRequireVersion": "v0.53.8",
+      "effectiveModule": {
+        "Path": "github.com/cosmos/cosmos-sdk",
+        "Version": "v0.53.8",
+        "Sum": "h1:rKQIgqifo3Izv/JQLpPIjReOJ7jK+Qh8Rt8GIttDADw="
+      }
+    },
+    {
+      "importModule": "github.com/cometbft/cometbft",
+      "selectedRequireVersion": "v0.38.26",
+      "effectiveModule": {
+        "Path": "github.com/cometbft/cometbft",
+        "Version": "v0.38.26",
+        "Sum": "h1:MIPYgOSvyyiN1jo3SZljKy4ZXqs896aQnj3pQFfUmaE="
+      }
+    },
+    {
+      "importModule": "github.com/cosmos/ibc-go/v10",
+      "selectedRequireVersion": "v10.7.0",
+      "effectiveModule": {
+        "Path": "github.com/cosmos/ibc-go/v10",
+        "Version": "v10.7.0",
+        "Sum": "h1:lE1nsilDP4SUiD7mhgdF9X3f1T4sa7Lt8CiH8Qy1jzg="
+      }
+    },
+    {
+      "importModule": "github.com/ethereum/go-ethereum",
+      "selectedRequireVersion": "v1.15.11",
+      "effectiveModule": {
+        "Path": "github.com/cosmos/go-ethereum",
+        "Version": "v1.16.2-cosmos-1",
+        "Sum": "h1:QIaIS6HIdPSBdTvpFhxswhMLUJgcr4irbd2o9ZKldAI="
+      }
+    },
+    {
+      "importModule": "cosmossdk.io/store",
+      "selectedRequireVersion": "v1.1.2",
+      "effectiveModule": {
+        "Path": "cosmossdk.io/store",
+        "Version": "v1.1.2",
+        "Sum": "h1:3HOZG8+CuThREKv6cn3WSohAc6yccxO3hLzwK6rBC7o="
+      }
+    },
+    {
+      "importModule": "cosmossdk.io/core",
+      "selectedRequireVersion": "v0.11.3",
+      "effectiveModule": {
+        "Path": "cosmossdk.io/core",
+        "Version": "v0.11.3",
+        "Sum": "h1:mei+MVDJOwIjIniaKelE3jPDqShCc/F4LkNNHh+4yfo="
+      }
+    },
+    {
+      "importModule": "cosmossdk.io/log",
+      "selectedRequireVersion": "v1.6.1",
+      "effectiveModule": {
+        "Path": "cosmossdk.io/log",
+        "Version": "v1.6.1",
+        "Sum": "h1:YXNwAgbDwMEKwDlCdH8vPcoggma48MgZrTQXCfmMBeI="
+      }
+    },
+    {
+      "importModule": "github.com/bytedance/sonic",
+      "selectedRequireVersion": "v1.15.1",
+      "effectiveModule": {
+        "Path": "github.com/bytedance/sonic",
+        "Version": "v1.15.1",
+        "Sum": "h1:nJD5PmM0vY7J8CT6MxoqbVAAMhkSmV2HgRAUrrpLoOw="
+      }
+    },
+    {
+      "importModule": "github.com/bytedance/sonic/loader",
+      "selectedRequireVersion": "v0.5.1",
+      "effectiveModule": {
+        "Path": "github.com/bytedance/sonic/loader",
+        "Version": "v0.5.1",
+        "Sum": "h1:Ygpfa9zwRCCKSlrp5bBP/b/Xzc3VxsAW+5NIYXrOOpI="
+      }
+    }
+  ],
+  "validation": {
+    "wholeModuleIntegrity": "PASS: go mod verify on independently downloaded official modules in isolated Linux ext4 cache",
+    "ordinaryBuild": "PASS: owned app, identity, decimal packages and constructor probe",
+    "ordinaryTests": "PASS: identity, coin/NFT keeper and schema/params, compat signing, formulas, app signing-domain, real EVM transfer/exact fee and financial rollback checks",
+    "taggedIBC": "PASS: real signed ICS20 transfer/return, altered proof, error acknowledgement and timeout/refund cases in owned harness",
+    "softwareToolchainAdjustment": "Canonical Sonic1.14.2 fails Go1.26 compilation; Sonic1.15.1 plus loader0.5.1 preserve the selected core family and compile successfully."
+  },
+  "remainingGates": [
+    "Guarded production daemon and real two-process relay validation.",
+    "Native Decimal validator/delegation/reward and coin/NFT feature wiring/parity.",
+    "Known canonical EVM block-proposer address conversion requires an independent reviewed source correction and COINBASE execution regression.",
+    "This compatibility pass does not certify current advisory closure or mainnet replay compatibility."
+  ],
+  "historicalReference": "family-manifest.json retains the earlier SDK0.54/EVM0.7 bootstrap snapshot; its checks and findings must not be attributed to this graph."
+}
