@@ -828,7 +828,7 @@ func (app *App) setAnteHandler(txConfig client.TxConfig, maxGasWanted uint64) {
 		panic(err)
 	}
 
-	app.SetAnteHandler(evmante.NewAnteHandler(options))
+	app.SetAnteHandler(protectEthereumDomain(evmante.NewAnteHandler(options), app.evmChainID))
 }
 
 func (app *App) onPendingTx(hash common.Hash) {

@@ -2,6 +2,7 @@ package app
 
 import (
 	"encoding/json"
+	"fmt"
 	"math/big"
 	"testing"
 	"time"
@@ -160,12 +161,45 @@ func TestFreshOwnApplicationSignedNativeEVMTransfer(t *testing.T) {
 	require.NoError(t, err)
 	txBytes, err := a.TxConfig().TxEncoder()(canonical)
 	require.NoError(t, err)
-	result, err := a.FinalizeBlock(&abci.RequestFinalizeBlock{Height: 1, Time: now.Add(time.Second), Txs: [][]byte{txBytes}, NextValidatorsHash: valSet.Hash(), ProposerAddress: pub.Address()})
+	var rejected [][]byte
+	var rejectedNames []string
+	appendForeign := func(raw *ethtypes.Transaction, signer ethtypes.Signer, name string) {
+		signed, signErr := ethtypes.SignTx(raw, signer, ethKey)
+		require.NoError(t, signErr)
+		msg := &evmtypes.MsgEthereumTx{}
+		require.NoError(t, msg.FromSignedEthereumTx(signed, signer))
+		built, buildErr := msg.BuildTx(a.TxConfig().NewTxBuilder(), identity.BaseDenom)
+		require.NoError(t, buildErr)
+		encoded, encodeErr := a.TxConfig().TxEncoder()(built)
+		require.NoError(t, encodeErr)
+		rejected = append(rejected, encoded)
+		rejectedNames = append(rejectedNames, name)
+	}
+	appendForeign(tx, ethtypes.NewEIP155Signer(big.NewInt(75)), "Decimal chain75")
+	appendForeign(tx, ethtypes.NewEIP155Signer(big.NewInt(990002)), "different EVM domain990002")
+	seen := map[uint64]bool{}
+	for value := int64(1000); len(seen) < 2 && value < 1128; value++ {
+		unprotected := ethtypes.NewTransaction(0, to, big.NewInt(value), 21000, price, nil)
+		signed, signErr := ethtypes.SignTx(unprotected, ethtypes.HomesteadSigner{}, ethKey)
+		require.NoError(t, signErr)
+		v, _, _ := signed.RawSignatureValues()
+		if !seen[v.Uint64()] {
+			appendForeign(unprotected, ethtypes.HomesteadSigner{}, fmt.Sprintf("unprotected legacy v%d", v.Uint64()))
+			seen[v.Uint64()] = true
+		}
+	}
+	require.Len(t, seen, 2)
+	allTransactions := append(rejected, txBytes)
+	result, err := a.FinalizeBlock(&abci.RequestFinalizeBlock{Height: 1, Time: now.Add(time.Second), Txs: allTransactions, NextValidatorsHash: valSet.Hash(), ProposerAddress: pub.Address()})
 	require.NoError(t, err)
-	require.Len(t, result.TxResults, 1)
-	require.Zero(t, result.TxResults[0].Code, result.TxResults[0].Log)
+	require.Len(t, result.TxResults, len(allTransactions))
+	for i, name := range rejectedNames {
+		require.NotZero(t, result.TxResults[i].Code, "actual ante must reject %s", name)
+	}
+	accepted := result.TxResults[len(rejected)]
+	require.Zero(t, accepted.Code, accepted.Log)
 	var txData sdk.TxMsgData
-	require.NoError(t, a.AppCodec().Unmarshal(result.TxResults[0].Data, &txData))
+	require.NoError(t, a.AppCodec().Unmarshal(accepted.Data, &txData))
 	require.Len(t, txData.MsgResponses, 1)
 	var evmResponse evmtypes.MsgEthereumTxResponse
 	require.NoError(t, evmResponse.Unmarshal(txData.MsgResponses[0].Value))
@@ -176,6 +210,7 @@ func TestFreshOwnApplicationSignedNativeEVMTransfer(t *testing.T) {
 	expectedFee := new(big.Int).Mul(price, new(big.Int).SetUint64(evmResponse.GasUsed))
 	expectedBalance := math.NewInt(1_000_000).Mul(math.NewInt(1_000_000_000_000_000_000)).Sub(math.NewInt(123)).Sub(math.NewIntFromBigInt(expectedFee))
 	require.Equal(t, expectedBalance, a.BankKeeper.GetBalance(ctx, sdk.AccAddress(from.Bytes()), identity.BaseDenom).Amount, "real sender debit must equal transferred value plus exact charged legacy gas fee")
+	require.Equal(t, uint64(1), a.EVMKeeper.GetNonce(ctx, from), "rejected signing domains must not consume nonce")
 	t.Run("bounded_precompile_financial_rollback", func(t *testing.T) {
 		checkBoundedFinancialRollback(t, a, ethKey, valSet, now)
 	})

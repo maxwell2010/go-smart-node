@@ -18,6 +18,15 @@ fixed to `d0` and sealed. Default genesis uses `del`, has no preminted balances,
 sample wrapped-token pairs or cloned mainnet owners. Generic SDK mint inflation
 is inert. Operators must explicitly provide distribution and authorities.
 
+Ethereum transactions must additionally carry an EIP-155-protected signature
+for this application's EVM ID. This is enforced in consensus ante processing,
+before signature/nonce/fee writes, independently of RPC admission flags.
+Current Cosmos EVM params contain no `AllowUnprotectedTx` genesis field; the
+owned application rejects unprotected legacy signatures as fixed network
+policy. Production-tag tests submit chain 75, a different EVM ID and both legacy
+v27/v28 signatures in the same block before a valid transfer, checking rejection,
+exact recipient credit, unchanged invalid-transaction nonce and exact sender fee.
+
 The current application still uses canonical SDK staking, distribution and
 slashing as temporary constructor dependencies. It does not implement Decimal
 coin reserve semantics, NFT delegation, custom validator voting, fees or the
