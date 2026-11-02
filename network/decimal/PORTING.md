@@ -13,3 +13,15 @@ Coin, NFT, validator and fee integration remain incomplete until their keepers a
 Coin/NFT data and transaction schemas are now staged under `proto/decimal`, with their original wire type URLs and signer annotations. Generated files use Cosmos gogoproto v1.7.2 and protoc3.21.12; `scripts/generate-native-proto.sh` reproduces them. Modern descriptor-based signing is tested with a real SDK address codec, including invalid-sender rejection. These schema checks do not enable legacy native write handlers or deploy system contracts.
 
 The new coin default has zero allocation; this is not a mint instruction. Application genesis must reconcile metadata with the operator's bank distribution. Parameter validation rejects missing/negative amounts, and the real SDK CacheContext tests demonstrate that discarded changes cannot alter keeper reads. The complete-export NFT supply checker now detects counter mismatches and duplicate/missing records; callers must hydrate counters and sub-tokens rather than pass shallow query records. Native bank/reserve conservation and event-backed keeper wiring are still outstanding.
+
+The staged NFT state keeper now imports/exports complete records and verifies
+ownership/URI/collection indexes. Partial transfer batches and event/index-write
+errors roll back, including inherited versus explicit zero reserves. This is
+storage evidence, not authenticated EVM delegation, minting or reserve backing.
+See each keeper's README for its remaining application requirements.
+
+Do not use reflective `proto.Clone` as a general deep copy for populated SDK
+financial messages: nested custom math fields can panic in gogoproto merging.
+The parameter store retains only the concrete message type and constructs a
+fresh empty decoder per read; persisted bytes supply all values. Actual
+financial-message constructor and roundtrip tests cover this distinction.
