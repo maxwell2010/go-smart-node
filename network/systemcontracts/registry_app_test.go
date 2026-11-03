@@ -1347,5 +1347,8 @@ func TestOwnedAppSignedRegistryBootstrap(t *testing.T) {
 	t.Run("isolated NFT vault backend", func(t *testing.T) {
 		runIsolatedVaultBackend(t, isolatedBackendEnv{app: a, ctx: ctx, send: send, load: load, deploy: deploy, keys: keys, credit: nativeCredit, events: func() []abci.Event { return lastAllEvents }, setup: setup, govOwner: common.BytesToAddress(authtypes.NewModuleAddress(govtypes.ModuleName))})
 	})
+	t.Run("canonical isolated NFT Gateway", func(t *testing.T) {
+		runCanonicalIsolatedGateway(t, isolatedBackendEnv{app: a, ctx: ctx, send: send, load: load, deploy: deploy, keys: keys, credit: nativeCredit, events: func() []abci.Event { return lastAllEvents }, setup: setup}, func(reject bool) { rejectNativeBurn = reject })
+	})
 	t.Log("actual owned-App signed registry/proxy constructor, explicit owner, authorization, reinitialization rejection and exact native/EVM fees passed")
 }

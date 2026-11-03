@@ -27,7 +27,7 @@ func Load(name string) (Artifact, error) {
 
 func checkName(name string) error {
 	switch name {
-	case "MintCandyNFTPositionVault", "MintCandyIsolatedDRC1155", "IsolatedNFTTestController":
+	case "MintCandyIsolatedDelegation", "MintCandyNFTPositionVault", "MintCandyIsolatedDRC1155", "IsolatedNFTTestController":
 	case "DecimalContractCenter", "DecimalContractCenterProxy", "NewNetworkProxyBootstrap", "NativeBurnTestTarget", "NewNetworkTokenReadableProxy", "NewNetworkNFTReadableProxy", "BeaconNFT", "NewNetworkDRC721", "NewNetworkDRC1155", "IMintCandyNativeBurn", "NewNetworkNFTCenter", "NewNetworkTokenCenter", "NewNetworkReservelessTokenBeacon", "ConfiguredBootstrapTestTarget", "NewNetworkMasterValidator", "MintCandyWrappedDEL", "WrappedDELTestReceiver", "DecimalMasterValidator", "DecimalDelegation", "DelegationNFTLib", "MintCandyDelegation", "MintCandyDelegationNFTLib", "DecimalDelegationNFT", "DecimalTokenCenter", "DecimalNFTCenter", "DRC20", "DRC20Reserveless", "DRC721", "DRC1155", "DRC721Reserveless", "DRC1155Reserveless":
 	default:
 		return fmt.Errorf("unknown pinned system-contract artifact %q", name)
@@ -83,8 +83,8 @@ func LoadLinked(name string, libraries map[string]common.Address) (Artifact, err
 		return Artifact{}, err
 	}
 	expected := name
-	if name == "MintCandyDelegation" || name == "MintCandyDelegationNFTLib" {
-		expected = map[string]string{"MintCandyDelegation": "DecimalDelegation", "MintCandyDelegationNFTLib": "DelegationNFTLib"}[name]
+	if name == "MintCandyDelegation" || name == "MintCandyDelegationNFTLib" || name == "MintCandyIsolatedDelegation" {
+		expected = map[string]string{"MintCandyDelegation": "DecimalDelegation", "MintCandyDelegationNFTLib": "DelegationNFTLib", "MintCandyIsolatedDelegation": "MintCandyIsolatedDelegation"}[name]
 		if source.ArtifactName != name || source.SourceUnit != "owned/DecimalDelegation.sol" {
 			return Artifact{}, fmt.Errorf("owned staking artifact provenance mismatch")
 		}
