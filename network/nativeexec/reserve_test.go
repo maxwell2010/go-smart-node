@@ -18,8 +18,8 @@ import (
 )
 
 func TestReserveAdapterSharesRealMetadataAndLaterStageRollback(t *testing.T) {
-	for _, fail := range []bool{false, true} {
-		t.Run(map[bool]string{false: "commit", true: "late failure"}[fail], func(t *testing.T) {
+	for _, mode := range []string{"commit", "late apply failure", "final failure"} {
+		t.Run(mode, func(t *testing.T) {
 			ctx, key, execution := fixture()
 			keeper, err := coinkeeper.NewStateKeeper(runtime.NewKVStoreService(key))
 			require.NoError(t, err)
@@ -27,7 +27,7 @@ func TestReserveAdapterSharesRealMetadataAndLaterStageRollback(t *testing.T) {
 			creator, err := bech32.ConvertAndEncode("d0", execution.Sender.Bytes())
 			require.NoError(t, err)
 			unit := sdkmath.NewIntWithDecimal(1, 18)
-			coin := cointypes.Coin{Denom: "adaptercoin", Title: "Registered adapter fixture", Creator: creator,
+			coin := cointypes.Coin{Denom: "adaptcoin", Title: "Registered adapter fixture", Creator: creator,
 				CRR: 50, Volume: unit.MulRaw(10), Reserve: unit.MulRaw(5), MinVolume: sdkmath.ZeroInt(),
 				LimitVolume: unit.MulRaw(100), DRC20Contract: "0x1234567890123456789012345678901234567890"}
 			require.NoError(t, keeper.SetCoin(ctx, coin))
@@ -50,7 +50,15 @@ func TestReserveAdapterSharesRealMetadataAndLaterStageRollback(t *testing.T) {
 			execution.Receipt.Logs = []*ethtypes.Log{{Address: common.HexToAddress(coin.DRC20Contract), Topics: []common.Hash{event.ID}, Data: payload}}
 			probe := func(name string, reject bool) Preparer {
 				return prepareFunc(func(sdk.Context, Execution) (Prepared, error) {
-					return &plan{validate: func(sdk.Context) error { return nil }, apply: func(c sdk.Context) error {
+					return &plan{validate: func(c sdk.Context) error {
+						old, err := keeper.GetCoin(c, coin.Denom)
+						require.NoError(t, err)
+						require.Equal(t, coin, old, "all stages validate before reserve writes")
+						return nil
+					}, apply: func(c sdk.Context) error {
+						updated, err := keeper.GetCoin(c, coin.Denom)
+						require.NoError(t, err)
+						require.Equal(t, reserve, updated.Reserve, "later apply sees legitimate earlier-stage changes")
 						c.KVStore(key).Set([]byte(name), []byte{1})
 						c.EventManager().EmitEvent(sdk.NewEvent(name))
 						if reject {
@@ -60,13 +68,18 @@ func TestReserveAdapterSharesRealMetadataAndLaterStageRollback(t *testing.T) {
 					}}, nil
 				})
 			}
-			coordinator, err := New(assets, probe("nft-probe", false), probe("validator-probe", fail), finalFunc(func(sdk.Context, Execution) error { return nil }), Limits{MaxLogs: 8, MaxBytes: 4096, MaxCopyWeight: 65536})
+			coordinator, err := New(assets, probe("nft-probe", false), probe("validator-probe", mode == "late apply failure"), finalFunc(func(c sdk.Context, _ Execution) error {
+				if mode == "final failure" {
+					return errors.New("later validator final invariant rejected")
+				}
+				return nil
+			}), Limits{MaxLogs: 8, MaxBytes: 4096, MaxCopyWeight: 65536})
 			require.NoError(t, err)
 			err = coordinator.Process(ctx, execution)
 			current, readErr := keeper.GetCoin(ctx, coin.Denom)
 			require.NoError(t, readErr)
 			require.Equal(t, 3, reads, "prepare/validate/apply each check authoritative final backing")
-			if fail {
+			if mode != "commit" {
 				require.ErrorContains(t, err, "later validator")
 				require.Equal(t, coin.Volume, current.Volume)
 				require.Equal(t, coin.Reserve, current.Reserve)
@@ -83,4 +96,24 @@ func TestReserveAdapterSharesRealMetadataAndLaterStageRollback(t *testing.T) {
 	}
 	_, err := NewReservePreparer(nil)
 	require.Error(t, err)
+}
+
+func TestReserveAdapterRejectsUnreviewedEntryPointsBeforeReading(t *testing.T) {
+	ctx, _, execution := fixture()
+	compiled, err := contracts.CompiledABI("DRC20")
+	require.NoError(t, err)
+	hook, err := coinkeeper.NewReserveHook(new(coinkeeper.StateKeeper), compiled, func(sdk.Context, common.Address) (sdkmath.Int, sdkmath.Int, error) {
+		t.Fatal("unreviewed entry point must not read backing")
+		return sdkmath.Int{}, sdkmath.Int{}, nil
+	}, 8)
+	require.NoError(t, err)
+	adapter, err := NewReservePreparer(hook)
+	require.NoError(t, err)
+	for _, entry := range []EntryPoint{Unspecified, NativeSDK, IBC, EntryPoint(255)} {
+		execution.EntryPoint = entry
+		before := ctx.GasMeter().GasConsumed()
+		_, err := adapter.Prepare(ctx, execution)
+		require.ErrorContains(t, err, "no reviewed adapter")
+		require.Equal(t, before, ctx.GasMeter().GasConsumed())
+	}
 }

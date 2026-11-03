@@ -1,6 +1,7 @@
 package keeper
 
 import (
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -155,4 +156,44 @@ func TestReservePlanNoopDoesNotReadNativeStateOrBacking(t *testing.T) {
 	require.False(t, absent.IsNoop())
 	require.Error(t, absent.Validate(ctx))
 	require.Error(t, new(ReservePlan).Apply(ctx))
+}
+
+// SDK contexts are not generally concurrency-safe. Only the winner may touch
+// this context; all competing shallow copies must fail at the shared CAS token
+// before any KV, reader, event or gas-meter access.
+func TestReservePlanConcurrentApplyCopiesHaveOneWinner(t *testing.T) {
+	ctx, _, k, coin := fixture(t)
+	require.NoError(t, k.SetCoin(ctx, coin))
+	a := reserveABI(t)
+	entered, release := make(chan struct{}), make(chan struct{})
+	var reads atomic.Int32
+	hook, err := NewReserveHook(k, a, func(sdk.Context, common.Address) (sdkmath.Int, sdkmath.Int, error) {
+		if reads.Add(1) == 2 {
+			close(entered)
+			<-release
+		}
+		return coin.Volume, coin.Reserve, nil
+	}, 4)
+	require.NoError(t, err)
+	prepared, err := hook.Prepare(ctx, &ethtypes.Receipt{Status: 1, Logs: []*ethtypes.Log{reserveLog(t, a, coin.DRC20Contract, coin.Reserve, coin.Volume)}})
+	require.NoError(t, err)
+	child, _ := ctx.CacheContext()
+	winner := make(chan error, 1)
+	go func() { winner <- prepared.Apply(child) }()
+	<-entered
+	results := make(chan error, 32)
+	for range 32 {
+		copyOfPlan := *prepared
+		go func() { results <- copyOfPlan.Apply(child) }()
+	}
+	for range 32 {
+		require.ErrorContains(t, <-results, "consumed")
+	}
+	require.ErrorContains(t, prepared.Validate(child), "consumed")
+	close(release)
+	require.NoError(t, <-winner)
+	require.Equal(t, int32(2), reads.Load(), "prepare and the sole winner read backing")
+	require.Len(t, child.EventManager().Events(), 1)
+	require.Empty(t, ctx.EventManager().Events(), "an outer discard does not reset the single-use token")
+	require.ErrorContains(t, prepared.Apply(ctx), "consumed")
 }
