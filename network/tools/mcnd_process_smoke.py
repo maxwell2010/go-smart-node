@@ -11,7 +11,7 @@ class SignalGuard:
     def __init__(self):
         self.previous = {}
         self.requested = None
-        self.registering, self.unwinding = 0, False
+        self.protected, self.unwinding = 0, False
 
     def handle(self, number, _frame):
         if self.requested is None:
@@ -19,17 +19,17 @@ class SignalGuard:
         self.check()
 
     def check(self):
-        if self.requested is not None and not self.registering and not self.unwinding:
+        if self.requested is not None and not self.protected and not self.unwinding:
             self.unwinding = True
             raise TerminationRequested('termination requested: signal ' + str(self.requested))
 
     @contextmanager
-    def register_child(self):
-        self.registering += 1
+    def finish_owned_operation(self):
+        self.protected += 1
         try:
             yield
         finally:
-            self.registering -= 1
+            self.protected -= 1
             self.check()
 
     def __enter__(self):
@@ -55,8 +55,8 @@ def private_namespace():
 def private_environment(root):
     home = root / 'tool-home'
     temporary = root / 'tmp'
-    home.mkdir(mode=448)
-    temporary.mkdir(mode=448)
+    home.mkdir(mode=0o700)
+    temporary.mkdir(mode=0o700)
     return {'PATH': os.environ.get('PATH', '/usr/bin:/bin'), 'LANG': 'C.UTF-8', 'TZ': 'UTC', 'HOME': str(home), 'TMPDIR': str(temporary), 'TMP': str(temporary), 'TEMP': str(temporary), 'GOMAXPROCS': '2', 'NO_PROXY': '127.0.0.1,localhost'}
 
 class ProcessOwner:
@@ -67,7 +67,7 @@ class ProcessOwner:
         self.signals = signals
 
     def spawn(self, args, path, env):
-        with self.signals.register_child() if self.signals else nullcontext():
+        with self.signals.finish_owned_operation() if self.signals else nullcontext():
             log = open(path, 'w', encoding='utf8')
             self.handles.append(log)
             child = subprocess.Popen(args, env=env, stdout=log, stderr=log)
@@ -85,7 +85,7 @@ class ProcessOwner:
             raise
 
     def close(self):
-        with self.signals.register_child() if self.signals else nullcontext():
+        with self.signals.finish_owned_operation() if self.signals else nullcontext():
             self._close_all()
 
     def _close_all(self):

@@ -76,6 +76,18 @@ class FakeChild:
         return 0
 
 
+class SignalBetweenChildren(list):
+    def __init__(self, children, callback):
+        super().__init__(children)
+        self.callback = callback
+
+    def __reversed__(self):
+        iterator = super().__reversed__()
+        yield next(iterator)
+        self.callback()  # Outside every per-child stop/except block.
+        yield from iterator
+
+
 class ProcessLifecycleGuards(unittest.TestCase):
     def setUp(self):
         # Both imported helpers use this same stdlib module. Every real spawn
@@ -162,13 +174,9 @@ class ProcessLifecycleGuards(unittest.TestCase):
                 guard = module.SignalGuard()
                 owner = lab.Lab(Path("unused"), {}, {}, guard) if module is lab else daemon.ProcessOwner(guard)
                 first, second, unrelated = FakeChild(), FakeChild(), FakeChild()
-                original = second.terminate
-                def interrupted_stop():
-                    guard.handle(module.signal.SIGTERM, None)
-                    original()
-                second.terminate = interrupted_stop
                 handle = Mock()
-                owner.children, owner.handles = [first, second], [handle]
+                owner.children = SignalBetweenChildren([first, second], lambda: guard.handle(module.signal.SIGTERM, None))
+                owner.handles = [handle]
                 with self.assertRaises(module.TerminationRequested):
                     owner.close()
                 self.assertFalse(first.running)
@@ -237,13 +245,12 @@ class ProcessLifecycleGuards(unittest.TestCase):
             self.assertEqual(unrelated.read_text(), "preserve")
             self.assertFalse(Path(result["home"]).parent.exists(), "only owned TemporaryDirectory is removed")
 
-    def test_signal_after_synthetic_success_produces_failed_report_and_closes_fake_child(self):
-        child, unrelated = FakeChild(), FakeChild()
+    def test_signal_between_cleanup_iterations_after_success_fails_report_and_closes_all(self):
+        child, second, unrelated = FakeChild(), FakeChild(), FakeChild()
         guard = lab.SignalGuard()
         def interrupted_fake_suite(owner, *_):
-            owner.children.append(child)
+            owner.children = SignalBetweenChildren([child, second], lambda: guard.handle(lab.signal.SIGTERM, None))
             owner.report.update(status="TWO_PROCESS_HERMES_PASS", release_gate=True)
-            guard.handle(lab.signal.SIGTERM, None)
         with tempfile.TemporaryDirectory() as directory:
             report = Path(directory) / "report.json"
             args = ["--mode", "full", "--reference-binary", "fake-reference", "--reference-sha256", "0" * 64,
@@ -252,13 +259,14 @@ class ProcessLifecycleGuards(unittest.TestCase):
             with patch.object(lab, "private_namespace"), patch.object(lab, "binary", return_value=(Path("fake"), "0" * 64)), \
                     patch.object(lab, "command", return_value="fake-version"), patch.object(lab, "full_suite", side_effect=interrupted_fake_suite), \
                     patch.object(lab.signal, "signal"), patch("sys.stdout", new=io.StringIO()), guard:
-                code = lab.main(args)
+                code = lab.main(args, signals=guard)
             result = json.loads(report.read_text())
             self.assertEqual(code, 1)
             self.assertEqual(result["status"], "FAIL")
             self.assertFalse(result["release_gate"])
             self.assertIn("termination requested", result["error"])
             self.assertFalse(child.running)
+            self.assertFalse(second.running)
             self.assertEqual(unrelated.calls, [])
 
 

@@ -34,7 +34,7 @@ class SignalGuard:
     """Unwind once through owned-process cleanup, then ignore repeated stops."""
     def __init__(self):
         self.previous, self.requested = {}, None
-        self.registering, self.unwinding = 0, False
+        self.protected, self.unwinding = 0, False
 
     def handle(self, number, _frame):
         if self.requested is None:
@@ -42,19 +42,19 @@ class SignalGuard:
         self.check()
 
     def check(self):
-        if self.requested is not None and not self.registering and not self.unwinding:
+        if self.requested is not None and not self.protected and not self.unwinding:
             self.unwinding = True
             raise TerminationRequested("termination requested: signal " + str(self.requested))
 
     @contextmanager
-    def register_child(self):
-        # Record an interruption while Popen returns, then unwind only after
-        # the new child has entered the owner's cleanup list.
-        self.registering += 1
+    def finish_owned_operation(self):
+        # Finish ownership registration or all cleanup attempts before raising
+        # the first recorded stop. Repeated stops cannot interrupt that unwind.
+        self.protected += 1
         try:
             yield
         finally:
-            self.registering -= 1
+            self.protected -= 1
             self.check()
 
     def __enter__(self):
@@ -209,7 +209,7 @@ class Lab:
                 self.ports.add(port); return port
 
     def spawn(self, args, name):
-        with self.signals.register_child() if self.signals else nullcontext():
+        with self.signals.finish_owned_operation() if self.signals else nullcontext():
             log = open(self.root / (name + ".log"), "w", encoding="utf8")
             self.handles.append(log)
             child = subprocess.Popen([str(a) for a in args], env=self.env, stdout=log, stderr=subprocess.STDOUT)
@@ -225,7 +225,7 @@ class Lab:
                 child.kill(); child.wait(timeout=10)
 
     def close(self):
-        with self.signals.register_child() if self.signals else nullcontext():
+        with self.signals.finish_owned_operation() if self.signals else nullcontext():
             self._close_all()
 
     def _close_all(self):
