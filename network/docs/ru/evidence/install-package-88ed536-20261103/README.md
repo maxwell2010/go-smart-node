@@ -62,3 +62,9 @@ linking/полного build environment этим smoke не установле�
 release URL, не финальный vulnerability scan, не performance/hardware минимум,
 не mainnet replay, не проверка новой изолированной финансовой модели и не
 разрешение её активации. Новая общая сборка должна пройти собственные CI/gates.
+
+Дополнительное read-only сравнение ELF сохранено в read-only-elf-comparison.json.
+Различия не ограничены build-ID: затронуты debug/line, unwind, pclntab, module
+и symbol metadata; размеры/layout различаются. Общие text/rodata/data секции
+побайтно равны, но идентичность полных ELF или семантическая эквивалентность
+этим не заявляются. Бинарники не менялись и не выполнялись этим сравнением.

@@ -1,0 +1,98 @@
+{
+  "allOtherFileBytesEqualAtSameOffsets": null,
+  "ciBytes": 192041312,
+  "ciSha256": "a5b359c7ec929621cca2858dac52e9bd108ea7f66de35178394c7417058ee9e5",
+  "differentFileBackedSections": [
+    {
+      "bytesCI": 12940165,
+      "bytesLocal": 12940161,
+      "offsetCI": 159377760,
+      "section": ".debug_info",
+      "sha256CI": "89e14db3eabc1778f8b60bc853d40e689815d4c79b8190697486854ab6a6ef6e",
+      "sha256Local": "1e7b6e409a6bf41543ed0dd34b9722cb7c6c7e7b38ffbe220c6ea017b57e0de8"
+    },
+    {
+      "bytesCI": 7332318,
+      "bytesLocal": 7332330,
+      "offsetCI": 172332256,
+      "section": ".debug_line",
+      "sha256CI": "ce00fb81da1df1ce88d329aa9330446c0f99d08cd0b27bb6f8d0aa5e5a7c2f6e",
+      "sha256Local": "158181d259cc5af4bb4077e6e4fa9031a6fa7fb1b52124d8eea946903ed73957"
+    },
+    {
+      "bytesCI": 61312,
+      "bytesLocal": 61312,
+      "offsetCI": 133836720,
+      "section": ".eh_frame",
+      "sha256CI": "0fc4130c58217376b37b937d4bac63731b31863869385a5d1e5b94adfb3fa8ab",
+      "sha256Local": "ace95f53235be2e957fbaa0656602524ecc7bda3e31afcf9b93b5eca054237d8"
+    },
+    {
+      "bytesCI": 9084,
+      "bytesLocal": 9084,
+      "offsetCI": 133827632,
+      "section": ".eh_frame_hdr",
+      "sha256CI": "a2e9a35438367f039cdb0f18d47de8cab5c34e13a09301f8b5e2fb0330dd0661",
+      "sha256Local": "0797025dacfb3e63c4b7734c1eca3174de3f0e71ea9fe6de8fb48911b498979a"
+    },
+    {
+      "bytesCI": 592,
+      "bytesLocal": 592,
+      "offsetCI": 134764608,
+      "section": ".go.module",
+      "sha256CI": "92b0c941b0ca246c57208179558ba29e5fa7a96764799b3ac65c5f2c73a519df",
+      "sha256Local": "22d90f2e1f2cc96b05a6b24c8991e84813f70bf560ec3096c1216bd8739adfd5"
+    },
+    {
+      "bytesCI": 47923094,
+      "bytesLocal": 47923126,
+      "offsetCI": 85650592,
+      "section": ".gopclntab",
+      "sha256CI": "bf2ab82c666b2cfece26285b2d90590b7d6757ecc12f8764df3aeaec062ccf8b",
+      "sha256Local": "00aeac25f9fc221ae01701e2b62c1a9385c3feb7b0848bf5f670ae290fede640"
+    },
+    {
+      "bytesCI": 36,
+      "bytesLocal": 36,
+      "offsetCI": 912,
+      "section": ".note.gnu.build-id",
+      "sha256CI": "c499e3243e1d4e4942f116a08ce4679e4e652e095837575d6d6b9e6f1847c718",
+      "sha256Local": "ac79964989d7918c11ff71d79e9308223977118c95394a9ee38ca226197c9a17"
+    },
+    {
+      "bytesCI": 100,
+      "bytesLocal": 100,
+      "offsetCI": 980,
+      "section": ".note.go.buildid",
+      "sha256CI": "d0c4ac1a7f426aed13edd2fb67b442e7acf6594d425c0f6e7b1278dfd6ba64ce",
+      "sha256Local": "12f2e1caebe06544f179757fca6c0e53402b578b931ff6d18f1f9428efdcbf31"
+    },
+    {
+      "bytesCI": 5200344,
+      "bytesLocal": 5200344,
+      "offsetCI": 137858416,
+      "section": ".symtab",
+      "sha256CI": "a16e5d62c37d6fa3ea10bf5f0f434b032a01638e4163d202e38fc7517a1fb85b",
+      "sha256Local": "9a4a8a73a299e54faf6dc1157dd7e7d8d8cd8db455ca9579408c1b12fa08c9a5"
+    }
+  ],
+  "elfHeader64BytesEqual": false,
+  "elfSectionLayoutsEqual": false,
+  "excludedNotesForDiagnosticOnly": [
+    {
+      "end": 948,
+      "section": ".note.gnu.build-id",
+      "start": 912
+    },
+    {
+      "end": 1080,
+      "section": ".note.go.buildid",
+      "start": 980
+    }
+  ],
+  "fullByteIdentity": false,
+  "localBytes": 192041328,
+  "localSha256": "e2fb07b379e60a82b8310d00c59baae33169d72c1277a538f16128f3dbe46a4c",
+  "reproducibilityClaim": false,
+  "scope": "Read-only in-memory ELF comparison. Neither file was patched, normalized, rewritten or executed by this check. Unequal original SHA remains unequal."
+}

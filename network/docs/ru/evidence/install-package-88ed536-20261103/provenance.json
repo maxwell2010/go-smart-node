@@ -6,8 +6,8 @@
       "sha256": "07d0aab2ac21580bd3a18e1e86673ee4e803b00e3c3d717c00211f079615678e"
     },
     "README.md": {
-      "bytes": 5364,
-      "sha256": "37a93d84e4ebae5f3a1ccd4ffe5756d5b4d7f52829ba7e9cda9a5cc27a2b8454"
+      "bytes": 5975,
+      "sha256": "63084017b29b201792b95adb85e5736e4be02e8f7c0a5a7e24b983fabe6bccf8"
     },
     "acceptance-summary.json": {
       "bytes": 2400,
@@ -92,6 +92,10 @@
     "mcnd-development-linux-amd64.tar.gz.sha256": {
       "bytes": 102,
       "sha256": "e17aa7fb4589f578fc0c5a594f664fc1bf63742ffbb0bac6183c1831185f9985"
+    },
+    "read-only-elf-comparison.json": {
+      "bytes": 3508,
+      "sha256": "5aac593d55ba0c16815a9df83991eb0eba5ea18d4b75aa4c3b928956ca09c2b3"
     }
   },
   "latestPackagingHelperCommit": "c7b10bd8b0c88f12ce84f41b24f3d9eeb0c1cf31",
