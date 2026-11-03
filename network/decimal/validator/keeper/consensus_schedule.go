@@ -209,7 +209,17 @@ func (k *StateKeeper) BootstrapConsensusSchedule(ctx sdk.Context, initialHeight 
 	if initialHeight <= 0 || initialHeight > math.MaxInt64-2 || (ctx.BlockHeight() != 0 && ctx.BlockHeight() != initialHeight-1) {
 		return errors.New("invalid initial consensus schedule context")
 	}
-	g, err := k.ExportGenesis(ctx)
+	child, commit := ctx.CacheContext()
+	marker, err := k.service.OpenKVStore(child).Get([]byte{bondedTotalsKey})
+	if err != nil {
+		return err
+	}
+	if marker == nil {
+		if err := k.RebuildConsensusIndexes(child); err != nil {
+			return err
+		}
+	}
+	g, err := k.ExportGenesis(child)
 	if err != nil {
 		return err
 	}
@@ -228,7 +238,6 @@ func (k *StateKeeper) BootstrapConsensusSchedule(ctx sdk.Context, initialHeight 
 	if err = g.Validate(); err != nil {
 		return err
 	}
-	child, commit := ctx.CacheContext()
 	for _, row := range g.ScheduledValidatorSets {
 		if err = k.writeScheduledSet(child, row); err != nil {
 			return err

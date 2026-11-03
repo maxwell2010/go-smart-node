@@ -9,6 +9,7 @@ import (
 	sdk "github.com/cosmos/cosmos-sdk/types"
 	"github.com/cosmos/gogoproto/proto"
 	"github.com/maxwell2010/go-smart-node/network/decimal/validator/types"
+	"sort"
 )
 
 // InitGenesis is all-or-nothing in the SDK cache. Full cross-module reserve and
@@ -43,6 +44,9 @@ func (k *StateKeeper) InitGenesis(ctx sdk.Context, g *types.GenesisState) error 
 		return errors.New("validator store is not empty")
 	}
 	if e = k.SetParams(child, g.Params); e != nil {
+		return e
+	}
+	if e = k.initConsensusIndexes(child); e != nil {
 		return e
 	}
 	for _, v := range g.Validators {
@@ -103,6 +107,10 @@ func (k *StateKeeper) InitGenesis(ctx sdk.Context, g *types.GenesisState) error 
 }
 
 func (k *StateKeeper) ExportGenesis(ctx sdk.Context) (*types.GenesisState, error) {
+	return k.exportGenesis(ctx, true)
+}
+
+func (k *StateKeeper) exportGenesis(ctx sdk.Context, auditIndexes bool) (*types.GenesisState, error) {
 	marker, e := k.service.OpenKVStore(ctx).Get([]byte{4})
 	if e != nil {
 		return nil, e
@@ -225,6 +233,11 @@ func (k *StateKeeper) ExportGenesis(ctx sdk.Context) (*types.GenesisState, error
 	if e = k.validateDelegationIndexes(ctx, g.Delegations); e != nil {
 		return nil, e
 	}
+	if auditIndexes {
+		if e = k.auditConsensusIndexes(ctx, g); e != nil {
+			return nil, e
+		}
+	}
 	return g, nil
 }
 
@@ -244,35 +257,46 @@ func (k *StateKeeper) SetDelegation(ctx sdk.Context, d types.Delegation) error {
 
 func (k *StateKeeper) SetLastValidatorPowers(ctx sdk.Context, powers []types.LastValidatorPower) error {
 	child, commit := ctx.CacheContext()
-	p, e := k.GetParams(child)
+	previous, e := k.previousPositivePowers(child)
 	if e != nil {
 		return e
 	}
-	vals, e := k.GetValidators(child)
-	if e != nil {
-		return e
-	}
-	g := types.GenesisState{Params: p, Validators: vals, LastValidatorPowers: powers}
+	seen := map[string]bool{}
+	var positive []types.LastValidatorPower
+	var total int64
 	for _, v := range powers {
-		if v.Power < 0 || v.Power > cmttypes.MaxTotalVotingPower-g.LastTotalPower {
+		if seen[v.Address] {
+			return errors.New("duplicate previous native validator power")
+		}
+		seen[v.Address] = true
+		if _, e := k.GetValidator(child, v.Address); e != nil {
+			return e
+		}
+		if v.Power < 0 || v.Power > cmttypes.MaxTotalVotingPower-total {
 			return errors.New("invalid native total power")
 		}
-		g.LastTotalPower += v.Power
-	}
-	if e = g.Validate(); e != nil {
-		return e
-	}
-	var keys [][]byte
-	if e = k.scan(child, powerPrefix, func(key, _ []byte) error { keys = append(keys, key); return nil }); e != nil {
-		return e
+		total += v.Power
+		if v.Power > 0 {
+			positive = append(positive, v)
+		}
 	}
 	state := k.service.OpenKVStore(child)
-	for _, key := range keys {
+	operators := make([]string, 0, len(previous))
+	for operator := range previous {
+		operators = append(operators, operator)
+	}
+	sort.Strings(operators)
+	for _, operator := range operators {
+		key, _ := operatorKey(powerPrefix, operator)
+		if e = state.Delete(key); e != nil {
+			return e
+		}
+		key, _ = operatorKey(positivePowerPrefix, operator)
 		if e = state.Delete(key); e != nil {
 			return e
 		}
 	}
-	for _, v := range powers {
+	for _, v := range positive {
 		key, e := operatorKey(powerPrefix, v.Address)
 		if e != nil {
 			return e
@@ -280,10 +304,16 @@ func (k *StateKeeper) SetLastValidatorPowers(ctx sdk.Context, powers []types.Las
 		if e = k.put(child, key, &v); e != nil {
 			return e
 		}
+		key, _ = operatorKey(positivePowerPrefix, v.Address)
+		var value [8]byte
+		binary.BigEndian.PutUint64(value[:], uint64(v.Power))
+		if e = state.Set(key, value[:]); e != nil {
+			return e
+		}
 	}
-	var total [8]byte
-	binary.BigEndian.PutUint64(total[:], uint64(g.LastTotalPower))
-	if e = state.Set([]byte{3}, total[:]); e != nil {
+	var encoded [8]byte
+	binary.BigEndian.PutUint64(encoded[:], uint64(total))
+	if e = state.Set([]byte{3}, encoded[:]); e != nil {
 		return e
 	}
 	commit()
