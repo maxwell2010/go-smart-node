@@ -18,7 +18,11 @@ Application configuration must provide an approved `BindingSource`, based on
 authenticated chain deployment/governance state. Each binding specifies the
 native token address and expected runtime hash. EIP1967 proxies also require
 their exact current implementation address/hash. An occupied implementation
-slot without that approval fails closed. Other proxy/forwarding schemes require
+slot without that approval fails closed. A nonzero EIP1967 beacon slot is explicitly rejected even when its runtime
+hash is pinned and no implementation binding is supplied. Factory-created
+BeaconProxy tokens need a separate explicit beacon/factory/implementation
+approval and bounded beacon resolution before monetary use.
+Other proxy/forwarding schemes require
 separate review; an arbitrary runtime must not be admitted just because its
 hash can be read. This interface is not an authentication mechanism for an
 untrusted binding provider.
@@ -49,7 +53,7 @@ revert, malformed output, EVM gas exhaustion and discarded state writes; it is
 not a production runtime allowlist. Full application wiring and deployment
 authority remain separate integration requirements.
 
-The bounded loop case uses an EVM gas cap of 200,000 and charged 226,619 SDK
+The bounded loop case uses an EVM gas cap of 200,000 and charged 227,778 SDK
 gas including native reads in the verified run. A one-unit child SDK budget
 fails closed. The entire view suite and native coin keeper regressions pass
 on the selected SDK53 family, with whole-module verification and both owned

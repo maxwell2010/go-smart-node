@@ -256,6 +256,18 @@ func TestAuthoritativeCoinViewWithSignedOwnEVM(t *testing.T) {
 			require.Equal(t, before, a.EVMKeeper.GetState(ctx(), target, common.Hash{}), "view writes must never reach native EVM store")
 		})
 	}
+
+	// A pinned runtime must not admit an unverified beacon as a direct token.
+	// This signed constructor populates the standard beacon slot through EVM.
+	beaconRuntime, err := hex.DecodeString("678ac7230489e8000060005260206000f3")
+	require.NoError(t, err)
+	beaconInit, err := hex.DecodeString("60017fa3f0ad74e5423aebfd80d3ef4346578335a9a72aeaee59ff6cb3582b35133d5055" + fmt.Sprintf("60%02x603060003960%02x6000f3", len(beaconRuntime), len(beaconRuntime)))
+	require.NoError(t, err)
+	beaconFixture := deployCode(append(beaconInit, beaconRuntime...), new(big.Int))
+	metadata.coin.DRC20Contract = beaconFixture.Hex()
+	binding.binding = evmview.Binding{Address: beaconFixture, RuntimeHash: a.EVMKeeper.GetCodeHash(ctx(), beaconFixture)}
+	_, err = reader.GetCoin(ctx(), "viewcoin")
+	require.ErrorContains(t, err, "beacon proxy requires")
 	metadata.coin.DRC20Contract = token.Hex()
 	binding.binding = savedBinding
 	bounded, err := evmview.New(metadata, a.BankKeeper, a.EVMKeeper, binding, compiled, 200_000, 1)
