@@ -1,0 +1,100 @@
+package app
+
+import (
+	"encoding/json"
+	"errors"
+	"fmt"
+
+	sdkmath "cosmossdk.io/math"
+	"github.com/cosmos/cosmos-sdk/codec"
+	banktypes "github.com/cosmos/cosmos-sdk/x/bank/types"
+	coinconfig "github.com/maxwell2010/go-smart-node/network/decimal/coin/config"
+	cointypes "github.com/maxwell2010/go-smart-node/network/decimal/coin/types"
+	nfttypes "github.com/maxwell2010/go-smart-node/network/decimal/nft/types"
+	"github.com/maxwell2010/go-smart-node/network/identity"
+)
+
+func nativeAllocation(cdc codec.JSONCodec, genesis map[string]json.RawMessage) (cointypes.GenesisState, sdkmath.Int, error) {
+	var coin cointypes.GenesisState
+	var bank banktypes.GenesisState
+	if len(genesis[cointypes.ModuleName]) == 0 || len(genesis[banktypes.ModuleName]) == 0 {
+		return coin, sdkmath.Int{}, errors.New("native allocation requires explicit coin and bank genesis")
+	}
+	if err := cdc.UnmarshalJSON(genesis[cointypes.ModuleName], &coin); err != nil {
+		return coin, sdkmath.Int{}, err
+	}
+	if err := cdc.UnmarshalJSON(genesis[banktypes.ModuleName], &bank); err != nil {
+		return coin, sdkmath.Int{}, err
+	}
+	if err := bank.Validate(); err != nil {
+		return coin, sdkmath.Int{}, err
+	}
+	if coin.Params.BaseDenom != identity.BaseDenom {
+		return coin, sdkmath.Int{}, errors.New("native base denomination must be del")
+	}
+	total := sdkmath.ZeroInt()
+	for _, balance := range bank.Balances {
+		for _, value := range balance.Coins {
+			if value.Denom != identity.BaseDenom {
+				continue
+			}
+			if value.Amount.IsNil() || value.Amount.IsNegative() || value.Amount.GT(coinconfig.MaxCoinSupply.Sub(total)) {
+				return coin, sdkmath.Int{}, errors.New("native genesis bank allocation exceeds monetary bounds")
+			}
+			total = total.Add(value.Amount)
+		}
+	}
+	// SDK permits omitted supply and derives it from balances. A supplied DEL
+	// supply must agree; it cannot replace the balance-based allocation proof.
+	if len(bank.Supply) > 0 && !bank.Supply.AmountOf(identity.BaseDenom).Equal(total) {
+		return coin, sdkmath.Int{}, errors.New("declared bank DEL supply differs from genesis balances")
+	}
+	return coin, total, nil
+}
+
+// ReconcileNativeGenesisAllocation is an explicit genesis-builder operation.
+// It changes only the supplied map; it never mints or writes runtime state.
+func ReconcileNativeGenesisAllocation(cdc codec.JSONCodec, genesis map[string]json.RawMessage) error {
+	coin, total, err := nativeAllocation(cdc, genesis)
+	if err != nil {
+		return err
+	}
+	coin.Params.BaseVolume = total
+	if err := coin.Validate(); err != nil {
+		return err
+	}
+	data, err := cdc.MarshalJSON(&coin)
+	if err != nil {
+		return err
+	}
+	genesis[cointypes.ModuleName] = data
+	return nil
+}
+
+// ValidateNativeGenesisAllocation never repairs an arbitrary genesis at startup.
+func ValidateNativeGenesisAllocation(cdc codec.JSONCodec, genesis map[string]json.RawMessage) error {
+	coin, total, err := nativeAllocation(cdc, genesis)
+	if err != nil {
+		return err
+	}
+	if err := coin.Validate(); err != nil {
+		return err
+	}
+	if !coin.Params.BaseVolume.Equal(total) {
+		return fmt.Errorf("native declared base allocation differs from bank balances; explicitly run genesis reconcile-native-allocation")
+	}
+	var nft nfttypes.GenesisState
+	if len(genesis[nfttypes.ModuleName]) == 0 {
+		return errors.New("native NFT genesis must be explicit")
+	}
+	if err := cdc.UnmarshalJSON(genesis[nfttypes.ModuleName], &nft); err != nil {
+		return err
+	}
+	if err := nft.Validate(); err != nil {
+		return err
+	}
+	if len(coin.Coins) != 0 || len(coin.Checks) != 0 || len(nft.Collections) != 0 {
+		return errors.New("nonempty native asset genesis requires authenticated contract bootstrap and backing reconciliation, not yet enabled")
+	}
+	return nil
+}

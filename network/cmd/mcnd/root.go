@@ -157,7 +157,9 @@ func initRootCmd(rootCmd *cobra.Command, encodingConfig evmencoding.Config, basi
 	initCmd := genutilcli.InitCmd(initializationBasics(encodingConfig.Codec), home)
 	_ = initCmd.Flags().Set(genutilcli.FlagDefaultBondDenom, identity.BaseDenom)
 	initCmd.Flags().Lookup(genutilcli.FlagDefaultBondDenom).DefValue = identity.BaseDenom
-	rootCmd.AddCommand(initCmd, genutilcli.Commands(encodingConfig.TxConfig, basics, home), cmtcli.NewCompletionCmd(rootCmd, true), pruning.Cmd(sdkAppCreator, home), snapshot.Cmd(sdkAppCreator))
+	genesisCommands := genutilcli.Commands(encodingConfig.TxConfig, basics, home)
+	addNativeGenesisCommands(genesisCommands)
+	rootCmd.AddCommand(initCmd, genesisCommands, cmtcli.NewCompletionCmd(rootCmd, true), pruning.Cmd(sdkAppCreator, home), snapshot.Cmd(sdkAppCreator))
 
 	// add Cosmos EVM' flavored TM commands to start server, etc.
 	cosmosevmserver.AddCommands(

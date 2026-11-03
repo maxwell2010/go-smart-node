@@ -24,12 +24,14 @@ import (
 	transfer "github.com/cosmos/ibc-go/v10/modules/apps/transfer"
 	ibc "github.com/cosmos/ibc-go/v10/modules/core"
 	ibctm "github.com/cosmos/ibc-go/v10/modules/light-clients/07-tendermint"
+	nativecoin "github.com/maxwell2010/go-smart-node/network/decimal/coin/module"
+	nativenft "github.com/maxwell2010/go-smart-node/network/decimal/nft/module"
 )
 
 // NewBasicModuleManager registers the owned application's stateless module set.
 // It opens no database and never constructs an EVM keeper or chain singleton.
 func NewBasicModuleManager() module.BasicManager {
-	return module.NewBasicManager(
+	return module.NewBasicManager(nativecoin.AppModuleBasic{}, nativenft.AppModuleBasic{},
 		auth.AppModuleBasic{}, bank.AppModuleBasic{}, staking.AppModuleBasic{},
 		mint.AppModuleBasic{}, distr.AppModuleBasic{}, slashing.AppModuleBasic{},
 		gov.NewAppModuleBasic(nil), consensus.AppModuleBasic{}, upgrade.AppModuleBasic{},

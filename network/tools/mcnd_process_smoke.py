@@ -44,6 +44,7 @@ report['operatorAddress']=address;report['operatorEthereumAddress']=eth_address
 report['operatorKeyType']='eth_secp256k1';report['relayerKeyType']='secp256k1'
 receiver=json.loads(run(['keys','add','receiver','--key-type','secp256k1','--coin-type','60','--keyring-backend','test','--output','json'],True))['address']
 run(['genesis','add-genesis-account',address,'1000000000000000000000000del'])
+run(['genesis','reconcile-native-allocation'])
 run(['genesis','gentx','validator','1000000000000000000del','--chain-id',chain,'--keyring-backend','test'])
 run(['genesis','collect-gentxs'])
 run(['genesis','validate-genesis'])
@@ -83,6 +84,11 @@ def operate(target, label):
   req=urllib.request.Request('http://127.0.0.1:8645',data=b'{"jsonrpc":"2.0","id":1,"method":"eth_chainId","params":[]}',headers={'Content-Type':'application/json'})
   with urllib.request.urlopen(req,timeout=2) as response:assert int(json.load(response)['result'],16)==int(evm)
   report['checks'].append(label+' actual height '+str(height)+' and eth_chainId '+evm)
+  native_params=json.loads(run(['query','coin','params','--node','tcp://127.0.0.1:28657','--output','json']))['params']
+  assert native_params['base_denom']=='del' and int(native_params['base_volume'])==1000000000000000000000000
+  native_collections=json.loads(run(['query','nft','collections','--node','tcp://127.0.0.1:28657','--output','json']))
+  assert not native_collections.get('collections')
+  report['checks'].append(label+' mounted native coin allocation and empty NFT query routes')
   if label=='first-start':
    sender_before=bank_balance(address);nonce_before=account_sequence(address)
    assert evm_nonce(eth_address)==nonce_before,'native and EVM APIs do not identify the same operator account'

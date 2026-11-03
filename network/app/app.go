@@ -4,6 +4,13 @@
 package app
 
 import (
+	nativecoinkeeper "github.com/maxwell2010/go-smart-node/network/decimal/coin/keeper"
+	nativecoin "github.com/maxwell2010/go-smart-node/network/decimal/coin/module"
+	nativecointypes "github.com/maxwell2010/go-smart-node/network/decimal/coin/types"
+	nativenftkeeper "github.com/maxwell2010/go-smart-node/network/decimal/nft/keeper"
+	nativenft "github.com/maxwell2010/go-smart-node/network/decimal/nft/module"
+	nativenfttypes "github.com/maxwell2010/go-smart-node/network/decimal/nft/types"
+
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -178,6 +185,8 @@ type App struct {
 	memKeys map[string]*storetypes.MemoryStoreKey
 
 	// keepers
+	NativeCoinKeeper      *nativecoinkeeper.StateKeeper
+	NativeNFTKeeper       *nativenftkeeper.StateKeeper
 	AccountKeeper         authkeeper.AccountKeeper
 	BankKeeper            bankkeeper.Keeper
 	StakingKeeper         *stakingkeeper.Keeper
@@ -247,7 +256,7 @@ func NewApp(
 	bApp.SetTxEncoder(txConfig.TxEncoder())
 
 	keys := storetypes.NewKVStoreKeys(
-		authtypes.StoreKey, banktypes.StoreKey, stakingtypes.StoreKey,
+		authtypes.StoreKey, banktypes.StoreKey, stakingtypes.StoreKey, nativecointypes.StoreKey, nativenfttypes.StoreKey,
 		minttypes.StoreKey, distrtypes.StoreKey, slashingtypes.StoreKey,
 		govtypes.StoreKey, consensusparamtypes.StoreKey,
 		upgradetypes.StoreKey, feegrant.StoreKey, evidencetypes.StoreKey, authzkeeper.StoreKey,
@@ -281,6 +290,15 @@ func NewApp(
 		tkeys:             tkeys,
 	}
 
+	var nativeErr error
+	app.NativeCoinKeeper, nativeErr = nativecoinkeeper.NewStateKeeper(runtime.NewKVStoreService(keys[nativecointypes.StoreKey]))
+	if nativeErr != nil {
+		panic(nativeErr)
+	}
+	app.NativeNFTKeeper, nativeErr = nativenftkeeper.NewStateKeeper(runtime.NewKVStoreService(keys[nativenfttypes.StoreKey]))
+	if nativeErr != nil {
+		panic(nativeErr)
+	}
 	// removed x/params: no ParamsKeeper initialization
 
 	// get authority address
@@ -550,6 +568,8 @@ func NewApp(
 	// NOTE: Any module instantiated in the module manager that is later modified
 	// must be passed by reference here.
 	app.ModuleManager = module.NewManager(
+		nativecoin.NewAppModule(app.NativeCoinKeeper, runtime.NewKVStoreService(keys[nativecointypes.StoreKey])),
+		nativenft.NewAppModule(app.NativeNFTKeeper, runtime.NewKVStoreService(keys[nativenfttypes.StoreKey])),
 		genutil.NewAppModule(
 			app.AccountKeeper, app.StakingKeeper,
 			app, app.txConfig,
@@ -639,6 +659,7 @@ func NewApp(
 	// properly initialized with tokens from genesis accounts.
 	// NOTE: The genutils module must also occur after auth so that it can access the params from auth.
 	genesisModuleOrder := []string{
+		nativecointypes.ModuleName, nativenfttypes.ModuleName,
 		authtypes.ModuleName, banktypes.ModuleName,
 		distrtypes.ModuleName, stakingtypes.ModuleName, slashingtypes.ModuleName, govtypes.ModuleName,
 		minttypes.ModuleName,
@@ -834,6 +855,9 @@ func (app *App) InitChainer(ctx sdk.Context, req *abci.RequestInitChain) (*abci.
 		panic(err)
 	}
 
+	if err := ValidateNativeGenesisAllocation(app.appCodec, genesisState); err != nil {
+		return nil, err
+	}
 	if err := app.UpgradeKeeper.SetModuleVersionMap(ctx, app.ModuleManager.GetVersionMap()); err != nil {
 		panic(err)
 	}

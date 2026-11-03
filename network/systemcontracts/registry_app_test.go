@@ -94,6 +94,7 @@ func TestOwnedAppSignedRegistryBootstrap(t *testing.T) {
 	}
 	genesis[banktypes.ModuleName] = a.AppCodec().MustMarshalJSON(&bankFunded)
 	genesis[stakingtypes.ModuleName] = a.AppCodec().MustMarshalJSON(&stakeFunded)
+	require.NoError(t, ownedapp.ReconcileNativeGenesisAllocation(a.AppCodec(), genesis))
 	data, err := json.Marshal(genesis)
 	require.NoError(t, err)
 	now := time.Unix(1900000000, 0).UTC()

@@ -275,6 +275,7 @@ def prepare_owned(lab, mcnd):
         os.chmod(mnemonic_file, 0o600); output.write(key["mnemonic"] + "\n")
     address = key["address"]
     command([mcnd, "genesis", "add-genesis-account", address, str(10**24) + "del", *common], lab.env)
+    command([mcnd, "genesis", "reconcile-native-allocation", *common], lab.env)
     command([mcnd, "genesis", "gentx", "lab", str(10**18) + "del", "--keyring-backend", "test", *common], lab.env)
     command([mcnd, "genesis", "collect-gentxs", *common], lab.env)
     command([mcnd, "genesis", "validate", *common], lab.env)

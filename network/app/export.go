@@ -39,6 +39,13 @@ func (app *App) ExportAppStateAndValidators(forZeroHeight bool, jailAllowedAddrs
 		return servertypes.ExportedApp{}, err
 	}
 
+	if _, hasCoin := genState["coin"]; hasCoin {
+		if err := ReconcileNativeGenesisAllocation(app.appCodec, genState); err != nil {
+			return servertypes.ExportedApp{}, err
+		}
+	} else if _, hasBank := genState["bank"]; hasBank && len(modulesToExport) > 0 {
+		return servertypes.ExportedApp{}, fmt.Errorf("bank-only export omits native allocation; include coin")
+	}
 	appState, err := json.MarshalIndent(genState, "", "  ")
 	if err != nil {
 		return servertypes.ExportedApp{}, err

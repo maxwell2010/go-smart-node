@@ -76,6 +76,7 @@ func fundedTestGenesis(t *testing.T, a *App, vals *cmttypes.ValidatorSet, accoun
 	}
 	genesis[banktypes.ModuleName] = a.AppCodec().MustMarshalJSON(&bankFunded)
 	genesis[stakingtypes.ModuleName] = a.AppCodec().MustMarshalJSON(&stakingFunded)
+	require.NoError(t, ReconcileNativeGenesisAllocation(a.AppCodec(), genesis))
 	return genesis
 }
 
@@ -134,6 +135,7 @@ func TestFreshOwnApplicationSignedNativeEVMTransfer(t *testing.T) {
 	const chainID = "mintcandy_990001-1"
 	a := testApp(t, chainID, 990001)
 	assertOwnApplicationConstructorAndGenesis(t, a)
+	assertMountedNativeAssetsBeforeInit(t, a)
 	key, err := ethsecp.GenerateKey()
 	require.NoError(t, err)
 	account := authtypes.NewBaseAccount(key.PubKey().Address().Bytes(), key.PubKey(), 0, 0)
@@ -217,4 +219,5 @@ func TestFreshOwnApplicationSignedNativeEVMTransfer(t *testing.T) {
 	t.Run("proposer_coinbase_address", func(t *testing.T) {
 		checkCoinbaseOpcode(t, a, ethKey, valSet, now)
 	})
+	assertNativeAllocationExport(t, a)
 }
