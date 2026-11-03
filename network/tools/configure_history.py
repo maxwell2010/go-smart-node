@@ -37,13 +37,16 @@ def configure(home, apply=False, role="rpc-ibc"):
   outputs[path]=render(path.read_text(encoding="utf-8"),effective)
  if apply:
   for path in outputs:
-   if path.with_suffix(path.suffix+".before-history").exists():raise ValueError("backup already exists; refusing overwrite")
+   if os.path.lexists(path.with_suffix(path.suffix+".before-history")):raise ValueError("backup already exists; refusing overwrite")
   for path,result in outputs.items():
-   path.with_suffix(path.suffix+".before-history").write_bytes(path.read_bytes())
+   with path.with_suffix(path.suffix+".before-history").open("xb") as backup:backup.write(path.read_bytes())
    path.with_suffix(path.suffix+".before-history").chmod(path.stat().st_mode & 0o777)
+  for path,result in outputs.items():
    temporary=path.with_suffix(path.suffix+".new")
    with temporary.open("x",encoding="utf-8",newline="\n") as stream:stream.write(result)
    temporary.chmod(path.stat().st_mode & 0o777)
+  for path in outputs:
+   temporary=path.with_suffix(path.suffix+".new")
    os.replace(temporary,path)
  return {str(path):tomllib.loads(result) for path,result in outputs.items()}
 

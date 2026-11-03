@@ -3,6 +3,7 @@ parser=argparse.ArgumentParser(description="Bounded mcnd lifecycle gate for a ne
 parser.add_argument("--binary",required=True)
 parser.add_argument("--report",required=True)
 parser.add_argument("--home-parent",default=tempfile.gettempdir())
+parser.add_argument("--history-role",choices=["rpc-ibc","consensus"])
 args=parser.parse_args()
 pathlib.Path(args.report).parent.mkdir(parents=True,exist_ok=True)
 if os.readlink("/proc/self/ns/net")==os.readlink("/proc/1/ns/net"):
@@ -19,6 +20,11 @@ def run(args, secret=False):
  return p.stdout
 report={'binarySha256':hashlib.sha256(pathlib.Path(binary).read_bytes()).hexdigest(),'home':str(home),'chainID':chain,'evmChainID':int(evm),'checks':[]}
 run(['init','disposable','--chain-id',chain,'--evm.evm-chain-id',evm])
+if args.history_role:
+ from configure_history import configure
+ configure(home,apply=True,role=args.history_role)
+ report['historyRole']=args.history_role
+ report['checks'].append('fresh-home retention configuration applied; block pruning window not exercised')
 genesis=json.loads((home/'config/genesis.json').read_text());state=genesis['app_state']
 assert genesis['chain_id']==chain
 assert state['staking']['params']['bond_denom']=='del'

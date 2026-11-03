@@ -1,4 +1,4 @@
-import pathlib, tempfile, unittest
+import os, pathlib, tempfile, unittest
 from unittest.mock import patch
 from configure_history import PROFILE, configure, render
 from install_mcnd import validate_revision, install
@@ -38,6 +38,16 @@ class OperatorToolsTest(unittest.TestCase):
             before={p:p.read_bytes() for p in (home/'config').iterdir()}
             with self.assertRaises(ValueError):configure(home,True)
             self.assertEqual(before,{p:p.read_bytes() for p in (home/'config').iterdir()})
+
+    @unittest.skipIf(os.name=='nt','Linux symlink behavior tested in Linux CI')
+    def test_dangling_backup_symlink_is_never_followed(self):
+        with tempfile.TemporaryDirectory() as root:
+            home=self.fixture(root);target=home/'outside'
+            (home/'config/app.toml.before-history').symlink_to(target)
+            original=(home/'config/app.toml').read_bytes()
+            with self.assertRaises(ValueError):configure(home,True)
+            self.assertFalse(target.exists())
+            self.assertEqual(original,(home/'config/app.toml').read_bytes())
 
     def test_config_drift_rejected(self):
         with self.assertRaises(ValueError):render('pruning="default"\n',{(None,'missing'):'1'})
