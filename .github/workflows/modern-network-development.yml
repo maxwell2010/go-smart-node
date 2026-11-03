@@ -30,6 +30,7 @@ jobs:
         run: |
           python3 network/scripts/verify_owned_evm.py
           python3 network/scripts/verify_owned_stun.py
+          python3 network/scripts/verify_owned_geth.py
           python3 -m unittest discover -s network/tools -p 'test_*.py'
       - name: Build pinned development daemon
         run: |

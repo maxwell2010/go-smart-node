@@ -49,11 +49,16 @@ jobs:
           go mod download
           git diff --exit-code -- go.mod go.sum
           go mod verify |& tee validation-logs/module-integrity.log
-      - name: Verify owned EVM source and integrity guards
+      - name: Verify owned sources and integrity guards
         run: |
           python3 scripts/verify_owned_evm.py |& tee validation-logs/owned-evm-integrity.log
           python3 scripts/verify_owned_stun.py |& tee validation-logs/owned-stun-integrity.log
+          python3 scripts/verify_owned_geth.py |& tee validation-logs/owned-geth-integrity.log
           python3 -m unittest discover -s scripts -p 'test_*.py'
+      - name: Test ordinary crypto regressions with and without CGO
+        run: |
+          go test -mod=readonly -p 2 -count=1 github.com/ethereum/go-ethereum/crypto github.com/ethereum/go-ethereum/crypto/secp256k1 github.com/ethereum/go-ethereum/common/math |& tee validation-logs/geth-crypto-cgo.log
+          CGO_ENABLED=0 go test -mod=readonly -p 2 -count=1 -run '^TestOwnedGeth' ./securitytests |& tee validation-logs/geth-crypto-nocgo.log
       - name: Test modern module and native feature port
         run: go test -mod=readonly -p 2 -count=1 -v -timeout 10m ./... |& tee validation-logs/tests.log
       - name: Reproduce pinned system contract artifacts

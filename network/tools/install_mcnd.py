@@ -28,7 +28,7 @@ def install(revision, destination, source=None):
   if run(["git","-C",str(source),"status","--porcelain","--untracked-files=no"]):raise ValueError("source has tracked modifications")
   module=source/"network"
   environment=dict(os.environ,CGO_ENABLED="1",CC="gcc",GOTOOLCHAIN="local")
-  for verifier in ("verify_owned_evm.py","verify_owned_stun.py"):
+  for verifier in ("verify_owned_evm.py","verify_owned_stun.py","verify_owned_geth.py"):
    subprocess.run(["python3",str(module/"scripts"/verifier)],check=True)
   for command in (["go","mod","download"],["go","mod","verify"]):subprocess.run(command,cwd=module,env=environment,check=True)
   target=pathlib.Path(temporary)/"mcnd"
