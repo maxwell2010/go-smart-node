@@ -115,7 +115,15 @@ func (d *Decoder) decode(ctx sdk.Context, execution Execution) (Decoded, error) 
 	if execution.EntryPoint == EntryPointSignedEthereum && r.TxHash == (common.Hash{}) {
 		return result, errors.New("signed NFT execution lacks transaction identity")
 	}
-	var totalBytes uint64
+	totalBytes := uint64(len(r.PostState))
+	if totalBytes > uint64(d.limits.MaxBytes) {
+		return result, errors.New("NFT receipt byte limit exceeded")
+	}
+	for _, value := range []*big.Int{r.EffectiveGasPrice, r.BlobGasPrice, r.BlockNumber} {
+		if value != nil && (value.Sign() < 0 || value.BitLen() > 256) {
+			return result, errors.New("NFT receipt integer metadata exceeds bound")
+		}
+	}
 	for _, log := range r.Logs {
 		if log == nil {
 			return result, errors.New("nil NFT receipt log")
