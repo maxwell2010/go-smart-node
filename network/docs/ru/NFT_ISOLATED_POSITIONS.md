@@ -24,6 +24,14 @@ Vault и контракт NFT721 receipt - один контракт/прокс�
 | CustodyRef | Vault20/positionId32 и native ID receipt | 1 NFT721 receipt |
 | Parent | Предыдущий positionId32 при split | Отдельная lineage-ссылка |
 
+Общий предел одной позиции - 1024 origin units. Он одинаков в контрактном
+`maxOriginQuantity()`, `nft/types.MaxIsolatedOriginUnits`, native lineage,
+validator bindings и SDK admission. Проверка выполняется до origin burn,
+approval и funding. Большие holdings разделяются на несколько независимых
+receipt. Массивы не усекаются; значения quantity сохраняются как uint256 и
+проверяются перед преобразованием. До релиза нужны совместные измерения gas
+для 1024 и проверка отказа 1025 без изменения состояния.
+
 NFT-модуль хранит единственный ledger идентичностей и lineage. При изоляции
 исходные активные единицы погашаются и их точные native subID архивируются с
 ссылкой на receipt. Для receipt создаётся самостоятельная внешняя/native
@@ -89,6 +97,7 @@ vault не содержит параллельного staking ledger. Пере�
 | `addReserveByDEL(uint256)` / typed ERC20 top-up | Явное пополнение одной позиции |
 | `redeemPosition(uint256,address)` | Закрытие свободного receipt с соблюдением burnable/refundable политики origin |
 | `nextPositionId()` | Полный monotonic high-watermark для сверки native-состояния |
+| `maxOriginQuantity()` | Общий явный предел 1024 origin units |
 
 На новом origin1155 нужны `isolate(uint256,uint256,address) returns(uint256)`,
 `getIsolationUnitReserve(uint256) returns(INFTReserve.Reserve)` и
