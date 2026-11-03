@@ -1,0 +1,184 @@
+{
+  "binarySha256": "652ad716f18c7723fe22aff5f48c42e63330cec11c5ce275c77da225e6959348",
+  "binarySourceCommit": "264303bd5ca8bd8107ba219c77b60c9c14818f1c",
+  "helperFileSha256": "9141fd01a8d7e1bbe1a8ad9be77fbfe1a1d6564d5ed70239d36b66f6cf683d5b",
+  "helperSourceCommit": "342125cd37f335a36c3ea949cdbad9120cc87489",
+  "reviewBaseCommit": "645d3c5a72408856b087d4b3c4a4c45ac7f22966",
+  "roles": {
+    "consensus": {
+      "after": {
+        "app": {
+          "min-retain-blocks": 1000000,
+          "pruning": "custom",
+          "pruning-interval": "100",
+          "pruning-keep-recent": "10000"
+        },
+        "comet": {
+          "statesync": {
+            "chunk_fetchers": "4",
+            "chunk_request_timeout": "10s",
+            "discovery_time": "15s",
+            "enable": false,
+            "max_snapshot_chunks": 100000,
+            "rpc_servers": "",
+            "temp_dir": "",
+            "trust_hash": "",
+            "trust_height": 0,
+            "trust_period": "168h0m0s"
+          },
+          "storage": {
+            "discard_abci_responses": true
+          },
+          "tx_index": {
+            "indexer": "null",
+            "psql-conn": ""
+          }
+        },
+        "evmIndexer": false,
+        "p2p": {
+          "laddr": "tcp://127.0.0.1:26656",
+          "persistent_peers": "",
+          "pex": false,
+          "seeds": ""
+        },
+        "snapshot": {
+          "snapshot-interval": 0,
+          "snapshot-keep-recent": 2
+        }
+      },
+      "backupsEqualOriginal": true,
+      "before": {
+        "app": {
+          "min-retain-blocks": 0,
+          "pruning": "default",
+          "pruning-interval": "0",
+          "pruning-keep-recent": "0"
+        },
+        "comet": {
+          "statesync": {
+            "chunk_fetchers": "4",
+            "chunk_request_timeout": "10s",
+            "discovery_time": "15s",
+            "enable": false,
+            "max_snapshot_chunks": 100000,
+            "rpc_servers": "",
+            "temp_dir": "",
+            "trust_hash": "",
+            "trust_height": 0,
+            "trust_period": "168h0m0s"
+          },
+          "storage": {
+            "discard_abci_responses": false
+          },
+          "tx_index": {
+            "indexer": "kv",
+            "psql-conn": ""
+          }
+        },
+        "evmIndexer": false,
+        "p2p": {
+          "laddr": "tcp://127.0.0.1:26656",
+          "persistent_peers": "",
+          "pex": false,
+          "seeds": ""
+        },
+        "snapshot": {
+          "snapshot-interval": 0,
+          "snapshot-keep-recent": 2
+        }
+      },
+      "dryRunUnchanged": true,
+      "initialDataFileNames": [
+        "priv_validator_state.json"
+      ]
+    },
+    "rpc-ibc": {
+      "after": {
+        "app": {
+          "min-retain-blocks": 1000000,
+          "pruning": "custom",
+          "pruning-interval": "100",
+          "pruning-keep-recent": "10000"
+        },
+        "comet": {
+          "statesync": {
+            "chunk_fetchers": "4",
+            "chunk_request_timeout": "10s",
+            "discovery_time": "15s",
+            "enable": false,
+            "max_snapshot_chunks": 100000,
+            "rpc_servers": "",
+            "temp_dir": "",
+            "trust_hash": "",
+            "trust_height": 0,
+            "trust_period": "168h0m0s"
+          },
+          "storage": {
+            "discard_abci_responses": false
+          },
+          "tx_index": {
+            "indexer": "kv",
+            "psql-conn": ""
+          }
+        },
+        "evmIndexer": false,
+        "p2p": {
+          "laddr": "tcp://127.0.0.1:26656",
+          "persistent_peers": "",
+          "pex": false,
+          "seeds": ""
+        },
+        "snapshot": {
+          "snapshot-interval": 0,
+          "snapshot-keep-recent": 2
+        }
+      },
+      "backupsEqualOriginal": true,
+      "before": {
+        "app": {
+          "min-retain-blocks": 0,
+          "pruning": "default",
+          "pruning-interval": "0",
+          "pruning-keep-recent": "0"
+        },
+        "comet": {
+          "statesync": {
+            "chunk_fetchers": "4",
+            "chunk_request_timeout": "10s",
+            "discovery_time": "15s",
+            "enable": false,
+            "max_snapshot_chunks": 100000,
+            "rpc_servers": "",
+            "temp_dir": "",
+            "trust_hash": "",
+            "trust_height": 0,
+            "trust_period": "168h0m0s"
+          },
+          "storage": {
+            "discard_abci_responses": false
+          },
+          "tx_index": {
+            "indexer": "kv",
+            "psql-conn": ""
+          }
+        },
+        "evmIndexer": false,
+        "p2p": {
+          "laddr": "tcp://127.0.0.1:26656",
+          "persistent_peers": "",
+          "pex": false,
+          "seeds": ""
+        },
+        "snapshot": {
+          "snapshot-interval": 0,
+          "snapshot-keep-recent": 2
+        }
+      },
+      "dryRunUnchanged": true,
+      "initialDataFileNames": [
+        "priv_validator_state.json"
+      ]
+    }
+  },
+  "scope": "Actual SDK53/Comet38 config generation + retention helper; no node start, no runtime pruning/state-sync/financial claims"
+}

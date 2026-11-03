@@ -1,6 +1,6 @@
 # Separate network compatibility candidate
 
-[Р СѓСЃСЃРєР°СЏ РёРЅСЃС‚СЂСѓРєС†РёСЏ: СѓСЃС‚Р°РЅРѕРІРєР°, Р·Р°РІРёСЃРёРјРѕСЃС‚Рё, СЃРµСЂРІРµСЂ, СЃРёРЅС…СЂРѕРЅРёР·Р°С†РёСЏ, РїРёСЂС‹ Рё С…СЂР°РЅРµРЅРёРµ РёСЃС‚РѕСЂРёРё](docs/ru/README.md).
+[Русская инструкция: установка, зависимости, сервер, синхронизация, пиры и хранение истории](docs/ru/README.md).
 
 This nested module builds the owned application for a separate, fresh network. The repository root remains the legacy mainnet replay build, with its own dependency graph. Do not import that legacy module here.
 
@@ -15,6 +15,7 @@ GOTOOLCHAIN=local go mod download
 GOTOOLCHAIN=local go mod verify
 python3 scripts/verify_owned_evm.py
 python3 scripts/verify_owned_geth.py
+python3 scripts/verify_owned_sdk.py --compiled
 python3 scripts/verify_pion_transport.py
 GOTOOLCHAIN=local go test -mod=readonly -p 1 -count=1 ./identity ./decimal/... ./app ./internal/family ./internal/ibcharness ./internal/ibcreference/...
 GOTOOLCHAIN=local go test -mod=readonly -p 1 -count=1 -tags=test ./app -run '^TestOwnApplicationICS20TwoChains$'
@@ -38,15 +39,19 @@ go mod download
 go mod verify
 python3 scripts/verify_owned_evm.py
 python3 scripts/verify_owned_geth.py
+python3 scripts/verify_owned_sdk.py --compiled
 python3 scripts/verify_pion_transport.py
-mkdir -p build
-CGO_ENABLED=1 go build -mod=readonly -trimpath -p 1 -o build/mcnd ./cmd/mcnd
+MCND_REVISION=$(git rev-parse HEAD)
+MCND="$PWD/build/mcnd-$MCND_REVISION"
+env -u GOFLAGS -u GOEXPERIMENT -u CGO_CFLAGS -u CGO_CPPFLAGS -u CGO_CXXFLAGS -u CGO_FFLAGS -u CGO_LDFLAGS GOENV=off GOWORK=off GOTOOLCHAIN=local python3 tools/install_mcnd.py --source .. --revision "$MCND_REVISION" --destination "$MCND"
 ```
+
+The installation helper requires a clean pinned checkout and default build environment; see the Russian operator guide for source/provenance limits. No production pin is published. Individual ERC1155 collateral positions are the selected target model and are not yet an end-to-end active network feature; previous shared-pool tests do not certify that model.
 
 For a new local network, the following creates test funds and a validator in a separate lab home. The example IDs are disposable lab values. The `test` keyring backend is used only for these newly generated lab keys. `keys add` defaults to `eth_secp256k1`. Operator and governance-owner templates use `eth_secp256k1` with coin type 60, so their native `d0` address and Ethereum EOA share the same 20 bytes. IBC relayers use a separate native Cosmos `secp256k1` fixture; its RIPEMD address is not an Ethereum operator address.
 
 ```sh
-MCND="$PWD/build/mcnd"
+MCND="$PWD/build/mcnd-$(git rev-parse HEAD)"
 NODE_HOME="$HOME/.mcnd-lab-990001"
 "$MCND" init local --home "$NODE_HOME" --chain-id mintcandy_990001-1 --evm.evm-chain-id 990001
 "$MCND" keys add operator --home "$NODE_HOME" --key-type eth_secp256k1 --coin-type 60 --keyring-backend test

@@ -7,7 +7,8 @@
 [Оставшиеся условия выпуска](../../../docs/RELEASE_STATUS.md).
 [Финансовые проверки и ограничения](VERIFICATION_LIMITS.md),
 [газ нативной обработки](NATIVE_WORK_GAS.md),
-[проверка зависимостей конкретной сборки](../security/mcnd-b9636dc-20261103/README.md).
+[проверка зависимостей отдельной сборки](../security/mcnd-sdkarmor-264303b-20261103/README.md).
+[Подробно о синхронизации и хранении](SYNCHRONIZATION_AND_STORAGE.md).
 [Выбранная модель изолированных NFT-позиций](ISOLATED_1155_MODEL.md).
 
 ## Сервер и зависимости
@@ -19,7 +20,8 @@
 Production-нагрузка завершённой сети ещё не измерена, поэтому подтверждённого
 минимального оборудования нет. Стартовый бюджет development-стенда:
 4 современных vCPU, 16 GiB RAM, 200 GiB свободного NVMe SSD, стабильное
-подключение 100 Mbit/s. Это ориентир, а не гарантия скорости или места.
+подключение 100 Mbit/s. Это предварительный бюджет планирования, а не
+измеренный минимум и не основание для покупки production-сервера.
 Архивному RPC и сборочной машине нужна отдельная оценка. До production
 обязательны замеры CPU/RAM/IOPS, роста GiB/сутки, block latency и catch-up
 на целевой нагрузке. Оставляйте запас диска и настройте уведомления.
@@ -31,39 +33,72 @@ sudo apt-get install -y build-essential git curl ca-certificates python3
 TASK_TMP=$(mktemp -d)
 curl -fL --proto '=https' --tlsv1.2 https://go.dev/dl/go1.26.10.linux-amd64.tar.gz -o "$TASK_TMP/go.tar.gz"
 echo 'ccfe7ae822d2c2f41f4fe7c956199967a4dac22d0ee0d2b2bfdb440aab3b20c5  '"$TASK_TMP/go.tar.gz" | sha256sum -c -
-mkdir -p "$HOME/.local/opt/go1.26.10"
-tar -xzf "$TASK_TMP/go.tar.gz" -C "$HOME/.local/opt/go1.26.10" --strip-components=1
-export PATH="$HOME/.local/opt/go1.26.10/bin:$PATH"
+GO_INSTALL_DIR="$HOME/.local/opt/go1.26.10"
+mkdir -p "$HOME/.local/opt"
+test ! -e "$GO_INSTALL_DIR"
+mkdir "$GO_INSTALL_DIR"
+tar -xzf "$TASK_TMP/go.tar.gz" -C "$GO_INSTALL_DIR" --strip-components=1
+export PATH="$GO_INSTALL_DIR/bin:$PATH"
 go version
 ```
 
 Не распаковывайте архив при несовпадении SHA256. Используйте новый каталог,
 не заменяйте системную Go без проверки зависимых служб.
 
-## Однострочная сборка опубликованной development-ревизии
+## Быстрая сборка точной development-ревизии
 
-После установки зависимостей команда ниже получает точный commit, проверяет
-оба owned-source манифеста и собирает бинарник. Она не запускает ноду,
-не создаёт ключи и не меняет systemd. Это фиксированный исторический
-compatibility-кандидат без завершаемой нативной интеграции.
+Утверждённого production pin нет. Используйте modern development pin,
+для которого опубликован успешный Linux CI с SDK/source-inventory проверками.
+Не выбирайте `master`, `HEAD`, tag или случайный SHA вместо полного commit.
+Команда ниже - шаблон для утверждённой ревизии, не рекомендация текущей
+финансовой сборки. Нужен commit, содержащий актуальные operator tools.
+
+Промежуточный опубликованный snapshot
+`88ed5365340a6cf22bb757b27a9a9e5eef3dbe28` прошёл
+[Development CI](https://github.com/maxwell2010/go-smart-node/actions/runs/41601774112)
+со сборкой, source inventory, архивом и проверкой retention-конфига.
+Это не stable и не полный финансовый релиз. Свежий guard retention-helper
+из этого документа добавлен позднее: для совместного использования нужен
+следующий pin, включающий этот guard и собственный успешный CI.
+
+Сначала задайте `MCND_REVISION` равным проверенному полному SHA из 40
+строчных hex-символов и экспортируйте переменную. Затем из любого каталога:
 
 ```sh
-TASK_SRC=$(mktemp -d) && git -C "$TASK_SRC" init -q && git -C "$TASK_SRC" fetch --depth 1 https://github.com/maxwell2010/go-smart-node.git 245f13bf2baf04c617baefe1b87ee7e37c68383d && git -C "$TASK_SRC" checkout --detach FETCH_HEAD && test "$(git -C "$TASK_SRC" rev-parse HEAD)" = 245f13bf2baf04c617baefe1b87ee7e37c68383d && (cd "$TASK_SRC/network" && python3 scripts/verify_owned_evm.py && python3 scripts/verify_owned_stun.py && GOTOOLCHAIN=local go mod download && GOTOOLCHAIN=local go mod verify && test "$(go version | cut -d ' ' -f3)" = go1.26.10 && mkdir build && CGO_ENABLED=1 CC=gcc GOTOOLCHAIN=local go build -mod=readonly -p 1 -trimpath -ldflags '-X main.buildCommit=245f13bf2baf04c617baefe1b87ee7e37c68383d' -o build/mcnd ./cmd/mcnd && sha256sum build/mcnd && printf 'Бинарник: %s/network/build/mcnd\n' "$TASK_SRC")
+python3 -c 'import os,re,sys; sys.exit(0 if re.fullmatch(r"[0-9a-f]{40}", os.environ.get("MCND_REVISION", "")) else "Сначала экспортируйте утверждённый MCND_REVISION")' && TASK_SRC=$(mktemp -d) && git -C "$TASK_SRC" init -q && git -C "$TASK_SRC" fetch --depth 1 https://github.com/maxwell2010/go-smart-node.git "$MCND_REVISION" && git -C "$TASK_SRC" checkout --detach FETCH_HEAD && test "$(git -C "$TASK_SRC" rev-parse HEAD)" = "$MCND_REVISION" && env -u GOFLAGS -u GOEXPERIMENT -u CGO_CFLAGS -u CGO_CPPFLAGS -u CGO_CXXFLAGS -u CGO_FFLAGS -u CGO_LDFLAGS GOENV=off GOWORK=off GOTOOLCHAIN=local python3 "$TASK_SRC/network/tools/install_mcnd.py" --source "$TASK_SRC" --revision "$MCND_REVISION" --destination "$HOME/.local/bin/mcnd-development-$MCND_REVISION"
 ```
 
-Стабильный архив, подписанный genesis и каталог пиров новой сети пока не
-опубликованы. Не подставляйте случайные URL. После release-gates команда
-должна быть обновлена на утверждённую ревизию и проверенные артефакты.
-Из проверенного checkout с операторскими скриптами также доступен сборщик:
+SHA идентифицирует исходники, но сам по себе не удостоверяет издателя.
+Проверяйте канал публикации ревизии. Стабильный архив, подписанный genesis
+и каталог пиров новой сети пока не опубликованы. Установщик создаёт только
+новый бинарник; ноду, ключи, genesis, home и systemd он не создаёт.
+
+В уже проверенном чистом checkout можно использовать короткий вариант
+из корня репозитория; `MCND_REVISION` должен совпадать с checkout:
 
 ```sh
-python3 network/tools/install_mcnd.py --source "$PWD" --revision "$(git rev-parse HEAD)" --destination "$HOME/.local/bin/mcnd-development-$(git rev-parse --short HEAD)"
+env -u GOFLAGS -u GOEXPERIMENT -u CGO_CFLAGS -u CGO_CPPFLAGS -u CGO_CXXFLAGS -u CGO_FFLAGS -u CGO_LDFLAGS GOENV=off GOWORK=off GOTOOLCHAIN=local python3 network/tools/install_mcnd.py --source "$PWD" --revision "${MCND_REVISION:?Укажите утверждённый полный commit}" --destination "$HOME/.local/bin/mcnd-development-$MCND_REVISION"
 ```
 
-Сборщик требует чистую tracked-ревизию, точную Go и Linux amd64, отказывается
-перезаписывать существующий бинарник. Обновления устанавливайте под новым
-именем, сохраняйте предыдущую версию. Откат после миграции состояния требует
-отдельного проверенного плана, одной замены бинарника может быть недостаточно.
+Политика сборки: точная Go 1.26.10, Linux amd64/v1, CGO=1/GCC, default
+build tags; пользовательские GOFLAGS/GOEXPERIMENT/CGO flags не поддерживаются.
+GOENV и workspace отключаются для этой команды. Это не меняет глобальное
+окружение пользователя. Проверяются три owned-source дерева EVM/geth/SDK,
+канонический Pion v3, h1 зависимостей и фактические tracked Go/embed inputs
+до и после сборки. Игнорируемый или untracked production input недопустим.
+Это проверка состава исходников; она не является подписью издателя,
+полной аттестацией toolchain, SBOM или доказательством финансовой корректности.
+
+Обновления ставятся под новым именем: сборщик отказывается перезаписывать
+существующий бинарник. Сохраняйте предыдущую версию. Откат после миграции
+состояния требует отдельного проверенного плана; замены бинарника может
+быть недостаточно. Неиспользуемый временный checkout можно сохранить для
+проверки происхождения - команда не удаляет другие каталоги.
+
+Историческая ревизия `245f13bf2baf04c617baefe1b87ee7e37c68383d`
+сохранена только как provenance прежнего compatibility-стенда. Она содержит
+другую dependency/native schema и старый STUN-путь. Не используйте её как
+актуальную установку и не смешивайте с современными CLI-инструкциями.
 
 ## Genesis, ключи и подключение
 
@@ -150,7 +185,13 @@ python3 network/tools/configure_history.py --home /path/to/NEW-home --apply --ro
 ```
 
 Первый вызов не пишет файлы. Второй сохраняет backups. Скрипт отказывается
-изменять home с существующей DB/WAL или перезаписывать backups. Для
+изменять home с DB/WAL, неизвестными файлами в data или ненулевым
+состоянием consensus-подписания. Допускается только пустой data или
+нулевой `priv_validator_state.json` от init. Существующие backup/`.new`
+файлы не перезаписываются. Изменения двух конфигов не являются общей
+атомарной транзакцией: при ошибке остаются backups/временные файлы для
+ручной проверки. Скрипт не останавливает процессы и не блокирует запуск
+ноды; оператор должен исключить параллельный старт/редактирование. Для
 существующих нод нужен отдельный план обслуживания.
 
 Профиль `rpc-ibc` проверен на отдельном реальном процессе default-build
@@ -172,7 +213,8 @@ min-retain-blocks = 1000000
 ```
 
 В `[state-sync]`: `snapshot-interval=0`, `snapshot-keep-recent=2`.
-Нода не становится snapshot-провайдером. Для его включения нужны замеры
+Нода не становится snapshot-провайдером. `snapshot-keep-recent=0`
+означал бы сохранять все snapshots, а не отключение. Для включения нужны замеры
 размера/IO и дополнительное место, ограниченное число сохраняемых snapshots.
 
 Это параметры стенда, не утверждённая публичная политика. 10000 - блоки,

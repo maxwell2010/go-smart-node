@@ -1,0 +1,31 @@
+{
+  "files": {
+    ".gitattributes": {
+      "bytes": 9,
+      "sha256": "48747480eddba024928d03be9bf83dc579e5515768647507a767e8187a85c9ab"
+    },
+    "README.md": {
+      "bytes": 2696,
+      "sha256": "fcaa8f4ccc4681ad8f5106a5f07015a4a3b8de4a79f8a37935548b0b92a151ab"
+    },
+    "actual-config-profile-proof.json": {
+      "bytes": 5146,
+      "sha256": "6b76b092598a81861c5957cde6037808e71bafa0863fcad1474a5c416cb6b72b"
+    },
+    "docs-checks.json": {
+      "bytes": 179,
+      "sha256": "cae91b6bf2cd288edf451e99075e1303469b7eb19d705147c2eb0e6e027150ba"
+    },
+    "operator-regressions-linux.log": {
+      "bytes": 110,
+      "sha256": "378835dfcd1a3745d724bbc79aa32b8ce02046db20c8d9d4d5c73615d1fe5954"
+    },
+    "retention-safety-linux.log": {
+      "bytes": 103,
+      "sha256": "58eca5ce8535a77628fb9cdfecc2d75dc7649f463d20db8714856be99a65444e"
+    }
+  },
+  "helperSha256": "9141fd01a8d7e1bbe1a8ad9be77fbfe1a1d6564d5ed70239d36b66f6cf683d5b",
+  "helperSourceCommit": "342125cd37f335a36c3ea949cdbad9120cc87489",
+  "scope": "Operator-tool safety/config generation and documentation checks only, not runtime financial or disk-size certification"
+}
