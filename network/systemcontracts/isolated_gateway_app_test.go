@@ -162,9 +162,11 @@ func runCanonicalIsolatedGateway(t *testing.T, e isolatedBackendEnv, rejectBurn 
 		return burned
 	}
 
+	var addressBindingValidator common.Address
 	for order := 0; order < 2; order++ {
 		t.Run([]string{"A exits first", "B exits first"}[order], func(t *testing.T) {
 			validators := []common.Address{common.BytesToAddress(crypto.Keccak256([]byte{byte(0xA0 + order)}, []byte("isolated-validator-A"))[12:]), common.BytesToAddress(crypto.Keccak256([]byte{byte(0xB0 + order)}, []byte("isolated-validator-B"))[12:])}
+			addressBindingValidator = validators[1]
 			type validatorMeta struct {
 				Validator common.Address
 				Meta      string
@@ -298,4 +300,7 @@ func runCanonicalIsolatedGateway(t *testing.T, e isolatedBackendEnv, rejectBurn 
 			t.Log("actual Unified Gateway: A9 DEL/B10 DEL, two owners/two validators, exact native burn, origin uint256 and marker order retained")
 		})
 	}
+	t.Run("authoritative token address bindings", func(t *testing.T) {
+		runExactTokenAddressBindings(t, e, registryAddress, gaddr, roles["nft-center"], originAddress, wrapped, addressBindingValidator, gateway)
+	})
 }
