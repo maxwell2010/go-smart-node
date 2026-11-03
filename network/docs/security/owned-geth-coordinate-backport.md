@@ -46,6 +46,8 @@ CGO_ENABLED=0 go test -mod=readonly -p 1 github.com/ethereum/go-ethereum/crypto 
 
 Оригинальные `COPYING`, `COPYING.LESSER`, вложенные notices и авторские заголовки сохранены. Они не заменены лицензией основного репозитория. Development packager включает исходные `LICENSE*`, `COPYING*` и `NOTICE*` рекурсивно, с исходными путями и SHA256; для этого добавлена проверка различающихся GPL/LGPL notices и вложенного notice в архиве. Фактическая сборка и source-bound development archive должны иметь отдельное свидетельство с точным commit и hash бинарника.
 
+Для чистого source commit `b03012ff052026d867da03fc9a44fe06cb9f4a1e` собран настоящий `mcnd` с Go 1.26.10, Linux amd64 и CGO/GCC. SHA256 бинарника: `2d5ed4b419ec712776960cf2e052379b2e2c3910fee83f8d803b73c822f89edf`. Получен development archive размером 75 943 390 байт, SHA256 `77c9855427e91d7ec62c1a65efef413ca96072d4bd67ef14789b73305a8dbcfb`. Все file hashes архива проверены; девять license/notice-файлов geth, включая оба `COPYING`, совпадают с исходниками побайтно. Точный commit подтверждён реальной командой версии с отдельным временным home. [Свидетельство упаковки](owned-geth-coordinate-package-proof.json) сохраняет имена и SHA256 всех этих notices. Это development artifact указанного snapshot, не опубликованный стабильный релиз.
+
 ## Оставшиеся ограничения
 
 Этот patch закрывает конкретное изменение исходника для GO-2026-4507. Он не означает закрытие ECIES и остальных upstream geth advisories, Pion DTLS v2 или OpenPGP. Проверка исходников доказывает наличие объявленного patch, а не отсутствие других уязвимостей.

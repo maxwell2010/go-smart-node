@@ -1,0 +1,59 @@
+{
+  "allArchiveFileHashesVerified": true,
+  "archiveBytes": 75943390,
+  "archiveSha256": "77c9855427e91d7ec62c1a65efef413ca96072d4bd67ef14789b73305a8dbcfb",
+  "binaryBytes": 186653392,
+  "binarySha256": "2d5ed4b419ec712776960cf2e052379b2e2c3910fee83f8d803b73c822f89edf",
+  "localArtifacts": "C:\\MintCandyBuild\\mcnd-owned-geth-b03012f-20261103",
+  "ownedGethLicenseMembers": {
+    "provenance/network/third_party/cosmos-geth/COPYING": {
+      "bytes": 35149,
+      "sha256": "3972dc9744f6499f0f9b2dbf76696f2ae7ad8af9b23dde66d6af86c9dfb36986"
+    },
+    "provenance/network/third_party/cosmos-geth/COPYING.LESSER": {
+      "bytes": 7651,
+      "sha256": "da7eabb7bafdf7d3ae5e9f223aa5bdc1eece45ac569dc21b3b037520b4464768"
+    },
+    "provenance/network/third_party/cosmos-geth/crypto/bn256/LICENSE": {
+      "bytes": 1537,
+      "sha256": "9af6283f0c25b7eab8bc4a9d61fbc8b9dc31c82251612369e3472c53ffef55ca"
+    },
+    "provenance/network/third_party/cosmos-geth/crypto/bn256/cloudflare/LICENSE": {
+      "bytes": 1479,
+      "sha256": "2d36597f7117c38b006835ae7f537487207d8ec407aa9d9980794b2030cbc067"
+    },
+    "provenance/network/third_party/cosmos-geth/crypto/ecies/LICENSE": {
+      "bytes": 1527,
+      "sha256": "6c398508b282a0cf1533cabcd4e92a7638e26e3d0f1b299ae8f4c295c16d0728"
+    },
+    "provenance/network/third_party/cosmos-geth/crypto/secp256k1/LICENSE": {
+      "bytes": 1707,
+      "sha256": "d9e86fe404a67168af493583a2ad300a20447997b2974f026f71872cd4696ca6"
+    },
+    "provenance/network/third_party/cosmos-geth/crypto/secp256k1/libsecp256k1/COPYING": {
+      "bytes": 1057,
+      "sha256": "a735999c7e5649df6fcda6fb06ab97435851c392b1b93494ae8725f37441632f"
+    },
+    "provenance/network/third_party/cosmos-geth/metrics/LICENSE": {
+      "bytes": 1516,
+      "sha256": "d2571186acad91c8a3121fb31f1aa5963e82ccd08608d00cef3eb3f3a6c8ad38"
+    },
+    "provenance/network/third_party/cosmos-geth/metrics/influxdb/LICENSE": {
+      "bytes": 1061,
+      "sha256": "e3f9d67a2fc35a9c119bb3686ff7068bdea1a55bbe0d92e9eaaf2ed1e9015093"
+    }
+  },
+  "ownedGethManifestSha256": "0afd6e8dd31540c1c5328bc8f475018ff648302256a74728ff2cbab13886bd3a",
+  "recordedUtc": "2026-11-03T06:18:30.360564+00:00",
+  "runtimeVersion": {
+    "commit": "b03012ff052026d867da03fc9a44fe06cb9f4a1e",
+    "cosmos_sdk_version": "v0.53.8",
+    "go": "go version go1.26.10 linux/amd64",
+    "server_name": "mcnd",
+    "version": "0.0.0-dev"
+  },
+  "schemaVersion": 1,
+  "scope": "Source-bound development binary and actual license-bearing archive only. No stable release, daemon lifecycle or new integrated vulnerability scan claim.",
+  "sourceRevision": "b03012ff052026d867da03fc9a44fe06cb9f4a1e",
+  "sourceTrackedChangesAfterPackaging": ""
+}
