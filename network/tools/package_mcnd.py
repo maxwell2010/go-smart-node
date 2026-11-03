@@ -1,7 +1,8 @@
 """Package a source-bound Linux amd64 DEVELOPMENT binary; never publish it."""
 import argparse, hashlib, io, json, os, pathlib, platform, subprocess, sys, tarfile, tempfile
-from install_mcnd import validate_revision
+from install_mcnd import GO_VERSION, validate_revision
 from source_inventory import production_environment, verify_build_inputs
+from binary_provenance import verify_binary_build
 
 def package(binary,source,revision,output,source_inputs=None):
  validate_revision(revision);source=pathlib.Path(source).resolve(strict=True);binary=pathlib.Path(binary).resolve(strict=True)
@@ -15,6 +16,7 @@ def package(binary,source,revision,output,source_inputs=None):
  if header[:5]!=b"\x7fELF\x02" or header[18:20]!=b"\x3e\x00":raise ValueError("Linux amd64 ELF required")
  environment=production_environment()
  info=subprocess.check_output(["go","version","-m",str(binary)],text=True,env=environment)
+ verified_build=verify_binary_build(info,source,revision,GO_VERSION,environment=environment)
  runtime_version=None
  if "main.buildCommit=" in info:
   if "main.buildCommit="+revision not in info:raise ValueError("binary lacks exact source buildCommit")
@@ -28,6 +30,7 @@ def package(binary,source,revision,output,source_inputs=None):
  if source_inputs is not None and json.loads(pathlib.Path(source_inputs).read_bytes())!=inventory:raise ValueError("production source inputs differ from the pre-build inventory")
  data={"bin/mcnd":binary.read_bytes(),"BUILD_INFO.txt":info.encode(),"DEVELOPMENT.txt":b"DEVELOPMENT ONLY. Native feature integration and release gates remain incomplete.\n"}
  data["SOURCE_INPUTS.json"]=(json.dumps(inventory,sort_keys=True,indent=2)+"\n").encode()
+ data["VERIFIED_BUILD.json"]=(json.dumps(verified_build,sort_keys=True,indent=2)+"\n").encode()
  if runtime_version is not None:data["CLI_VERSION.json"]=(json.dumps(runtime_version,sort_keys=True,indent=2)+"\n").encode()
  third_party=source/"network/third_party"
  notices=sorted({path for pattern in ("LICENSE*","COPYING*","NOTICE*") for path in third_party.rglob(pattern) if path.is_file()})

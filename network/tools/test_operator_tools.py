@@ -6,6 +6,13 @@ from package_mcnd import package
 
 
 class OperatorToolsTest(unittest.TestCase):
+    def setUp(self):
+        # Archive/config tests use inert bytes. The metadata policy is tested
+        # independently and on the real Linux CI daemon, never by running these.
+        verifier = patch('package_mcnd.verify_binary_build', return_value={'fixture': 'archive-only'})
+        self.binary_verifier = verifier.start()
+        self.addCleanup(verifier.stop)
+
     def test_revision_rejects_branch_and_shell_text(self):
         for value in ('master', '123', '../file', 'a'*39, 'F'*40, 'a'*40+';command'):
             with self.assertRaises(ValueError): validate_revision(value)
@@ -83,6 +90,23 @@ class OperatorToolsTest(unittest.TestCase):
             with patch('package_mcnd.subprocess.check_output',side_effect=output), patch('package_mcnd.subprocess.run',side_effect=subprocess.CalledProcessError(1,['SDK verifier'])):
                 with self.assertRaises(subprocess.CalledProcessError):package(binary,source,'a'*40,target)
             self.assertFalse(target.exists())
+
+    def test_packager_rejects_build_metadata_mismatch_before_archive_creation(self):
+        with tempfile.TemporaryDirectory() as root:
+            source=pathlib.Path(root);binary=source/'mcnd'
+            header=bytearray(20);header[:5]=b'\x7fELF\x02';header[18:20]=b'\x3e\x00';binary.write_bytes(header)
+            def output(command,**kwargs):
+                if 'rev-parse' in command:return 'a'*40+'\n'
+                if 'status' in command:return ''
+                return 'recorded build metadata fixture'
+            self.binary_verifier.side_effect=ValueError('binary settings differ from default build policy')
+            target=source/'rejected.tar.gz'
+            with patch('package_mcnd.subprocess.check_output',side_effect=output):
+                with self.assertRaisesRegex(ValueError,'default build policy'):
+                    package(binary,source,'a'*40,target)
+            self.binary_verifier.assert_called_once()
+            self.assertFalse(target.exists())
+            self.assertFalse(target.with_name(target.name+'.sha256').exists())
 
     def test_trimpath_requires_matching_native_cli_commit(self):
         for matches in (True, False):
