@@ -32,7 +32,8 @@
         "Path": "github.com/cosmos/evm",
         "Version": "v0.6.3",
         "Sum": "h1:1G8+iqyQWslZ2g7873h90Fcr3pL6RV24PgOS1wiK2SY="
-      }
+      },
+      "importedByDefaultMcnd": true
     },
     {
       "importModule": "github.com/cosmos/cosmos-sdk",
@@ -41,7 +42,8 @@
         "Path": "github.com/cosmos/cosmos-sdk",
         "Version": "v0.53.8",
         "Sum": "h1:rKQIgqifo3Izv/JQLpPIjReOJ7jK+Qh8Rt8GIttDADw="
-      }
+      },
+      "importedByDefaultMcnd": true
     },
     {
       "importModule": "github.com/cometbft/cometbft",
@@ -50,7 +52,8 @@
         "Path": "github.com/cometbft/cometbft",
         "Version": "v0.38.26",
         "Sum": "h1:MIPYgOSvyyiN1jo3SZljKy4ZXqs896aQnj3pQFfUmaE="
-      }
+      },
+      "importedByDefaultMcnd": true
     },
     {
       "importModule": "github.com/cosmos/ibc-go/v10",
@@ -59,7 +62,8 @@
         "Path": "github.com/cosmos/ibc-go/v10",
         "Version": "v10.7.0",
         "Sum": "h1:lE1nsilDP4SUiD7mhgdF9X3f1T4sa7Lt8CiH8Qy1jzg="
-      }
+      },
+      "importedByDefaultMcnd": true
     },
     {
       "importModule": "github.com/ethereum/go-ethereum",
@@ -73,7 +77,8 @@
         "Path": "github.com/cosmos/go-ethereum",
         "Version": "v1.16.2-cosmos-1",
         "Sum": "h1:QIaIS6HIdPSBdTvpFhxswhMLUJgcr4irbd2o9ZKldAI="
-      }
+      },
+      "importedByDefaultMcnd": true
     },
     {
       "importModule": "cosmossdk.io/store",
@@ -82,7 +87,8 @@
         "Path": "cosmossdk.io/store",
         "Version": "v1.1.2",
         "Sum": "h1:3HOZG8+CuThREKv6cn3WSohAc6yccxO3hLzwK6rBC7o="
-      }
+      },
+      "importedByDefaultMcnd": true
     },
     {
       "importModule": "cosmossdk.io/core",
@@ -91,7 +97,8 @@
         "Path": "cosmossdk.io/core",
         "Version": "v0.11.3",
         "Sum": "h1:mei+MVDJOwIjIniaKelE3jPDqShCc/F4LkNNHh+4yfo="
-      }
+      },
+      "importedByDefaultMcnd": true
     },
     {
       "importModule": "cosmossdk.io/log",
@@ -100,7 +107,8 @@
         "Path": "cosmossdk.io/log",
         "Version": "v1.6.1",
         "Sum": "h1:YXNwAgbDwMEKwDlCdH8vPcoggma48MgZrTQXCfmMBeI="
-      }
+      },
+      "importedByDefaultMcnd": true
     },
     {
       "importModule": "github.com/bytedance/sonic",
@@ -109,7 +117,8 @@
         "Path": "github.com/bytedance/sonic",
         "Version": "v1.15.1",
         "Sum": "h1:nJD5PmM0vY7J8CT6MxoqbVAAMhkSmV2HgRAUrrpLoOw="
-      }
+      },
+      "importedByDefaultMcnd": true
     },
     {
       "importModule": "github.com/bytedance/sonic/loader",
@@ -118,7 +127,8 @@
         "Path": "github.com/bytedance/sonic/loader",
         "Version": "v0.5.1",
         "Sum": "h1:Ygpfa9zwRCCKSlrp5bBP/b/Xzc3VxsAW+5NIYXrOOpI="
-      }
+      },
+      "importedByDefaultMcnd": true
     },
     {
       "importModule": "cel.dev/expr",
@@ -127,7 +137,8 @@
         "Path": "cel.dev/expr",
         "Version": "v0.25.2",
         "Sum": "h1:K6j46C81hXtZQfuX60cVWQFBJahKSE2gfRbNuvr5bFs="
-      }
+      },
+      "importedByDefaultMcnd": true
     },
     {
       "importModule": "cloud.google.com/go",
@@ -136,7 +147,8 @@
         "Path": "cloud.google.com/go",
         "Version": "v0.123.0",
         "Sum": "h1:2NAUJwPR47q+E35uaJeYoNhuNEM9kM8SjgRgdeOJUSE="
-      }
+      },
+      "importedByDefaultMcnd": true
     },
     {
       "importModule": "cloud.google.com/go/auth",
@@ -145,7 +157,8 @@
         "Path": "cloud.google.com/go/auth",
         "Version": "v0.18.2",
         "Sum": "h1:+Nbt5Ev0xEqxlNjd6c+yYUeosQ5TtEUaNcN/3FozlaM="
-      }
+      },
+      "importedByDefaultMcnd": true
     },
     {
       "importModule": "cloud.google.com/go/compute/metadata",
@@ -154,7 +167,8 @@
         "Path": "cloud.google.com/go/compute/metadata",
         "Version": "v0.9.0",
         "Sum": "h1:pDUj4QMoPejqq20dK0Pg2N4yG9zIkYGdBtwLoEkH9Zs="
-      }
+      },
+      "importedByDefaultMcnd": true
     },
     {
       "importModule": "cloud.google.com/go/iam",
@@ -163,7 +177,8 @@
         "Path": "cloud.google.com/go/iam",
         "Version": "v1.5.3",
         "Sum": "h1:+vMINPiDF2ognBJ97ABAYYwRgsaqxPbQDlMnbHMjolc="
-      }
+      },
+      "importedByDefaultMcnd": true
     },
     {
       "importModule": "cloud.google.com/go/monitoring",
@@ -172,7 +187,8 @@
         "Path": "cloud.google.com/go/monitoring",
         "Version": "v1.24.3",
         "Sum": "h1:dde+gMNc0UhPZD1Azu6at2e79bfdztVDS5lvhOdsgaE="
-      }
+      },
+      "importedByDefaultMcnd": true
     },
     {
       "importModule": "cloud.google.com/go/storage",
@@ -181,7 +197,8 @@
         "Path": "cloud.google.com/go/storage",
         "Version": "v1.61.3",
         "Sum": "h1:VS//ZfBuPGDvakfD9xyPW1RGF1Vy3BWUoVZXgW1KMOg="
-      }
+      },
+      "importedByDefaultMcnd": true
     },
     {
       "importModule": "filippo.io/edwards25519",
@@ -190,7 +207,8 @@
         "Path": "filippo.io/edwards25519",
         "Version": "v1.1.1",
         "Sum": "h1:YpjwWWlNmGIDyXOn8zLzqiD+9TyIlPhGFG96P39uBpw="
-      }
+      },
+      "importedByDefaultMcnd": true
     },
     {
       "importModule": "github.com/GoogleCloudPlatform/opentelemetry-operations-go/detectors/gcp",
@@ -199,7 +217,8 @@
         "Path": "github.com/GoogleCloudPlatform/opentelemetry-operations-go/detectors/gcp",
         "Version": "v1.33.0",
         "Sum": "h1:l7+6kwRMJNwdCvYdDl7Eax+wzEYHSnNY7zrrfbhDdTA="
-      }
+      },
+      "importedByDefaultMcnd": true
     },
     {
       "importModule": "github.com/GoogleCloudPlatform/opentelemetry-operations-go/exporter/metric",
@@ -208,7 +227,8 @@
         "Path": "github.com/GoogleCloudPlatform/opentelemetry-operations-go/exporter/metric",
         "Version": "v0.55.0",
         "Sum": "h1:UnDZ/zFfG1JhH/DqxIZYU/1CUAlTUScoXD/LcM2Ykk8="
-      }
+      },
+      "importedByDefaultMcnd": true
     },
     {
       "importModule": "github.com/GoogleCloudPlatform/opentelemetry-operations-go/internal/resourcemapping",
@@ -217,7 +237,8 @@
         "Path": "github.com/GoogleCloudPlatform/opentelemetry-operations-go/internal/resourcemapping",
         "Version": "v0.55.0",
         "Sum": "h1:0s6TxfCu2KHkkZPnBfsQ2y5qia0jl3MMrmBhu3nCOYk="
-      }
+      },
+      "importedByDefaultMcnd": true
     },
     {
       "importModule": "github.com/aws/aws-sdk-go-v2",
@@ -226,7 +247,8 @@
         "Path": "github.com/aws/aws-sdk-go-v2",
         "Version": "v1.41.5",
         "Sum": "h1:dj5kopbwUsVUVFgO4Fi5BIT3t4WyqIDjGKCangnV/yY="
-      }
+      },
+      "importedByDefaultMcnd": true
     },
     {
       "importModule": "github.com/aws/aws-sdk-go-v2/aws/protocol/eventstream",
@@ -235,7 +257,8 @@
         "Path": "github.com/aws/aws-sdk-go-v2/aws/protocol/eventstream",
         "Version": "v1.7.8",
         "Sum": "h1:eBMB84YGghSocM7PsjmmPffTa+1FBUeNvGvFou6V/4o="
-      }
+      },
+      "importedByDefaultMcnd": true
     },
     {
       "importModule": "github.com/aws/aws-sdk-go-v2/config",
@@ -244,7 +267,8 @@
         "Path": "github.com/aws/aws-sdk-go-v2/config",
         "Version": "v1.32.12",
         "Sum": "h1:O3csC7HUGn2895eNrLytOJQdoL2xyJy0iYXhoZ1OmP0="
-      }
+      },
+      "importedByDefaultMcnd": true
     },
     {
       "importModule": "github.com/aws/aws-sdk-go-v2/credentials",
@@ -253,7 +277,8 @@
         "Path": "github.com/aws/aws-sdk-go-v2/credentials",
         "Version": "v1.19.12",
         "Sum": "h1:oqtA6v+y5fZg//tcTWahyN9PEn5eDU/Wpvc2+kJ4aY8="
-      }
+      },
+      "importedByDefaultMcnd": true
     },
     {
       "importModule": "github.com/aws/aws-sdk-go-v2/feature/ec2/imds",
@@ -262,7 +287,8 @@
         "Path": "github.com/aws/aws-sdk-go-v2/feature/ec2/imds",
         "Version": "v1.18.20",
         "Sum": "h1:zOgq3uezl5nznfoK3ODuqbhVg1JzAGDUhXOsU0IDCAo="
-      }
+      },
+      "importedByDefaultMcnd": true
     },
     {
       "importModule": "github.com/aws/aws-sdk-go-v2/internal/configsources",
@@ -271,7 +297,8 @@
         "Path": "github.com/aws/aws-sdk-go-v2/internal/configsources",
         "Version": "v1.4.21",
         "Sum": "h1:Rgg6wvjjtX8bNHcvi9OnXWwcE0a2vGpbwmtICOsvcf4="
-      }
+      },
+      "importedByDefaultMcnd": true
     },
     {
       "importModule": "github.com/aws/aws-sdk-go-v2/internal/endpoints/v2",
@@ -280,7 +307,8 @@
         "Path": "github.com/aws/aws-sdk-go-v2/internal/endpoints/v2",
         "Version": "v2.7.21",
         "Sum": "h1:PEgGVtPoB6NTpPrBgqSE5hE/o47Ij9qk/SEZFbUOe9A="
-      }
+      },
+      "importedByDefaultMcnd": true
     },
     {
       "importModule": "github.com/aws/aws-sdk-go-v2/internal/ini",
@@ -289,7 +317,8 @@
         "Path": "github.com/aws/aws-sdk-go-v2/internal/ini",
         "Version": "v1.8.6",
         "Sum": "h1:qYQ4pzQ2Oz6WpQ8T3HvGHnZydA72MnLuFK9tJwmrbHw="
-      }
+      },
+      "importedByDefaultMcnd": true
     },
     {
       "importModule": "github.com/aws/aws-sdk-go-v2/internal/v4a",
@@ -298,7 +327,8 @@
         "Path": "github.com/aws/aws-sdk-go-v2/internal/v4a",
         "Version": "v1.4.22",
         "Sum": "h1:rWyie/PxDRIdhNf4DzRk0lvjVOqFJuNnO8WwaIRVxzQ="
-      }
+      },
+      "importedByDefaultMcnd": true
     },
     {
       "importModule": "github.com/aws/aws-sdk-go-v2/service/internal/accept-encoding",
@@ -307,7 +337,8 @@
         "Path": "github.com/aws/aws-sdk-go-v2/service/internal/accept-encoding",
         "Version": "v1.13.7",
         "Sum": "h1:5EniKhLZe4xzL7a+fU3C2tfUN4nWIqlLesfrjkuPFTY="
-      }
+      },
+      "importedByDefaultMcnd": true
     },
     {
       "importModule": "github.com/aws/aws-sdk-go-v2/service/internal/checksum",
@@ -316,7 +347,8 @@
         "Path": "github.com/aws/aws-sdk-go-v2/service/internal/checksum",
         "Version": "v1.9.13",
         "Sum": "h1:JRaIgADQS/U6uXDqlPiefP32yXTda7Kqfx+LgspooZM="
-      }
+      },
+      "importedByDefaultMcnd": true
     },
     {
       "importModule": "github.com/aws/aws-sdk-go-v2/service/internal/presigned-url",
@@ -325,7 +357,8 @@
         "Path": "github.com/aws/aws-sdk-go-v2/service/internal/presigned-url",
         "Version": "v1.13.21",
         "Sum": "h1:c31//R3xgIJMSC8S6hEVq+38DcvUlgFY0FM6mSI5oto="
-      }
+      },
+      "importedByDefaultMcnd": true
     },
     {
       "importModule": "github.com/aws/aws-sdk-go-v2/service/internal/s3shared",
@@ -334,7 +367,8 @@
         "Path": "github.com/aws/aws-sdk-go-v2/service/internal/s3shared",
         "Version": "v1.19.21",
         "Sum": "h1:ZlvrNcHSFFWURB8avufQq9gFsheUgjVD9536obIknfM="
-      }
+      },
+      "importedByDefaultMcnd": true
     },
     {
       "importModule": "github.com/aws/aws-sdk-go-v2/service/s3",
@@ -343,7 +377,8 @@
         "Path": "github.com/aws/aws-sdk-go-v2/service/s3",
         "Version": "v1.97.3",
         "Sum": "h1:HwxWTbTrIHm5qY+CAEur0s/figc3qwvLWsNkF4RPToo="
-      }
+      },
+      "importedByDefaultMcnd": true
     },
     {
       "importModule": "github.com/aws/aws-sdk-go-v2/service/signin",
@@ -352,7 +387,8 @@
         "Path": "github.com/aws/aws-sdk-go-v2/service/signin",
         "Version": "v1.0.8",
         "Sum": "h1:0GFOLzEbOyZABS3PhYfBIx2rNBACYcKty+XGkTgw1ow="
-      }
+      },
+      "importedByDefaultMcnd": true
     },
     {
       "importModule": "github.com/aws/aws-sdk-go-v2/service/sso",
@@ -361,7 +397,8 @@
         "Path": "github.com/aws/aws-sdk-go-v2/service/sso",
         "Version": "v1.30.13",
         "Sum": "h1:kiIDLZ005EcKomYYITtfsjn7dtOwHDOFy7IbPXKek2o="
-      }
+      },
+      "importedByDefaultMcnd": true
     },
     {
       "importModule": "github.com/aws/aws-sdk-go-v2/service/ssooidc",
@@ -370,7 +407,8 @@
         "Path": "github.com/aws/aws-sdk-go-v2/service/ssooidc",
         "Version": "v1.35.17",
         "Sum": "h1:jzKAXIlhZhJbnYwHbvUQZEB8KfgAEuG0dc08Bkda7NU="
-      }
+      },
+      "importedByDefaultMcnd": true
     },
     {
       "importModule": "github.com/aws/aws-sdk-go-v2/service/sts",
@@ -379,7 +417,8 @@
         "Path": "github.com/aws/aws-sdk-go-v2/service/sts",
         "Version": "v1.41.9",
         "Sum": "h1:Cng+OOwCHmFljXIxpEVXAGMnBia8MSU6Ch5i9PgBkcU="
-      }
+      },
+      "importedByDefaultMcnd": true
     },
     {
       "importModule": "github.com/aws/smithy-go",
@@ -388,7 +427,8 @@
         "Path": "github.com/aws/smithy-go",
         "Version": "v1.24.2",
         "Sum": "h1:FzA3bu/nt/vDvmnkg+R8Xl46gmzEDam6mZ1hzmwXFng="
-      }
+      },
+      "importedByDefaultMcnd": true
     },
     {
       "importModule": "github.com/cncf/xds/go",
@@ -397,7 +437,8 @@
         "Path": "github.com/cncf/xds/go",
         "Version": "v0.0.0-20260202195803-dba9d589def2",
         "Sum": "h1:aBangftG7EVZoUb69Os8IaYg++6uMOdKK83QtkkvJik="
-      }
+      },
+      "importedByDefaultMcnd": true
     },
     {
       "importModule": "github.com/consensys/gnark-crypto",
@@ -406,7 +447,8 @@
         "Path": "github.com/consensys/gnark-crypto",
         "Version": "v0.18.1",
         "Sum": "h1:RyLV6UhPRoYYzaFnPQA4qK3DyuDgkTgskDdoGqFt3fI="
-      }
+      },
+      "importedByDefaultMcnd": true
     },
     {
       "importModule": "github.com/envoyproxy/go-control-plane/envoy",
@@ -415,7 +457,8 @@
         "Path": "github.com/envoyproxy/go-control-plane/envoy",
         "Version": "v1.37.0",
         "Sum": "h1:u3riX6BoYRfF4Dr7dwSOroNfdSbEPe9Yyl09/B6wBrQ="
-      }
+      },
+      "importedByDefaultMcnd": true
     },
     {
       "importModule": "github.com/envoyproxy/protoc-gen-validate",
@@ -424,7 +467,8 @@
         "Path": "github.com/envoyproxy/protoc-gen-validate",
         "Version": "v1.3.3",
         "Sum": "h1:MVQghNeW+LZcmXe7SY1V36Z+WFMDjpqGAGacLe2T0ds="
-      }
+      },
+      "importedByDefaultMcnd": true
     },
     {
       "importModule": "github.com/fatih/color",
@@ -433,7 +477,8 @@
         "Path": "github.com/fatih/color",
         "Version": "v1.18.0",
         "Sum": "h1:S8gINlzdQ840/4pfAwic/ZE0djQEH3wM94VfqLTZcOM="
-      }
+      },
+      "importedByDefaultMcnd": true
     },
     {
       "importModule": "github.com/go-jose/go-jose/v4",
@@ -442,7 +487,8 @@
         "Path": "github.com/go-jose/go-jose/v4",
         "Version": "v4.1.4",
         "Sum": "h1:moDMcTHmvE6Groj34emNPLs/qtYXRVcd6S7NHbHz3kA="
-      }
+      },
+      "importedByDefaultMcnd": true
     },
     {
       "importModule": "github.com/go-logr/logr",
@@ -451,7 +497,8 @@
         "Path": "github.com/go-logr/logr",
         "Version": "v1.4.4",
         "Sum": "h1:tG4xh9yMsRCAiodLVTxyrkzSZ9+o0L1Kg/+cPVcbP/8="
-      }
+      },
+      "importedByDefaultMcnd": true
     },
     {
       "importModule": "github.com/googleapis/enterprise-certificate-proxy",
@@ -460,7 +507,8 @@
         "Path": "github.com/googleapis/enterprise-certificate-proxy",
         "Version": "v0.3.14",
         "Sum": "h1:yh8ncqsbUY4shRD5dA6RlzjJaT4hi3kII+zYw8wmLb8="
-      }
+      },
+      "importedByDefaultMcnd": true
     },
     {
       "importModule": "github.com/googleapis/gax-go/v2",
@@ -469,7 +517,8 @@
         "Path": "github.com/googleapis/gax-go/v2",
         "Version": "v2.17.0",
         "Sum": "h1:RksgfBpxqff0EZkDWYuz9q/uWsTVz+kf43LsZ1J6SMc="
-      }
+      },
+      "importedByDefaultMcnd": true
     },
     {
       "importModule": "github.com/hashicorp/aws-sdk-go-base/v2",
@@ -478,7 +527,8 @@
         "Path": "github.com/hashicorp/aws-sdk-go-base/v2",
         "Version": "v2.0.0-beta.72",
         "Sum": "h1:vTCWu1wbdYo7PEZFem/rlr01+Un+wwVmI7wiegFdRLk="
-      }
+      },
+      "importedByDefaultMcnd": true
     },
     {
       "importModule": "github.com/hashicorp/go-getter",
@@ -487,7 +537,8 @@
         "Path": "github.com/hashicorp/go-getter",
         "Version": "v1.8.6",
         "Sum": "h1:9sQboWULaydVphxc4S64oAI4YqpuCk7nPmvbk131ebY="
-      }
+      },
+      "importedByDefaultMcnd": true
     },
     {
       "importModule": "github.com/hashicorp/go-version",
@@ -496,7 +547,8 @@
         "Path": "github.com/hashicorp/go-version",
         "Version": "v1.8.0",
         "Sum": "h1:KAkNb1HAiZd1ukkxDFGmokVZe1Xy9HG6NUp+bPle2i4="
-      }
+      },
+      "importedByDefaultMcnd": true
     },
     {
       "importModule": "github.com/klauspost/compress",
@@ -505,7 +557,8 @@
         "Path": "github.com/klauspost/compress",
         "Version": "v1.18.5",
         "Sum": "h1:/h1gH5Ce+VWNLSWqPzOVn6XBO+vJbCNGvjoaGBFW2IE="
-      }
+      },
+      "importedByDefaultMcnd": true
     },
     {
       "importModule": "github.com/pion/dtls/v2",
@@ -514,21 +567,18 @@
         "Path": "github.com/pion/dtls/v2",
         "Version": "v2.2.7",
         "Sum": "h1:cSUBsETxepsCSFSxC3mc/aDo14qQLMSL+O6IjG28yV8="
-      }
+      },
+      "importedByDefaultMcnd": false
     },
     {
       "importModule": "github.com/pion/stun/v2",
       "selectedRequireVersion": "v2.0.0",
       "effectiveModule": {
-        "Path": "./third_party/pion-stun-v2",
-        "Local": true,
-        "Manifest": "third_party/pion-stun-v2/UPSTREAM.json"
-      },
-      "canonicalModule": {
         "Path": "github.com/pion/stun/v2",
         "Version": "v2.0.0",
         "Sum": "h1:A5+wXKLAypxQri59+tmQKVs7+l6mMM+3d+eER9ifRU0="
-      }
+      },
+      "importedByDefaultMcnd": false
     },
     {
       "importModule": "github.com/spiffe/go-spiffe/v2",
@@ -537,7 +587,8 @@
         "Path": "github.com/spiffe/go-spiffe/v2",
         "Version": "v2.7.0",
         "Sum": "h1:uXe1MflJoHw58wAUvxVlcM7WpKtijWG7I1UidcGh6g4="
-      }
+      },
+      "importedByDefaultMcnd": true
     },
     {
       "importModule": "github.com/ulikunitz/xz",
@@ -546,7 +597,8 @@
         "Path": "github.com/ulikunitz/xz",
         "Version": "v0.5.15",
         "Sum": "h1:9DNdB5s+SgV3bQ2ApL10xRc35ck0DuIX/isZvIk+ubY="
-      }
+      },
+      "importedByDefaultMcnd": true
     },
     {
       "importModule": "go.opentelemetry.io/auto/sdk",
@@ -555,7 +607,8 @@
         "Path": "go.opentelemetry.io/auto/sdk",
         "Version": "v1.2.1",
         "Sum": "h1:jXsnJ4Lmnqd11kwkBV2LgLoFMZKizbCi5fNZ/ipaZ64="
-      }
+      },
+      "importedByDefaultMcnd": true
     },
     {
       "importModule": "go.opentelemetry.io/contrib/detectors/gcp",
@@ -564,7 +617,8 @@
         "Path": "go.opentelemetry.io/contrib/detectors/gcp",
         "Version": "v1.44.0",
         "Sum": "h1:NmLfL734pJhM0JKaYd2Y28+nY9dPRWYAAbxhRCrKXPw="
-      }
+      },
+      "importedByDefaultMcnd": true
     },
     {
       "importModule": "go.opentelemetry.io/contrib/instrumentation/google.golang.org/grpc/otelgrpc",
@@ -573,7 +627,8 @@
         "Path": "go.opentelemetry.io/contrib/instrumentation/google.golang.org/grpc/otelgrpc",
         "Version": "v0.63.0",
         "Sum": "h1:YH4g8lQroajqUwWbq/tr2QX1JFmEXaDLgG+ew9bLMWo="
-      }
+      },
+      "importedByDefaultMcnd": true
     },
     {
       "importModule": "go.opentelemetry.io/otel",
@@ -582,7 +637,8 @@
         "Path": "go.opentelemetry.io/otel",
         "Version": "v1.45.0",
         "Sum": "h1:pdrWmLHofpubmArBv1LgFSv1Z0Ie/ppdZzu+kUN5EeU="
-      }
+      },
+      "importedByDefaultMcnd": true
     },
     {
       "importModule": "go.opentelemetry.io/otel/metric",
@@ -591,7 +647,8 @@
         "Path": "go.opentelemetry.io/otel/metric",
         "Version": "v1.45.0",
         "Sum": "h1:7Eg1uH7CJ5cXv9is6tnBe1FI6rj1nwUdbFypRm3br/M="
-      }
+      },
+      "importedByDefaultMcnd": true
     },
     {
       "importModule": "go.opentelemetry.io/otel/sdk",
@@ -600,7 +657,8 @@
         "Path": "go.opentelemetry.io/otel/sdk",
         "Version": "v1.45.0",
         "Sum": "h1:4VVSMgQ83dUgW2aoX5f6JgLvHwIvzcuLnF9lUdCSpCw="
-      }
+      },
+      "importedByDefaultMcnd": true
     },
     {
       "importModule": "go.opentelemetry.io/otel/sdk/metric",
@@ -609,7 +667,8 @@
         "Path": "go.opentelemetry.io/otel/sdk/metric",
         "Version": "v1.45.0",
         "Sum": "h1:oVFszMfyj1Am6s24Vtc7wBb8BKLcwepJjNEYILuiE3o="
-      }
+      },
+      "importedByDefaultMcnd": true
     },
     {
       "importModule": "go.opentelemetry.io/otel/trace",
@@ -618,7 +677,8 @@
         "Path": "go.opentelemetry.io/otel/trace",
         "Version": "v1.45.0",
         "Sum": "h1:l/mP6Uv7oNO7/TblbhpbgMidxhq1uO/rPsikOyVhxag="
-      }
+      },
+      "importedByDefaultMcnd": true
     },
     {
       "importModule": "golang.org/x/crypto",
@@ -627,7 +687,8 @@
         "Path": "golang.org/x/crypto",
         "Version": "v0.58.0",
         "Sum": "h1:COkYLr4k7nDI4r6QtMML2AfzeIswWHAJthLS6K/M/54="
-      }
+      },
+      "importedByDefaultMcnd": true
     },
     {
       "importModule": "golang.org/x/net",
@@ -636,7 +697,8 @@
         "Path": "golang.org/x/net",
         "Version": "v0.61.0",
         "Sum": "h1:RR+6j/BTBCrggOLugxa+66R8FvoN6MHlzDlZIbN9YFw="
-      }
+      },
+      "importedByDefaultMcnd": true
     },
     {
       "importModule": "golang.org/x/oauth2",
@@ -645,7 +707,8 @@
         "Path": "golang.org/x/oauth2",
         "Version": "v0.36.0",
         "Sum": "h1:peZ/1z27fi9hUOFCAZaHyrpWG5lwe0RJEEEeH0ThlIs="
-      }
+      },
+      "importedByDefaultMcnd": true
     },
     {
       "importModule": "golang.org/x/sync",
@@ -654,7 +717,8 @@
         "Path": "golang.org/x/sync",
         "Version": "v0.24.0",
         "Sum": "h1:iqiDrGoDgyuvAKrhLQthUEzU/R378N78gXbBjxed7oA="
-      }
+      },
+      "importedByDefaultMcnd": true
     },
     {
       "importModule": "golang.org/x/sys",
@@ -663,7 +727,8 @@
         "Path": "golang.org/x/sys",
         "Version": "v0.49.0",
         "Sum": "h1:XbzkgYJHdqh/8m2Uu0W/dQv8nktxx4BFHp1M0gROTXA="
-      }
+      },
+      "importedByDefaultMcnd": true
     },
     {
       "importModule": "golang.org/x/term",
@@ -672,7 +737,8 @@
         "Path": "golang.org/x/term",
         "Version": "v0.47.0",
         "Sum": "h1:cpyOwQkr2Nzxe2p6KnrTG7Ei2wtzjsuSjhpXXepZ/BM="
-      }
+      },
+      "importedByDefaultMcnd": true
     },
     {
       "importModule": "golang.org/x/text",
@@ -681,7 +747,8 @@
         "Path": "golang.org/x/text",
         "Version": "v0.43.0",
         "Sum": "h1:1QivrlhwAsnMOcqgOdl9my7s9OyZl8O5/UGUTJVXoWc="
-      }
+      },
+      "importedByDefaultMcnd": true
     },
     {
       "importModule": "golang.org/x/time",
@@ -690,7 +757,8 @@
         "Path": "golang.org/x/time",
         "Version": "v0.15.0",
         "Sum": "h1:bbrp8t3bGUeFOx08pvsMYRTCVSMk89u4tKbNOZbp88U="
-      }
+      },
+      "importedByDefaultMcnd": true
     },
     {
       "importModule": "golang.org/x/tools",
@@ -699,7 +767,8 @@
         "Path": "golang.org/x/tools",
         "Version": "v0.51.0",
         "Sum": "h1:k4Xc/1Om9jwkBJBo4NVLMSARBoWtK10mx+W5BnXCeAI="
-      }
+      },
+      "importedByDefaultMcnd": false
     },
     {
       "importModule": "google.golang.org/api",
@@ -708,7 +777,8 @@
         "Path": "google.golang.org/api",
         "Version": "v0.271.0",
         "Sum": "h1:cIPN4qcUc61jlh7oXu6pwOQqbJW2GqYh5PS6rB2C/JY="
-      }
+      },
+      "importedByDefaultMcnd": true
     },
     {
       "importModule": "google.golang.org/genproto",
@@ -717,7 +787,8 @@
         "Path": "google.golang.org/genproto",
         "Version": "v0.0.0-20260128011058-8636f8732409",
         "Sum": "h1:VQZ/yAbAtjkHgH80teYd2em3xtIkkHd7ZhqfH2N9CsM="
-      }
+      },
+      "importedByDefaultMcnd": true
     },
     {
       "importModule": "google.golang.org/genproto/googleapis/api",
@@ -726,7 +797,8 @@
         "Path": "google.golang.org/genproto/googleapis/api",
         "Version": "v0.0.0-20260526163538-3dc84a4a5aaa",
         "Sum": "h1:Kjn0N0tCrDgiAFW+lGO4JZ3ck44CehvJQMAwj9QF0G8="
-      }
+      },
+      "importedByDefaultMcnd": true
     },
     {
       "importModule": "google.golang.org/genproto/googleapis/rpc",
@@ -735,7 +807,8 @@
         "Path": "google.golang.org/genproto/googleapis/rpc",
         "Version": "v0.0.0-20260526163538-3dc84a4a5aaa",
         "Sum": "h1:mZHHdPZl0dbGHCflZgAq/Q468DWVFcU2whhB2KAo8fk="
-      }
+      },
+      "importedByDefaultMcnd": true
     },
     {
       "importModule": "google.golang.org/grpc",
@@ -744,7 +817,8 @@
         "Path": "google.golang.org/grpc",
         "Version": "v1.83.2",
         "Sum": "h1:EManeRomTObA0BU7I8vXgg/78uE5MJ9M8B39EX2WscU="
-      }
+      },
+      "importedByDefaultMcnd": true
     },
     {
       "importModule": "google.golang.org/protobuf",
@@ -753,7 +827,98 @@
         "Path": "google.golang.org/protobuf",
         "Version": "v1.36.11",
         "Sum": "h1:fV6ZwhNocDyBLK0dj+fg8ektcVegBBuEolpbTQyBNVE="
-      }
+      },
+      "importedByDefaultMcnd": true
+    },
+    {
+      "importModule": "github.com/pion/stun/v3",
+      "selectedRequireVersion": "v3.1.7",
+      "effectiveModule": {
+        "Path": "github.com/pion/stun/v3",
+        "Version": "v3.1.7",
+        "Sum": "h1:uRXMTlGLf89WgItGNyZ6aR5jMTX0NBbybXADpQCzn+E="
+      },
+      "importedByDefaultMcnd": true
+    },
+    {
+      "importModule": "github.com/pion/dtls/v3",
+      "selectedRequireVersion": "v3.1.15",
+      "effectiveModule": {
+        "Path": "github.com/pion/dtls/v3",
+        "Version": "v3.1.15",
+        "Sum": "h1:okWk5LNwU21DfhvG8z4wm45knHVSPEdkihwp6BxfQcc="
+      },
+      "importedByDefaultMcnd": true
+    },
+    {
+      "importModule": "github.com/pion/logging",
+      "selectedRequireVersion": "v0.2.4",
+      "effectiveModule": {
+        "Path": "github.com/pion/logging",
+        "Version": "v0.2.4",
+        "Sum": "h1:tTew+7cmQ+Mc1pTBLKH2puKsOvhm32dROumOZ655zB8="
+      },
+      "importedByDefaultMcnd": true
+    },
+    {
+      "importModule": "github.com/stretchr/testify",
+      "selectedRequireVersion": "v1.12.1",
+      "effectiveModule": {
+        "Path": "github.com/stretchr/testify",
+        "Version": "v1.12.1",
+        "Sum": "h1:EuwCh5fleGS7H32xRwO3wRGT7DxrDhLAT6FF8MpWDWE="
+      },
+      "importedByDefaultMcnd": true
+    },
+    {
+      "importModule": "go.yaml.in/yaml/v3",
+      "selectedRequireVersion": "v3.0.5",
+      "effectiveModule": {
+        "Path": "go.yaml.in/yaml/v3",
+        "Version": "v3.0.5",
+        "Sum": "h1:N6y/pJk8buWs9NY5ERU2HSMfm+IuD/OtfdAnq6kESPw="
+      },
+      "importedByDefaultMcnd": true
+    },
+    {
+      "importModule": "github.com/pion/transport/v4",
+      "selectedRequireVersion": "v4.1.0",
+      "effectiveModule": {
+        "Path": "github.com/pion/transport/v4",
+        "Version": "v4.1.0",
+        "Sum": "h1:8S+nF2reM2cJuqC6g78OVy2BBgmbdns+acx3jA97BvQ="
+      },
+      "importedByDefaultMcnd": true
+    },
+    {
+      "importModule": "github.com/stretchr/objx",
+      "selectedRequireVersion": "v0.5.3",
+      "effectiveModule": {
+        "Path": "github.com/stretchr/objx",
+        "Version": "v0.5.3",
+        "Sum": "h1:jmXUvGomnU1o3W/V5h2VEradbpJDwGrzugQQvL0POH4="
+      },
+      "importedByDefaultMcnd": false
+    },
+    {
+      "importModule": "github.com/wlynxg/anet",
+      "selectedRequireVersion": "v0.0.5",
+      "effectiveModule": {
+        "Path": "github.com/wlynxg/anet",
+        "Version": "v0.0.5",
+        "Sum": "h1:J3VJGi1gvo0JwZ/P1/Yc/8p63SoW98B5dHkYDmpgvvU="
+      },
+      "importedByDefaultMcnd": true
+    },
+    {
+      "importModule": "github.com/pion/transport/v5",
+      "selectedRequireVersion": "v5.0.0",
+      "effectiveModule": {
+        "Path": "github.com/pion/transport/v5",
+        "Version": "v5.0.0",
+        "Sum": "h1:XWdfCnG6oLaTp07Sr4lbyWVs+MXuaD3eggUsSn6LK90="
+      },
+      "importedByDefaultMcnd": true
     }
   ],
   "validation": {
@@ -777,7 +942,8 @@
       "coverage": "Local EVM/STUN replacements require separate provenance/source review; Cosmos geth replacement identity does not close upstream inherited advisories. GO-2026-4507 affected-base BitCurve.IsOnCurve is retained in this binary. No final-release clean claim.",
       "scope": "Actual b9636dc default-build mcnd dependency snapshot only. Preserves earlier source-specific daemon/IBC controls and requires new scans for later integrated code."
     },
-    "gethCoordinateBackport": "Exact upstream GO-2026-4507 source backport, ordinary crypto/signature/math tests with CGO1 and0, actual source-bound b03012f development archive and license hashes. This is not a final integrated security PASS."
+    "gethCoordinateBackport": "Exact upstream GO-2026-4507 source backport, ordinary crypto/signature/math tests with CGO1 and0, actual source-bound b03012f development archive and license hashes. This is not a final integrated security PASS.",
+    "pionTransport": "Canonical STUN3.1.7/DTLS3.1.15, no alias replacement and no v2 packages in actual mcnd imports. Full318aace source/binary captures retain FAIL for OpenPGP and all module-only findings; DTLSv2 advisory absent without suppression. Final financial integration is not certified."
   },
   "remainingGates": [
     "Native Decimal validator/delegation/reward and coin/NFT feature wiring/parity.",
@@ -808,24 +974,16 @@
   },
   "ownedSourceBackports": [
     {
-      "module": "github.com/pion/stun/v2",
-      "selectedRequireVersion": "v2.0.0",
-      "replacement": "./third_party/pion-stun-v2",
-      "manifest": "third_party/pion-stun-v2/UPSTREAM.json",
-      "patchLabel": "v2.0.0-mintcandy.1",
-      "scope": "Upstream short XOR-MAPPED-ADDRESS guard; canonical panic and owned pass on actual v2 parser."
-    },
-    {
       "module": "github.com/ethereum/go-ethereum",
       "selectedRequireVersion": "v1.15.11",
       "replacement": "./third_party/cosmos-geth",
       "manifest": "third_party/cosmos-geth/UPSTREAM.json",
-      "patchLabel": "v1.16.2-cosmos-1-mintcandy.1",
+      "patchLabel": "v1.16.2-cosmos-1-mintcandy.2",
       "canonicalModule": "github.com/cosmos/go-ethereum@v1.16.2-cosmos-1",
-      "scope": "Exact upstream coordinate validation fix895a8597 in all3 files, including CGO header and non-CGO path; ordinary crypto tests pass in both modes. Other advisories and final integrated source/binary scans remain separate gates."
+      "scope": "Exact upstream coordinate validation fix895a8597 in all3 files, plus actual NAT import migration to canonical STUN v3; all5 source differences declared. Ordinary crypto, codec/client, actual private-loopback NAT/DTLS and source integrity tests pass."
     }
   ],
-  "selectedModulesSourceRevision": "46b571901be3d91468561e21796ac79c76411635",
-  "selectedModulesScope": "Curated module versions/h1 from b9636dc with the explicitly declared owned geth replacement at46b5719; other external selections unchanged. These records do not retarget older daemon validation or scan evidence.",
+  "selectedModulesSourceRevision": "318aace03f41132c4b6b704a287c05c227d6c26e",
+  "selectedModulesScope": "Curated actual MVS records/h1 from source318aace; importedByDefaultMcnd describes package imports, not exploit reachability. Unused legacy STUN/DTLS v2 remain in MVS through unchanged canonical EVM metadata and are not imported by mcnd. Older daemon and scan evidence retains its own source scope.",
   "selectedModulesBaseSourceRevision": "b9636dc388f9c6456d824ec0a96d407ac53b8c66"
 }
