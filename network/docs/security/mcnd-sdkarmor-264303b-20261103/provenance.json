@@ -11,8 +11,8 @@
   ],
   "files": {
     ".gitattributes": {
-      "bytes": 9,
-      "sha256": "48747480eddba024928d03be9bf83dc579e5515768647507a767e8187a85c9ab"
+      "bytes": 38,
+      "sha256": "ae60befd8ebaf7396e13504d7aada5f0a4bde1e2bd2848eebbece60bce4a593e"
     },
     "GO-2025-3442.json": {
       "bytes": 2426,
