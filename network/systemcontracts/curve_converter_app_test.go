@@ -133,7 +133,7 @@ func runCurveConverterFinancial(t *testing.T, e isolatedBackendEnv) {
 	amount := func(n int64) *big.Int { return new(big.Int).Mul(big.NewInt(n), big.NewInt(1_000_000_000_000_000_000)) }
 	native := func(target common.Address) *big.Int {
 		bank := e.app.BankKeeper.GetBalance(e.ctx(), sdk.AccAddress(target.Bytes()), identity.BaseDenom).Amount.BigInt()
-		require.Equal(t, bank, e.app.EVMKeeper.GetBalance(e.ctx(), target).ToBig())
+		require.Zero(t, bank.Cmp(e.app.EVMKeeper.GetBalance(e.ctx(), target).ToBig()), "bank and EVM native balances must agree numerically")
 		return bank
 	}
 	deadline := func() *big.Int { return big.NewInt(e.ctx().BlockTime().Unix() + 300) }
