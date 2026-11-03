@@ -63,6 +63,7 @@ jobs:
           echo "0479d44fdf9c501c25337fdc540419f1593b884a87b47f023da4f1c700fda782  $SOLC" | sha256sum --check
           chmod 755 "$SOLC"
           SOLC="$SOLC" python3 systemcontracts/build.py |& tee validation-logs/system-contract-reproduction.log
+          SOLC="$SOLC" python3 systemcontracts/build_owned_delegation.py |& tee validation-logs/owned-delegation-reproduction.log
           git diff --exit-code -- systemcontracts/artifacts
       - name: Test native ownership against actual SDK governance tally
         run: go test -mod=readonly -p 2 -count=1 -v -timeout 10m -tags sdk53 ./decimal/validator/governance |& tee validation-logs/native-governance-tally.log
