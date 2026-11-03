@@ -36,6 +36,17 @@ are excluded. Existing manifest role addresses are immutable in this stage;
 rebinding requires a separately reviewed migration path. Approved replacement
 hashes are explicit application policy, not inferred from proposal text.
 
+The isolated NFT position vault has its own `nft-position-vault` role using the
+pinned `MintCandyNFTPositionVault` ABI. This role permits only pause, unpause and
+an approved proxy upgrade with empty initialization. Position transfers, splits,
+redemptions and ownership changes are not governance execution selectors.
+
+The unified Gateway may bind both `delegation` and `delegation-nft` to one proxy
+only when their proxy hash and approved implementation/child hash sets are
+identical. Set order does not change this policy. All other duplicate role
+addresses, including registry collisions, fail during manifest construction;
+one alias cannot widen the replacement policy of the other.
+
 Every direct ApplyMessage call uses its actual GasLimit and a bounded SDK gas
 meter. After successful EVM execution the explicitly injected EvmHooks pipeline
 runs exactly once in the same cache. ApplyMessage does not implicitly run the
@@ -88,6 +99,17 @@ It does not certify completed Decimal financial hooks, NFT ownership, rewards,
 last-validator removal or native consensus transitions. The test wrapper installs
 the execution session around the original generic SDK governance module only;
 production wiring remains gated on native Decimal governance integration.
+
+`authority/integration` adds a separate one-App control with genuinely deployed
+Vault and isolated Gateway proxies. Canonical SDK proposals pause/unpause all
+three roles, perform an empty Vault upgrade and replace the Gateway through both
+aliases using two differently linked, explicitly approved runtime hashes. A
+forbidden selector, unapproved runtime, nonempty initialization and a later
+failed proposal message preserve the earlier contract state. Its injected hook
+only validates the local authority context and performs no financial writes.
+This is a role-policy proof, not a full SourceAuth/native financial pipeline
+resource proof. The latter still requires combined measured budgeting before
+application activation; this group does not increase the staging allowances.
 
 Reproduce generated messages with the pinned local protoc3.21.12 and
 protoc-gen-gocosmos1.7.2 using `scripts/generate-authority-proto.sh`. Run
