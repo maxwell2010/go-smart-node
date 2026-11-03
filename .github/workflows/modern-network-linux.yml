@@ -23,7 +23,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: modern-network-${{ github.workflow }}-${{ github.ref }}
+  group: modern-network-${{ github.workflow }}-${{ github.ref }}-${{ inputs.scope || 'module' }}
   cancel-in-progress: true
 
 jobs:
@@ -145,7 +145,7 @@ jobs:
 
   isolated-process-gates:
     if: github.event_name == 'workflow_dispatch' && inputs.scope == 'process'
-    runs-on: ubuntu-22.04
+    runs-on: ubuntu-24.04
     timeout-minutes: 45
     env:
       GOENV: 'off'
