@@ -284,7 +284,7 @@ func runCurveConverterFinancial(t *testing.T, e isolatedBackendEnv) {
 		call(0, coin, curved, new(big.Int), true, "transfer", controllers[0], amount(2))
 		// Expected output comes from the actual registered curve, independently
 		// of the converter preview; it must differ from a linear 1:1 sale.
-		quote := integer(coin, curved, "calculateSellOutput", input)
+		quote := integer(coin, curved, exactABIMethod(t, coin.ABI, "calculateSellOutput(uint256)"), input)
 		require.Positive(t, quote.Sign())
 		require.NotZero(t, quote.Cmp(input))
 		require.Equal(t, quote, integer(converter, converterAddress, "preview", curved, input, quote, deadline()))
