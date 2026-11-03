@@ -65,7 +65,7 @@ func TestReserveHookUsesFinalPerTokenStateAndDiscardsReaderWrites(t *testing.T) 
 	require.Equal(t, finalVolume, after.Volume)
 	require.Equal(t, finalReserve, after.Reserve)
 	require.Equal(t, coin.Title, after.Title)
-	require.Equal(t, 1, reads)
+	require.Equal(t, 2, reads, "prepare and standalone apply each verify actual final backing")
 	require.Len(t, ctx.EventManager().Events(), 1)
 }
 

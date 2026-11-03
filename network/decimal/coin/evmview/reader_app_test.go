@@ -212,6 +212,9 @@ func TestAuthoritativeCoinViewWithSignedOwnEVM(t *testing.T) {
 	parent, err := reader.GetCoin(ctx(), "viewcoin")
 	require.NoError(t, err)
 	require.Equal(t, hydrated.Reserve, parent.Reserve)
+	t.Run("prepared reserve plan rechecks actual same-height backing", func(t *testing.T) {
+		checkPreparedReservePlan(t, a, ctx(), metadata.coin, binding, compiled, hydrated, accounts[0].GetAddress())
+	})
 	// An explicitly supplied wrong runtime/implementation policy fails closed.
 	savedBinding := binding.binding
 	binding.binding.Implementation = common.Address{}
