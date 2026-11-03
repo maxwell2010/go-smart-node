@@ -4,17 +4,17 @@
   "checkpoints": [
     {
       "branch": "wip/remote-reserve-adapter-20261103",
-      "revision": "fb63f1d",
+      "revision": "fb63f1d793527f6ffdae87eb63741f77efe7d995",
       "status": "WIP: new reserve adapter fixture fails with invalid coin denomination; do not treat as a release"
     },
     {
       "branch": "wip/remote-consensus-indexes-20261103",
-      "revision": "a11b4f3",
+      "revision": "a11b4f3198848f41844dbfaefcaf3fd4eaa0744f",
       "status": "WIP: final uppercase Bech32 index correction awaits a fresh test run"
     },
     {
       "branch": "wip/remote-collateral-converter-20261103",
-      "revision": "d5a3c90",
+      "revision": "d5a3c90e95f30eff51398e12788a70738a30f746",
       "status": "WIP: Stack too deep; generated artifacts include partial output and must be regenerated and verified"
     },
     {
