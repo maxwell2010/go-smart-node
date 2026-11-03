@@ -304,9 +304,9 @@ require (
 replace (
 	// use cosmos fork of keyring
 	github.com/99designs/keyring => github.com/cosmos/keyring v1.2.0
-	// use Cosmos geth fork
-	// branch: release/1.16
-	github.com/ethereum/go-ethereum => github.com/cosmos/go-ethereum v1.16.2-cosmos-1
+	// Exact Cosmos geth source plus upstream GO-2026-4507 coordinate guard.
+	// Canonical module/license and patch provenance: third_party/cosmos-geth/UPSTREAM.json.
+	github.com/ethereum/go-ethereum => ./third_party/cosmos-geth
 	// Security Advisory https://github.com/advisories/GHSA-h395-qcrw-5vmq
 	github.com/gin-gonic/gin => github.com/gin-gonic/gin v1.9.1
 	// replace broken goleveldb

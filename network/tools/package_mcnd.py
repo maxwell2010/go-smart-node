@@ -1,5 +1,5 @@
 """Package a source-bound Linux amd64 DEVELOPMENT binary; never publish it."""
-import argparse, hashlib, io, json, os, pathlib, platform, subprocess, tarfile
+import argparse, hashlib, io, json, os, pathlib, platform, subprocess, tarfile, tempfile
 from install_mcnd import validate_revision
 
 def package(binary,source,revision,output):
@@ -15,11 +15,14 @@ def package(binary,source,revision,output):
  else:
   # Go omits linker flags from build info under -trimpath.
   if platform.system()!="Linux" or platform.machine()!="x86_64":raise ValueError("trimpath provenance requires native Linux amd64 version verification")
-  runtime_version=json.loads(subprocess.check_output([str(binary),"version","--long","--output","json"],text=True,timeout=30))
+  with tempfile.TemporaryDirectory(prefix="mcnd-package-version-") as version_home:
+   runtime_version=json.loads(subprocess.check_output([str(binary),"version","--long","--output","json","--home",version_home],text=True,timeout=30))
   if runtime_version.get("commit")!=revision or runtime_version.get("server_name")!="mcnd":raise ValueError("runtime binary source commit mismatch")
  data={"bin/mcnd":binary.read_bytes(),"BUILD_INFO.txt":info.encode(),"DEVELOPMENT.txt":b"DEVELOPMENT ONLY. Native feature integration and release gates remain incomplete.\n"}
  if runtime_version is not None:data["CLI_VERSION.json"]=(json.dumps(runtime_version,sort_keys=True,indent=2)+"\n").encode()
- for path in [source/"LICENSE",source/"network/LICENSE",*sorted((source/"network/systemcontracts").glob("LICENSE*")),*sorted((source/"network/third_party").glob("*/LICENSE*")),*sorted((source/"network/third_party").glob("*/UPSTREAM.json"))]:
+ third_party=source/"network/third_party"
+ notices=sorted({path for pattern in ("LICENSE*","COPYING*","NOTICE*") for path in third_party.rglob(pattern) if path.is_file()})
+ for path in [source/"LICENSE",source/"network/LICENSE",*sorted((source/"network/systemcontracts").glob("LICENSE*")),*notices,*sorted(third_party.glob("*/UPSTREAM.json"))]:
   if path.is_file():data["provenance/"+path.relative_to(source).as_posix()]=path.read_bytes()
  manifest={"schemaVersion":1,"status":"development","sourceRevision":revision,"binarySha256":hashlib.sha256(data["bin/mcnd"]).hexdigest(),"files":{name:hashlib.sha256(value).hexdigest() for name,value in data.items()},"dependencyScope":"Go build information records effective module replacements. UPSTREAM manifests identify local owned patches; this is not a complete security audit or signed provenance."}
  data["MANIFEST.json"]=(json.dumps(manifest,indent=2)+"\n").encode()

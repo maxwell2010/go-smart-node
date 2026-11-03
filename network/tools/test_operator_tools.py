@@ -1,4 +1,4 @@
-import os, pathlib, tempfile, unittest
+import hashlib, os, pathlib, tarfile, tempfile, unittest
 from unittest.mock import patch
 from configure_history import PROFILE, configure, render
 from install_mcnd import validate_revision, install
@@ -80,6 +80,8 @@ class OperatorToolsTest(unittest.TestCase):
                     if 'rev-parse' in command:return 'a'*40+'\n'
                     if 'status' in command:return ''
                     if command[0]=='go':return 'build -trimpath=true\n'
+                    self.assertIn('--home',command)
+                    self.assertTrue(pathlib.Path(command[command.index('--home')+1]).is_dir())
                     return '{"server_name":"mcnd","commit":"'+('a' if matches else 'b')*40+'"}'
                 target=source/'package.tar.gz'
                 with patch('package_mcnd.subprocess.check_output',side_effect=output), patch('package_mcnd.platform.system',return_value='Linux'), patch('package_mcnd.platform.machine',return_value='x86_64'):
@@ -88,6 +90,27 @@ class OperatorToolsTest(unittest.TestCase):
                     else:
                         with self.assertRaises(ValueError):package(binary,source,'a'*40,target)
                         self.assertFalse(target.exists())
+
+    def test_packager_preserves_distinct_owned_licenses_and_notices(self):
+        with tempfile.TemporaryDirectory() as root:
+            source=pathlib.Path(root);binary=source/'mcnd'
+            header=bytearray(20);header[:5]=b'\x7fELF\x02';header[18:20]=b'\x3e\x00';binary.write_bytes(header)
+            notices={'COPYING':b'GPL notice\n','COPYING.LESSER':b'LGPL notice\n','crypto/library/NOTICE':b'Library notice\n'}
+            for name,content in notices.items():
+                path=source/'network/third_party/cosmos-geth'/name
+                path.parent.mkdir(parents=True,exist_ok=True);path.write_bytes(content)
+            def output(command,**kwargs):
+                if 'rev-parse' in command:return 'a'*40+'\n'
+                if 'status' in command:return ''
+                return 'build -ldflags="-X main.buildCommit='+('a'*40)+'"'
+            target=source/'development.tar.gz'
+            with patch('package_mcnd.subprocess.check_output',side_effect=output):
+                manifest=package(binary,source,'a'*40,target)
+            with tarfile.open(target,'r:gz') as archive:
+                for name,content in notices.items():
+                    member='provenance/network/third_party/cosmos-geth/'+name
+                    self.assertEqual(content,archive.extractfile(member).read())
+                    self.assertEqual(hashlib.sha256(content).hexdigest(),manifest['files'][member])
 
 
 if __name__=='__main__':unittest.main()
