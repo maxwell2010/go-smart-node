@@ -75,6 +75,11 @@ func (k *StateKeeper) InitGenesis(ctx sdk.Context, g *types.GenesisState) error 
 			return e
 		}
 	}
+	for _, row := range g.ScheduledValidatorSets {
+		if e = k.writeScheduledSet(child, row); e != nil {
+			return e
+		}
+	}
 	flag := byte(0)
 	if g.Exported {
 		flag = 1
@@ -170,6 +175,16 @@ func (k *StateKeeper) ExportGenesis(ctx sdk.Context) (*types.GenesisState, error
 			return e
 		}
 		g.ValidatorOfflineSince = append(g.ValidatorOfflineSince, o)
+		return nil
+	}); e != nil {
+		return nil, e
+	}
+	if e = k.scan(ctx, schedulePrefix, func(key, data []byte) error {
+		row, err := decodeScheduledSet(key, data)
+		if err != nil {
+			return err
+		}
+		g.ScheduledValidatorSets = append(g.ScheduledValidatorSets, row)
 		return nil
 	}); e != nil {
 		return nil, e

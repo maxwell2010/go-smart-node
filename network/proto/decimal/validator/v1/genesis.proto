@@ -32,6 +32,9 @@ message GenesisState {
   bool exported = 8;
   // validator_offline_since contains offline-since timestamps for auto-unbond tracking.
   repeated ValidatorOfflineSince validator_offline_since = 9 [ (gogoproto.nullable) = false ];
+  // New-network consensus pipeline. Exactly two consecutive effective heights
+  // survive each committed EndBlock; independent of historical retention.
+  repeated ScheduledValidatorSet scheduled_validator_sets = 10 [ (gogoproto.nullable) = false ];
 }
 
 // ValidatorOfflineSince stores when a validator went offline for auto-unbond tracking.
@@ -50,4 +53,11 @@ message LastValidatorPower {
   string address = 1 [ (cosmos_proto.scalar) = "cosmos.AddressString" ];
   // power defines the voting power of the validator.
   int64 power = 2;
+}
+
+// ScheduledValidatorSet retains the exact future effective set across restart.
+// Existing mainnet database layouts are not migrated by this new-network field.
+message ScheduledValidatorSet {
+  int64 effective_height = 1;
+  repeated Validator validators = 2 [ (gogoproto.nullable) = false ];
 }

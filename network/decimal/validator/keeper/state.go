@@ -34,6 +34,7 @@ const (
 	powerPrefix        byte = 0x30
 	offlinePrefix      byte = 0x31
 	historyPrefix      byte = 0x40
+	schedulePrefix     byte = 0x41
 )
 
 type StateKeeper struct {

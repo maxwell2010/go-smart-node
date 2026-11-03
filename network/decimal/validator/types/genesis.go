@@ -149,5 +149,8 @@ func (g GenesisState) Validate() error {
 		}
 		offline[o.ValidatorAddress] = true
 	}
+	if err := ValidateScheduledSets(g.ScheduledValidatorSets, g.Validators); err != nil {
+		return err
+	}
 	return nil
 }
