@@ -38,8 +38,9 @@ const (
 )
 
 type StateKeeper struct {
-	service store.KVStoreService
-	params  compat.ParamsStore[*types.Params]
+	service       store.KVStoreService
+	params        compat.ParamsStore[*types.Params]
+	bindingDomain *types.EVMSourceDomain
 }
 
 func NewStateKeeper(service store.KVStoreService) (*StateKeeper, error) {

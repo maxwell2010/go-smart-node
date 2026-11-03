@@ -10,13 +10,16 @@ checks and deterministic historical ordering. Financial values are copied by
 protobuf serialization, including nonempty NFT reserves and holds.
 
 The schema, transactional keeper and guarded read-only application module are
-present. Native financial message routes, emergency authority, emission schedule
-and consensus activation remain incomplete. The existing SDK staking scaffold must be
-replaced atomically with a native ledger and genuine consensus/index/history
-adapter before this schema controls consensus or IBC trusting periods. A keeper
-must hydrate the separate `ValidatorRS` row before computing native power.
-The mounted module is described in [its scope](module/README.md); it must not
-be mistaken for activation of that native financial/consensus controller.
+present, including bounded delegation updates, Comet transition schedules,
+governance adapters and persisted source-position bindings. Native financial
+message routes, emergency authority, emission schedule and consensus activation
+remain incomplete. The existing SDK staking scaffold must be replaced atomically
+with a native ledger and genuine consensus/index/history adapter before this
+schema controls consensus or IBC trusting periods. The keeper hydrates the
+separate `ValidatorRS` row before computing native power. The mounted module is
+described in [its scope](module/README.md); it must not be mistaken for activation
+of that native financial/consensus controller. See also
+[source bindings and controller integration](BINDINGS.ru.md).
 
 Genesis validation checks structural references and bounded native financial
 fields. Bank escrow, conversion-price, supply and NFT ownership reconciliation
@@ -26,7 +29,7 @@ Generation from the `network` module uses the existing pinned tools:
 
 ```sh
 bash scripts/generate-native-proto.sh validator
-go test -mod=readonly -p 1 -count=1 ./decimal/validator/...
+go test -mod=readonly -p 1 -tags sdk53 -count=1 ./decimal/validator/...
 ```
 
 The protobuf package and wire type URLs remain `decimal.validator.v1`; the Go

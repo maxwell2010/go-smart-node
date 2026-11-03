@@ -17,9 +17,11 @@ func (k *StateKeeper) InitGenesis(ctx sdk.Context, g *types.GenesisState) error 
 	if g == nil {
 		return errors.New("validator genesis is missing")
 	}
-	if e := g.Validate(); e != nil {
-		return e
+	prepared, err := k.prepareEVMGenesis(ctx, g)
+	if err != nil {
+		return err
 	}
+	g = prepared
 	child, commit := ctx.CacheContext()
 	state := k.service.OpenKVStore(child)
 	it, e := state.Iterator(nil, nil)
@@ -83,6 +85,9 @@ func (k *StateKeeper) InitGenesis(ctx sdk.Context, g *types.GenesisState) error 
 			return e
 		}
 	}
+	if e = k.initEVMGenesis(child, g); e != nil {
+		return e
+	}
 	flag := byte(0)
 	if g.Exported {
 		flag = 1
@@ -104,6 +109,9 @@ func (k *StateKeeper) ExportGenesis(ctx sdk.Context) (*types.GenesisState, error
 	}
 	if !bytes.Equal(marker, []byte{1}) {
 		return nil, errors.New("validator genesis is not initialized")
+	}
+	if e = k.checkEVMExportDomain(ctx); e != nil {
+		return nil, e
 	}
 	p, e := k.GetParams(ctx)
 	if e != nil {
@@ -208,6 +216,9 @@ func (k *StateKeeper) ExportGenesis(ctx sdk.Context) (*types.GenesisState, error
 		return nil, errors.New("invalid genesis export flag")
 	}
 	g.Exported = flag[0] == 1
+	if e = k.exportEVMGenesis(ctx, g); e != nil {
+		return nil, e
+	}
 	if e = g.Validate(); e != nil {
 		return nil, fmt.Errorf("invalid native export: %w", e)
 	}

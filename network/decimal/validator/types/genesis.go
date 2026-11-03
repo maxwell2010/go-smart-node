@@ -152,5 +152,5 @@ func (g GenesisState) Validate() error {
 	if err := ValidateScheduledSets(g.ScheduledValidatorSets, g.Validators); err != nil {
 		return err
 	}
-	return nil
+	return g.ValidateEVMReferences()
 }

@@ -1,0 +1,109 @@
+syntax = "proto3";
+package decimal.validator.v1;
+
+import "gogoproto/gogo.proto";
+import "decimal/validator/v1/validator.proto";
+
+option go_package = "github.com/maxwell2010/go-smart-node/network/decimal/validator/types";
+
+// Configured App identity, never a genesis permission switch.
+message EVMSourceDomain {
+  string chain_id = 1 [(gogoproto.customname)="ChainID"];
+  uint64 evm_chain_id = 2 [(gogoproto.customname)="EVMChainID"];
+}
+
+enum EVMStakeBindingKind {
+  EVM_STAKE_BINDING_UNSPECIFIED = 0;
+  EVM_STAKE_BINDING_COIN = 1;
+  EVM_STAKE_BINDING_NFT = 2;
+}
+
+enum NFTPositionMode {
+  NFT_POSITION_UNSPECIFIED = 0;
+  NFT_POSITION_DIRECT_721 = 1;
+  NFT_POSITION_ISOLATED_RECEIPT = 2;
+}
+
+// References the NFT keeper's sole identity map. It does not duplicate owners,
+// balances, the mint cursor or pool accounting. IDs are exactly 32 bytes.
+message EVMNFTReference {
+  bytes contract = 1;
+  bytes token_id = 2 [(gogoproto.customname)="TokenID"];
+  string native_token_id = 3 [(gogoproto.customname)="NativeTokenID"];
+  repeated uint32 native_sub_token_ids = 4 [(gogoproto.customname)="NativeSubTokenIDs"];
+  // Explicit Ethereum standard number 721/1155; not a cast of another enum.
+  uint32 standard = 5;
+}
+
+message NFTPositionIdentity {
+  NFTPositionMode mode = 1;
+  EVMNFTReference origin = 2;
+  EVMNFTReference custody = 3;
+  string origin_quantity = 4 [(gogoproto.customtype)="cosmossdk.io/math.Int",(gogoproto.nullable)=false];
+  string receipt_quantity = 5 [(gogoproto.customtype)="cosmossdk.io/math.Int",(gogoproto.nullable)=false];
+  bytes vault = 6;
+  bytes position_id = 7 [(gogoproto.customname)="PositionID"];
+  bytes parent_position_id = 8 [(gogoproto.customname)="ParentPositionID"];
+}
+
+// Points to the normalized native delegation; stores no second asset balance.
+message NativeStakeTarget {
+  StakeType stake_type = 1;
+  string id = 2 [(gogoproto.customname)="ID"];
+  repeated uint32 sub_token_ids = 3 [(gogoproto.customname)="SubTokenIDs"];
+}
+
+// reserve_kind uses the pinned INFTReserve domain: None=0 / DEL=1 / DRC20=2.
+// Native DEL retains a zero token address; ERC20 requires a real token address.
+message EVMReserveAsset {
+  uint32 reserve_kind = 1;
+  bytes token = 2;
+  string native_denom = 3;
+}
+
+message EVMStakeBinding {
+  EVMStakeBindingKind kind = 1;
+  bytes gateway = 2;
+  bytes stake_id = 3 [(gogoproto.customname)="StakeID"];
+  bytes validator = 4;
+  bytes beneficiary = 5;
+  bytes token_contract = 6;
+  bytes token_id = 7 [(gogoproto.customname)="TokenID"];
+  bytes hold_timestamp = 8;
+  // Coin getter field only. NFT hold provenance is recorded separately below.
+  bytes raw_hold_start_time = 9;
+  bytes penalty_cursor = 10;
+  string raw_amount = 11 [(gogoproto.customtype)="cosmossdk.io/math.Int",(gogoproto.nullable)=false];
+  string raw_nft_backed_amount = 12 [(gogoproto.customtype)="cosmossdk.io/math.Int",(gogoproto.nullable)=false];
+  string reported_reserve_amount = 13 [(gogoproto.customtype)="cosmossdk.io/math.Int",(gogoproto.nullable)=false];
+  EVMReserveAsset reserve_asset = 14;
+  bytes coin_companion_stake_id = 15 [(gogoproto.customname)="CoinCompanionStakeID"];
+  NFTPositionIdentity nft_position = 16 [(gogoproto.customname)="NFTPosition"];
+  NativeStakeTarget native_target = 17;
+  bool active = 18;
+  int64 native_hold_start_time = 19;
+  int64 created_height = 20;
+  int64 updated_height = 21;
+}
+
+message EVMFrozenBinding {
+  bytes gateway = 1;
+  bytes frozen_index = 2;
+  EVMStakeBindingKind source_kind = 3;
+  bytes source_stake_id = 4 [(gogoproto.customname)="SourceStakeID"];
+  bytes source_validator = 5;
+  bytes destination_validator = 6;
+  bytes beneficiary = 7;
+  // Original protocol enum: Withdraw1/Transfer2.
+  uint32 freeze_type = 8;
+  bytes completion_timestamp = 9;
+  string raw_amount = 10 [(gogoproto.customtype)="cosmossdk.io/math.Int",(gogoproto.nullable)=false];
+  string reported_reserve_amount = 11 [(gogoproto.customtype)="cosmossdk.io/math.Int",(gogoproto.nullable)=false];
+  EVMReserveAsset reserve_asset = 12;
+  NFTPositionIdentity nft_position = 13 [(gogoproto.customname)="NFTPosition"];
+  NativeStakeTarget native_target = 14;
+  bytes native_entry_hash = 15;
+  bool active = 16;
+  int64 created_height = 17;
+  int64 updated_height = 18;
+}

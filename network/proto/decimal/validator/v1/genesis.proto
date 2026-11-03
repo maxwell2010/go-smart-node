@@ -9,6 +9,7 @@ import "google/protobuf/timestamp.proto";
 
 import "decimal/validator/v1/validator.proto";
 import "decimal/validator/v1/params.proto";
+import "decimal/validator/v1/binding.proto";
 
 option go_package = "github.com/maxwell2010/go-smart-node/network/decimal/validator/types";
 
@@ -35,6 +36,10 @@ message GenesisState {
   // New-network consensus pipeline. Exactly two consecutive effective heights
   // survive each committed EndBlock; independent of historical retention.
   repeated ScheduledValidatorSet scheduled_validator_sets = 10 [ (gogoproto.nullable) = false ];
+  EVMSourceDomain binding_domain = 11;
+  repeated EVMStakeBinding evm_stake_bindings = 12 [(gogoproto.customname)="EVMStakeBindings",(gogoproto.nullable)=false];
+  repeated EVMFrozenBinding evm_frozen_bindings = 13 [(gogoproto.customname)="EVMFrozenBindings",(gogoproto.nullable)=false];
+  uint64 binding_revision = 14;
 }
 
 // ValidatorOfflineSince stores when a validator went offline for auto-unbond tracking.
