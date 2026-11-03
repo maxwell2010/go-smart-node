@@ -123,7 +123,7 @@ func checkCoordinatedReserveAdapter(t *testing.T, app *ownedapp.App, parent sdk.
 			if mode == "backing mismatch" {
 				require.NoError(t, app.BankKeeper.SendCoins(ctx, sdk.AccAddress(owner.Bytes()), sdk.AccAddress(common.HexToAddress(metadata.DRC20Contract).Bytes()), sdk.NewCoins(sdk.NewInt64Coin("del", 1))))
 			}
-			beforeEvents := append(sdk.Events(nil), ctx.EventManager().Events()...)
+			beforeEvents := append(sdk.Events{}, ctx.EventManager().Events()...)
 			balance := app.BankKeeper.GetBalance(ctx, sdk.AccAddress(owner.Bytes()), "del")
 			nativeSupply := app.BankKeeper.GetSupply(ctx, "del")
 			applied := 0
