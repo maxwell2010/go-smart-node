@@ -39,11 +39,16 @@
       "importModule": "github.com/cosmos/cosmos-sdk",
       "selectedRequireVersion": "v0.53.8",
       "effectiveModule": {
+        "Path": "./third_party/cosmos-sdk",
+        "Local": true,
+        "Manifest": "third_party/cosmos-sdk/UPSTREAM.json"
+      },
+      "importedByDefaultMcnd": true,
+      "canonicalModule": {
         "Path": "github.com/cosmos/cosmos-sdk",
         "Version": "v0.53.8",
         "Sum": "h1:rKQIgqifo3Izv/JQLpPIjReOJ7jK+Qh8Rt8GIttDADw="
-      },
-      "importedByDefaultMcnd": true
+      }
     },
     {
       "importModule": "github.com/cometbft/cometbft",
@@ -919,6 +924,16 @@
         "Sum": "h1:XWdfCnG6oLaTp07Sr4lbyWVs+MXuaD3eggUsSn6LK90="
       },
       "importedByDefaultMcnd": true
+    },
+    {
+      "importModule": "github.com/ProtonMail/go-crypto",
+      "selectedRequireVersion": "v1.5.2",
+      "effectiveModule": {
+        "Path": "github.com/ProtonMail/go-crypto",
+        "Version": "v1.5.2",
+        "Sum": "h1:cucYnvqcY7UOXVD//mSyjeaPY0SSN3v5cDkYPxumINk="
+      },
+      "importedByDefaultMcnd": true
     }
   ],
   "validation": {
@@ -944,7 +959,8 @@
     },
     "gethCoordinateBackport": "Exact upstream GO-2026-4507 source backport, ordinary crypto/signature/math tests with CGO1 and0, actual source-bound b03012f development archive and license hashes. This is not a final integrated security PASS.",
     "pionTransport": "Canonical STUN3.1.7/DTLS3.1.15, no alias replacement and no v2 packages in actual mcnd imports. Full318aace source/binary captures retain FAIL for OpenPGP and all module-only findings; DTLSv2 advisory absent without suppression. Final financial integration is not certified.",
-    "compressionHTTP": "Compatible published compress1.18.7/x-net0.62 patches, ordinary bounded codecs/local TLS HTTP2/normal HTML tests and App/CLI pass. Full MVS has exactly two version changes. No bomb fixtures or advisory suppression. Final source/binary scans and OpenPGP remediation remain separate."
+    "compressionHTTP": "Compatible published compress1.18.7/x-net0.62 patches, ordinary bounded codecs/local TLS HTTP2/normal HTML tests and App/CLI pass. Full MVS has exactly two version changes. No bomb fixtures or advisory suppression. Final source/binary scans and OpenPGP remediation remain separate.",
+    "sdkArmorSource": "Source 264303b source and actual-binary symbol gates pass with zero symbol advisories. Complete captures retain module-only findings and explicit local SDK/EVM/geth coverage gaps; canonical SDK x/crisis advisory dispositions are preserved. This is a dependency snapshot, not a financial-release certification."
   },
   "remainingGates": [
     "Native Decimal validator/delegation/reward and coin/NFT feature wiring/parity.",
@@ -982,9 +998,17 @@
       "patchLabel": "v1.16.2-cosmos-1-mintcandy.2",
       "canonicalModule": "github.com/cosmos/go-ethereum@v1.16.2-cosmos-1",
       "scope": "Exact upstream coordinate validation fix895a8597 in all3 files, plus actual NAT import migration to canonical STUN v3; all5 source differences declared. Ordinary crypto, codec/client, actual private-loopback NAT/DTLS and source integrity tests pass."
+    },
+    {
+      "module": "github.com/cosmos/cosmos-sdk",
+      "selectedRequireVersion": "v0.53.8",
+      "replacement": "./third_party/cosmos-sdk",
+      "manifest": "third_party/cosmos-sdk/UPSTREAM.json",
+      "patchLabel": "v0.53.8-mintcandy.1",
+      "scope": "Maintained armor import with strict legacy CRC compatibility; canonical SDK crypto/encryption/signature algorithms preserved. Full source inventory, ordinary crypto/keyring/format/App tests and source-bound snapshot evidence recorded; canonical advisory coverage review remains mandatory."
     }
   ],
-  "selectedModulesSourceRevision": "d05b146f122b696a2a69e535af3d49c630d91c7f",
-  "selectedModulesScope": "Curated actual MVS records/h1 from318aace with exactly two verified selections updated atd05b146: compress1.18.7 andx/net0.62. Other module paths/core versions unchanged. ImportedByDefaultMcnd remains the prior actual package-import observation, not exploit reachability. Historical daemon/capture evidence keeps its own scope.",
+  "selectedModulesSourceRevision": "264303bd5ca8bd8107ba219c77b60c9c14818f1c",
+  "selectedModulesScope": "Curated actual MVS records from the source 264303b dependency snapshot: SDK 0.53.8 uses an explicitly declared local armor compatibility patch; ProtonMail changes from 1.1.5 to 1.5.2. Other selections remain unchanged from d05b146. Imported-package flags and older daemon validation retain their own recorded scope; local source manifests require separate verification.",
   "selectedModulesBaseSourceRevision": "b9636dc388f9c6456d824ec0a96d407ac53b8c66"
 }
