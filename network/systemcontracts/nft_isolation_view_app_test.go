@@ -273,4 +273,7 @@ func runIsolatedPositionReader(t *testing.T, e isolatedBackendEnv) {
 	e.credit.Set(unit)
 	call(0, vault, vaultAddress, new(big.Int), true, "redeemPosition", newPosition, owner)
 	t.Logf("actual isolated StakeSource authentication SDKgas=%d; native capture/pipeline costs separate", cost)
+	t.Run("registered custom DRC20 minimum-supply gate", func(t *testing.T) {
+		runRegisteredCustomMinimum(t, customMinimumEnv{base: e, registry: registryAddress, gateway: gatewayAddress, vault: vaultAddress, origin: originAddress, master: masterAddress, call: call, gov: govSetup, reader: sourceReader})
+	})
 }
