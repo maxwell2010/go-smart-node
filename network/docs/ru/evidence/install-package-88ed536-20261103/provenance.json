@@ -2,8 +2,8 @@
   "acceptanceTestCommit": "6679269112802998dccb288f95432124535e1742",
   "files": {
     ".gitattributes": {
-      "bytes": 9,
-      "sha256": "48747480eddba024928d03be9bf83dc579e5515768647507a767e8187a85c9ab"
+      "bytes": 27,
+      "sha256": "07d0aab2ac21580bd3a18e1e86673ee4e803b00e3c3d717c00211f079615678e"
     },
     "README.md": {
       "bytes": 5364,
