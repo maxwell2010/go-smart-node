@@ -188,10 +188,17 @@ func (r *Reader) read(ctx sdk.Context, target common.Address, contract abi.ABI, 
 	if err != nil {
 		return nil, err
 	}
-	if response == nil || response.GasUsed > r.config.EVMGas {
+	if response == nil {
 		return nil, errors.New("invalid bounded NFT getter gas result")
 	}
-	ctx.GasMeter().ConsumeGas(response.GasUsed, "NFT final getter EVM work")
+	usedGas := response.GasUsed
+	if response.MaxUsedGas > usedGas {
+		usedGas = response.MaxUsedGas
+	}
+	if usedGas > r.config.EVMGas {
+		return nil, errors.New("invalid bounded NFT getter gas result")
+	}
+	ctx.GasMeter().ConsumeGas(usedGas, "NFT final getter EVM work before refunds")
 	if response.VmError != "" {
 		return nil, fmt.Errorf("NFT getter reverted: %s", response.VmError)
 	}
