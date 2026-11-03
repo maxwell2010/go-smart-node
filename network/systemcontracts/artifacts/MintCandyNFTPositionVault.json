@@ -1330,6 +1330,7 @@
   "creationLinks": {},
   "freshFactorySourcesSha256": {
     "IsolatedNFTTestController.sol": "b836f6defaefdf5f1a1a5a5e67e968ad4af690ac3c94f4a5d15b31c6245592a1",
+    "MintCandyCurveConverter.sol": "4a7f512ed3ab42a7ca551b79eb13e6914ed2ad72ba6eb1c7a25763641dca675a",
     "MintCandyIsolatedDRC1155.sol": "371c3eabec6e8043bc7f01698a69bf4f05d78025979c5f2cb1c1e0a7b49cd301",
     "MintCandyNFTIsolationLimits.sol": "ad1331111e2f0917f69a715a2525408816b6f8a49ae216b5dd9d2dcaffdfd668",
     "MintCandyNFTPositionVault.sol": "02665ab29dbbda312c60b641cfd7c81ebe06c6dfffeb2c16b78dd1a52b9633e2",
