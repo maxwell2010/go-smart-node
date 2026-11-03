@@ -40,7 +40,7 @@ type Role struct {
 	Address                 common.Address
 	ProxyCodeHash           common.Hash
 	ApprovedImplementations []common.Hash
-	ApprovedChildren        []common.Hash
+	ApprovedChildren        map[string][]common.Hash
 }
 type Manifest struct {
 	Registry Role
@@ -61,12 +61,24 @@ func NewKeeper(evm *evmkeeper.Keeper, manifest Manifest, hooks evmtypes.EvmHooks
 		return nil, errors.New("authority requires EVM, native receipt pipeline and reviewed manifest")
 	}
 	copyRole := func(r Role) (Role, error) {
-		if r.Address == (common.Address{}) || r.ProxyCodeHash == (common.Hash{}) || len(r.ApprovedImplementations) == 0 || len(r.ApprovedImplementations) > 64 || len(r.ApprovedChildren) > 64 {
+		if r.Address == (common.Address{}) || r.ProxyCodeHash == (common.Hash{}) || len(r.ApprovedImplementations) == 0 || len(r.ApprovedImplementations) > 64 || len(r.ApprovedChildren) > 6 {
 			return Role{}, errors.New("incomplete authority role binding")
 		}
 		r.ApprovedImplementations = append([]common.Hash(nil), r.ApprovedImplementations...)
-		r.ApprovedChildren = append([]common.Hash(nil), r.ApprovedChildren...)
-		for _, h := range append(append([]common.Hash(nil), r.ApprovedImplementations...), r.ApprovedChildren...) {
+		children := map[string][]common.Hash{}
+		for slot, hashes := range r.ApprovedChildren {
+			if len(slot) > 48 || len(hashes) == 0 || len(hashes) > 64 {
+				return Role{}, errors.New("invalid child implementation policy")
+			}
+			children[slot] = append([]common.Hash(nil), hashes...)
+			for _, hash := range hashes {
+				if hash == (common.Hash{}) {
+					return Role{}, errors.New("zero child code hash")
+				}
+			}
+		}
+		r.ApprovedChildren = children
+		for _, h := range r.ApprovedImplementations {
 			if h == (common.Hash{}) {
 				return Role{}, errors.New("zero approved code hash")
 			}
@@ -87,6 +99,9 @@ func NewKeeper(evm *evmkeeper.Keeper, manifest Manifest, hooks evmtypes.EvmHooks
 			return nil, errors.New("duplicate authority target address")
 		}
 		seen[r.Address] = true
+		if err := validateChildSlots(role, r.ApprovedChildren); err != nil {
+			return nil, err
+		}
 		value, err := copyRole(r)
 		if err != nil {
 			return nil, err
@@ -94,6 +109,19 @@ func NewKeeper(evm *evmkeeper.Keeper, manifest Manifest, hooks evmtypes.EvmHooks
 		owned.Roles[role] = value
 	}
 	return &Keeper{evm: evm, manifest: owned, hooks: hooks, owner: common.BytesToAddress(authtypes.NewModuleAddress("gov"))}, nil
+}
+
+func validateChildSlots(role string, slots map[string][]common.Hash) error {
+	allowed := map[string]map[string]bool{
+		"token-center": {"upgradeToken": true, "upgradeTokenReserveless": true},
+		"nft-center":   {"upgradeNFT:0:true": true, "upgradeNFT:0:false": true, "upgradeNFT:1:true": true, "upgradeNFT:1:false": true},
+	}
+	for slot := range slots {
+		if !allowed[role][slot] {
+			return fmt.Errorf("invalid child implementation slot %q for role %q", slot, role)
+		}
+	}
+	return nil
 }
 
 func nilHook(hooks evmtypes.EvmHooks) bool {
@@ -300,7 +328,11 @@ func (k *Keeper) execute(ctx sdk.Context, call *types.SystemCall) (uint64, error
 			return 0, errors.New("invalid upgrade implementation")
 		}
 		expected := common.BytesToHash(call.ReplacementCodeHash)
-		allowedHashes := binding.ApprovedChildren
+		slot := method.RawName
+		if method.RawName == "upgradeNFT" {
+			slot = fmt.Sprintf("upgradeNFT:%d:%t", arguments[1].(uint8), arguments[2].(bool))
+		}
+		allowedHashes := binding.ApprovedChildren[slot]
 		if method.RawName == "upgrade" {
 			allowedHashes = binding.ApprovedImplementations
 			if len(arguments) != 2 || len(arguments[1].([]byte)) != 0 {

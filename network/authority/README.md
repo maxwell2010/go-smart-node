@@ -16,7 +16,11 @@ these SDK-native proposal operations.
 
 The application supplies an explicit reviewed manifest of registry and role
 addresses, proxy code hashes and approved implementation/child code hashes.
-The keeper copies the manifest and caps each approved hash list at64 entries.
+The keeper deep-copies the manifest and caps each approved hash list at64 entries.
+Factory children are approved per method and asset slot: token `upgradeToken`
+and `upgradeTokenReserveless` lists are separate; NFT `upgradeNFT` additionally
+binds DRC721/DRC1155 and reserve/reserveless flags. Known code in the wrong
+financial/asset family is rejected, even when another slot approves it.
 At execution it checks the live registry binding, standard ERC1967 implementation
 slot, actual proxy and implementation code, proposal-pinned current addresses
 and hashes, and actual governance ownership. Getter calls have explicit EVM gas

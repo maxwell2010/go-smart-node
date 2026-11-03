@@ -118,3 +118,29 @@ while charging the exact failed transaction fee. Canonical delegation runtime
 stays24316bytes because the constructor setup is a separate temporary artifact.
 This verifies genesis handoff, not subsequent approved governance proposal
 execution, which remains a required application integration gate.
+
+
+## Bounded validator penalty views
+
+The NEW MasterValidator extension exposes `getPenaltyCount(address)` and
+`getPenaltiesRange(address,start,limit)`. The latter returns at most256 entries,
+rejects start beyond the end, permits start equal to count and zero-size pages,
+and uses subtraction before indexing to avoid arithmetic overflow. The verified
+base source and monetary logic are unchanged. Signed actual-App tests append
+real penalties and compare pages with the canonical full-array getter, including
+empty pages and rejected bounds.
+
+Native reconciliation should request a smaller page fitting its own explicit
+EVM/SDK gas budget (for example32 entries for a100K EVM allowance), bind count
+and page results to the same context, and retain an idempotent processed index.
+The256 cap is a hard maximum, not a guarantee that every caller's smaller gas
+budget can read256 cold storage slots. Runtime governance selectors for adding
+penalties or changing validator membership remain separately gated on native
+financial and final validator-set validation.
+
+
+Measured on the actual257-entry signed application fixture: a32-entry page used
+58290 intrinsic-inclusive EVM MaxUsedGas, and a256-entry page used257595.
+The100K native-reader allowance therefore uses32-entry pages in this fixture;
+these are bounded local measurements, not a universal future compiler/fork gas
+promise. The full test also reads the final partial page and checks parity.

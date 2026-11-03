@@ -6,6 +6,7 @@ import {DecimalMasterValidator} from "./sources/DecimalMasterValidator.sol";
 /// @notice Fresh-network initialization extension using verified native accessors.
 contract NewNetworkMasterValidator is DecimalMasterValidator {
     error InvalidFreshInitialization();
+    error InvalidPenaltyReadRange();
 
     constructor() { _disableInitializers(); }
 
@@ -22,5 +23,25 @@ contract NewNetworkMasterValidator is DecimalMasterValidator {
 
     function contractCenter() external view returns (address) {
         return _getValidatorStorage()._contractCenter;
+    }
+
+    /// @notice Bounded readers for native reconciliation; no monetary change.
+    function getPenaltyCount(address validator) external view returns (uint256) {
+        return _getValidatorStorage()._validators[validator].penaltyPercantages.length;
+    }
+
+    function getPenaltiesRange(
+        address validator,
+        uint256 start,
+        uint256 limit
+    ) external view returns (uint16[] memory result) {
+        uint16[] storage penalties = _getValidatorStorage()._validators[validator].penaltyPercantages;
+        if (limit > 256 || start > penalties.length) revert InvalidPenaltyReadRange();
+        uint256 remaining = penalties.length - start;
+        uint256 count = limit < remaining ? limit : remaining;
+        result = new uint16[](count);
+        for (uint256 i; i < count; ++i) {
+            result[i] = penalties[start + i];
+        }
     }
 }

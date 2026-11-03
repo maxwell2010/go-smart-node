@@ -236,6 +236,68 @@ func TestOwnedAppSignedRegistryBootstrap(t *testing.T) {
 		require.Equal(t, address, values[0].(common.Address))
 		send(keys[1], &validatorAddress, new(big.Int), initialization, false)
 		send(keys[1], &implementation, new(big.Int), initialization, false)
+		var penaltyReadGas uint64
+		penaltyReader := func(method string, args ...interface{}) []interface{} {
+			data, err := fresh.ABI.Pack(method, args...)
+			require.NoError(t, err)
+			result := send(keys[1], &validatorAddress, new(big.Int), data, true)
+			penaltyReadGas = result.MaxUsedGas
+			values, err := fresh.ABI.Unpack(method, result.Ret)
+			require.NoError(t, err)
+			return values
+		}
+		member := crypto.PubkeyToAddress(keys[2].PublicKey)
+		require.Zero(t, penaltyReader("getPenaltyCount", member)[0].(*big.Int).Sign())
+		meta := []struct {
+			Validator common.Address
+			Meta      string
+		}{{Validator: member, Meta: "bounded penalty read fixture"}}
+		add, err := fresh.ABI.Pack("addValidators", meta)
+		require.NoError(t, err)
+		send(keys[1], &validatorAddress, new(big.Int), add, true)
+		for _, penalty := range []uint16{1, 2} {
+			data, err := fresh.ABI.Pack("addPenalty", member, penalty)
+			require.NoError(t, err)
+			send(keys[1], &validatorAddress, new(big.Int), data, true)
+			data, err = fresh.ABI.Pack("unpauseValidator", member)
+			require.NoError(t, err)
+			send(keys[1], &validatorAddress, new(big.Int), data, true)
+		}
+		require.Equal(t, int64(2), penaltyReader("getPenaltyCount", member)[0].(*big.Int).Int64())
+		require.Equal(t, []uint16{1}, penaltyReader("getPenaltiesRange", member, big.NewInt(0), big.NewInt(1))[0])
+		require.Equal(t, []uint16{2}, penaltyReader("getPenaltiesRange", member, big.NewInt(1), big.NewInt(256))[0])
+		require.Empty(t, penaltyReader("getPenaltiesRange", member, big.NewInt(2), big.NewInt(256))[0])
+		require.Empty(t, penaltyReader("getPenaltiesRange", member, big.NewInt(0), big.NewInt(0))[0])
+		require.Equal(t, []uint16{1, 2}, penaltyReader("getValidatorPenalties", member)[0])
+		for _, bounds := range [][2]int64{{3, 1}, {0, 257}} {
+			invalid, err := fresh.ABI.Pack("getPenaltiesRange", member, big.NewInt(bounds[0]), big.NewInt(bounds[1]))
+			require.NoError(t, err)
+			failed := send(keys[1], &validatorAddress, new(big.Int), invalid, false)
+			var selector [4]byte
+			require.GreaterOrEqual(t, len(failed.Ret), 4)
+			copy(selector[:], failed.Ret[:4])
+			reason, err := fresh.ABI.ErrorByID(selector)
+			require.NoError(t, err)
+			require.Equal(t, "InvalidPenaltyReadRange", reason.Name)
+		}
+
+		// Exercise actual packed-array pagination with a nontrivial bounded history.
+		for index := 2; index < 257; index++ {
+			data, err := fresh.ABI.Pack("addPenalty", member, uint16(1+index%2))
+			require.NoError(t, err)
+			send(keys[1], &validatorAddress, new(big.Int), data, true)
+			data, err = fresh.ABI.Pack("unpauseValidator", member)
+			require.NoError(t, err)
+			send(keys[1], &validatorAddress, new(big.Int), data, true)
+		}
+		require.Equal(t, int64(257), penaltyReader("getPenaltyCount", member)[0].(*big.Int).Int64())
+		require.Len(t, penaltyReader("getPenaltiesRange", member, big.NewInt(0), big.NewInt(32))[0], 32)
+		t.Logf("actual penalty range32 MaxUsedGas=%d", penaltyReadGas)
+		require.Less(t, penaltyReadGas, uint64(100000))
+		require.Len(t, penaltyReader("getPenaltiesRange", member, big.NewInt(0), big.NewInt(256))[0], 256)
+		t.Logf("actual penalty range256 MaxUsedGas=%d", penaltyReadGas)
+		require.Equal(t, []uint16{1}, penaltyReader("getPenaltiesRange", member, big.NewInt(256), big.NewInt(256))[0])
+
 	})
 
 	t.Run("fresh full system proxy set", func(t *testing.T) {
@@ -443,6 +505,10 @@ func TestOwnedAppSignedRegistryBootstrap(t *testing.T) {
 			manifest := authority.Manifest{Registry: authority.Role{Address: govRegistry, ProxyCodeHash: proxyHash, ApprovedImplementations: []common.Hash{crypto.Keccak256Hash(registry.Runtime)}}, Roles: map[string]authority.Role{
 				"master-validator": {Address: role, ProxyCodeHash: proxyHash, ApprovedImplementations: []common.Hash{crypto.Keccak256Hash(artifact.Runtime)}},
 			}}
+
+			childHash := func(name string) common.Hash { return crypto.Keccak256Hash(load(name).Runtime) }
+			manifest.Roles["token-center"] = authority.Role{Address: roles["token-center"], ProxyCodeHash: proxyHash, ApprovedImplementations: []common.Hash{crypto.Keccak256Hash(roleABI["token-center"].Runtime)}, ApprovedChildren: map[string][]common.Hash{"upgradeToken": {childHash("DRC20")}, "upgradeTokenReserveless": {childHash("DRC20Reserveless")}}}
+			manifest.Roles["nft-center"] = authority.Role{Address: roles["nft-center"], ProxyCodeHash: proxyHash, ApprovedImplementations: []common.Hash{crypto.Keccak256Hash(roleABI["nft-center"].Runtime)}, ApprovedChildren: map[string][]common.Hash{"upgradeNFT:0:true": {childHash("DRC721")}, "upgradeNFT:1:true": {childHash("DRC1155")}, "upgradeNFT:0:false": {childHash("DRC721Reserveless")}, "upgradeNFT:1:false": {childHash("DRC1155Reserveless")}}}
 			markerAddress := accounts[2].GetAddress()
 			nativeFailure := false
 			hook := authorityReceiptHook(func(c sdk.Context, sender common.Address, message core.Message, receipt *ethtypes.Receipt) error {
@@ -528,6 +594,61 @@ func TestOwnedAppSignedRegistryBootstrap(t *testing.T) {
 				_, err := wrongCodeBridge.ExecuteSystemContract(c, makeMessage(123))
 				return err
 			}), "proxy code differs")
+
+			factoryMessage := func(role, method, child string, kind uint8, reserve bool) *authoritytypes.MsgExecuteSystemContract {
+				artifact := roleABI[role]
+				args := []interface{}{tokenImpls[child]}
+				if method == "upgradeNFT" {
+					args = append(args, kind, reserve)
+				}
+				data, err := artifact.ABI.Pack(method, args...)
+				require.NoError(t, err)
+				return &authoritytypes.MsgExecuteSystemContract{Authority: government, Calls: []*authoritytypes.SystemCall{{Role: role, Target: roles[role].Bytes(), TargetCodeHash: proxyHash.Bytes(), Implementation: implementations[role].Bytes(), ImplementationCodeHash: crypto.Keccak256Hash(artifact.Runtime).Bytes(), Data: data, GasLimit: 200000, ReplacementCodeHash: childHash(child).Bytes()}}}
+			}
+			// Mutating the caller's nested map/slice cannot widen the keeper's policy.
+			tokenChildren := manifest.Roles["token-center"].ApprovedChildren
+			tokenChildren["upgradeToken"][0] = childHash("DRC20Reserveless")
+			for _, slot := range []struct {
+				role, method, child string
+				kind                uint8
+				reserve             bool
+			}{
+				{"token-center", "upgradeToken", "DRC20", 0, false}, {"token-center", "upgradeTokenReserveless", "DRC20Reserveless", 0, false},
+				{"nft-center", "upgradeNFT", "DRC721", 0, true}, {"nft-center", "upgradeNFT", "DRC1155", 1, true},
+				{"nft-center", "upgradeNFT", "DRC721Reserveless", 0, false}, {"nft-center", "upgradeNFT", "DRC1155Reserveless", 1, false},
+			} {
+				message := factoryMessage(slot.role, slot.method, slot.child, slot.kind, slot.reserve)
+				require.NoError(t, authority.RunGovernance(ctx(), func(c sdk.Context) error { _, err := bridge.ExecuteSystemContract(c, message); return err }), slot.child)
+			}
+			baseline := marker()
+			factoryState := func() []common.Address {
+				values := []common.Address{query(roleABI["token-center"], roles["token-center"], "implementation")[0].(common.Address), query(roleABI["token-center"], roles["token-center"], "implementationReserveless")[0].(common.Address)}
+				for _, slot := range []struct {
+					kind    uint8
+					reserve bool
+				}{{0, true}, {1, true}, {0, false}, {1, false}} {
+					values = append(values, query(roleABI["nft-center"], roles["nft-center"], "implementation", slot.kind, slot.reserve)[0].(common.Address))
+				}
+				return values
+			}
+			originalState := factoryState()
+			for _, wrong := range []struct {
+				role, method, child string
+				kind                uint8
+				reserve             bool
+			}{
+				{"token-center", "upgradeToken", "DRC20Reserveless", 0, false}, {"token-center", "upgradeTokenReserveless", "DRC20", 0, false},
+				{"nft-center", "upgradeNFT", "DRC1155", 0, true}, {"nft-center", "upgradeNFT", "DRC721", 1, true},
+				{"nft-center", "upgradeNFT", "DRC721Reserveless", 0, true}, {"nft-center", "upgradeNFT", "DRC1155Reserveless", 1, true},
+				{"nft-center", "upgradeNFT", "DRC721", 0, false}, {"nft-center", "upgradeNFT", "DRC1155", 1, false},
+			} {
+				message := factoryMessage(wrong.role, wrong.method, wrong.child, wrong.kind, wrong.reserve)
+				require.ErrorContains(t, authority.RunGovernance(ctx(), func(c sdk.Context) error { _, err := bridge.ExecuteSystemContract(c, message); return err }), "not approved", wrong.child)
+				require.Equal(t, baseline, marker())
+				require.Equal(t, originalState, factoryState())
+			}
+			tokenChildren["upgradeToken"][0] = childHash("DRC20")
+			beforeMarker = marker()
 			// All protocol signers and routes are validated by the unmodified SDK keeper.
 			params, err := a.GovKeeper.Params.Get(ctx())
 			require.NoError(t, err)
