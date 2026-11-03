@@ -81,7 +81,7 @@ func (k *StateKeeper) GetIsolatedLineage(ctx sdk.Context, vault, id []byte) (typ
 	if err != nil {
 		return types.IsolatedPositionLineage{}, err
 	}
-	if receiptToken.Creator != v.ReceiptCreator || receiptToken.Denom != v.ReceiptDenom || receiptToken.ReserveLess || receiptToken.Minted-receiptToken.Burnt != 1 {
+	if receiptToken.Creator != v.ReceiptCreator || receiptToken.Denom != v.ReceiptDenom || receiptToken.ReserveLess || !receiptToken.IsolatedReceipt || receiptToken.Minted-receiptToken.Burnt != 1 {
 		return types.IsolatedPositionLineage{}, errors.New("isolated receipt is not one active backed unit")
 	}
 	if _, err := k.GetSubToken(ctx, p.ReceiptNativeTokenID, p.ReceiptSubTokenID); err != nil {
@@ -154,6 +154,58 @@ func (k *StateKeeper) storeIsolatedLineage(ctx sdk.Context, p types.IsolatedPosi
 		if err := state.Set(types.GetIsolatedOriginUnitKey(p.OriginNativeTokenID, unit), key); err != nil {
 			return err
 		}
+	}
+	return nil
+}
+
+// validateIsolatedTokenProfile avoids GetToken -> GetIsolatedLineage -> GetToken
+// recursion. It checks bounded raw identity/profile records; the full lineage
+// reader separately audits every archived origin-unit index.
+func (k *StateKeeper) validateIsolatedTokenProfile(ctx sdk.Context, token types.Token) error {
+	collection, err := k.GetCollection(ctx, token.Creator, token.Denom)
+	if err != nil {
+		return err
+	}
+	if collection.TypeNft != types.NftType_NFT721 || collection.ReserveLess {
+		return errors.New("isolated receipt token requires a backed ERC721 collection")
+	}
+	vault := common.HexToAddress(collection.AddressDRC).Bytes()
+	state, err := k.GetIsolatedVaultState(ctx, vault)
+	if err != nil {
+		return err
+	}
+	if state.ReceiptCreator != token.Creator || state.ReceiptDenom != token.Denom {
+		return errors.New("isolated receipt metadata differs from known vault")
+	}
+	indexed, err := k.service.OpenKVStore(ctx).Get(types.GetIsolatedReceiptIndexKey(token.ID))
+	if err != nil {
+		return err
+	}
+	if len(indexed) != 53 || indexed[0] != 0x43 || !bytes.Equal(indexed[1:21], vault) {
+		return errors.New("isolated receipt flag has no valid lineage index")
+	}
+	var p types.IsolatedPositionLineage
+	if err := k.read(ctx, indexed, &p); err != nil {
+		return err
+	}
+	if err := p.Validate(); err != nil {
+		return err
+	}
+	if p.ReceiptNativeTokenID != token.ID || !bytes.Equal(p.Vault, vault) || !bytes.Equal(p.PositionID, indexed[21:]) || bytes.Compare(p.PositionID, state.NextPositionID) >= 0 || token.Minted-token.Burnt != 1 {
+		return errors.New("isolated receipt flag differs from active lineage")
+	}
+	var binding types.ExternalNFTBinding
+	if err := k.read(ctx, types.GetExternalBindingKey(token.ID), &binding); err != nil {
+		return err
+	}
+	if err := k.checkBindingDomain(ctx, binding); err != nil {
+		return err
+	}
+	if err := types.ValidateBindingToken(binding, token, collection); err != nil {
+		return err
+	}
+	if !bytes.Equal(binding.Contract, vault) || !bytes.Equal(binding.TokenID, p.PositionID) {
+		return errors.New("isolated receipt external identity differs from lineage")
 	}
 	return nil
 }

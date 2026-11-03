@@ -82,6 +82,8 @@ message Token {
   // sub_tokens defines the list of NFT sub-tokens existing in the NFT token.
   repeated SubToken sub_tokens = 9 [ (gogoproto.castrepeated) = "SubTokens" ];
   bool reserve_less = 10;
+  // Explicit known-vault receipt profile, including genuinely zero-backed children.
+  bool isolated_receipt = 11;
 }
 
 // ExternalNFTBinding is the unique, explicit external/native identity mapping.

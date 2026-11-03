@@ -75,7 +75,23 @@ App обязан отклонять непустое новое состояни
 
 Предел равен `types.MaxIsolatedOriginUnits = 1024`. В тестовом native state
 protobuf-запись с 1024 origin IDs занимает 2221 байт. Полный checked getter этой
-позиции расходует 4 137 884 SDK gas на обычном тестовом store; 1025 отклоняется
+позиции расходует 4 182 560 SDK gas на обычном тестовом store; 1025 отклоняется
 до записи. Getter не сканирует другие позиции и проверяет не более 1024 её
 origin индексов. Это отдельный primitive benchmark, не оценка полного signed
 EVM + NFT + validator pipeline. Production gas budgets не увеличены.
+
+
+Для новой квитанции с изначально нулевым резервом Token содержит явный профиль
+`isolated_receipt=true`, `reserve_less=false` и настоящий нулевой default reserve.
+Положительный фиктивный default не создаётся. Флаг разрешён только для backed
+ERC721, связанного с известным vault и живой exact lineage; generic NFT не может
+активировать этот профиль. Обычный getter проверяет bounded raw profile records,
+не вызывая рекурсивно полный getter lineage. Пропавшие записи у известной
+квитанции считаются повреждением состояния. Все текущие writers проходят полную
+проверку genesis; runtime admission остаётся закрытым до authenticated planner.
+
+Обычный тест сохраняет zero-backed child с информационным закрытым parent ID,
+переносит квитанцию в другой кошелёк, выполняет commit настоящего IAVL/LevelDB,
+закрывает и повторно открывает отдельную тестовую БД. Полный protobuf-export,
+kind1, нулевой default reserve, флаг профиля и владелец сохраняются. Это проверка
+сохранности состояния, не разрешение пропускать подтверждение EVM обеспечения.

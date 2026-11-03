@@ -23,7 +23,7 @@ func isolatedLineageFixture(t *testing.T) (sdk.Context, *StateKeeper, *types.Gen
 	vault := common.HexToAddress("0x7777777777777777777777777777777777777777")
 	id := common.BigToHash(big.NewInt(1)).Bytes()
 	origin := g.ExternalBindings[1]
-	receipt := &types.Token{Creator: owners[0], Denom: "positions", ID: "isolated_receipt", URI: "ipfs://isolated-receipt", Reserve: sdk.NewCoin("del", sdkmath.NewIntWithDecimal(1, 18)), Minted: 1, SubTokens: types.SubTokens{{ID: 1, Owner: owners[1]}}}
+	receipt := &types.Token{Creator: owners[0], Denom: "positions", ID: "isolated_receipt", IsolatedReceipt: true, URI: "ipfs://isolated-receipt", Reserve: sdk.NewCoin("del", sdkmath.NewIntWithDecimal(1, 18)), Minted: 1, SubTokens: types.SubTokens{{ID: 1, Owner: owners[1]}}}
 	g.Collections = append(g.Collections, types.Collection{Creator: owners[0], Denom: "positions", Supply: 1, Tokens: types.Tokens{receipt}, TypeNft: types.NftType_NFT721, AddressDRC: vault.Hex()})
 	g.ExternalBindings = append(g.ExternalBindings, types.ExternalNFTBinding{ChainID: bindingChain, EVMChainID: 777, Contract: vault.Bytes(), TokenID: id, NativeTokenID: receipt.ID, NFTType: types.NftType_NFT721, NextSubTokenID: 2})
 	g.IsolatedVaults = []types.IsolatedVaultState{{ChainID: bindingChain, EVMChainID: 777, Vault: vault.Bytes(), NextPositionID: common.BigToHash(big.NewInt(2)).Bytes(), ReceiptCreator: owners[0], ReceiptDenom: "positions"}}
@@ -232,4 +232,83 @@ func TestIsolatedLineageExportRejectsOrphanConsumedIndex(t *testing.T) {
 	require.NoError(t, k.service.OpenKVStore(ctx).Set(types.GetIsolatedOriginUnitKey("orphan", 9), []byte("unowned")))
 	_, err := k.ExportGenesis(ctx)
 	require.ErrorContains(t, err, "orphan records or indexes")
+}
+
+func TestFreshZeroBackedChildNeedsExplicitVaultProfile(t *testing.T) {
+	for _, profile := range []bool{false, true} {
+		t.Run(map[bool]string{false: "generic rejected", true: "isolated accepted"}[profile], func(t *testing.T) {
+			ctx, k, g, _ := isolatedLineageFixture(t)
+			token := g.Collections[1].Tokens[0]
+			token.Reserve = sdk.NewCoin("del", sdkmath.ZeroInt())
+			token.IsolatedReceipt = profile
+			g.IsolatedPositions[0].Reserve.Amount = make([]byte, 32)
+			err := k.InitGenesis(ctx, g)
+			if !profile {
+				require.Error(t, err)
+				return
+			}
+			require.NoError(t, err)
+			loaded, err := k.GetToken(ctx, token.ID)
+			require.NoError(t, err)
+			require.True(t, loaded.IsolatedReceipt)
+			require.False(t, loaded.ReserveLess)
+			require.True(t, loaded.Reserve.IsZero())
+			exported, err := k.ExportGenesis(ctx)
+			require.NoError(t, err)
+			found := false
+			for _, collection := range exported.Collections {
+				for _, item := range collection.Tokens {
+					if item.ID == token.ID {
+						found = true
+						require.True(t, item.IsolatedReceipt)
+					}
+				}
+			}
+			require.True(t, found)
+		})
+	}
+	ctx, k, g, _ := isolatedLineageFixture(t)
+	g.Collections[0].Tokens[0].IsolatedReceipt = true
+	require.Error(t, k.InitGenesis(ctx, g), "generic origin cannot activate the receipt profile")
+}
+
+func TestIsolatedReceiptFlagCannotOutliveKnownLineage(t *testing.T) {
+	for _, missing := range []string{"receipt index", "lineage", "vault", "binding"} {
+		t.Run(missing, func(t *testing.T) {
+			ctx, k, g, _ := isolatedLineageFixture(t)
+			require.NoError(t, k.InitGenesis(ctx, g))
+			p := g.IsolatedPositions[0]
+			key := types.GetIsolatedReceiptIndexKey(p.ReceiptNativeTokenID)
+			switch missing {
+			case "lineage":
+				key = types.GetIsolatedPositionKey(p.Vault, p.PositionID)
+			case "vault":
+				key = types.GetIsolatedVaultKey(p.Vault)
+			case "binding":
+				key = types.GetExternalBindingKey(p.ReceiptNativeTokenID)
+			}
+			require.NoError(t, k.service.OpenKVStore(ctx).Delete(key))
+			_, err := k.GetToken(ctx, p.ReceiptNativeTokenID)
+			require.Error(t, err)
+			require.NotErrorIs(t, err, ErrNotFound, "a broken known receipt is corruption, not an unknown asset")
+			_, err = k.ExportGenesis(ctx)
+			require.Error(t, err)
+		})
+	}
+}
+
+func TestClosedVaultTokenCannotDropProfileToKeepGenericTombstone(t *testing.T) {
+	ctx, k, g, _ := isolatedLineageFixture(t)
+	receipt := g.Collections[1].Tokens[0]
+	receipt.IsolatedReceipt = false
+	receipt.Burnt = 1
+	receipt.SubTokens = nil
+	g.IsolatedPositions = nil
+	require.ErrorContains(t, k.InitGenesis(ctx, g), "active profiled receipt lineage")
+}
+
+func TestIsolatedReceiptCannotEnableGenericRemint(t *testing.T) {
+	ctx, k, g, _ := isolatedLineageFixture(t)
+	g.Collections[1].Tokens[0].AllowMint = true
+	require.ErrorContains(t, k.InitGenesis(ctx, g), "cannot be reminted")
 }

@@ -61,11 +61,14 @@ func (t *Token) Validate() error {
 	if t.Reserve.Amount.IsNil() || t.Reserve.Validate() != nil || t.Reserve.Amount.GT(coinconfig.MaxCoinSupply) {
 		return errors.InvalidReserve
 	}
+	if t.IsolatedReceipt && t.AllowMint {
+		return fmt.Errorf("isolated receipt IDs cannot be reminted")
+	}
 	if t.ReserveLess {
-		if t.Reserve.Denom != identity.BaseDenom || !t.Reserve.IsZero() {
+		if t.IsolatedReceipt || t.Reserve.Denom != identity.BaseDenom || !t.Reserve.IsZero() {
 			return errors.InvalidReserve
 		}
-	} else if !t.Reserve.IsPositive() {
+	} else if !t.Reserve.IsPositive() && !(t.IsolatedReceipt && t.Reserve.IsZero()) {
 		return errors.InvalidReserve
 	}
 	if !config.CollectionDenomValidator.MatchString(t.Denom) {

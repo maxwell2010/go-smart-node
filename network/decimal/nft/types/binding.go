@@ -80,6 +80,9 @@ func ValidateBindingToken(b ExternalNFTBinding, token Token, collection Collecti
 	if b.NextSubTokenID != uint64(token.Minted)+1 {
 		return fmt.Errorf("external NFT cursor differs from lifetime minted count")
 	}
+	if token.IsolatedReceipt && (b.NFTType != NftType_NFT721 || collection.ReserveLess) {
+		return fmt.Errorf("isolated receipt profile requires a backed ERC721 binding")
+	}
 	if token.ReserveLess != collection.ReserveLess {
 		return fmt.Errorf("external NFT reserve profile mismatch")
 	}

@@ -143,7 +143,7 @@ func (g *GenesisState) ValidateIsolation() error {
 			return fmt.Errorf("isolated receipt identity differs from NFT binding")
 		}
 		token := tokens[p.ReceiptNativeTokenID]
-		if token == nil || token.Creator != v.ReceiptCreator || token.Denom != v.ReceiptDenom || token.ReserveLess || len(token.SubTokens) != 1 || token.SubTokens[0] == nil || token.SubTokens[0].ID != p.ReceiptSubTokenID {
+		if token == nil || token.Creator != v.ReceiptCreator || token.Denom != v.ReceiptDenom || token.ReserveLess || !token.IsolatedReceipt || len(token.SubTokens) != 1 || token.SubTokens[0] == nil || token.SubTokens[0].ID != p.ReceiptSubTokenID {
 			return fmt.Errorf("isolated receipt must have exactly one live native unit")
 		}
 		origin, found := bindings[p.OriginNativeTokenID]
@@ -178,9 +178,17 @@ func (g *GenesisState) ValidateIsolation() error {
 			consumed[p.OriginNativeTokenID][id] = true
 		}
 	}
+	for id, token := range tokens {
+		if token.IsolatedReceipt && !receipts[id] {
+			return fmt.Errorf("isolated receipt flag requires a live known-vault lineage")
+		}
+	}
 	for _, b := range g.ExternalBindings {
-		if _, found := vaults[string(b.Contract)]; found && tokens[b.NativeTokenID] != nil && len(tokens[b.NativeTokenID].SubTokens) > 0 && !receipts[b.NativeTokenID] {
-			return fmt.Errorf("live isolated vault receipt is missing its lineage")
+		if _, found := vaults[string(b.Contract)]; found {
+			token := tokens[b.NativeTokenID]
+			if token == nil || !token.IsolatedReceipt || !receipts[b.NativeTokenID] {
+				return fmt.Errorf("isolated vault binding requires an active profiled receipt lineage; closed receipts must be compacted through authenticated close")
+			}
 		}
 	}
 	return nil

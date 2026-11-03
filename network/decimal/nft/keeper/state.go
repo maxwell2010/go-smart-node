@@ -231,6 +231,14 @@ func (k *StateKeeper) GetToken(ctx sdk.Context, id string) (types.Token, error) 
 	if err := token.Validate(); err != nil {
 		return types.Token{}, err
 	}
+	if token.IsolatedReceipt {
+		if err := k.validateIsolatedTokenProfile(ctx, token); err != nil {
+			if errors.Is(err, ErrNotFound) {
+				return types.Token{}, fmt.Errorf("isolated receipt profile is incomplete: %v", err)
+			}
+			return types.Token{}, err
+		}
+	}
 	return token, nil
 }
 
