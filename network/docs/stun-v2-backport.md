@@ -1,5 +1,7 @@
 # STUN v2 short-attribute backport
 
+Historical checkpoint only. The current separate-network code migrates the real geth NAT path to canonical Pion v3; see [transport migration](security/maintained-pion-transport.md). The old v2 source copy and its verifier are retired in that migration. Earlier commit-bound captures and installation commands retain their original scope.
+
 The SDK53 candidate actually selects `github.com/pion/stun/v2 v2.0.0`
 through the Cosmos Geth NAT dependency. The prior SDK54 regression imported
 STUN v3, which was absent from the selected family. Testing the real v2

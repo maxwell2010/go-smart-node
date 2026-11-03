@@ -4,7 +4,7 @@
 
 This nested module builds the owned application for a separate, fresh network. The repository root remains the legacy mainnet replay build, with its own dependency graph. Do not import that legacy module here.
 
-The current candidate follows the active [2025.1 release family](https://docs.cosmos.network/sdk/latest/release-family): SDK `0.53.8`, CometBFT `0.38.26`, Cosmos EVM `0.6.3`, and IBC Go `10.7.0`. Its effective Ethereum implementation is the canonical Cosmos replacement `github.com/cosmos/go-ethereum v1.16.2-cosmos-1`. Exact source, checksums, test scope and remaining gates are recorded in `family-maintained53.json`.
+The current candidate retains the selected [2025.1 release family](https://docs.cosmos.network/sdk/latest/release-family): SDK `0.53.8`, CometBFT `0.38.26`, Cosmos EVM `0.6.3`, and IBC Go `10.7.0`. Its effective Ethereum implementation is declared owned source based on `github.com/cosmos/go-ethereum v1.16.2-cosmos-1`, with the upstream coordinate fix and explicit Pion v3 NAT adaptation. See [source backport](docs/security/owned-geth-coordinate-backport.md) and [transport migration](docs/security/maintained-pion-transport.md). `family-maintained53.json` preserves source-specific historical checks and remaining gates.
 
 `family-check` constructs the owned application in an empty in-memory database, checks the EVM, IBC and transfer wiring, and exits. It opens no listeners or external connections. It is not a daemon or a completed native feature port.
 
@@ -14,7 +14,8 @@ Run ordinary compatibility checks from this directory with the pinned Go `1.26.1
 GOTOOLCHAIN=local go mod download
 GOTOOLCHAIN=local go mod verify
 python3 scripts/verify_owned_evm.py
-python3 scripts/verify_owned_stun.py
+python3 scripts/verify_owned_geth.py
+python3 scripts/verify_pion_transport.py
 GOTOOLCHAIN=local go test -mod=readonly -p 1 -count=1 ./identity ./decimal/... ./app ./internal/family ./internal/ibcharness ./internal/ibcreference/...
 GOTOOLCHAIN=local go test -mod=readonly -p 1 -count=1 -tags=test ./app -run '^TestOwnApplicationICS20TwoChains$'
 GOTOOLCHAIN=local go run -mod=readonly ./cmd/family-check
@@ -36,7 +37,8 @@ Build with Go `1.26.10`, GCC and CGO enabled. Use the default production build, 
 go mod download
 go mod verify
 python3 scripts/verify_owned_evm.py
-python3 scripts/verify_owned_stun.py
+python3 scripts/verify_owned_geth.py
+python3 scripts/verify_pion_transport.py
 mkdir -p build
 CGO_ENABLED=1 go build -mod=readonly -trimpath -p 1 -o build/mcnd ./cmd/mcnd
 ```

@@ -29,7 +29,6 @@ jobs:
       - name: Verify sources and operator tooling
         run: |
           python3 network/scripts/verify_owned_evm.py
-          python3 network/scripts/verify_owned_stun.py
           python3 network/scripts/verify_owned_geth.py
           python3 -m unittest discover -s network/tools -p 'test_*.py'
       - name: Build pinned development daemon
@@ -37,6 +36,7 @@ jobs:
           cd network
           go mod download
           go mod verify
+          python3 scripts/verify_pion_transport.py
           git diff --exit-code -- go.mod go.sum
           go build -mod=readonly -p 2 -trimpath -ldflags "-X main.buildCommit=$GITHUB_SHA" -o "$RUNNER_TEMP/mcnd" ./cmd/mcnd
           "$RUNNER_TEMP/mcnd" version

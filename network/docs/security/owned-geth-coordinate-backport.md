@@ -1,5 +1,7 @@
 # Объявленный source backport GO-2026-4507
 
+Здесь зафиксирована исходная группа `b03012ff052026d867da03fc9a44fe06cb9f4a1e` и её development archive. Последующая [отдельная миграция Pion](maintained-pion-transport.md) сохраняет это crypto-исправление и объявляет дополнительные NAT/go.mod отличия; она не переименовывает старую сборку в новую.
+
 Вместо изменения module cache в `network/third_party/cosmos-geth` сохранено полное дерево `github.com/cosmos/go-ethereum v1.16.2-cosmos-1` и применён точный upstream fix [895a8597cb16c02203e38707ed2d1da5c500fe60](https://github.com/ethereum/go-ethereum/commit/895a8597cb16c02203e38707ed2d1da5c500fe60). Это узкое исправление в разработке отдельной сети, не сертификат безопасности всего geth и не обновление Decimal mainnet.
 
 ## Происхождение и объём

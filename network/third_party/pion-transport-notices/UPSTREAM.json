@@ -1,0 +1,20 @@
+{
+  "kind": "canonical upstream license notices only; runtime modules are not local replacements",
+  "modules": {
+    "github.com/pion/dtls/v3": {
+      "license": "LICENSE.dtls-v3",
+      "licenseSha256": "6483daf6c8aa2c8192528e60be098aa82dd18f6d7b96dc8246f4f7c3333fbf3f",
+      "source": "https://github.com/pion/dtls/blob/v3.1.15/LICENSE",
+      "sum": "h1:okWk5LNwU21DfhvG8z4wm45knHVSPEdkihwp6BxfQcc=",
+      "version": "v3.1.15"
+    },
+    "github.com/pion/stun/v3": {
+      "license": "LICENSE.stun-v3",
+      "licenseSha256": "6483daf6c8aa2c8192528e60be098aa82dd18f6d7b96dc8246f4f7c3333fbf3f",
+      "source": "https://github.com/pion/stun/blob/v3.1.7/LICENSE",
+      "sum": "h1:uRXMTlGLf89WgItGNyZ6aR5jMTX0NBbybXADpQCzn+E=",
+      "version": "v3.1.7"
+    }
+  },
+  "schemaVersion": 1
+}

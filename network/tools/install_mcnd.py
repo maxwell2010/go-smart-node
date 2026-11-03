@@ -28,13 +28,14 @@ def install(revision, destination, source=None):
   if run(["git","-C",str(source),"status","--porcelain","--untracked-files=no"]):raise ValueError("source has tracked modifications")
   module=source/"network"
   environment=dict(os.environ,CGO_ENABLED="1",CC="gcc",GOTOOLCHAIN="local")
-  for verifier in ("verify_owned_evm.py","verify_owned_stun.py","verify_owned_geth.py"):
+  for verifier in ("verify_owned_evm.py","verify_owned_geth.py"):
    subprocess.run(["python3",str(module/"scripts"/verifier)],check=True)
   for command in (["go","mod","download"],["go","mod","verify"]):subprocess.run(command,cwd=module,env=environment,check=True)
+  subprocess.run(["python3",str(module/"scripts/verify_pion_transport.py")],cwd=module,env=environment,check=True)
   target=pathlib.Path(temporary)/"mcnd"
   subprocess.run(["go","build","-mod=readonly","-p","1","-trimpath","-ldflags","-X main.buildCommit="+revision,"-o",str(target),"./cmd/mcnd"],cwd=module,env=environment,check=True)
   if run(["git","-C",str(source),"diff","--name-only","--","network/go.mod","network/go.sum"]):raise ValueError("module files changed")
-  subprocess.run([str(target),"version"],check=True)
+  subprocess.run([str(target),"version","--home",str(pathlib.Path(temporary)/"version-home")],check=True)
   destination.parent.mkdir(parents=True,exist_ok=True)
   # Exclusive create: another installer cannot be overwritten after validation.
   with destination.open("xb") as stream, target.open("rb") as built:shutil.copyfileobj(built,stream)

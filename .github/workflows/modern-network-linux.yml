@@ -52,8 +52,8 @@ jobs:
       - name: Verify owned sources and integrity guards
         run: |
           python3 scripts/verify_owned_evm.py |& tee validation-logs/owned-evm-integrity.log
-          python3 scripts/verify_owned_stun.py |& tee validation-logs/owned-stun-integrity.log
           python3 scripts/verify_owned_geth.py |& tee validation-logs/owned-geth-integrity.log
+          python3 scripts/verify_pion_transport.py |& tee validation-logs/pion-upstream-integrity.log
           python3 -m unittest discover -s scripts -p 'test_*.py'
       - name: Test ordinary crypto regressions with and without CGO
         run: |

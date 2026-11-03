@@ -7,7 +7,7 @@ import (
 	"net"
 	"testing"
 
-	"github.com/pion/stun/v2"
+	"github.com/pion/stun/v3"
 )
 
 // GO-2026-6163: a peer-controlled empty XOR-MAPPED-ADDRESS must be rejected,
