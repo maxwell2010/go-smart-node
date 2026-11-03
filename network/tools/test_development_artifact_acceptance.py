@@ -2,6 +2,8 @@
 
 Set MCND_ACCEPTANCE_ROOT to a new fixture directory containing source/,
 github-artifact.zip, github-artifact-metadata.json and the downloaded tar/sidecar.
+MCND_ACCEPTANCE_COMMIT selects the exact published commit; an optional
+MCND_ACCEPTANCE_SOURCE may name a repository containing that Git object.
 These tests never start a node, install dependencies or send transactions.
 """
 import hashlib
@@ -9,13 +11,14 @@ import io
 import json
 import os
 from pathlib import Path, PurePosixPath
+import re
 import subprocess
 import tarfile
 import unittest
 import zipfile
 
 
-COMMIT = "88ed5365340a6cf22bb757b27a9a9e5eef3dbe28"
+COMMIT = os.environ.get("MCND_ACCEPTANCE_COMMIT", "88ed5365340a6cf22bb757b27a9a9e5eef3dbe28")
 ARCHIVE = "mcnd-development-linux-amd64.tar.gz"
 
 
@@ -31,7 +34,9 @@ class PublishedDevelopmentArtifactAcceptance(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         cls.root = Path(os.environ["MCND_ACCEPTANCE_ROOT"]).resolve(strict=True)
-        cls.source = cls.root / "source"
+        if not re.fullmatch("[0-9a-f]{40}", COMMIT):
+            raise ValueError("exact lowercase Git commit required")
+        cls.source = Path(os.environ.get("MCND_ACCEPTANCE_SOURCE", str(cls.root / "source"))).resolve(strict=True)
         metadata = json.loads((cls.root / "github-artifact-metadata.json").read_bytes())
         cls.artifact = metadata["artifacts"][0]
         with (cls.root / "github-artifact.zip").open("rb") as stream:
@@ -70,7 +75,8 @@ class PublishedDevelopmentArtifactAcceptance(unittest.TestCase):
         self.assertEqual(self.manifest["binarySha256"], self.manifest["files"]["bin/mcnd"])
 
     def test_every_production_input_matches_the_pinned_git_blob(self):
-        revision = subprocess.check_output(["git", "-C", str(self.source), "rev-parse", "HEAD"], text=True).strip()
+        # Read explicit commit objects, never substitute a mutable branch/HEAD.
+        revision = subprocess.check_output(["git", "-C", str(self.source), "rev-parse", COMMIT + "^{commit}"], text=True).strip()
         self.assertEqual(COMMIT, revision)
         self.assertEqual(COMMIT, self.inventory["sourceRevision"])
         self.assertEqual({"CC": "gcc", "CGO_ENABLED": "1", "GOAMD64": "v1", "GOARCH": "amd64", "GOENV": "off", "GOFLAGS": "", "GOOS": "linux", "GOTOOLCHAIN": "local", "GOWORK": "off"}, self.inventory["buildPolicy"])
