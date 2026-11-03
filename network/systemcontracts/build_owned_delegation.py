@@ -27,7 +27,7 @@ def main():
     unit = "owned/DecimalDelegation.sol"
     source = (ROOT / unit).read_text(encoding="utf-8")
     output = ["abi", "evm.bytecode.object", "evm.bytecode.linkReferences", "evm.deployedBytecode.object", "evm.deployedBytecode.linkReferences", "evm.deployedBytecode.immutableReferences"]
-    targets = {"DecimalDelegation": "MintCandyDelegation", "DelegationNFTLib": "MintCandyDelegationNFTLib"}
+    targets = {"DecimalDelegation": "MintCandyDelegation", "DelegationNFTLib": "MintCandyDelegationNFTLib", "MintCandyIsolatedDelegation": "MintCandyIsolatedDelegation"}
     settings = {"optimizer": {"enabled": True, "runs": 200}, "evmVersion": "paris", "viaIR": True,
                 "metadata": {"bytecodeHash": "ipfs"}, "libraries": {},
                 "outputSelection": {unit: {name: output for name in targets}}}

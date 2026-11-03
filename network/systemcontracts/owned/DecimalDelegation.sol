@@ -2846,6 +2846,9 @@ interface IDecimalDelegationCommon {
     );
 
     // NFT delegation events
+    event NFTIsolationStarted(uint256 indexed positionId, address indexed originOwner,
+        address indexed originContract, uint256 originTokenId, uint256 originQuantity);
+
     event NFTDelegated(
         bytes32 indexed nftStakeId,
         bytes32 indexed coinStakeId,
@@ -4055,6 +4058,15 @@ pragma solidity 0.8.20;
  * signatures (solc 0.8.20 cannot emit interface-qualified events); identical
  * signatures keep the same topic0, so off-chain consumers are unaffected.
  */
+interface IMintCandyIsolationOrigin {
+    function isolate(uint256 tokenId, uint256 quantity, address recipient) external returns (uint256);
+    function isolationVault() external view returns (address);
+}
+interface IMintCandyIsolationVault {
+    function nextPositionId() external view returns (uint256);
+    function maxOriginQuantity() external pure returns (uint256);
+}
+
 library DelegationNFTLib {
     /* ========== EVENTS (redeclared, identical signatures) ========== */
 
@@ -4086,6 +4098,9 @@ library DelegationNFTLib {
         bytes32 indexed stakeId,
         uint256 newPenaltyIndex
     );
+    event NFTIsolationStarted(uint256 indexed positionId, address indexed originOwner,
+        address indexed originContract, uint256 originTokenId, uint256 originQuantity);
+
     event NFTDelegated(
         bytes32 indexed nftStakeId,
         bytes32 indexed coinStakeId,
@@ -4257,14 +4272,15 @@ library DelegationNFTLib {
         return IDecimalNFTCenter(_getAddress($, "nft-center"));
     }
 
-    /// @dev Audit C1: only NFT contracts created by the NFT center may back a
-    /// delegation. getReserve()/rate() on an arbitrary contract are attacker-
-    /// controlled and would mint unbacked staking power for whatever reserve
-    /// they claim.
+    /// @dev Reserve NFTs must be factory-created collections or the explicitly
+    /// configured new-network position vault. Runtime/factory/registry approval
+    /// is additionally enforced by the native financial controller before commit.
+    /// Arbitrary caller-selected getReserve()/rate() contracts are not admitted.
     function _checkNFTRegistered(
         IDecimalDelegationCommon.DelegationStorage storage $,
         address nftContract
     ) internal view {
+        if (nftContract != address(0) && nftContract == _getAddress($, "nft-position-vault")) return;
         NFTState memory state = _getNFTCenter($).getNFTState(nftContract);
         if (!state.active || !state.withReserve) {
             revert NFTNotRegistered(nftContract);
@@ -4578,6 +4594,14 @@ library DelegationNFTLib {
         uint256 tokenId,
         uint256 holdTimestamp
     ) public {
+        _delegateReceipt($, delegator, validator, nftContract, tokenId, holdTimestamp, false);
+    }
+
+    function _delegateReceipt(
+        IDecimalDelegationCommon.DelegationStorage storage $,
+        address delegator, address validator, address nftContract,
+        uint256 tokenId, uint256 holdTimestamp, bool received
+    ) private {
         if (!_isValidatorActive($, validator))
             revert IDecimalDelegationCommon.InvalidValidator();
         _checkNFTRegistered($, nftContract);
@@ -4607,12 +4631,14 @@ library DelegationNFTLib {
             revert IDecimalDelegationCommon.NFTAlreadyDelegated();
         }
 
-        // Transfer NFT to this contract
-        IDRC721(nftContract).safeTransferFrom(
-            delegator,
-            address(this),
-            tokenId
-        );
+        // New isolated receipts were minted into this Gateway in this call.
+        // Ordinary wallet receipts must be transferred by the Gateway itself.
+        if (received) {
+            if (IDRC721(nftContract).ownerOf(tokenId) != address(this))
+                revert IDecimalDelegationCommon.InvalidAmount();
+        } else {
+            IDRC721(nftContract).safeTransferFrom(delegator, address(this), tokenId);
+        }
 
         // Determine reserve token and type
         address reserveToken;
@@ -4658,6 +4684,31 @@ library DelegationNFTLib {
                 isActive: true
             })
         );
+    }
+
+    function delegateIsolatedNFT1155(
+        IDecimalDelegationCommon.DelegationStorage storage $,
+        address delegator, address validator, address originContract,
+        uint256 originTokenId, uint256 quantity, uint256 holdTimestamp
+    ) public {
+        if (!_isValidatorActive($, validator)) revert IDecimalDelegationCommon.InvalidValidator();
+        // Origins must still be approved factory-created reserve collections.
+        NFTState memory state = _getNFTCenter($).getNFTState(originContract);
+        if (!state.active || !state.withReserve || state.nftType != NFTType.DRC1155)
+            revert NFTNotRegistered(originContract);
+        address vault = _getAddress($, "nft-position-vault");
+        if (vault == address(0) || vault.code.length == 0 ||
+            IMintCandyIsolationOrigin(originContract).isolationVault() != vault)
+            revert NFTNotRegistered(originContract);
+        uint256 maximum = IMintCandyIsolationVault(vault).maxOriginQuantity();
+        if (quantity == 0 || quantity > maximum) revert IDecimalDelegationCommon.InvalidAmount();
+        uint256 expectedId = IMintCandyIsolationVault(vault).nextPositionId();
+        if (expectedId == 0) revert IDecimalDelegationCommon.InvalidAmount();
+        emit NFTIsolationStarted(expectedId, delegator, originContract, originTokenId, quantity);
+        IERC1155(originContract).safeTransferFrom(delegator, address(this), originTokenId, quantity, "");
+        uint256 actualId = IMintCandyIsolationOrigin(originContract).isolate(originTokenId, quantity, address(this));
+        if (actualId != expectedId) revert IDecimalDelegationCommon.InvalidAmount();
+        _delegateReceipt($, delegator, validator, vault, actualId, holdTimestamp, true);
     }
 
     /* ========== DRC1155 DELEGATION ========== */
@@ -7140,4 +7191,19 @@ contract DecimalDelegation is
      * @dev Fallback function to receive Ether.
      */
     receive() external payable virtual {}
+}
+/// @notice Fresh-network Unified Gateway: ERC1155 delegation creates an isolated ERC721 position.
+/// @dev Historical shared-pool artifact remains separately named MintCandyDelegation.
+contract MintCandyIsolatedDelegation is DecimalDelegation {
+    function delegateNFT1155(address validator, address originContract, uint256 tokenId, uint256 quantity)
+        public override whenNotPaused {
+        DelegationNFTLib.delegateIsolatedNFT1155(_getDelegationStorage(), msg.sender,
+            validator, originContract, tokenId, quantity, 0);
+    }
+    function delegateNFT1155Hold(address validator, address originContract, uint256 tokenId,
+        uint256 quantity, uint256 holdTimestamp) public override whenNotPaused {
+        if (holdTimestamp == 0) revert InvalidHoldTimestamp(0);
+        DelegationNFTLib.delegateIsolatedNFT1155(_getDelegationStorage(), msg.sender,
+            validator, originContract, tokenId, quantity, holdTimestamp);
+    }
 }
