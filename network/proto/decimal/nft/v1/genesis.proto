@@ -17,4 +17,5 @@ message GenesisState {
   repeated Collection collections = 1 [ (gogoproto.nullable) = false ];
   // params defines all the module's parameters.
   Params params = 2 [ (gogoproto.nullable) = false ];
+  repeated ExternalNFTBinding external_bindings = 3 [ (gogoproto.nullable) = false ];
 }

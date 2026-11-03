@@ -133,6 +133,25 @@ func GetSubTokenByOwnerKey(owner sdk.AccAddress, id string, index uint32) []byte
 	return append(keyPrefixSubTokensByOwner, append(owner.Bytes(), getSubTokenID(id, index)...)...)
 }
 
+// External bindings have a primary native-ID record and an exact-domain reverse
+// identity index. Both directions are checked on reads and complete exports.
+func GetExternalBindingsKey() []byte { return []byte{0x41} }
+func GetExternalBindingKey(id string) []byte {
+	return append(GetExternalBindingsKey(), helpers.CalcHashSHA256(id)...)
+}
+func GetExternalIdentityKey(binding ExternalNFTBinding) []byte {
+	return append([]byte{0xA4}, helpers.CalcHashSHA256(ExternalIdentityKey(binding))...)
+}
+func GetTokenURIMembersKey(uri string) []byte {
+	return append([]byte{0xA5}, helpers.CalcHashSHA256(uri)...)
+}
+func GetTokenURIMemberKey(uri, id string) []byte {
+	return append(GetTokenURIMembersKey(uri), helpers.CalcHashSHA256(id)...)
+}
+func GetSubTokensByOwnerKey(owner sdk.AccAddress, id string) []byte {
+	return append(append([]byte{0xA3}, owner.Bytes()...), helpers.CalcHashSHA256(id)...)
+}
+
 // getCollectionID returns the collection ID concatenated from creator address denom hash and c.
 func getCollectionID(creator sdk.AccAddress, denom string) []byte {
 	return append(creator.Bytes(), helpers.CalcHashSHA256(denom)...)

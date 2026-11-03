@@ -8,8 +8,8 @@ import (
 	"strings"
 
 	"cosmossdk.io/core/store"
-	"github.com/cosmos/cosmos-sdk/codec/address"
 	storetypes "cosmossdk.io/store/types"
+	"github.com/cosmos/cosmos-sdk/codec/address"
 	sdk "github.com/cosmos/cosmos-sdk/types"
 	"github.com/cosmos/gogoproto/proto"
 	"github.com/maxwell2010/go-smart-node/network/decimal/compat"
@@ -25,9 +25,25 @@ var ErrNotFound = errors.New("NFT record does not exist")
 const MaxRecordBytes = 64 * 1024
 
 type StateKeeper struct {
-	service store.KVStoreService
-	params  compat.ParamsStore[*types.Params]
-	emit    func(sdk.Context, proto.Message) error
+	service    store.KVStoreService
+	params     compat.ParamsStore[*types.Params]
+	emit       func(sdk.Context, proto.Message) error
+	chainID    string
+	evmChainID uint64
+}
+
+// NewStateKeeperWithDomain enables explicit external identity records for one
+// network only. It does not authenticate a contract or admit an EVM receipt.
+func NewStateKeeperWithDomain(service store.KVStoreService, chainID string, evmChainID uint64) (*StateKeeper, error) {
+	if err := types.ValidateExternalDomain(chainID, evmChainID); err != nil {
+		return nil, err
+	}
+	k, err := NewStateKeeper(service)
+	if err != nil {
+		return nil, err
+	}
+	k.chainID, k.evmChainID = chainID, evmChainID
+	return k, nil
 }
 
 func NewStateKeeper(service store.KVStoreService) (*StateKeeper, error) {
@@ -79,6 +95,13 @@ func (k *StateKeeper) put(ctx sdk.Context, key []byte, record proto.Message) err
 func (k *StateKeeper) InitGenesis(ctx sdk.Context, genesis *types.GenesisState) error {
 	if err := genesis.Validate(); err != nil {
 		return err
+	}
+	bound := make(map[string]bool, len(genesis.ExternalBindings))
+	for _, binding := range genesis.ExternalBindings {
+		if err := k.checkBindingDomain(ctx, binding); err != nil {
+			return err
+		}
+		bound[binding.NativeTokenID] = true
 	}
 	_, err := k.params.Get(ctx)
 	if err == nil {
@@ -137,15 +160,20 @@ func (k *StateKeeper) InitGenesis(ctx sdk.Context, genesis *types.GenesisState) 
 			if err := k.put(child, types.GetTokenKey(token.ID), &metadata); err != nil {
 				return err
 			}
-			uriKey := types.GetTokenURIKey(token.URI)
-			used, err := state.Has(uriKey)
-			if err != nil {
-				return err
+			if !bound[token.ID] {
+				uriKey := types.GetTokenURIKey(token.URI)
+				used, err := state.Has(uriKey)
+				if err != nil {
+					return err
+				}
+				if used {
+					return errors.New("NFT metadata URI is already assigned")
+				}
+				if err := state.Set(uriKey, []byte(token.ID)); err != nil {
+					return err
+				}
 			}
-			if used {
-				return errors.New("NFT metadata URI is already assigned")
-			}
-			if err := state.Set(uriKey, []byte(token.ID)); err != nil {
+			if err := state.Set(types.GetTokenURIMemberKey(token.URI, token.ID), []byte(token.ID)); err != nil {
 				return err
 			}
 			if err := state.Set(types.GetTokenByCollectionKey(creator, collection.Denom, token.ID), []byte(token.ID)); err != nil {
@@ -163,6 +191,11 @@ func (k *StateKeeper) InitGenesis(ctx sdk.Context, genesis *types.GenesisState) 
 					return err
 				}
 			}
+		}
+	}
+	for _, binding := range genesis.ExternalBindings {
+		if err := k.storeNewBinding(child, binding); err != nil {
+			return err
 		}
 	}
 	commit()
@@ -205,6 +238,9 @@ func (k *StateKeeper) GetSubToken(ctx sdk.Context, id string, index uint32) (typ
 	}
 	if sub.Reserve != nil && sub.Reserve.Denom != token.Reserve.Denom {
 		return types.SubToken{}, errors.New("NFT reserve denomination mismatch")
+	}
+	if token.ReserveLess && sub.Reserve != nil && !sub.Reserve.IsZero() {
+		return types.SubToken{}, errors.New("reserveless NFT sub-token has nonzero reserve")
 	}
 	owner, err := account(sub.Owner)
 	if err != nil {
@@ -270,6 +306,25 @@ func (k *StateKeeper) ExportGenesis(ctx sdk.Context) (*types.GenesisState, error
 		return nil, err
 	}
 	genesis := types.NewGenesisState(*params, nil)
+	bound := make(map[string]bool)
+	if err := k.visit(ctx, types.GetExternalBindingsKey(), func(key, _ []byte) error {
+		var record types.ExternalNFTBinding
+		if err := k.read(ctx, key, &record); err != nil {
+			return err
+		}
+		if !bytes.Equal(key, types.GetExternalBindingKey(record.NativeTokenID)) {
+			return errors.New("NFT binding key mismatch")
+		}
+		binding, err := k.GetExternalNFTBinding(ctx, record.NativeTokenID)
+		if err != nil {
+			return err
+		}
+		bound[binding.NativeTokenID] = true
+		genesis.ExternalBindings = append(genesis.ExternalBindings, binding)
+		return nil
+	}); err != nil {
+		return nil, err
+	}
 	var tokens, subs, contracts uint64
 	err = k.visit(ctx, types.GetCollectionsKey(), func(key, _ []byte) error {
 		var record types.Collection
@@ -305,12 +360,21 @@ func (k *StateKeeper) ExportGenesis(ctx sdk.Context) (*types.GenesisState, error
 			if token.Creator != collection.Creator || token.Denom != collection.Denom || !bytes.Equal(indexKey, types.GetTokenByCollectionKey(creator, collection.Denom, token.ID)) {
 				return errors.New("NFT collection/token index mismatch")
 			}
-			indexed, err := k.service.OpenKVStore(ctx).Get(types.GetTokenURIKey(token.URI))
+			indexed, err := k.service.OpenKVStore(ctx).Get(types.GetTokenURIMemberKey(token.URI, token.ID))
 			if err != nil {
 				return err
 			}
 			if string(indexed) != token.ID {
 				return errors.New("NFT URI index mismatch")
+			}
+			if !bound[token.ID] {
+				indexed, err := k.service.OpenKVStore(ctx).Get(types.GetTokenURIKey(token.URI))
+				if err != nil {
+					return err
+				}
+				if string(indexed) != token.ID {
+					return errors.New("NFT legacy URI index mismatch")
+				}
 			}
 			if err := k.visit(ctx, types.GetSubTokensKey(token.ID), func(subKey, _ []byte) error {
 				var record types.SubToken
@@ -345,7 +409,7 @@ func (k *StateKeeper) ExportGenesis(ctx sdk.Context) (*types.GenesisState, error
 	for _, expected := range []struct {
 		prefix byte
 		count  uint64
-	}{{0x13, contracts}, {0x21, tokens}, {0x31, subs}, {0xA1, tokens}, {0xA2, tokens}, {0xA3, subs}} {
+	}{{0x13, contracts}, {0x21, tokens}, {0x31, subs}, {0x41, uint64(len(bound))}, {0xA1, tokens - uint64(len(bound))}, {0xA2, tokens}, {0xA3, subs}, {0xA4, uint64(len(bound))}, {0xA5, tokens}} {
 		var count uint64
 		if err := k.visit(ctx, []byte{expected.prefix}, func(_, _ []byte) error { count++; return nil }); err != nil {
 			return nil, err

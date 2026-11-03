@@ -41,6 +41,9 @@ message Collection {
 
   // address nft defines the NFT collection name.
   string addressDRC = 6;
+  bool reserve_less = 7;
+  string external_symbol = 8;
+  string external_name = 9;
 }
 
 // CollectionCounter defines object containing counter of minted NFT tokens in the collection.
@@ -78,6 +81,22 @@ message Token {
 
   // sub_tokens defines the list of NFT sub-tokens existing in the NFT token.
   repeated SubToken sub_tokens = 9 [ (gogoproto.castrepeated) = "SubTokens" ];
+  bool reserve_less = 10;
+}
+
+// ExternalNFTBinding is the unique, explicit external/native identity mapping.
+// uint256 IDs retain all 32 bytes; next_sub_token_id is a never-reused cursor.
+message ExternalNFTBinding {
+  option (gogoproto.equal) = true;
+  option (gogoproto.goproto_getters) = false;
+  option (gogoproto.goproto_stringer) = true;
+  string chain_id = 1 [ (gogoproto.customname) = "ChainID" ];
+  uint64 evm_chain_id = 2 [ (gogoproto.customname) = "EVMChainID" ];
+  bytes contract = 3;
+  bytes token_id = 4 [ (gogoproto.customname) = "TokenID" ];
+  string native_token_id = 5 [ (gogoproto.customname) = "NativeTokenID" ];
+  NftType nft_type = 6 [ (gogoproto.customname) = "NFTType" ];
+  uint64 next_sub_token_id = 7 [ (gogoproto.customname) = "NextSubTokenID" ];
 }
 
 // TokenCounter defines object containing counters of minted and burnt NFT sub-tokens.

@@ -31,6 +31,12 @@ func (c *Collection) Validate() error {
 	if c.AddressDRC != "" && (c.TypeNft == NftType_Unspecified || len(c.AddressDRC) != 42 || !strings.HasPrefix(c.AddressDRC, "0x") || !common.IsHexAddress(c.AddressDRC) || common.HexToAddress(c.AddressDRC) == (common.Address{})) {
 		return fmt.Errorf("invalid NFT contract assignment")
 	}
+	if c.ReserveLess && c.AddressDRC == "" {
+		return fmt.Errorf("reserveless NFT requires an explicit external collection")
+	}
+	if len(c.ExternalSymbol) > 255 || len(c.ExternalName) > 1024 {
+		return fmt.Errorf("external NFT display metadata exceeds limit")
+	}
 
 	return nil
 }
@@ -52,7 +58,14 @@ func (t *Token) Validate() error {
 	if strings.TrimSpace(t.URI) == "" {
 		return errors.InvalidNFT
 	}
-	if t.Reserve.Amount.IsNil() || t.Reserve.Validate() != nil || !t.Reserve.IsPositive() || t.Reserve.Amount.GT(coinconfig.MaxCoinSupply) {
+	if t.Reserve.Amount.IsNil() || t.Reserve.Validate() != nil || t.Reserve.Amount.GT(coinconfig.MaxCoinSupply) {
+		return errors.InvalidReserve
+	}
+	if t.ReserveLess {
+		if t.Reserve.Denom != identity.BaseDenom || !t.Reserve.IsZero() {
+			return errors.InvalidReserve
+		}
+	} else if !t.Reserve.IsPositive() {
 		return errors.InvalidReserve
 	}
 	if !config.CollectionDenomValidator.MatchString(t.Denom) {
