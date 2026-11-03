@@ -124,3 +124,44 @@ message SubToken {
   // reserve defines reserve of the NFT sub-token.
   cosmos.base.v1beta1.Coin reserve = 3;
 }
+
+// IsolatedVaultState preserves the next never-reused receipt ID even when all
+// older receipts have been closed and their current-state records compacted.
+message IsolatedVaultState {
+  option (gogoproto.equal) = true;
+  option (gogoproto.goproto_getters) = false;
+  string chain_id = 1 [ (gogoproto.customname) = "ChainID" ];
+  uint64 evm_chain_id = 2 [ (gogoproto.customname) = "EVMChainID" ];
+  bytes vault = 3;
+  bytes next_position_id = 4 [ (gogoproto.customname) = "NextPositionID" ];
+  string receipt_creator = 5;
+  string receipt_denom = 6;
+}
+
+// IsolatedReserveSnapshot is declared contract collateral, not an inferred bank
+// balance or governance voting claim after pending liabilities. Amount retains
+// all uint256 bytes; zero remains backed DEL/DRC20 rather than reserve-less.
+message IsolatedReserveSnapshot {
+  option (gogoproto.equal) = true;
+  option (gogoproto.goproto_getters) = false;
+  uint32 kind = 1;
+  bytes token = 2;
+  bytes amount = 3;
+}
+
+// IsolatedPositionLineage belongs to every live receipt, in a wallet or escrow.
+// It archives the exact burned origin units and does not depend on a live parent.
+message IsolatedPositionLineage {
+  option (gogoproto.equal) = true;
+  option (gogoproto.goproto_getters) = false;
+  bytes vault = 1;
+  bytes position_id = 2 [ (gogoproto.customname) = "PositionID" ];
+  string receipt_native_token_id = 3 [ (gogoproto.customname) = "ReceiptNativeTokenID" ];
+  uint32 receipt_sub_token_id = 4 [ (gogoproto.customname) = "ReceiptSubTokenID" ];
+  bytes origin_contract = 5;
+  bytes origin_token_id = 6 [ (gogoproto.customname) = "OriginTokenID" ];
+  string origin_native_token_id = 7 [ (gogoproto.customname) = "OriginNativeTokenID" ];
+  repeated uint32 origin_sub_token_ids = 8 [ (gogoproto.customname) = "OriginSubTokenIDs" ];
+  bytes parent_position_id = 9 [ (gogoproto.customname) = "ParentPositionID" ];
+  IsolatedReserveSnapshot reserve = 10 [ (gogoproto.nullable) = false ];
+}

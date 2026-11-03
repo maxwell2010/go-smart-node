@@ -18,4 +18,6 @@ message GenesisState {
   // params defines all the module's parameters.
   Params params = 2 [ (gogoproto.nullable) = false ];
   repeated ExternalNFTBinding external_bindings = 3 [ (gogoproto.nullable) = false ];
+  repeated IsolatedVaultState isolated_vaults = 4 [ (gogoproto.nullable) = false ];
+  repeated IsolatedPositionLineage isolated_positions = 5 [ (gogoproto.nullable) = false ];
 }

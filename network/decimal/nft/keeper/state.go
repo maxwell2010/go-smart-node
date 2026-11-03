@@ -104,6 +104,11 @@ func (k *StateKeeper) InitGenesis(ctx sdk.Context, genesis *types.GenesisState) 
 		}
 		bound[binding.NativeTokenID] = true
 	}
+	for _, vault := range genesis.IsolatedVaults {
+		if err := k.checkVaultDomain(ctx, vault); err != nil {
+			return err
+		}
+	}
 	_, err := k.params.Get(ctx)
 	if err == nil {
 		return errors.New("NFT genesis already initialized")
@@ -196,6 +201,16 @@ func (k *StateKeeper) InitGenesis(ctx sdk.Context, genesis *types.GenesisState) 
 	}
 	for _, binding := range genesis.ExternalBindings {
 		if err := k.storeNewBinding(child, binding); err != nil {
+			return err
+		}
+	}
+	for _, vault := range genesis.IsolatedVaults {
+		if err := k.storeIsolatedVault(child, vault); err != nil {
+			return err
+		}
+	}
+	for _, position := range genesis.IsolatedPositions {
+		if err := k.storeIsolatedLineage(child, position); err != nil {
 			return err
 		}
 	}
@@ -366,6 +381,35 @@ func (k *StateKeeper) ExportGenesis(ctx sdk.Context) (*types.GenesisState, error
 	}); err != nil {
 		return nil, err
 	}
+
+	if err := k.visit(ctx, types.GetIsolatedVaultsKey(), func(key, _ []byte) error {
+		if len(key) != 21 {
+			return errors.New("invalid isolated vault key width")
+		}
+		v, err := k.GetIsolatedVaultState(ctx, key[1:])
+		if err != nil {
+			return err
+		}
+		genesis.IsolatedVaults = append(genesis.IsolatedVaults, v)
+		return nil
+	}); err != nil {
+		return nil, err
+	}
+	var originUnits uint64
+	if err := k.visit(ctx, types.GetIsolatedPositionsKey(), func(key, _ []byte) error {
+		if len(key) != 53 {
+			return errors.New("invalid isolated position key width")
+		}
+		p, err := k.GetIsolatedLineage(ctx, key[1:21], key[21:])
+		if err != nil {
+			return err
+		}
+		genesis.IsolatedPositions = append(genesis.IsolatedPositions, p)
+		originUnits += uint64(len(p.OriginSubTokenIDs))
+		return nil
+	}); err != nil {
+		return nil, err
+	}
 	var tokens, subs, contracts uint64
 	err = k.visit(ctx, types.GetCollectionsKey(), func(key, _ []byte) error {
 		var record types.Collection
@@ -450,7 +494,7 @@ func (k *StateKeeper) ExportGenesis(ctx sdk.Context) (*types.GenesisState, error
 	for _, expected := range []struct {
 		prefix byte
 		count  uint64
-	}{{0x13, contracts}, {0x21, tokens}, {0x31, subs}, {0x41, uint64(len(bound))}, {0xA1, tokens - uint64(len(bound))}, {0xA2, tokens}, {0xA3, subs}, {0xA4, uint64(len(bound))}, {0xA5, tokens}} {
+	}{{0x13, contracts}, {0x21, tokens}, {0x31, subs}, {0x41, uint64(len(bound))}, {0xA1, tokens - uint64(len(bound))}, {0xA2, tokens}, {0xA3, subs}, {0xA4, uint64(len(bound))}, {0xA5, tokens}, {0x42, uint64(len(genesis.IsolatedVaults))}, {0x43, uint64(len(genesis.IsolatedPositions))}, {0xA6, uint64(len(genesis.IsolatedPositions))}, {0xA7, originUnits}} {
 		var count uint64
 		if err := k.visit(ctx, []byte{expected.prefix}, func(_, _ []byte) error { count++; return nil }); err != nil {
 			return nil, err

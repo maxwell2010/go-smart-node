@@ -43,3 +43,39 @@ receipt admission and public transaction routes remain separate gates. No
 methods here authenticate a transaction signer or system contract. The owned
 application must continue rejecting nonempty collections or bindings until
 those gates are satisfied; empty module/query mounting does not activate them.
+
+## Проверенная модель происхождения isolated receipt
+
+Genesis хранит `isolated_vaults` (полный domain, vault, монотонный uint256
+`next_position_id`, коллекция квитанций) и `isolated_positions` (живые квитанции).
+`GetIsolatedVaultState` и `GetIsolatedLineage` возвращают отдельные копии записей.
+У каждой живой квитанции сохраняются origin contract/token ID, явный native ID
+и точный отсортированный набор сожжённых origin sub-ID, включая состояние в
+обычном кошельке после вывода из делегации. Parent ID информационный: активный
+ребёнок не требует записи закрытого родителя. Единственный реестр происхождения
+находится в NFT-модуле; validator bindings ссылаются на него.
+
+`IsolatedReserveSnapshot` сохраняет фактический declared reserve контракта как
+kind/token/uint256 amount. Нулевой резерв сохраняет backed kind DEL или ERC20.
+Он не изменяет default reserve исторического Token и не является автоматически
+подтверждённым голосующим весом после отложенных штрафов. Подлинность контрактов,
+обеспечение и финансовая проекция требуют отдельного authenticated admission.
+Текущие методы создания этих записей доступны только внутреннему genesis import;
+публичные Msg и автоматическая активация по отдельному событию отсутствуют.
+App обязан отклонять непустое новое состояние до установки такого admission.
+
+Импорт и полный экспорт проверяют domain, полный uint256 ID, receipt721 qty1,
+существующий origin1155, отсутствие архивных origin units в живой популяции,
+непересекающиеся наборы между квитанциями, high-watermark и оба обратных индекса.
+Все записи и индексы импортируются в одном cache context. Проверяются перенос
+квитанции между кошельками, export/import, нулевой backed reserve, независимый
+ребёнок, отказ на повреждённом/лишнем индексе и rollback поздней ошибки записи.
+Это foundation состояния: runtime compaction закрытых receipt и повторное
+открытие должны быть реализованы в authenticated close planner отдельно.
+
+Предел равен `types.MaxIsolatedOriginUnits = 1024`. В тестовом native state
+protobuf-запись с 1024 origin IDs занимает 2221 байт. Полный checked getter этой
+позиции расходует 4 137 884 SDK gas на обычном тестовом store; 1025 отклоняется
+до записи. Getter не сканирует другие позиции и проверяет не более 1024 её
+origin индексов. Это отдельный primitive benchmark, не оценка полного signed
+EVM + NFT + validator pipeline. Production gas budgets не увеличены.

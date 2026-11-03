@@ -114,6 +114,9 @@ func (m *GenesisState) Validate() error {
 			return fmt.Errorf("reserveless NFT requires an explicit external identity binding")
 		}
 	}
+	if err := m.ValidateIsolation(); err != nil {
+		return err
+	}
 	if message, broken := SupplyInvariantCheck(m.Collections); broken {
 		return fmt.Errorf("%s", message)
 	}
