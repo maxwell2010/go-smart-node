@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT
 pragma solidity 0.8.20;
 
-import {IERC20} from "./sources/DecimalTokenCenter.sol";
+import {IERC20, IERC20Metadata} from "./sources/DecimalTokenCenter.sol";
 import {ReentrancyGuard} from "./sources/OpenZeppelinReentrancyGuard.sol";
 
 interface IMintCandyConversionRegistry {
@@ -11,6 +11,7 @@ interface IMintCandyConversionCenter {
     function paused() external view returns (bool);
     function getContractCenter() external view returns (address);
     function isTokenExists(address token) external view returns (bool);
+    function tokens(string calldata symbol) external view returns (address);
 }
 interface IMintCandyConversionTokenProxy {
     function FACTORY() external view returns (address);
@@ -84,6 +85,7 @@ contract MintCandyCurveConverter is ReentrancyGuard {
             if (center.code.length == 0 || IMintCandyConversionCenter(center).paused() ||
                 IMintCandyConversionCenter(center).getContractCenter() != REGISTRY ||
                 !IMintCandyConversionCenter(center).isTokenExists(token) ||
+                IMintCandyConversionCenter(center).tokens(IERC20Metadata(token).symbol()) != token ||
                 IMintCandyConversionTokenProxy(token).FACTORY() != center ||
                 IMintCandyConversionTokenProxy(token).FAMILY() != 0) revert UnapprovedReserveCurve();
             IMintCandyReserveCurve curve = IMintCandyReserveCurve(token);
