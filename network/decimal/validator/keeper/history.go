@@ -14,6 +14,67 @@ import (
 )
 
 const MaxHistoricalBytes = 2 * 1024 * 1024
+const historyProgressKey byte = 0x42
+
+// These derived cursors are persisted with the history mutations. They are not
+// a new genesis field. A legacy development store without the cursor needs one
+// reverse seek to its newest key, not an iteration over its retained histories.
+func (k *StateKeeper) historyProgress(ctx sdk.Context) (newest, prunedThrough int64, err error) {
+	state := k.service.OpenKVStore(ctx)
+	data, err := state.Get([]byte{historyProgressKey})
+	if err != nil {
+		return 0, 0, err
+	}
+	if data != nil {
+		if len(data) != 17 || data[0] != 1 {
+			return 0, 0, errors.New("malformed historical progress metadata")
+		}
+		newest = int64(binary.BigEndian.Uint64(data[1:9]))
+		prunedThrough = int64(binary.BigEndian.Uint64(data[9:17]))
+		if newest <= 0 || prunedThrough < 0 || prunedThrough >= newest {
+			return 0, 0, errors.New("invalid historical progress heights")
+		}
+		latest, e := state.Get(historyKey(newest))
+		if e != nil {
+			return 0, 0, e
+		}
+		if latest == nil {
+			return 0, 0, errors.New("historical progress references missing newest row")
+		}
+		return newest, prunedThrough, nil
+	}
+	it, err := state.ReverseIterator([]byte{historyPrefix}, []byte{historyPrefix + 1})
+	if err != nil {
+		return 0, 0, err
+	}
+	if it.Valid() {
+		err = it.Error()
+		if err == nil {
+			key := it.Key()
+			if len(key) != 9 || key[0] != historyPrefix {
+				err = errors.New("malformed historical native key")
+			} else {
+				newest = int64(binary.BigEndian.Uint64(key[1:]))
+				if newest <= 0 {
+					err = errors.New("invalid historical height")
+				}
+			}
+		}
+	}
+	closeErr := it.Close()
+	if err != nil {
+		return 0, 0, err
+	}
+	return newest, 0, closeErr
+}
+
+func (k *StateKeeper) setHistoryProgress(ctx sdk.Context, newest, prunedThrough int64) error {
+	data := make([]byte, 17)
+	data[0] = 1
+	binary.BigEndian.PutUint64(data[1:9], uint64(newest))
+	binary.BigEndian.PutUint64(data[9:17], uint64(prunedThrough))
+	return k.service.OpenKVStore(ctx).Set([]byte{historyProgressKey}, data)
+}
 
 func historyKey(height int64) []byte {
 	key := make([]byte, 9)
@@ -98,25 +159,45 @@ func (k *StateKeeper) SetHistoricalInfo(ctx sdk.Context, h types.HistoricalInfo)
 	if old != nil && !bytes.Equal(old, data) {
 		return errors.New("historical native record is immutable")
 	}
-	// Reject out-of-order new records so a stale header cannot prune live history.
-	var remove [][]byte
-	if e = k.scan(child, historyPrefix, func(existing, _ []byte) error {
-		if len(existing) != 9 {
-			return errors.New("malformed historical native key")
-		}
-		height := int64(binary.BigEndian.Uint64(existing[1:]))
-		if height <= 0 {
-			return errors.New("invalid historical height")
-		}
-		if height > h.Header.Height && old == nil {
-			return errors.New("historical native insertion is out of order")
-		}
-		if h.Header.Height >= int64(p.HistoricalEntries) && height <= h.Header.Height-int64(p.HistoricalEntries) {
-			remove = append(remove, existing)
-		}
-		return nil
-	}); e != nil {
+	newest, prunedThrough, e := k.historyProgress(child)
+	if e != nil {
 		return e
+	}
+	if old == nil && h.Header.Height < newest {
+		return errors.New("historical native insertion is out of order")
+	}
+	if h.Header.Height > newest {
+		newest = h.Header.Height
+	}
+	// Seek only the stale range. Ordinary sequential blocks visit at most one
+	// stale row; gaps or lower retention delete every newly stale row without
+	// silently delaying retention or introducing a new work-count policy.
+	var remove [][]byte
+	cutoff := h.Header.Height - int64(p.HistoricalEntries)
+	if cutoff > prunedThrough {
+		it, err := state.Iterator([]byte{historyPrefix}, historyKey(cutoff+1))
+		if err != nil {
+			return err
+		}
+		for ; it.Valid(); it.Next() {
+			if e = it.Error(); e != nil {
+				break
+			}
+			key := it.Key()
+			if len(key) != 9 || key[0] != historyPrefix || int64(binary.BigEndian.Uint64(key[1:])) <= 0 {
+				e = errors.New("malformed historical native key")
+				break
+			}
+			remove = append(remove, bytes.Clone(key))
+		}
+		closeErr := it.Close()
+		if e != nil {
+			return e
+		}
+		if closeErr != nil {
+			return closeErr
+		}
+		prunedThrough = cutoff
 	}
 	if e = state.Set(key, data); e != nil {
 		return e
@@ -125,6 +206,9 @@ func (k *StateKeeper) SetHistoricalInfo(ctx sdk.Context, h types.HistoricalInfo)
 		if e = state.Delete(stale); e != nil {
 			return e
 		}
+	}
+	if e = k.setHistoryProgress(child, newest, prunedThrough); e != nil {
+		return e
 	}
 	commit()
 	return nil
