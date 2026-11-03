@@ -11,6 +11,7 @@ import (
 	coinconfig "github.com/maxwell2010/go-smart-node/network/decimal/coin/config"
 	cointypes "github.com/maxwell2010/go-smart-node/network/decimal/coin/types"
 	nfttypes "github.com/maxwell2010/go-smart-node/network/decimal/nft/types"
+	nativevalidatortypes "github.com/maxwell2010/go-smart-node/network/decimal/validator/types"
 	"github.com/maxwell2010/go-smart-node/network/identity"
 )
 
@@ -95,6 +96,22 @@ func ValidateNativeGenesisAllocation(cdc codec.JSONCodec, genesis map[string]jso
 	}
 	if len(coin.Coins) != 0 || len(coin.Checks) != 0 || len(nft.Collections) != 0 {
 		return errors.New("nonempty native asset genesis requires authenticated contract bootstrap and backing reconciliation, not yet enabled")
+	}
+	var validators nativevalidatortypes.GenesisState
+	if len(genesis[nativevalidatortypes.ModuleName]) == 0 {
+		return errors.New("native validator genesis must be explicit")
+	}
+	if err := cdc.UnmarshalJSON(genesis[nativevalidatortypes.ModuleName], &validators); err != nil {
+		return err
+	}
+	if err := validators.Validate(); err != nil {
+		return err
+	}
+	if validators.Params.BaseDenom != identity.BaseDenom {
+		return errors.New("native validator base denomination must be del")
+	}
+	if len(validators.Validators) != 0 || len(validators.Delegations) != 0 || len(validators.Undelegations) != 0 || len(validators.Redelegations) != 0 || len(validators.LastValidatorPowers) != 0 || validators.LastTotalPower != 0 || len(validators.ValidatorOfflineSince) != 0 || len(validators.ScheduledValidatorSets) != 0 {
+		return errors.New("nonempty native validator genesis requires authenticated financial bootstrap and consensus-controller activation, not yet enabled")
 	}
 	return nil
 }

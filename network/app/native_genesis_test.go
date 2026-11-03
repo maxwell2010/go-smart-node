@@ -9,6 +9,7 @@ import (
 	sdk "github.com/cosmos/cosmos-sdk/types"
 	banktypes "github.com/cosmos/cosmos-sdk/x/bank/types"
 	cointypes "github.com/maxwell2010/go-smart-node/network/decimal/coin/types"
+	nativevalidatortypes "github.com/maxwell2010/go-smart-node/network/decimal/validator/types"
 	"github.com/stretchr/testify/require"
 )
 
@@ -36,4 +37,19 @@ func TestNativeGenesisAllocationRequiresExplicitBuilder(t *testing.T) {
 	before = bytes.Clone(genesis["coin"])
 	require.Error(t, ReconcileNativeGenesisAllocation(cfg.Codec, genesis))
 	require.True(t, bytes.Equal(before, genesis["coin"]))
+}
+
+func TestNativeValidatorGenesisRequiresExplicitModuleAndDEL(t *testing.T) {
+	cfg := MakeEncodingConfig(990001)
+	genesis := DefaultGenesis(cfg.Codec)
+	before := bytes.Clone(genesis[nativevalidatortypes.ModuleName])
+	delete(genesis, nativevalidatortypes.ModuleName)
+	require.ErrorContains(t, ValidateNativeGenesisAllocation(cfg.Codec, genesis), "native validator genesis must be explicit")
+	var g nativevalidatortypes.GenesisState
+	cfg.Codec.MustUnmarshalJSON(before, &g)
+	g.Params.BaseDenom = "other"
+	genesis[nativevalidatortypes.ModuleName] = cfg.Codec.MustMarshalJSON(&g)
+	require.ErrorContains(t, ValidateNativeGenesisAllocation(cfg.Codec, genesis), "native validator base denomination must be del")
+	genesis[nativevalidatortypes.ModuleName] = before
+	require.NoError(t, ValidateNativeGenesisAllocation(cfg.Codec, genesis))
 }

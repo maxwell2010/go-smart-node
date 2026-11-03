@@ -14,6 +14,7 @@ import (
 	"github.com/cosmos/gogoproto/proto"
 	cointypes "github.com/maxwell2010/go-smart-node/network/decimal/coin/types"
 	nfttypes "github.com/maxwell2010/go-smart-node/network/decimal/nft/types"
+	nativevalidatortypes "github.com/maxwell2010/go-smart-node/network/decimal/validator/types"
 	"github.com/stretchr/testify/require"
 )
 
@@ -36,6 +37,9 @@ func assertMountedNativeAssetsBeforeInit(t *testing.T, a *App) {
 	// They are not an accepted contract-backed application genesis.
 	require.NoError(t, a.NativeCoinKeeper.InitGenesis(child, coinGenesis))
 	require.NoError(t, a.NativeNFTKeeper.InitGenesis(child, nftGenesis))
+	validatorGenesis := nativevalidatortypes.DefaultGenesisState()
+	validatorGenesis.Params.MaxEntries = 31
+	require.NoError(t, a.NativeValidatorKeeper.InitGenesis(child, validatorGenesis))
 	invoke := func(ctx sdk.Context, path string, request, response proto.Message) {
 		t.Helper()
 		handler := a.GRPCQueryRouter().Route(path)
@@ -45,6 +49,11 @@ func assertMountedNativeAssetsBeforeInit(t *testing.T, a *App) {
 		response.Reset()
 		require.NoError(t, a.appCodec.Unmarshal(result.Value, response))
 	}
+	var nativeParamsResponse nativevalidatortypes.QueryParamsResponse
+	invoke(child, "/decimal.validator.v1.Query/Params", &nativevalidatortypes.QueryParamsRequest{}, &nativeParamsResponse)
+	require.Equal(t, uint32(31), nativeParamsResponse.Params.MaxEntries)
+	_, err = a.NativeValidatorKeeper.GetParams(parent)
+	require.Error(t, err, "discarded native validator fixture must not initialize parent state")
 	var coinResponse cointypes.QueryCoinResponse
 	invoke(child, "/decimal.coin.v1.Query/Coin", &cointypes.QueryCoinRequest{Denom: coin.Denom}, &coinResponse)
 	require.Equal(t, coin.Volume, coinResponse.Coin.Volume)
@@ -103,7 +112,7 @@ func assertMountedNativeAssetsBeforeInit(t *testing.T, a *App) {
 	require.ErrorContains(t, err, "authenticated contract bootstrap")
 	_, err = a.NativeCoinKeeper.GetParams(parent)
 	require.Error(t, err)
-	for _, message := range []sdk.Msg{&cointypes.MsgCreateCoin{}, &nfttypes.MsgMintToken{}} {
+	for _, message := range []sdk.Msg{&cointypes.MsgCreateCoin{}, &nfttypes.MsgMintToken{}, &nativevalidatortypes.MsgDelegate{}, &nativevalidatortypes.MsgDelegateNFT{}} {
 		require.Nil(t, a.MsgServiceRouter().Handler(message), "native financial message routes must remain disabled")
 	}
 }
