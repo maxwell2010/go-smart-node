@@ -292,3 +292,13 @@ both exact sender-balance loss and total-supply reduction. Pausing in the fixtur
 uses bounded internal Gov-authority EVM setup, while the financial controls are
 signed transactions; these controls do not claim a production Gov proposal
 route for the new vault role.
+
+The fresh MasterValidator adds `getValidatorState(address)`, a fixed 96-byte
+(status, paused, penaltyCount) storage read. It never copies the append-only
+penalty array and does not change canonical sources, metadata events or monetary
+rules. Ordinary signed App controls cover the same validator at0 and257 penalty
+entries: the new getter uses exactly31197 pre-refund VM gas in both cases;
+canonical `isActive` in that freshly compiled class grows31972 to140646.
+The source/ABI extension alone does not replace old Gateway hot-path callers;
+those must explicitly adopt this bounded header before financial activation.
+All35 current artifacts reproduce byte-for-byte with pinned source/compiler.

@@ -25,6 +25,14 @@ contract NewNetworkMasterValidator is DecimalMasterValidator {
         return _getValidatorStorage()._contractCenter;
     }
 
+    /// @notice Fixed-size validator header; never copies the penalty array.
+    function getValidatorState(address validator) external view returns (
+        ValidatorStatus status, bool paused, uint256 penaltyCount
+    ) {
+        Validator storage state = _getValidatorStorage()._validators[validator];
+        return (state.status, state.paused, state.penaltyPercantages.length);
+    }
+
     /// @notice Bounded readers for native reconciliation; no monetary change.
     function getPenaltyCount(address validator) external view returns (uint256) {
         return _getValidatorStorage()._validators[validator].penaltyPercantages.length;
