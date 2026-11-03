@@ -1,0 +1,189 @@
+{
+  "binary": {
+    "bytes": 186653552,
+    "committed_binary": false,
+    "local_artifact_directory": "C:\\MintCandyBuild\\mcnd-audit-b9636dc-20261103-ordinary",
+    "runtime_commit": "b9636dc388f9c6456d824ec0a96d407ac53b8c66",
+    "server_name": "mcnd",
+    "sha256": "9686f6406d35910f7829009dbdc6777bfad350697215ca043b486588c1bbb19f",
+    "toolchain": "go1.26.10 linux/amd64"
+  },
+  "build_argv": [
+    "go",
+    "build",
+    "-mod=readonly",
+    "-p",
+    "1",
+    "-trimpath",
+    "-ldflags",
+    "-X main.buildCommit=b9636dc388f9c6456d824ec0a96d407ac53b8c66",
+    "-o",
+    "mcnd-b9636dc-linux-amd64",
+    "./cmd/mcnd"
+  ],
+  "files": {
+    ".gitattributes": {
+      "bytes": 9,
+      "sha256": "48747480eddba024928d03be9bf83dc579e5515768647507a767e8187a85c9ab"
+    },
+    "README.md": {
+      "bytes": 14568,
+      "sha256": "498d530a05fc5bae6218a731c09c57296d79c96f104d6c68f6a9947d4f32ef94"
+    },
+    "advisories/GO-2025-3684.json": {
+      "bytes": 880,
+      "sha256": "1f7e8b3fb3a6f0e228e88987048eb72ec24adeca5d5d54937dd4467d866a5773"
+    },
+    "advisories/GO-2026-4479.json": {
+      "bytes": 1471,
+      "sha256": "00d0a6dc7e8f5b8488ab1457dba86012737fe7ed27c3470bfd6fdf0fac29bc88"
+    },
+    "advisories/GO-2026-4507.json": {
+      "bytes": 1075,
+      "sha256": "d3ded45dfa579e01e4b9a26a91aabc85b570ca75a4e49c885e842e21ded54741"
+    },
+    "advisories/GO-2026-4511.json": {
+      "bytes": 1215,
+      "sha256": "aa5d2400cd29f967b113b567cef58300b6cc346f131b33f3af0396b90a5735e2"
+    },
+    "advisories/GO-2026-5932.json": {
+      "bytes": 1827,
+      "sha256": "bde8769150ec1368d9a8dbd61fbbde52296de692c57147e02e3ae295e1981f11"
+    },
+    "advisories/fork-geth-osv-query.json": {
+      "bytes": 245,
+      "sha256": "a7e3cc2860cd48e4d9f272fa10003f54596ee9c601453fdb6034900eaf1242d9"
+    },
+    "advisories/fork-geth-osv.json": {
+      "bytes": 2,
+      "sha256": "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a"
+    },
+    "advisories/upstream-geth-osv-query.json": {
+      "bytes": 238,
+      "sha256": "f543e1d745ff3754c289d50026ffc24e0186015d2fe9812f12fa7648b5bacaa4"
+    },
+    "advisories/upstream-geth-osv.json": {
+      "bytes": 14317,
+      "sha256": "3ffc95a6b3fbee4034737eb2f5dae0c6fcd2a23a4ec68aa71ec7867ec10f99a4"
+    },
+    "audit-tools.sha256": {
+      "bytes": 211,
+      "sha256": "23864018f255f7378145efce63d46d861338a92f7baae02e8bb853a4863e4c8e"
+    },
+    "binary-buildinfo.txt.gz": {
+      "bytes": 12467,
+      "sha256": "0e4213a0a5d66204ab0be9d5f01e4df1672925a12e6c12d416b411ba4fc5a2af"
+    },
+    "binary.gate.json": {
+      "bytes": 917,
+      "sha256": "5f257f75e124fdf1254750c6cb671e6b1f9c24fb128b17e540c2f63cdc0049c5"
+    },
+    "binary.jsonl.gz": {
+      "bytes": 122377,
+      "sha256": "801cf2abc6e465a3283b7179969bedbd83090c22ef0d20696a082629f24cd7a3"
+    },
+    "binary.manifest.json": {
+      "bytes": 696,
+      "sha256": "db3f6727f1124e6f72a6858afbae94e16471aef9d119e4dc8c92672b9bb9ff8a"
+    },
+    "binary.summary.json": {
+      "bytes": 6631,
+      "sha256": "b37c42c0900750bfa4bb09767d957abc14a3e17d2857d6926325af90ccd9f835"
+    },
+    "build-environment.json": {
+      "bytes": 337,
+      "sha256": "0e36b2c230e9eed3b94bec59982f41261a94e50b858d1da71905476833b248c4"
+    },
+    "import-paths.json": {
+      "bytes": 1991,
+      "sha256": "7a2527aee56cf5378550ddf785ca20826795ad64ca0a872218db51a8e142cda5"
+    },
+    "importgraph.txt.gz": {
+      "bytes": 50526,
+      "sha256": "0003a6b6633cd3f809547884b359b9bcba6797c38aa60ddf343e9338cccc2322"
+    },
+    "keys-help.txt": {
+      "bytes": 3486,
+      "sha256": "a98f7766e577ffc04eeaff2aa3630ce91b912b9babc0dbcd95ec24919aac0020"
+    },
+    "modules.jsonl.gz": {
+      "bytes": 56076,
+      "sha256": "c4a57409d4f2d378098408fd5bcf4038bfe7f6a26023cec7b5d8a831cc7e9168"
+    },
+    "owned-evm-verify.txt": {
+      "bytes": 67,
+      "sha256": "99d11a8ce1340f0dcbb76cb62983dc1edc401245f3e2ce9383e4a9bef9f397a8"
+    },
+    "owned-stun-verify.txt": {
+      "bytes": 67,
+      "sha256": "9655d87810276d0a969bc73438e2ace5e23e51239b654da1f0f44ef9f328b5bb"
+    },
+    "packages.txt.gz": {
+      "bytes": 12702,
+      "sha256": "b1a6a806f170faadaa9a3e3bcc3c2f31d207ea222a76586b75189ca7f0c12afc"
+    },
+    "post-build-mod-verify.txt": {
+      "bytes": 21,
+      "sha256": "b4537ed75f533f993f371954de47e42a793b8e5b0587577de7e27fb3e50696bd"
+    },
+    "runtime-version.json": {
+      "bytes": 10879,
+      "sha256": "8ae3a5110155fdf7d5074b5e28cbe0bd15832b4788c23e062d42430f0086ea86"
+    },
+    "scanner-buildinfo.txt": {
+      "bytes": 718,
+      "sha256": "cdf0bafb86787adf8480dc512d9b0832ccfde97e5c09d143a9741aed8bde776b"
+    },
+    "source.gate.json": {
+      "bytes": 814,
+      "sha256": "712262235239af621cde8275e975f376085d7aafa40bd683e6195b2b00a04d79"
+    },
+    "source.jsonl.gz": {
+      "bytes": 128288,
+      "sha256": "8e59046366c3b26564d478d64f631f933d06e926e3101c16ec240f1cbc30edb6"
+    },
+    "source.manifest.json": {
+      "bytes": 597,
+      "sha256": "7678cf89601e9052f383bde23a28dea9b46bb303fad0806da6fbbcadb7e20bea"
+    },
+    "source.summary.json": {
+      "bytes": 2175,
+      "sha256": "4ad4f50b191319aa002643fd40443fba9b1672bd9263534ef67580635a14b8e3"
+    },
+    "supplemental-symbols.json": {
+      "bytes": 1188,
+      "sha256": "3f37b36eb063b197d8ee12b06d7810a9ee7f15b609c3dfa268c29c45429a4b20"
+    },
+    "upstream-geth-review.json": {
+      "bytes": 2850,
+      "sha256": "11956743f9e7eb3909e70e61445f6423b63b3516a078e82d798ff5db07769064"
+    }
+  },
+  "gates": {
+    "binary": 1,
+    "source": 1
+  },
+  "owned_source_coverage": "Local replacements are not versioned entries in scanner SBOM; owned source verification is complementary identity evidence, not advisory closure.",
+  "recorded_utc": "2026-11-03T05:45:54.627795+00:00",
+  "scanner": {
+    "db_last_modified": "2026-11-02T22:01:43Z",
+    "executable_sha256": "18b257e9a691f1357255aec1228fa6cd74c0a50096130b99c230169cab7013d9",
+    "module": "golang.org/x/vuln",
+    "module_sum": "h1:12VaqnI9kJfqwRoPptxoqsUhQtdfrSbdksT7X/KY/sc=",
+    "name": "govulncheck",
+    "version": "v1.9.0"
+  },
+  "schema_version": 1,
+  "scope": "Actual default-build mcnd dependency snapshot, not the final integrated release and not mainnet replay. No exploit/bypass probes.",
+  "source_bindings": {
+    "network/go.mod": "b509be9b98bed8910b6ab24a63f40cc9bb270f08d17cdc359ccbbd50cf6d90f0",
+    "network/go.sum": "2f086845e0261c70be7e51ccd51e0124f9d2d97f00f3089af657ebab93638d4d",
+    "network/third_party/cosmos-evm/UPSTREAM.json": "4595f84643e2a103b9d5e279a33405e5ce79ed3ef973e920bc7e1c5927274c02",
+    "network/third_party/pion-stun-v2/UPSTREAM.json": "22052a85f4831bdfcbc5857097cc2047e6346f5b6478961ad980b79a648de9ac",
+    "scripts/audit/capture_govuln.py": "81c0646a02dbb5f13a9f5277318d0944b8adb68b39afe9edb482263f8c2bbe1f",
+    "scripts/audit/govuln_gate.py": "e2b2916621b29026b6f0235b434b1a2eae1f156e1eb983132c75615822d5e8a3",
+    "scripts/audit/summarize_govuln.py": "4cab9735b0f0eb6c4d8e0ac37355be8193560d2e067b93b410cd25125d273746"
+  },
+  "source_clean_during_build_and_scans": true,
+  "source_commit": "b9636dc388f9c6456d824ec0a96d407ac53b8c66"
+}

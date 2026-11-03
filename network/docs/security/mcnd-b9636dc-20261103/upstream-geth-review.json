@@ -1,0 +1,68 @@
+{
+  "ahead_by": 2,
+  "base_commit": "dd1ebac11757484575ee779381af32f29ce3fbe4",
+  "behind_by": 0,
+  "changed_files": [
+    ".github/workflows/build.yml",
+    ".github/workflows/dependencies.yml",
+    ".github/workflows/lint.yml",
+    ".github/workflows/markdown-links.yml",
+    ".github/workflows/security.yml",
+    ".github/workflows/super-linter.yml",
+    ".github/workflows/test.yml",
+    "core/state/statedb.go",
+    "core/state/statedb_hooked.go",
+    "core/state_transition.go",
+    "core/vm/contract.go",
+    "core/vm/contracts.go",
+    "core/vm/contracts_fuzz_test.go",
+    "core/vm/contracts_test.go",
+    "core/vm/custom_contract.go",
+    "core/vm/custom_contracts.go",
+    "core/vm/custom_eip.go",
+    "core/vm/custom_eip_test.go",
+    "core/vm/custom_eip_testing.go",
+    "core/vm/evm.go",
+    "core/vm/interface.go",
+    "core/vm/interpreter.go",
+    "core/vm/jump_table.go",
+    "core/vm/opcode_hooks.go",
+    "internal/ethapi/api_test.go",
+    "internal/ethapi/override/override_test.go",
+    "tests/fuzzers/bls12381/precompile_fuzzer.go"
+  ],
+  "code_hashes": [
+    {
+      "byte_identical": true,
+      "captured_utc": "2026-11-03T05:44:33.391987+00:00",
+      "fork_sha256": "468161ec6d2e4ea8e8a29d18a71b42554038bd59433ca2c38e0f03e61149e886",
+      "relative_path": "crypto/secp256k1/curve.go",
+      "source_url": "https://raw.githubusercontent.com/ethereum/go-ethereum/dd1ebac11757484575ee779381af32f29ce3fbe4/crypto/secp256k1/curve.go",
+      "upstream_sha256": "468161ec6d2e4ea8e8a29d18a71b42554038bd59433ca2c38e0f03e61149e886"
+    },
+    {
+      "byte_identical": true,
+      "captured_utc": "2026-11-03T05:44:33.773302+00:00",
+      "fork_sha256": "a0809cd64fb8778dc2a4adaa4bf35332551c706cde9086be389d25c4ed8672af",
+      "relative_path": "crypto/ecies/ecies.go",
+      "source_url": "https://raw.githubusercontent.com/ethereum/go-ethereum/dd1ebac11757484575ee779381af32f29ce3fbe4/crypto/ecies/ecies.go",
+      "upstream_sha256": "a0809cd64fb8778dc2a4adaa4bf35332551c706cde9086be389d25c4ed8672af"
+    }
+  ],
+  "commits": [
+    {
+      "sha": "2fc7571efa910e6e6195b6fccdc4c2cec839280c",
+      "subject": "feat: port cosmos patch to 1.16 (#7)"
+    },
+    {
+      "sha": "9a3ffad54df1d51db495036a29bf5799be36b4e2",
+      "subject": "Problem: no efficient GetStorageRoot impl in cosmos/evm (#9)"
+    }
+  ],
+  "comparison_url": "https://api.github.com/repos/cosmos/go-ethereum/compare/dd1ebac11757484575ee779381af32f29ce3fbe4...9a3ffad54df1d51db495036a29bf5799be36b4e2",
+  "head_commit": "9a3ffad54df1d51db495036a29bf5799be36b4e2",
+  "merge_base_commit": "dd1ebac11757484575ee779381af32f29ce3fbe4",
+  "raw_response_sha256": "9f5d554be80c2a00966b0d870e602a59e77947f976dfb38f9009570253298337",
+  "scope": "Static identity/source comparison only; no exploit execution and no daemon remote-exposure conclusion.",
+  "status": "ahead"
+}

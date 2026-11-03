@@ -1,0 +1,11 @@
+{
+  "query": {
+    "package": {
+      "name": "github.com/cosmos/go-ethereum",
+      "ecosystem": "Go"
+    },
+    "version": "v1.16.2-cosmos-1"
+  },
+  "url": "https://api.osv.dev/v1/query",
+  "captured_utc": "2026-11-03T05:36:04.032523+00:00"
+}

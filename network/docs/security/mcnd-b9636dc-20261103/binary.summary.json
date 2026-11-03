@@ -1,0 +1,130 @@
+{
+  "advisories": [
+    {
+      "entrypoints": [
+        "github.com/pion/dtls/v2.allCipherSuites",
+        "github.com/pion/dtls/v2.init",
+        "github.com/pion/dtls/v2/internal/ciphersuite.AuthenticationType",
+        "github.com/pion/dtls/v2/internal/ciphersuite.CertificateType",
+        "github.com/pion/dtls/v2/internal/ciphersuite.Decrypt",
+        "github.com/pion/dtls/v2/internal/ciphersuite.ECC",
+        "github.com/pion/dtls/v2/internal/ciphersuite.Encrypt",
+        "github.com/pion/dtls/v2/internal/ciphersuite.HashFunc",
+        "github.com/pion/dtls/v2/internal/ciphersuite.ID",
+        "github.com/pion/dtls/v2/internal/ciphersuite.Init",
+        "github.com/pion/dtls/v2/internal/ciphersuite.IsInitialized",
+        "github.com/pion/dtls/v2/internal/ciphersuite.KeyExchangeAlgorithm",
+        "github.com/pion/dtls/v2/internal/ciphersuite.NewTLSEcdheEcdsaWithAes128Ccm",
+        "github.com/pion/dtls/v2/internal/ciphersuite.NewTLSEcdheEcdsaWithAes128Ccm8",
+        "github.com/pion/dtls/v2/internal/ciphersuite.NewTLSPskWithAes128Ccm",
+        "github.com/pion/dtls/v2/internal/ciphersuite.NewTLSPskWithAes128Ccm8",
+        "github.com/pion/dtls/v2/internal/ciphersuite.NewTLSPskWithAes256Ccm8",
+        "github.com/pion/dtls/v2/internal/ciphersuite.String",
+        "github.com/pion/dtls/v2/internal/ciphersuite/types.Has",
+        "github.com/pion/dtls/v2/internal/util.BigEndianUint24",
+        "github.com/pion/dtls/v2/internal/util.Max",
+        "github.com/pion/dtls/v2/internal/util.PutBigEndianUint24",
+        "github.com/pion/dtls/v2/internal/util.PutBigEndianUint48",
+        "github.com/pion/dtls/v2/pkg/crypto/ccm.MaxLength",
+        "github.com/pion/dtls/v2/pkg/crypto/ccm.NewCCM",
+        "github.com/pion/dtls/v2/pkg/crypto/ccm.NonceSize",
+        "github.com/pion/dtls/v2/pkg/crypto/ccm.Open",
+        "github.com/pion/dtls/v2/pkg/crypto/ccm.Overhead",
+        "github.com/pion/dtls/v2/pkg/crypto/ccm.Seal",
+        "github.com/pion/dtls/v2/pkg/crypto/ciphersuite.Decrypt",
+        "github.com/pion/dtls/v2/pkg/crypto/ciphersuite.Encrypt",
+        "github.com/pion/dtls/v2/pkg/crypto/ciphersuite.NewCBC",
+        "github.com/pion/dtls/v2/pkg/crypto/ciphersuite.NewCCM",
+        "github.com/pion/dtls/v2/pkg/crypto/ciphersuite.NewGCM",
+        "github.com/pion/dtls/v2/pkg/crypto/clientcertificate.Types",
+        "github.com/pion/dtls/v2/pkg/crypto/elliptic.CurveTypes",
+        "github.com/pion/dtls/v2/pkg/crypto/elliptic.Curves",
+        "github.com/pion/dtls/v2/pkg/crypto/elliptic.String",
+        "github.com/pion/dtls/v2/pkg/crypto/hash.Algorithms",
+        "github.com/pion/dtls/v2/pkg/crypto/hash.CryptoHash",
+        "github.com/pion/dtls/v2/pkg/crypto/hash.Digest",
+        "github.com/pion/dtls/v2/pkg/crypto/hash.Insecure",
+        "github.com/pion/dtls/v2/pkg/crypto/hash.String",
+        "github.com/pion/dtls/v2/pkg/crypto/prf.GenerateEncryptionKeys",
+        "github.com/pion/dtls/v2/pkg/crypto/prf.PHash",
+        "github.com/pion/dtls/v2/pkg/crypto/signature.Algorithms",
+        "github.com/pion/dtls/v2/pkg/protocol.CompressionMethods",
+        "github.com/pion/dtls/v2/pkg/protocol.ContentType",
+        "github.com/pion/dtls/v2/pkg/protocol.DecodeCompressionMethods",
+        "github.com/pion/dtls/v2/pkg/protocol.EncodeCompressionMethods",
+        "github.com/pion/dtls/v2/pkg/protocol.Equal",
+        "github.com/pion/dtls/v2/pkg/protocol.Error",
+        "github.com/pion/dtls/v2/pkg/protocol.Marshal",
+        "github.com/pion/dtls/v2/pkg/protocol.Temporary",
+        "github.com/pion/dtls/v2/pkg/protocol.Timeout",
+        "github.com/pion/dtls/v2/pkg/protocol.Unmarshal",
+        "github.com/pion/dtls/v2/pkg/protocol.Unwrap",
+        "github.com/pion/dtls/v2/pkg/protocol/alert.ContentType",
+        "github.com/pion/dtls/v2/pkg/protocol/alert.Marshal",
+        "github.com/pion/dtls/v2/pkg/protocol/alert.String",
+        "github.com/pion/dtls/v2/pkg/protocol/alert.Unmarshal",
+        "github.com/pion/dtls/v2/pkg/protocol/extension.Marshal",
+        "github.com/pion/dtls/v2/pkg/protocol/extension.TypeValue",
+        "github.com/pion/dtls/v2/pkg/protocol/extension.Unmarshal",
+        "github.com/pion/dtls/v2/pkg/protocol/handshake.ContentType",
+        "github.com/pion/dtls/v2/pkg/protocol/handshake.Marshal",
+        "github.com/pion/dtls/v2/pkg/protocol/handshake.MarshalFixed",
+        "github.com/pion/dtls/v2/pkg/protocol/handshake.Populate",
+        "github.com/pion/dtls/v2/pkg/protocol/handshake.String",
+        "github.com/pion/dtls/v2/pkg/protocol/handshake.Type",
+        "github.com/pion/dtls/v2/pkg/protocol/handshake.Unmarshal",
+        "github.com/pion/dtls/v2/pkg/protocol/handshake.UnmarshalFixed",
+        "github.com/pion/dtls/v2/pkg/protocol/recordlayer.Marshal",
+        "github.com/pion/dtls/v2/pkg/protocol/recordlayer.Unmarshal"
+      ],
+      "fixed_versions_in_scanned_modules": {
+        "github.com/pion/dtls/v2": []
+      },
+      "id": "GO-2026-4479",
+      "modules": {
+        "github.com/pion/dtls/v2": "transitive"
+      },
+      "shortest_trace": [
+        "github.com/pion/dtls/v2/internal/ciphersuite.ID"
+      ],
+      "source": "https://pkg.go.dev/vuln/GO-2026-4479",
+      "summary": "Usage of random nonce generation with AES GCM ciphers risks leaking the authentication key in github.com/pion/dtls",
+      "symbol_finding_count": 241
+    },
+    {
+      "entrypoints": [
+        "golang.org/x/crypto/openpgp/armor.Close",
+        "golang.org/x/crypto/openpgp/armor.Decode",
+        "golang.org/x/crypto/openpgp/armor.Encode",
+        "golang.org/x/crypto/openpgp/armor.Read",
+        "golang.org/x/crypto/openpgp/armor.Write",
+        "golang.org/x/crypto/openpgp/errors.Error"
+      ],
+      "fixed_versions_in_scanned_modules": {
+        "golang.org/x/crypto": [
+          "0.58.1-0.20261009181718-2f1f834330b2"
+        ]
+      },
+      "id": "GO-2026-5932",
+      "modules": {
+        "golang.org/x/crypto": "direct"
+      },
+      "shortest_trace": [
+        "golang.org/x/crypto/openpgp/armor.Decode"
+      ],
+      "source": "https://pkg.go.dev/vuln/GO-2026-5932",
+      "summary": "The golang.org/x/crypto/openpgp package is unmaintained, unsafe by design, and has known security issues",
+      "symbol_finding_count": 9
+    }
+  ],
+  "distinct_symbol_advisories": 2,
+  "notes": [
+    "Symbol traces are static potential reachability, not exploit validation.",
+    "Toolchain vulnerabilities execute in runtime libraries too; provenance is not exposure.",
+    "Direct means an explicit non-indirect go.mod require in this snapshot."
+  ],
+  "provenance_buckets": {
+    "direct": 1,
+    "transitive": 1
+  }
+}

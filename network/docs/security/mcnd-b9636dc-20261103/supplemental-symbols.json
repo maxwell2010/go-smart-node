@@ -1,0 +1,33 @@
+{
+  "binary_sha256": "9686f6406d35910f7829009dbdc6777bfad350697215ca043b486588c1bbb19f",
+  "full_nm_bytes": 18211145,
+  "full_nm_sha256": "e94e54bb0ba0c299462e84b5f6684a42171996ca52498ea23a28729759805420",
+  "limitation": "A present symbol is not proof of an exposed entrypoint. Absence of a standalone nm symbol is not proof of complete absence or unreachability, including inlined code.",
+  "symbols": [
+    {
+      "name": "github.com/ethereum/go-ethereum/crypto/secp256k1.(*BitCurve).IsOnCurve",
+      "standalone_symbol_present": true
+    },
+    {
+      "name": "github.com/ethereum/go-ethereum/crypto/ecies.Encrypt",
+      "standalone_symbol_present": false
+    },
+    {
+      "name": "github.com/ethereum/go-ethereum/crypto/ecies.(*PrivateKey).Decrypt",
+      "standalone_symbol_present": false
+    },
+    {
+      "name": "github.com/ethereum/go-ethereum/crypto/ecies.(*PrivateKey).GenerateShared",
+      "standalone_symbol_present": false
+    },
+    {
+      "name": "github.com/pion/stun/v2.DialURI",
+      "standalone_symbol_present": false
+    },
+    {
+      "name": "github.com/pion/dtls/v2.Client",
+      "standalone_symbol_present": false
+    }
+  ],
+  "tool": "go tool nm"
+}

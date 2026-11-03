@@ -1,0 +1,19 @@
+{
+  "argv": [
+    "/opt/mintcandy-tools/vuln190/govulncheck",
+    "-json",
+    "-mode",
+    "binary",
+    "/mnt/c/MintCandyBuild/mcnd-audit-b9636dc-20261103-ordinary/mcnd-b9636dc-linux-amd64"
+  ],
+  "completed": true,
+  "completed_utc": "2026-11-03T05:42:31.516796+00:00",
+  "raw_bytes": 1194451,
+  "raw_sha256": "1f258e2ecd1c56eddca8f7073fd67588744280a24ea8248e2c11ca9f90744fcd",
+  "scanner_exit_code": 0,
+  "schema_version": 1,
+  "scope": "actual mcnd compiled binary; b9636dc clean source; linux/amd64; CGO=1; default tags",
+  "source_commit": "b9636dc388f9c6456d824ec0a96d407ac53b8c66",
+  "started_utc": "2026-11-03T05:41:36.015847+00:00",
+  "toolchain": "go version go1.26.10 linux/amd64"
+}

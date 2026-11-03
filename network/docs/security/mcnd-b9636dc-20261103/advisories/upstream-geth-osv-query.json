@@ -1,0 +1,11 @@
+{
+  "query": {
+    "package": {
+      "name": "github.com/ethereum/go-ethereum",
+      "ecosystem": "Go"
+    },
+    "version": "v1.16.2"
+  },
+  "url": "https://api.osv.dev/v1/query",
+  "captured_utc": "2026-11-03T05:36:03.640218+00:00"
+}

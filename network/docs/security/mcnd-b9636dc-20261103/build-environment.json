@@ -1,0 +1,14 @@
+{
+	"CC": "gcc",
+	"CGO_ENABLED": "1",
+	"GOAMD64": "v1",
+	"GOARCH": "amd64",
+	"GOCACHE": "/mnt/c/MintCandyBuild/cache53-build",
+	"GOFLAGS": "",
+	"GOMODCACHE": "/opt/mintcandy-modern-cache/modules",
+	"GOOS": "linux",
+	"GOPROXY": "https://proxy.golang.org",
+	"GOSUMDB": "sum.golang.org",
+	"GOTOOLCHAIN": "local",
+	"GOVERSION": "go1.26.10"
+}
