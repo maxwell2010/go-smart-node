@@ -1,0 +1,35 @@
+{
+  "binarySha256": "a5b359c7ec929621cca2858dac52e9bd108ea7f66de35178394c7417058ee9e5",
+  "commands": [
+    "version",
+    "version",
+    "init",
+    "genesis",
+    "genesis",
+    "comet",
+    "snapshots"
+  ],
+  "kind": "ci",
+  "nativeLinuxFixtureModes": {
+    "node_key.json": "0o600",
+    "priv_validator_key.json": "0o600",
+    "retentionBackup": "0o644"
+  },
+  "noChainDatabaseCreated": true,
+  "nodeIdFormatValid": true,
+  "profile": {
+    "blockFloor": 1000000,
+    "cometIndexer": "kv",
+    "discardABCI": false,
+    "keepRecent": "10000",
+    "pruning": "custom"
+  },
+  "recordedLimitation": "88ed version creates client.toml; root CLI fix and a new binary check are required. No App/chain database was started.",
+  "scope": "Ordinary off-chain CLI acceptance only; no start, RPC, transactions or financial/snapshot restoration claim",
+  "sourceCommit": "88ed5365340a6cf22bb757b27a9a9e5eef3dbe28",
+  "validatorSigningStateUnchanged": true,
+  "versionCreatedFiles": [
+    "config/client.toml"
+  ],
+  "versionHomeNotCreated": false
+}

@@ -1,0 +1,46 @@
+{
+  "archives": {
+    "latest-helper-development-linux-amd64.tar.gz": {
+      "allManifestHashesVerified": true,
+      "binarySha256": "e2fb07b379e60a82b8310d00c59baae33169d72c1277a538f16128f3dbe46a4c",
+      "binaryTarMode": "0o755",
+      "bytes": 77594152,
+      "manifestMembers": 34,
+      "sha256": "f3897a583e5da799f19c4d657be2e56c4669491cb81424e8444485540a4297ee",
+      "sourceInventoryEqualToCI": true,
+      "verifiedBuildModules": 247
+    },
+    "local-development-linux-amd64.tar.gz": {
+      "allManifestHashesVerified": true,
+      "binarySha256": "e2fb07b379e60a82b8310d00c59baae33169d72c1277a538f16128f3dbe46a4c",
+      "binaryTarMode": "0o755",
+      "bytes": 77583002,
+      "manifestMembers": 33,
+      "sha256": "8f0a0f433b1d182d43df9fb575c61f9c2f339aaaffc7ccac7dcb1889dfcceacd",
+      "sourceInventoryEqualToCI": true
+    },
+    "mcnd-development-linux-amd64.tar.gz": {
+      "allManifestHashesVerified": true,
+      "binarySha256": "a5b359c7ec929621cca2858dac52e9bd108ea7f66de35178394c7417058ee9e5",
+      "binaryTarMode": "0o755",
+      "bytes": 77582923,
+      "manifestMembers": 33,
+      "sha256": "2615b19e1965ce75573935f50d4ac45c06993458efad817906eecd6fd4a0f2c5",
+      "sourceInventoryEqualToCI": true
+    }
+  },
+  "ciLocalBinaryByteIdentical": false,
+  "ciLocalNormalizedGoMetadataEqual": true,
+  "ciLocalPrePostSourceInputsEqual": true,
+  "fixtureScope": "No node start, DB, RPC requests or transactions; native/tmp CLI fixtures only. Both88 binaries create only client.toml during version; fixed newer binary requires separate check.",
+  "helperCanonicalHashes": {
+    "network/tools/binary_provenance.py": "0b82ce8a72da7016833dee135b76f08032f4909ac8c51806e4c6aa2d98720b43",
+    "network/tools/package_mcnd.py": "d9344ff08f713a72231f3c8f058b8c2faeff4d73c9c42b98e5d3ffbc0ffe0d38",
+    "network/tools/source_inventory.py": "988ee4837e54e108c64f74eb77a418cf8a0449563acadde002032d18a9b0b354"
+  },
+  "latestPackagingHelperCommit": "c7b10bd8b0c88f12ce84f41b24f3d9eeb0c1cf31",
+  "localPackages": 366,
+  "reproducibilityScope": "Bitwise reproducibility is not established. Both .comment identify the same GCC version; identical Go metadata/source inputs are not proof that all linking inputs/environments are identical. No unsupported rebuild was used to explain the differing SHA.",
+  "sourceCommit": "88ed5365340a6cf22bb757b27a9a9e5eef3dbe28",
+  "sourceInputFiles": 1877
+}

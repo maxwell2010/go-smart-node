@@ -1,0 +1,100 @@
+{
+  "acceptanceTestCommit": "6679269112802998dccb288f95432124535e1742",
+  "files": {
+    ".gitattributes": {
+      "bytes": 9,
+      "sha256": "48747480eddba024928d03be9bf83dc579e5515768647507a767e8187a85c9ab"
+    },
+    "README.md": {
+      "bytes": 5364,
+      "sha256": "37a93d84e4ebae5f3a1ccd4ffe5756d5b4d7f52829ba7e9cda9a5cc27a2b8454"
+    },
+    "acceptance-summary.json": {
+      "bytes": 2400,
+      "sha256": "9b1b8abbde4ad72a274489ae6e483c55d3b928714cfdd53c8b282f8ea8930a97"
+    },
+    "ci-BUILD_INFO.txt.gz": {
+      "bytes": 12446,
+      "sha256": "933048d9f48ad41794f6dd6848109cd64748677e28fb7886732e276aa6f720e9"
+    },
+    "ci-SOURCE_INPUTS.json.gz": {
+      "bytes": 88065,
+      "sha256": "bcaa7dfae56637708f8035bbdbed2f37dbbeee8cfb3b528023cd87f8036347d2"
+    },
+    "ci-artifact-acceptance.log": {
+      "bytes": 699,
+      "sha256": "90f87de7147fcd1f591a738add0a0ab0f74df2ee7fd0bfd43e4171f6384763c0"
+    },
+    "ci-c-compiler-comment.txt": {
+      "bytes": 94,
+      "sha256": "ae393d923faf3d2aebfc196165741f504096d03bee004de8f98ef7fb10cb4e13"
+    },
+    "ci-cli-smoke.json": {
+      "bytes": 1040,
+      "sha256": "b55f60a1c79f727e5392372435c4ef4d91b78c76aff9ba4e62556d29ed1417ec"
+    },
+    "ci-elf-versions.txt.gz": {
+      "bytes": 477,
+      "sha256": "f67445e4af9798c0f41e4283d62070ac773f4b2298bdfdc6c501d37a64936830"
+    },
+    "existing-destination-refusal.json": {
+      "bytes": 281,
+      "sha256": "58cac91c050adee0196a3f8cfd63d2fc96e2b88a0e05bf57e614226c1a30b593"
+    },
+    "github-artifact-metadata.json": {
+      "bytes": 907,
+      "sha256": "74e9d46fe5325c3f75e0a198fd3ba5b44c9c4c043eb74172dd7c3b15489e2041"
+    },
+    "install.log": {
+      "bytes": 1708,
+      "sha256": "5d68eb6588394339db706e6958fe0fa29125e4c0fae5934cad15002d8ca27002"
+    },
+    "latest-VERIFIED_BUILD.json.gz": {
+      "bytes": 13973,
+      "sha256": "a9844e62797561eb1ee7f46f4d1a8882a66511a96e4c92efaef418ccdd770f36"
+    },
+    "latest-helper-development-linux-amd64.tar.gz.sha256": {
+      "bytes": 111,
+      "sha256": "ba3ab0ed9faa656341203bc94a05524523bd59ec678d08ec70fdbba48b8f2a9a"
+    },
+    "latest-package.log": {
+      "bytes": 65,
+      "sha256": "7f9e3323ed712e09ab76fc91bca37c51dbd8f2baf06a41be106ff03f8b56d0e2"
+    },
+    "local-build-info.txt.gz": {
+      "bytes": 12480,
+      "sha256": "bfe5f6165a59cf6fbfe6d9029b65fa639bc94332c8a9bb1e2546b95dd025ca03"
+    },
+    "local-c-compiler-comment.txt": {
+      "bytes": 94,
+      "sha256": "ae393d923faf3d2aebfc196165741f504096d03bee004de8f98ef7fb10cb4e13"
+    },
+    "local-cli-smoke.json": {
+      "bytes": 1043,
+      "sha256": "f635e95051e6793c312ddcfb1f247b43599d44baf5b58f0faae3b53afb55c562"
+    },
+    "local-development-linux-amd64.tar.gz.sha256": {
+      "bytes": 103,
+      "sha256": "56b4658f34bcd7b52f136d51a53f3cb8161f5448b752b324dd2143f6884bfed4"
+    },
+    "local-gcc-version.txt": {
+      "bytes": 246,
+      "sha256": "8497f84b2b8334c413d9c6166bd39d009ba55d2ff60a8f23e66dfa5819c2b048"
+    },
+    "local-postbuild-source-inputs.json.gz": {
+      "bytes": 88065,
+      "sha256": "bcaa7dfae56637708f8035bbdbed2f37dbbeee8cfb3b528023cd87f8036347d2"
+    },
+    "local-prebuild-source-inputs.json.gz": {
+      "bytes": 88065,
+      "sha256": "bcaa7dfae56637708f8035bbdbed2f37dbbeee8cfb3b528023cd87f8036347d2"
+    },
+    "mcnd-development-linux-amd64.tar.gz.sha256": {
+      "bytes": 102,
+      "sha256": "e17aa7fb4589f578fc0c5a594f664fc1bf63742ffbb0bac6183c1831185f9985"
+    }
+  },
+  "latestPackagingHelperCommit": "c7b10bd8b0c88f12ce84f41b24f3d9eeb0c1cf31",
+  "scope": "Actual development install/package/off-chain CLI acceptance only; recorded version side effect and no bitwise reproducibility claim",
+  "sourceCommit": "88ed5365340a6cf22bb757b27a9a9e5eef3dbe28"
+}

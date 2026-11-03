@@ -1,0 +1,10 @@
+Owned EVM source verification PASS: 1237 files, 3 declared changes
+Owned geth source verification PASS: 2261 files, 5 declared changes
+Owned SDK integrity PASS: 2141 files, 3 modified canonical files
+all modules verified
+{"compiled_legacy_imports": [], "input_sha256": {"go.mod": "8b80a6187f0907b25fd53061fe2626bb931bd8573ab300a733acadb6aad17ad3", "go.sum": "f0fc72dd7e2f75e0cbab5dbe2c5e9a3db5a361db6bce463ed0e758b57603786d"}, "legacy_mvs_inventory": {"github.com/pion/dtls/v2": "v2.2.7", "github.com/pion/stun/v2": "v2.0.0"}, "module_integrity": "all modules verified", "modules": {"github.com/pion/dtls/v3": {"GoModSum": "h1:iKFQNYrjsN2TiA2YKKMqB9MOZaFpjFULBI/A4sW0eyc=", "Sum": "h1:okWk5LNwU21DfhvG8z4wm45knHVSPEdkihwp6BxfQcc=", "Version": "v3.1.15"}, "github.com/pion/stun/v3": {"GoModSum": "h1:Nq77RW4aRrSNrltf2ksUJLjxWeipj4lnlgdsYIxC8g8=", "Sum": "h1:uRXMTlGLf89WgItGNyZ6aR5jMTX0NBbybXADpQCzn+E=", "Version": "v3.1.7"}}, "scope": "Default mcnd package imports and canonical source integrity; no advisory suppression or runtime exposure assertion."}
+Owned SDK integrity PASS: 2141 files, 3 modified canonical files
+{"legacyCompiledImports": [], "maintainedModule": {"GoModSum": "h1:/RaSu30DaKO4RY+XdV/ACcCcZkGr7AhUIduq5sjzzCo=", "Sum": "h1:cucYnvqcY7UOXVD//mSyjeaPY0SSN3v5cDkYPxumINk=", "Version": "v1.5.2"}, "moduleIntegrity": "all modules verified", "scannerCoverage": "Local SDK replacement requires explicit canonical SDK advisory review; import verification alone is not an advisory closure or complete audit."}
+0.0.0-dev
+Installed DEVELOPMENT binary: /mnt/c/MintCandyBuild/mcnd-install-acceptance-88ed536-20261103/installed/mcnd-88ed536
+No node home, keys, genesis or systemd service was created.

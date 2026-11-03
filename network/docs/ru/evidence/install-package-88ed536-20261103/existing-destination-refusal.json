@@ -1,0 +1,6 @@
+{
+  "binarySha256Unchanged": "e2fb07b379e60a82b8310d00c59baae33169d72c1277a538f16128f3dbe46a4c",
+  "exitCode": 1,
+  "expectedError": "destination already exists; choose a new versioned path",
+  "scope": "Ordinary existing-destination refusal; no build/node/home/service changes"
+}

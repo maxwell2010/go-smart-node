@@ -1,0 +1,8 @@
+test_actual_ci_elf_build_metadata_matches_packaged_metadata (test_development_artifact_acceptance.PublishedDevelopmentArtifactAcceptance.test_actual_ci_elf_build_metadata_matches_packaged_metadata) ... ok
+test_every_production_input_matches_the_pinned_git_blob (test_development_artifact_acceptance.PublishedDevelopmentArtifactAcceptance.test_every_production_input_matches_the_pinned_git_blob) ... ok
+test_github_digest_sidecar_and_complete_archive_manifest (test_development_artifact_acceptance.PublishedDevelopmentArtifactAcceptance.test_github_digest_sidecar_and_complete_archive_manifest) ... ok
+
+----------------------------------------------------------------------
+Ran 3 tests in 9.451s
+
+OK
