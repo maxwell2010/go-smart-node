@@ -2,6 +2,7 @@ package keeper
 
 import (
 	"bytes"
+	sdkmath "cosmossdk.io/math"
 	"encoding/binary"
 	"errors"
 	cmttypes "github.com/cometbft/cometbft/types"
@@ -158,21 +159,37 @@ func (k *StateKeeper) EndBlockValidatorUpdates(ctx sdk.Context, effective []type
 		}
 		updates = append(updates, abci.ValidatorUpdate{PubKey: wire, Power: changed[operator]})
 	}
-	// Demote before promoting to preserve MaxValidators at every validated write.
-	for _, v := range all {
-		if next[v.OperatorAddress] == 0 && v.Status == types.BondStatus_Bonded {
-			v.Status = types.BondStatus_Unbonded
-			if err = k.SetValidator(child, v); err != nil {
-				return nil, err
-			}
+	// Validate the complete final status map once. Writing individual validated
+	// transitions would reject a valid swap at MaxValidators or require O(N^2)
+	// repeated metadata scans. All writes remain inside this outer child cache.
+	changedStatuses := make([]types.Validator, 0)
+	finalValidators := append([]types.Validator(nil), all...)
+	for i, v := range finalValidators {
+		status := v.Status
+		if next[v.OperatorAddress] > 0 {
+			status = types.BondStatus_Bonded
+		} else if status == types.BondStatus_Bonded {
+			status = types.BondStatus_Unbonded
+		}
+		if status != v.Status {
+			v.Status = status
+			finalValidators[i] = v
+			changedStatuses = append(changedStatuses, v)
 		}
 	}
-	for _, v := range all {
-		if next[v.OperatorAddress] > 0 && v.Status != types.BondStatus_Bonded {
-			v.Status = types.BondStatus_Bonded
-			if err = k.SetValidator(child, v); err != nil {
-				return nil, err
-			}
+	if err = (types.GenesisState{Params: params, Validators: finalValidators}).Validate(); err != nil {
+		return nil, err
+	}
+	for _, v := range changedStatuses {
+		key, err := operatorKey(validatorPrefix, v.OperatorAddress)
+		if err != nil {
+			return nil, err
+		}
+		// Status is metadata only. The independently hydrated RS row and consensus
+		// index remain unchanged, including earned rewards and aggregate power.
+		v.Rewards, v.TotalRewards, v.Stake = sdkmath.ZeroInt(), sdkmath.ZeroInt(), 0
+		if err = k.put(child, key, &v); err != nil {
+			return nil, err
 		}
 	}
 	if err = k.SetLastValidatorPowers(child, powers); err != nil {
