@@ -151,13 +151,17 @@ func approved(hash common.Hash, hashes []common.Hash) bool {
 func (k *Keeper) invoke(ctx sdk.Context, target common.Address, data []byte, gas uint64, commit bool) (*evmtypes.MsgEthereumTxResponse, core.Message, error) {
 	msg := core.Message{From: k.owner, To: &target, Value: new(big.Int), GasLimit: gas, GasPrice: new(big.Int), GasFeeCap: new(big.Int), GasTipCap: new(big.Int), Data: append([]byte(nil), data...), SkipNonceChecks: true, SkipFromEOACheck: true}
 	result, err := k.evm.ApplyMessage(ctx, statedb.New(ctx, k.evm, statedb.NewEmptyTxConfig()), msg, nil, commit, false, true)
+	if result != nil {
+		// Internal execution has no fee-payer refund. Its resource budget must
+		// cover the work before storage refunds, including rejected calls.
+		ctx.GasMeter().ConsumeGas(min(max(result.MaxUsedGas, result.GasUsed), gas), "governance internal EVM work")
+	}
 	if err != nil {
 		return nil, msg, err
 	}
-	if result == nil || result.GasUsed > gas {
+	if result == nil || result.GasUsed > gas || result.MaxUsedGas > gas {
 		return nil, msg, errors.New("invalid internal EVM gas result")
 	}
-	ctx.GasMeter().ConsumeGas(result.GasUsed, "governance internal EVM work")
 	if result.VmError != "" {
 		return nil, msg, fmt.Errorf("system contract execution reverted: %s", result.VmError)
 	}

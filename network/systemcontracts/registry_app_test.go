@@ -10,6 +10,7 @@ import (
 
 	"cosmossdk.io/log"
 	"cosmossdk.io/math"
+	storetypes "cosmossdk.io/store/types"
 	abci "github.com/cometbft/cometbft/abci/types"
 	cmtproto "github.com/cometbft/cometbft/proto/tendermint/types"
 	cmttypes "github.com/cometbft/cometbft/types"
@@ -25,6 +26,7 @@ import (
 	stakingtypes "github.com/cosmos/cosmos-sdk/x/staking/types"
 	ethsecp "github.com/cosmos/evm/crypto/ethsecp256k1"
 	srvflags "github.com/cosmos/evm/server/flags"
+	"github.com/cosmos/evm/x/vm/statedb"
 	evmtypes "github.com/cosmos/evm/x/vm/types"
 	"github.com/ethereum/go-ethereum/accounts/abi"
 	"github.com/ethereum/go-ethereum/common"
@@ -690,6 +692,48 @@ func TestOwnedAppSignedRegistryBootstrap(t *testing.T) {
 			}
 			readReward := func() *big.Int { return query(artifact, role, "getRewardPerBlock")[0].(*big.Int) }
 			marker := func() uint64 { return a.AccountKeeper.GetAccount(ctx(), markerAddress).GetSequence() }
+			t.Run("internal work charges pre-refund EVM execution", func(t *testing.T) {
+				// Both controls begin at exactly the same real seeded contract
+				// state. Subtract actual SDK state-commit work measured in a
+				// disposable committed preview: clearing the second slot itself
+				// incurs another metered SDK store write, as well as its EVM work.
+				seed, _ := ctx().CacheContext()
+				require.NoError(t, authority.RunGovernance(seed, func(c sdk.Context) error {
+					_, err := bridge.ExecuteSystemContract(c, makeMessage(123))
+					return err
+				}))
+				var overhead, previousRefund int64
+				for i, method := range []string{"setRewardPerBlock", "clearRewardPerBlock"} {
+					request := makeMessage(0)
+					if method == "clearRewardPerBlock" {
+						request.Calls[0].Data, err = artifact.ABI.Pack(method)
+						require.NoError(t, err)
+					}
+					preview, _ := seed.CacheContext()
+					preview = preview.WithGasMeter(storetypes.NewInfiniteGasMeter())
+					message := core.Message{From: govOwner, To: &role, Value: new(big.Int), GasLimit: request.Calls[0].GasLimit, GasPrice: new(big.Int), GasFeeCap: new(big.Int), GasTipCap: new(big.Int), Data: request.Calls[0].Data, SkipNonceChecks: true, SkipFromEOACheck: true}
+					raw, err := a.EVMKeeper.ApplyMessage(preview, statedb.New(preview, a.EVMKeeper, statedb.NewEmptyTxConfig()), message, nil, true, false, true)
+					require.NoError(t, err)
+					require.Empty(t, raw.VmError)
+					require.Greater(t, raw.MaxUsedGas, raw.GasUsed, "control must earn a real EVM storage refund")
+					rawSDK := int64(preview.GasMeter().GasConsumed())
+					measured, _ := seed.CacheContext()
+					measured = measured.WithGasMeter(storetypes.NewInfiniteGasMeter())
+					require.NoError(t, authority.RunGovernance(measured, func(c sdk.Context) error {
+						_, err := bridge.ExecuteSystemContract(c, request)
+						return err
+					}))
+					charged := int64(measured.GasMeter().GasConsumed())
+					refund := int64(raw.MaxUsedGas - raw.GasUsed)
+					t.Logf("%s: EVM work=%d after-refund=%d commit SDK=%d total SDK=%d", method, raw.MaxUsedGas, raw.GasUsed, rawSDK, charged)
+					if i == 0 {
+						overhead, previousRefund = charged-int64(raw.MaxUsedGas)-rawSDK, refund
+					} else {
+						require.NotEqual(t, previousRefund, refund, "controls must exercise different refunds")
+						require.Equal(t, overhead, charged-int64(raw.MaxUsedGas)-rawSDK, "remaining native work cannot reclaim EVM storage refunds")
+					}
+				}
+			})
 			// A rejected native hook rolls back both real EVM state and native account writes.
 			beforeReward, beforeMarker := readReward(), marker()
 			nativeFailure = true

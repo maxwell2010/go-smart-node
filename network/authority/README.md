@@ -46,6 +46,13 @@ Actual EVM logs are emitted in the typed authority execution event for native
 indexers, capped at256 logs/32KiB. Consumers must not deduplicate internal calls
 by their empty Ethereum transaction hash.
 
+Internal calls and disposable getters charge the greater of `MaxUsedGas` and
+`GasUsed`, bounded by their actual EVM gas limit. Storage refunds do not replenish
+the governance resource budget; they belong to fee accounting of ordinary
+Ethereum transactions. The real-contract regression clears one versus two
+storage slots from the same seeded state and checks identical remaining native
+work charges despite the different EVM refunds.
+
 ## Resource policy and failed approved proposals
 
 The present constants are conservative staging policy, not final network
