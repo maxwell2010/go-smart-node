@@ -4,10 +4,20 @@ import subprocess
 import tempfile
 import unittest
 
-from source_inventory import json_records, verify_build_inputs
+from source_inventory import json_records, production_environment, verify_build_inputs
 
 
 class ProductionSourceInventory(unittest.TestCase):
+    def test_default_build_policy_rejects_unsupported_overrides(self):
+        for key, value in (("GOFLAGS", "-tags=test"), ("GOWORK", "workspace-file"), ("CGO_CFLAGS", "custom-flags"), ("GOEXPERIMENT", "custom-experiment")):
+            with self.subTest(key=key), self.assertRaisesRegex(ValueError, "unsupported default-build environment override"):
+                production_environment({key: value})
+        env=production_environment({"GOPROXY":"https://proxy.golang.org", "GOCACHE":"cache", "GOENV":"user-config"})
+        self.assertEqual("off",env["GOENV"])
+        self.assertEqual("off",env["GOWORK"])
+        self.assertEqual("local",env["GOTOOLCHAIN"])
+        self.assertEqual(("linux","amd64","v1","1","gcc"),tuple(env[k] for k in ("GOOS","GOARCH","GOAMD64","CGO_ENABLED","CC")))
+        self.assertEqual("cache",env["GOCACHE"])
     def fixture(self, root):
         root = Path(root)
         module = root / "network"

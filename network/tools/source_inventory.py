@@ -2,6 +2,7 @@
 import hashlib
 import argparse
 import json
+import os
 from pathlib import Path
 import subprocess
 
@@ -9,6 +10,18 @@ INPUT_FIELDS = (
     "GoFiles", "CgoFiles", "CFiles", "CXXFiles", "MFiles", "HFiles", "FFiles",
     "SFiles", "SwigFiles", "SwigCXXFiles", "SysoFiles", "EmbedFiles",
 )
+
+
+def production_environment(environment=None):
+    env = dict(os.environ if environment is None else environment)
+    for key in ("GOFLAGS", "GOEXPERIMENT", "CGO_CFLAGS", "CGO_CPPFLAGS", "CGO_CXXFLAGS", "CGO_FFLAGS", "CGO_LDFLAGS"):
+        if env.get(key, "").strip():
+            raise ValueError("unsupported default-build environment override: " + key)
+    if env.get("GOWORK", "") not in ("", "off"):
+        raise ValueError("unsupported default-build environment override: GOWORK")
+    env.update(GOFLAGS="", GOENV="off", GOWORK="off", GOTOOLCHAIN="local",
+               GOOS="linux", GOARCH="amd64", GOAMD64="v1", CGO_ENABLED="1", CC="gcc")
+    return env
 
 
 def json_records(raw):
@@ -24,6 +37,7 @@ def json_records(raw):
 
 
 def verify_build_inputs(source, *, environment=None, package_loader=None):
+    environment = production_environment(environment)
     source = Path(source).resolve(strict=True)
     module = source / "network"
     def git(*args):
@@ -56,7 +70,7 @@ def verify_build_inputs(source, *, environment=None, package_loader=None):
 
     if package_loader is None:
         raw = subprocess.check_output(
-            ["go", "list", "-mod=readonly", "-deps", "-json", "./cmd/mcnd"],
+            ["go", "list", "-mod=readonly", "-tags=", "-deps", "-json", "./cmd/mcnd"],
             cwd=module, env=environment, text=True,
         )
         packages = json_records(raw)
@@ -88,6 +102,7 @@ def verify_build_inputs(source, *, environment=None, package_loader=None):
     add_input(module / "go.sum")
     return {"schemaVersion": 1, "sourceRevision": git("rev-parse", "HEAD"),
             "scope": "Actual default mcnd source/embed inputs; external modules require module/source verifiers",
+            "buildPolicy": {key: environment[key] for key in ("GOENV", "GOWORK", "GOTOOLCHAIN", "GOFLAGS", "GOOS", "GOARCH", "GOAMD64", "CGO_ENABLED", "CC")},
             "localPackages": local_packages, "files": dict(sorted(inputs.items()))}
 
 

@@ -1,7 +1,7 @@
 """Package a source-bound Linux amd64 DEVELOPMENT binary; never publish it."""
 import argparse, hashlib, io, json, os, pathlib, platform, subprocess, sys, tarfile, tempfile
 from install_mcnd import validate_revision
-from source_inventory import verify_build_inputs
+from source_inventory import production_environment, verify_build_inputs
 
 def package(binary,source,revision,output,source_inputs=None):
  validate_revision(revision);source=pathlib.Path(source).resolve(strict=True);binary=pathlib.Path(binary).resolve(strict=True)
@@ -13,7 +13,8 @@ def package(binary,source,revision,output,source_inputs=None):
   subprocess.run([sys.executable,str(source/"network/scripts/verify_owned_sdk.py")],check=True)
  header=binary.read_bytes()[:20]
  if header[:5]!=b"\x7fELF\x02" or header[18:20]!=b"\x3e\x00":raise ValueError("Linux amd64 ELF required")
- info=subprocess.check_output(["go","version","-m",str(binary)],text=True)
+ environment=production_environment()
+ info=subprocess.check_output(["go","version","-m",str(binary)],text=True,env=environment)
  runtime_version=None
  if "main.buildCommit=" in info:
   if "main.buildCommit="+revision not in info:raise ValueError("binary lacks exact source buildCommit")
@@ -23,7 +24,7 @@ def package(binary,source,revision,output,source_inputs=None):
   with tempfile.TemporaryDirectory(prefix="mcnd-package-version-") as version_home:
    runtime_version=json.loads(subprocess.check_output([str(binary),"version","--long","--output","json","--home",version_home],text=True,timeout=30))
   if runtime_version.get("commit")!=revision or runtime_version.get("server_name")!="mcnd":raise ValueError("runtime binary source commit mismatch")
- inventory=verify_build_inputs(source)
+ inventory=verify_build_inputs(source,environment=environment)
  if source_inputs is not None and json.loads(pathlib.Path(source_inputs).read_bytes())!=inventory:raise ValueError("production source inputs differ from the pre-build inventory")
  data={"bin/mcnd":binary.read_bytes(),"BUILD_INFO.txt":info.encode(),"DEVELOPMENT.txt":b"DEVELOPMENT ONLY. Native feature integration and release gates remain incomplete.\n"}
  data["SOURCE_INPUTS.json"]=(json.dumps(inventory,sort_keys=True,indent=2)+"\n").encode()

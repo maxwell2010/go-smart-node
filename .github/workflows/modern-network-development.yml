@@ -18,6 +18,10 @@ jobs:
       CC: gcc
       GOTOOLCHAIN: local
       GOMAXPROCS: '2'
+      GOENV: 'off'
+      GOWORK: 'off'
+      GOFLAGS: ''
+      GOAMD64: 'v1'
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
@@ -41,7 +45,7 @@ jobs:
           python3 scripts/verify_owned_sdk.py --compiled
           git diff --exit-code -- go.mod go.sum
           python3 tools/source_inventory.py --source "$GITHUB_WORKSPACE" --output "$RUNNER_TEMP/mcnd-source-inputs.json"
-          go build -mod=readonly -p 2 -trimpath -ldflags "-X main.buildCommit=$GITHUB_SHA" -o "$RUNNER_TEMP/mcnd" ./cmd/mcnd
+          go build -mod=readonly -tags= -p 2 -trimpath -ldflags "-X main.buildCommit=$GITHUB_SHA" -o "$RUNNER_TEMP/mcnd" ./cmd/mcnd
           "$RUNNER_TEMP/mcnd" version
       - name: Check actual generated retention configuration
         run: |
