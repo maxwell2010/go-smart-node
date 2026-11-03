@@ -1,0 +1,10 @@
+{
+  "schemaVersion": 1,
+  "kind": "license-only; no module replacement or vendored maintained implementation",
+  "upstreamModule": "github.com/ProtonMail/go-crypto",
+  "upstreamVersion": "v1.5.2",
+  "upstreamCommit": "7537b30ff8aaf643512ce8bb78f5f92c44ffa6b4",
+  "upstreamModuleSum": "h1:cucYnvqcY7UOXVD//mSyjeaPY0SSN3v5cDkYPxumINk=",
+  "upstreamGoModSum": "h1:/RaSu30DaKO4RY+XdV/ACcCcZkGr7AhUIduq5sjzzCo=",
+  "licenseSha256": "2d36597f7117c38b006835ae7f537487207d8ec407aa9d9980794b2030cbc067"
+}

@@ -53,6 +53,7 @@ jobs:
         run: |
           python3 scripts/verify_owned_evm.py |& tee validation-logs/owned-evm-integrity.log
           python3 scripts/verify_owned_geth.py |& tee validation-logs/owned-geth-integrity.log
+          python3 scripts/verify_owned_sdk.py --compiled |& tee validation-logs/owned-sdk-integrity.log
           python3 scripts/verify_pion_transport.py |& tee validation-logs/pion-upstream-integrity.log
           python3 -m unittest discover -s scripts -p 'test_*.py'
       - name: Test ordinary crypto regressions with and without CGO
@@ -61,6 +62,10 @@ jobs:
           CGO_ENABLED=0 go test -mod=readonly -p 2 -count=1 -run '^TestOwnedGeth' ./securitytests |& tee validation-logs/geth-crypto-nocgo.log
       - name: Test modern module and native feature port
         run: go test -mod=readonly -p 2 -count=1 -v -timeout 10m ./... |& tee validation-logs/tests.log
+      - name: Test declared SDK armor, keyring and signature compatibility
+        run: |
+          go test -mod=readonly -p 2 -count=1 -timeout 10m github.com/cosmos/cosmos-sdk/crypto/internal/armorcompat github.com/cosmos/cosmos-sdk/crypto github.com/cosmos/cosmos-sdk/crypto/keyring github.com/cosmos/cosmos-sdk/crypto/keys/secp256k1 github.com/cosmos/cosmos-sdk/crypto/keys/ed25519 |& tee validation-logs/sdk-crypto-keyring.log
+          CGO_ENABLED=0 go test -mod=readonly -p 2 -count=1 -timeout 10m github.com/cosmos/cosmos-sdk/crypto/keys/secp256k1 github.com/cosmos/cosmos-sdk/crypto/keys/ed25519 |& tee validation-logs/sdk-signatures-nocgo.log
       - name: Reproduce pinned system contract artifacts
         run: |
           SOLC="$RUNNER_TEMP/solc-0.8.20"

@@ -62,6 +62,7 @@ require (
 	github.com/GoogleCloudPlatform/opentelemetry-operations-go/exporter/metric v0.55.0 // indirect
 	github.com/GoogleCloudPlatform/opentelemetry-operations-go/internal/resourcemapping v0.55.0 // indirect
 	github.com/Microsoft/go-winio v0.6.2 // indirect
+	github.com/ProtonMail/go-crypto v1.5.2 // indirect
 	github.com/VictoriaMetrics/fastcache v1.12.2 // indirect
 	github.com/aws/aws-sdk-go v1.49.0 // indirect
 	github.com/aws/aws-sdk-go-v2 v1.41.5 // indirect
@@ -310,3 +311,6 @@ replace (
 	// replace broken goleveldb
 	github.com/syndtr/goleveldb => github.com/syndtr/goleveldb v1.0.1-0.20210819022825-2ae1ddf74ef7
 )
+
+// Declared SDK armor compatibility source patch; see third_party/cosmos-sdk/UPSTREAM.json.
+replace github.com/cosmos/cosmos-sdk => ./third_party/cosmos-sdk

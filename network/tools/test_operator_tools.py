@@ -1,4 +1,4 @@
-import hashlib, os, pathlib, tarfile, tempfile, unittest
+import hashlib, os, pathlib, subprocess, tarfile, tempfile, unittest
 from unittest.mock import patch
 from configure_history import PROFILE, configure, render
 from install_mcnd import validate_revision, install
@@ -70,6 +70,19 @@ class OperatorToolsTest(unittest.TestCase):
             with patch('package_mcnd.subprocess.check_output',side_effect=output):
                 with self.assertRaises(ValueError):package(binary,source,'a'*40,source/'rejected.tar.gz')
             self.assertFalse((source/'rejected.tar.gz').exists())
+
+    def test_packager_rejects_missing_declared_sdk_source(self):
+        with tempfile.TemporaryDirectory() as root:
+            source=pathlib.Path(root);binary=source/'mcnd';binary.write_bytes(b'not used')
+            (source/'network').mkdir()
+            (source/'network/go.mod').write_text('replace github.com/cosmos/cosmos-sdk => ./third_party/cosmos-sdk\n')
+            def output(command,**kwargs):
+                if 'rev-parse' in command:return 'a'*40+'\n'
+                return ''
+            target=source/'rejected.tar.gz'
+            with patch('package_mcnd.subprocess.check_output',side_effect=output), patch('package_mcnd.subprocess.run',side_effect=subprocess.CalledProcessError(1,['SDK verifier'])):
+                with self.assertRaises(subprocess.CalledProcessError):package(binary,source,'a'*40,target)
+            self.assertFalse(target.exists())
 
     def test_trimpath_requires_matching_native_cli_commit(self):
         for matches in (True, False):

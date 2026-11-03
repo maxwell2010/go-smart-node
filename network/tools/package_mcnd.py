@@ -1,11 +1,15 @@
 """Package a source-bound Linux amd64 DEVELOPMENT binary; never publish it."""
-import argparse, hashlib, io, json, os, pathlib, platform, subprocess, tarfile, tempfile
+import argparse, hashlib, io, json, os, pathlib, platform, subprocess, sys, tarfile, tempfile
 from install_mcnd import validate_revision
 
 def package(binary,source,revision,output):
  validate_revision(revision);source=pathlib.Path(source).resolve(strict=True);binary=pathlib.Path(binary).resolve(strict=True)
  if subprocess.check_output(["git","-C",str(source),"rev-parse","HEAD"],text=True).strip()!=revision:raise ValueError("source mismatch")
  if subprocess.check_output(["git","-C",str(source),"status","--porcelain","--untracked-files=no"],text=True).strip():raise ValueError("source has tracked modifications")
+ sdk=source/"network/third_party/cosmos-sdk"
+ module_file=source/"network/go.mod"
+ if sdk.exists() or (module_file.exists() and "replace github.com/cosmos/cosmos-sdk => ./third_party/cosmos-sdk" in module_file.read_text()):
+  subprocess.run([sys.executable,str(source/"network/scripts/verify_owned_sdk.py")],check=True)
  header=binary.read_bytes()[:20]
  if header[:5]!=b"\x7fELF\x02" or header[18:20]!=b"\x3e\x00":raise ValueError("Linux amd64 ELF required")
  info=subprocess.check_output(["go","version","-m",str(binary)],text=True)

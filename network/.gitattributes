@@ -12,3 +12,5 @@ systemcontracts/artifacts/*.json text eol=lf
 
 systemcontracts/owned/** -text -whitespace
 systemcontracts/pause-source-patches.json text eol=lf
+third_party/cosmos-sdk/** -text -whitespace eol=lf
+third_party/armor-notices/** -text -whitespace
