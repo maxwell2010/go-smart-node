@@ -63,6 +63,9 @@ func (s AggregateReserveSource) DependencyHash(ctx context.Context, r Request) (
 	if err != nil {
 		return [32]byte{}, err
 	}
+	if err := p.Validate(); err != nil {
+		return [32]byte{}, err
+	}
 	if p.BaseDenom != identity.BaseDenom {
 		return [32]byte{}, errors.New("coin base denomination mismatch")
 	}
@@ -94,6 +97,12 @@ func (s AggregateReserveSource) DependencyHash(ctx context.Context, r Request) (
 	for _, name := range names {
 		coin, err := s.Coins.GetCoin(c, name)
 		if err != nil {
+			return [32]byte{}, err
+		}
+		if coin.Denom != name {
+			return [32]byte{}, errors.New("valuation coin denomination mismatch")
+		}
+		if err := coin.Validate(); err != nil {
 			return [32]byte{}, err
 		}
 		b, err = proto.Marshal(&coin)
@@ -133,8 +142,8 @@ func saleReturn(supply, reserve, amount sdkmath.Int, crr uint32) (result sdkmath
 }
 
 func (s AggregateReserveSource) SnapshotWeights(ctx context.Context, r Request) (Weights, error) {
-	if _, err := s.DependencyHash(ctx, r); err != nil {
-		return Weights{}, err
+	if s.Coins == nil || (reflect.ValueOf(s.Coins).Kind() == reflect.Pointer && reflect.ValueOf(s.Coins).IsNil()) {
+		return Weights{}, errors.New("native coin state is required")
 	}
 	g, err := ownershipGenesis(r)
 	if err != nil {
@@ -143,6 +152,19 @@ func (s AggregateReserveSource) SnapshotWeights(ctx context.Context, r Request) 
 	c, err := sdkContext(ctx)
 	if err != nil {
 		return Weights{}, err
+	}
+	if c.ChainID() != r.ChainID || c.BlockHeight() != r.Height {
+		return Weights{}, errors.New("valuation context mismatch")
+	}
+	params, err := s.Coins.GetParams(c)
+	if err != nil {
+		return Weights{}, err
+	}
+	if err = params.Validate(); err != nil {
+		return Weights{}, err
+	}
+	if params.BaseDenom != identity.BaseDenom {
+		return Weights{}, errors.New("coin base denomination mismatch")
 	}
 	totals := map[string]*big.Int{}
 	groups := map[string][]int{}
@@ -180,6 +202,12 @@ func (s AggregateReserveSource) SnapshotWeights(ctx context.Context, r Request) 
 		}
 		coin, err := s.Coins.GetCoin(c, name)
 		if err != nil {
+			return Weights{}, err
+		}
+		if coin.Denom != name {
+			return Weights{}, errors.New("valuation coin denomination mismatch")
+		}
+		if err := coin.Validate(); err != nil {
 			return Weights{}, err
 		}
 		if total.Sign() == 0 {
