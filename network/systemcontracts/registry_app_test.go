@@ -457,6 +457,27 @@ func TestOwnedAppSignedRegistryBootstrap(t *testing.T) {
 			checkSignedMixedPenalty(t, 2, true, true, keys, roles, artifacts, wrapped, address, registry, func() *big.Int { return a.BankKeeper.GetSupply(ctx(), identity.BaseDenom).Amount.BigInt() }, send)
 		})
 
+		for _, settleFirst := range []bool{false, true} {
+			for _, reverse := range []bool{false, true} {
+				name := "shared1155 A-first"
+				if reverse {
+					name = "shared1155 B-first"
+				}
+				if settleFirst {
+					name += " pre-settled"
+				} else {
+					name += " lazy"
+				}
+				t.Run(name, func(t *testing.T) {
+					checkSignedShared1155(t, reverse, settleFirst, keys, roles, artifacts, wrapped,
+						func() *big.Int { return a.BankKeeper.GetSupply(ctx(), identity.BaseDenom).Amount.BigInt() },
+						func(owner common.Address) *big.Int {
+							return a.BankKeeper.GetBalance(ctx(), sdk.AccAddress(owner.Bytes()), identity.BaseDenom).Amount.BigInt()
+						},
+						func(refund *big.Int) { nativeCredit.Set(refund) }, price, send)
+				})
+			}
+		}
 		t.Run("canonical NFT penalty negative control", func(t *testing.T) {
 			configure("nft-center", "upgradeNFT", deploy(load("DRC721")), uint8(0), true)
 			canonicalLibrary := load("DelegationNFTLib")
