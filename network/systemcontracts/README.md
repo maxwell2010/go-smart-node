@@ -144,3 +144,46 @@ Measured on the actual257-entry signed application fixture: a32-entry page used
 The100K native-reader allowance therefore uses32-entry pages in this fixture;
 these are bounded local measurements, not a universal future compiler/fork gas
 promise. The full test also reads the final partial page and checks parity.
+
+
+## Fresh factory beacon initialization
+
+Canonical TokenCenter/NFTCenter `initialize()` methods do not populate the
+beacon addresses required by fresh token creation. The prior owner/implementation
+setup controls alone did not establish working collection minting. The signed
+regression confirms canonical fresh NFT and reserveless-token creation reject.
+
+The NEW `NewNetworkNFTCenter.initializeFresh(registry)` constructs four verified
+canonical BeaconNFT instances and stores them using the inherited verified
+accessor. Each beacon retains the exact NFT_CENTER/TYPE_NFT/WITH_RESERVE API
+used by NFT implementations. `NewNetworkTokenCenter.initializeFresh(registry)`
+constructs a new immutable-center beacon for its reserveless ERC20 slot. Both
+initializers are constructor-only, require an active initialization and explicit
+nonzero owner/registry, and inherit the canonical financial methods unchanged.
+No mainnet addresses or manually guessed slots are supplied. The ordinary
+configured bootstrap then installs reviewed child implementations and hands off
+ownership to the actual governance module account atomically.
+
+Actual signed ABCI controls create/mint all four NFT variants, preserve a full
+2^200 ERC1155 token ID, reconcile native reserve backing, create a reserveless
+ERC20 and retain reserve-backed coin creation with exact net reserve. Failed
+later factory configuration also removes the newly constructed beacons and
+proxy, retaining only the exact transaction fee. These are real contract tests;
+complete native NFT binding/admission/receipt wiring remains a separate gate.
+
+
+## Fresh unified routing profile
+
+The updated fresh profile deploys one UnifiedDelegation financial contract.
+The registry labels `delegation` and `delegation-nft` resolve to that SAME proxy:
+NFT reserve code authenticates `delegation-nft`, while current coin and NFT
+operations both originate from UnifiedDelegation. The standalone legacy
+DecimalDelegationNFT artifact and earlier five-proxy setup controls are retained
+as historical/reference evidence, not the current fresh financial recipe.
+
+The actual configured governance-owned profile now tests the canonical registry,
+master validator, unified delegation and token/NFT factories with this explicit
+routing alias. Authority admits only the canonical `delegation` administration
+slot; the NFT alias is not a duplicate administrator/ledger. Arbitrary duplicate
+authority targets remain rejected. The alias fixes authentication routing without
+changing the canonical NFT guard or claiming completed native financial parity.

@@ -390,11 +390,11 @@ func TestOwnedAppSignedRegistryBootstrap(t *testing.T) {
 		send(keys[0], nil, new(big.Int), libCode, true)
 		linked, err := contracts.LoadLinked("DecimalDelegation", map[string]common.Address{"sources/DecimalDelegation.sol:DelegationNFTLib": libAddress})
 		require.NoError(t, err)
-		names := []string{"master-validator", "delegation", "delegation-nft", "token-center", "nft-center"}
+		names := []string{"master-validator", "delegation", "token-center", "nft-center"}
 		roleABI := map[string]contracts.Artifact{}
 		implementations := map[string]common.Address{}
 		for _, role := range names {
-			name := map[string]string{"master-validator": "NewNetworkMasterValidator", "delegation-nft": "DecimalDelegationNFT", "token-center": "DecimalTokenCenter", "nft-center": "DecimalNFTCenter"}[role]
+			name := map[string]string{"master-validator": "NewNetworkMasterValidator", "delegation-nft": "DecimalDelegationNFT", "token-center": "NewNetworkTokenCenter", "nft-center": "NewNetworkNFTCenter"}[role]
 			artifact := linked
 			if role != "delegation" {
 				artifact = load(name)
@@ -418,6 +418,11 @@ func TestOwnedAppSignedRegistryBootstrap(t *testing.T) {
 			require.NoError(t, err)
 			registryConfig = append(registryConfig, call)
 		}
+		// The updated protocol uses one unified financial ledger for coin and NFT.
+		roles["delegation-nft"] = roles["delegation"]
+		nftAlias, err := registry.ABI.Pack("setContractAddress", "delegation-nft", roles["delegation"])
+		require.NoError(t, err)
+		registryConfig = append(registryConfig, nftAlias)
 		wrappedRegister, err := registry.ABI.Pack("setContractAddress", "wdel", wrapped)
 		require.NoError(t, err)
 		registryConfig = append(registryConfig, wrappedRegister)
@@ -443,15 +448,15 @@ func TestOwnedAppSignedRegistryBootstrap(t *testing.T) {
 			}
 			if role == "master-validator" {
 				initialization = pack("initializeFresh", govRegistry)
-			} else {
+			} else if role != "token-center" && role != "nft-center" {
 				config = append(config, pack("setContractCenter", govRegistry))
 			}
 			if role == "token-center" {
-				initialization = pack("initialize")
+				initialization = pack("initializeFresh", govRegistry)
 				config = append(config, pack("upgradeToken", tokenImpls["DRC20"]), pack("upgradeTokenReserveless", tokenImpls["DRC20Reserveless"]))
 			}
 			if role == "nft-center" {
-				initialization = pack("initialize")
+				initialization = pack("initializeFresh", govRegistry)
 				for _, nft := range []struct {
 					name    string
 					kind    uint8
@@ -473,6 +478,8 @@ func TestOwnedAppSignedRegistryBootstrap(t *testing.T) {
 			return values
 		}
 		require.Equal(t, govOwner, query(registry, govRegistry, "owner")[0])
+		require.Equal(t, roles["delegation"], query(registry, govRegistry, "getContractAddress", "delegation-nft")[0])
+		require.Equal(t, query(registry, govRegistry, "getContractAddress", "delegation")[0], query(registry, govRegistry, "getContractAddress", "delegation-nft")[0])
 		send(keys[0], &govRegistry, new(big.Int), registryInit, false)
 		send(keys[0], &setup, new(big.Int), registryInit, false)
 		for _, role := range names {
@@ -694,6 +701,136 @@ func TestOwnedAppSignedRegistryBootstrap(t *testing.T) {
 			}
 			require.Zero(t, big.NewInt(321).Cmp(readReward()))
 			require.Equal(t, beforeMarker+1, marker(), "later failed proposal message must discard earlier native hook writes")
+		})
+
+		t.Run("fresh factory creation and mint", func(t *testing.T) {
+			creator := crypto.PubkeyToAddress(keys[0].PublicKey)
+			type nftMeta struct {
+				Creator     common.Address
+				Symbol      string
+				Name        string
+				ContractURI string
+				Refundable  bool
+				Burnable    bool
+			}
+			meta := nftMeta{Creator: creator, Symbol: "FRESH", Name: "Fresh collection", ContractURI: "ipfs://collection", Refundable: true, Burnable: true}
+			center := roles["nft-center"]
+			factory := roleABI["nft-center"]
+			// Previously configured canonical factories have no fresh beacon slots.
+			originalCenter := read("getContractAddress", "nft-center")
+			originalABI := load("DecimalNFTCenter")
+			before, err := originalABI.ABI.Pack("createDRC721", meta)
+			require.NoError(t, err)
+			send(keys[0], &originalCenter, new(big.Int), before, false)
+			for _, kind := range []struct {
+				method, artifact string
+				typ              uint8
+				reserve          bool
+			}{{"createDRC721", "DRC721", 0, true}, {"createDRC1155", "DRC1155", 1, true}, {"createDRC721Reserveless", "DRC721Reserveless", 0, false}, {"createDRC1155Reserveless", "DRC1155Reserveless", 1, false}} {
+				beacon := query(factory, center, "beacon", kind.typ, kind.reserve)[0].(common.Address)
+				require.NotEqual(t, common.Address{}, beacon)
+				require.NotEmpty(t, a.EVMKeeper.GetCode(ctx(), a.EVMKeeper.GetCodeHash(ctx(), beacon)))
+				create, err := factory.ABI.Pack(kind.method, meta)
+				require.NoError(t, err)
+				created := send(keys[0], &center, new(big.Int), create, true)
+				result, err := factory.ABI.Unpack(kind.method, created.Ret)
+				require.NoError(t, err)
+				collection := result[0].(common.Address)
+				require.NotEqual(t, common.Address{}, collection)
+				asset := load(kind.artifact)
+				huge := new(big.Int).Lsh(big.NewInt(1), 200)
+				reserve := big.NewInt(2_000_000_000_000_000_000)
+				var mint []byte
+				var value *big.Int
+				if kind.typ == 0 {
+					if kind.reserve {
+						mint, err = asset.ABI.Pack("mintByDEL", creator, "ipfs://fresh-item")
+						value = reserve
+					} else {
+						mint, err = asset.ABI.Pack("mint", creator, "ipfs://fresh-item", new(big.Int), common.Address{})
+						value = new(big.Int)
+					}
+				} else {
+					if kind.reserve {
+						mint, err = asset.ABI.Pack("mintByDEL", creator, huge, big.NewInt(2), "ipfs://shared")
+						value = new(big.Int).Mul(reserve, big.NewInt(2))
+					} else {
+						mint, err = asset.ABI.Pack("mint", creator, huge, big.NewInt(2), "ipfs://shared", new(big.Int), common.Address{})
+						value = new(big.Int)
+					}
+				}
+				require.NoError(t, err)
+				send(keys[0], &collection, value, mint, true)
+				if kind.typ == 0 {
+					require.Equal(t, creator, query(asset, collection, "ownerOf", big.NewInt(1))[0])
+				} else {
+					require.Equal(t, int64(2), query(asset, collection, "balanceOf", creator, huge)[0].(*big.Int).Int64())
+				}
+				require.Zero(t, value.Cmp(a.EVMKeeper.GetBalance(ctx(), collection).ToBig()))
+				require.Zero(t, value.Cmp(a.BankKeeper.GetBalance(ctx(), sdk.AccAddress(collection.Bytes()), identity.BaseDenom).Amount.BigInt()))
+			}
+			tokenCenter := roles["token-center"]
+			tokenFactory := roleABI["token-center"]
+			originalTokens := read("getContractAddress", "token-center")
+			freeData, err := tokenFactory.ABI.Pack("createTokenReserveless", "Fresh free token", "freshfree", true, true, big.NewInt(100), big.NewInt(1000), "fixture")
+			require.NoError(t, err)
+			send(keys[0], &originalTokens, new(big.Int), freeData, false)
+			created := send(keys[0], &tokenCenter, new(big.Int), freeData, true)
+			freeResult, err := tokenFactory.ABI.Unpack("createTokenReserveless", created.Ret)
+			require.NoError(t, err)
+			freeToken := freeResult[0].(common.Address)
+			require.Equal(t, int64(100), query(load("DRC20Reserveless"), freeToken, "balanceOf", creator)[0].(*big.Int).Int64())
+			require.Zero(t, a.BankKeeper.GetBalance(ctx(), sdk.AccAddress(freeToken.Bytes()), identity.BaseDenom).Amount.Sign())
+
+			// A failed later configuration removes the constructor-created beacons too.
+			for _, family := range []struct {
+				artifact, method string
+				count            uint64
+			}{{"NewNetworkNFTCenter", "upgradeNFT", 4}, {"NewNetworkTokenCenter", "upgradeTokenReserveless", 1}} {
+				implementation := deploy(load(family.artifact))
+				artifact := load(family.artifact)
+				initialization, err := artifact.ABI.Pack("initializeFresh", govRegistry)
+				require.NoError(t, err)
+				var bad []byte
+				if family.method == "upgradeNFT" {
+					bad, err = artifact.ABI.Pack(family.method, common.Address{}, uint8(0), true)
+				} else {
+					bad, err = artifact.ABI.Pack(family.method, common.Address{})
+				}
+				require.NoError(t, err)
+				creation, err := contracts.ConfiguredProxyDeployment(setup, implementation, govOwner, initialization, [][]byte{bad})
+				require.NoError(t, err)
+				failedProxy := crypto.CreateAddress(creator, a.EVMKeeper.GetNonce(ctx(), creator))
+				send(keys[0], nil, new(big.Int), creation, false)
+				require.Empty(t, a.EVMKeeper.GetCode(ctx(), a.EVMKeeper.GetCodeHash(ctx(), failedProxy)))
+				for nonce := uint64(1); nonce <= family.count; nonce++ {
+					beacon := crypto.CreateAddress(failedProxy, nonce)
+					require.Empty(t, a.EVMKeeper.GetCode(ctx(), a.EVMKeeper.GetCodeHash(ctx(), beacon)), "failed constructor must not leave a beacon")
+				}
+			}
+			// Reserve-backed creation remains functional and keeps exactly the net reserve.
+			unit := big.NewInt(1_000_000_000_000_000_000)
+			type coinMeta struct {
+				InitialMint    *big.Int
+				MinTotalSupply *big.Int
+				MaxTotalSupply *big.Int
+				Creator        common.Address
+				Crr            uint8
+				Identity       string
+				Symbol         string
+				Name           string
+			}
+			coin := coinMeta{InitialMint: new(big.Int).Mul(unit, big.NewInt(10)), MinTotalSupply: new(big.Int).Set(unit), MaxTotalSupply: new(big.Int).Mul(unit, big.NewInt(100)), Creator: creator, Crr: 50, Identity: "fixture", Symbol: "freshcoinx", Name: "Fresh reserve coin"}
+			create, err := tokenFactory.ABI.Pack("createToken", coin)
+			require.NoError(t, err)
+			commission := query(tokenFactory, tokenCenter, "getCommissionSymbol", coin.Symbol)[0].(*big.Int)
+			reserve := new(big.Int).Mul(unit, big.NewInt(10))
+			funding := new(big.Int).Add(reserve, commission)
+			send(keys[0], &tokenCenter, funding, create, true)
+			coinAddress := query(tokenFactory, tokenCenter, "tokens", coin.Symbol)[0].(common.Address)
+			require.NotEqual(t, common.Address{}, coinAddress)
+			require.Zero(t, reserve.Cmp(a.EVMKeeper.GetBalance(ctx(), coinAddress).ToBig()))
+			require.Equal(t, coin.InitialMint, query(load("DRC20"), coinAddress, "totalSupply")[0])
 		})
 		// A previous external registry write must also disappear on a later failure.
 		fixture := load("ConfiguredBootstrapTestTarget")

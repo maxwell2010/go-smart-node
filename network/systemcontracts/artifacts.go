@@ -27,7 +27,7 @@ func Load(name string) (Artifact, error) {
 
 func checkName(name string) error {
 	switch name {
-	case "DecimalContractCenter", "DecimalContractCenterProxy", "NewNetworkProxyBootstrap", "ConfiguredBootstrapTestTarget", "NewNetworkMasterValidator", "MintCandyWrappedDEL", "WrappedDELTestReceiver", "DecimalMasterValidator", "DecimalDelegation", "DelegationNFTLib", "DecimalDelegationNFT", "DecimalTokenCenter", "DecimalNFTCenter", "DRC20", "DRC20Reserveless", "DRC721", "DRC1155", "DRC721Reserveless", "DRC1155Reserveless":
+	case "DecimalContractCenter", "DecimalContractCenterProxy", "NewNetworkProxyBootstrap", "NewNetworkNFTCenter", "NewNetworkTokenCenter", "NewNetworkReservelessTokenBeacon", "ConfiguredBootstrapTestTarget", "NewNetworkMasterValidator", "MintCandyWrappedDEL", "WrappedDELTestReceiver", "DecimalMasterValidator", "DecimalDelegation", "DelegationNFTLib", "DecimalDelegationNFT", "DecimalTokenCenter", "DecimalNFTCenter", "DRC20", "DRC20Reserveless", "DRC721", "DRC1155", "DRC721Reserveless", "DRC1155Reserveless":
 	default:
 		return fmt.Errorf("unknown pinned system-contract artifact %q", name)
 	}

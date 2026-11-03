@@ -41,6 +41,11 @@ def main():
     config_name = "ConfiguredBootstrapTestTarget.sol"
     config_source = (ROOT / config_name).read_bytes()
     sources[config_name] = {"content": config_source.decode("utf-8")}
+    factory_sources = {}
+    for filename in ["NewNetworkTokenCenter.sol", "NewNetworkNFTCenter.sol"]:
+        data = (ROOT / filename).read_bytes()
+        factory_sources[filename] = hashlib.sha256(data).hexdigest()
+        sources[filename] = {"content": data.decode("utf-8")}
     targets = {
         "sources/DecimalContractCenter.sol": ["DecimalContractCenter"],
         "sources/DecimalContractCenterProxy.sol": ["DecimalContractCenterProxy"],
@@ -48,6 +53,8 @@ def main():
         wrapper_name: ["MintCandyWrappedDEL"],
         fresh_name: ["NewNetworkMasterValidator"],
         config_name: ["ConfiguredBootstrapTestTarget"],
+        "NewNetworkTokenCenter.sol": ["NewNetworkTokenCenter", "NewNetworkReservelessTokenBeacon"],
+        "NewNetworkNFTCenter.sol": ["NewNetworkNFTCenter"],
         probe_name: ["WrappedDELTestReceiver"],
         "sources/DecimalMasterValidator.sol": ["DecimalMasterValidator"],
         "sources/DecimalDelegation.sol": ["DecimalDelegation", "DelegationNFTLib"],
@@ -93,6 +100,7 @@ def main():
                         "testReceiverSourceSha256": hashlib.sha256(probe_source).hexdigest(),
                         "freshValidatorSourceSha256": hashlib.sha256(fresh_source).hexdigest(),
                         "testConfigSourceSha256": hashlib.sha256(config_source).hexdigest(),
+                        "freshFactorySourcesSha256": factory_sources,
                         "settings": {key: value for key, value in selected.items() if key != "outputSelection"}}
             (directory / (target + ".json")).write_text(json.dumps(artifact, sort_keys=True, indent=2) + "\n", encoding="utf-8", newline="\n")
             print(target, "creation", len(creation) // 2, "runtime", len(runtime) // 2, flush=True)
