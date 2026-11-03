@@ -108,3 +108,13 @@ backing-reader and stage composition, not installed production post-tx hooks,
 new-token admission or complete EVM/native transaction rollback. Existing signed
 App atomicity tests remain separate. No financial route is enabled by the
 adapter or its tests.
+
+
+A second actual-App control installs the coordinator hook only at the end of its
+single test App. A genuine signed DRC20 `buy` executes the adapter, then a later
+composition stage or final invariant rejects. The test checks that EVM token
+supply, token bank backing and native coin metadata all revert together; the
+sender pays the exact failure fee and retains value, and failed EVM logs are
+empty. A subsequent successful signed retry commits the new supply/backing.
+This is test-only hook installation with explicit fixture admission and probe
+stages, not production App activation or completed NFT/validator admission.
