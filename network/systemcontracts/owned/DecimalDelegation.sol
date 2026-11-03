@@ -2747,6 +2747,7 @@ pragma solidity 0.8.20;
 // New-network bounded history API. Entries are ordered by append index,
 // including entries appended at the same block timestamp.
 interface IPagedDecimalMasterValidator {
+    function getValidatorState(address validator) external view returns (uint8 status, bool paused, uint256 penaltyCount);
     function getPenaltyCount(address validator) external view returns (uint256);
     function getPenaltiesRange(address validator, uint256 start, uint256 limit) external view returns (uint16[] memory);
 }
@@ -3743,7 +3744,8 @@ abstract contract DecimalDelegationCommon is
         if (validator == address(0)) {
             return false;
         }
-        return _masterValidator().isActive(validator);
+        (uint8 status, bool paused,) = IPagedDecimalMasterValidator(address(_masterValidator())).getValidatorState(validator);
+        return status != 0 && !paused;
     }
 
     function _getHashedTokenId(
@@ -4294,7 +4296,8 @@ library DelegationNFTLib {
         if (validator == address(0)) {
             return false;
         }
-        return _masterValidator($).isActive(validator);
+        (uint8 status, bool paused,) = IPagedDecimalMasterValidator(address(_masterValidator($))).getValidatorState(validator);
+        return status != 0 && !paused;
     }
 
     function _getValidatorPenaltyCount(

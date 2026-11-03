@@ -1,9 +1,9 @@
 {
-  "patchLabel": "mintcandy-isolated-gateway-1",
+  "patchLabel": "mintcandy-isolated-bounded-master-2",
   "canonicalSource": "sources/DecimalDelegation.sol",
   "canonicalSha256": "4478ab6d8b4a7feb230d70715c72f3be816fdbfd0efe7743e3572cfd4ce010c2",
   "ownedSource": "owned/DecimalDelegation.sol",
-  "ownedSha256": "8b6e96ad6d5f07ba8be909ad21ea8500c5e9da969578e4c2f26662c49b285a6f",
+  "ownedSha256": "e067e1fbe560ccc5b8378a0aac26837eeb02cd62805feef8834435ed023f35b9",
   "changedFunctions": [
     "DelegationNFTLib._applyPenaltiesToStake",
     "DecimalDelegation._applyPenaltiesToStake",
@@ -36,7 +36,9 @@
     "DelegationNFTLib._delegateReceipt",
     "DelegationNFTLib.delegateIsolatedNFT1155",
     "MintCandyIsolatedDelegation.delegateNFT1155",
-    "MintCandyIsolatedDelegation.delegateNFT1155Hold"
+    "MintCandyIsolatedDelegation.delegateNFT1155Hold",
+    "DecimalDelegationCommon._isValidatorActive",
+    "DelegationNFTLib._isValidatorActive"
   ],
-  "financialScope": "Preserve per-position claim rounding; burn exact realized direct loss and debit recorded validator reserve once; NFT contract burns its own reserve loss once; global penalty application only acknowledges target index. ERC1155 preserves quantity-return API; companion/reserve mirrors debit exact observed approved NFT pool loss, without reinterpreting quantity as reserve wei. Explicit coin applications consume at most32 append entries per position, at most16 position IDs. NFT applications share at most16 append entries for the whole call, at most16 IDs; mutations require completed catchup. New and zero positions use current append count; no timestamp deduplication. The separate MintCandyIsolatedDelegation fresh-network profile replaces ERC1155 deposit delegation with authenticated incoming isolation and an ERC721 vault receipt stake. Origin quantity and receipt quantity remain separate; the explicit registry vault role is a distinct supported receipt family. Legacy MintCandyDelegation remains a separately named shared-model regression reference, not the fresh financial profile."
+  "financialScope": "Preserve per-position claim rounding; burn exact realized direct loss and debit recorded validator reserve once; NFT contract burns its own reserve loss once; global penalty application only acknowledges target index. ERC1155 preserves quantity-return API; companion/reserve mirrors debit exact observed approved NFT pool loss, without reinterpreting quantity as reserve wei. Explicit coin applications consume at most32 append entries per position, at most16 position IDs. NFT applications share at most16 append entries for the whole call, at most16 IDs; mutations require completed catchup. New and zero positions use current append count; no timestamp deduplication. The separate MintCandyIsolatedDelegation fresh-network profile replaces ERC1155 deposit delegation with authenticated incoming isolation and an ERC721 vault receipt stake. Origin quantity and receipt quantity remain separate; the explicit registry vault role is a distinct supported receipt family. Legacy MintCandyDelegation remains a separately named shared-model regression reference, not the fresh financial profile. Both owned Gateway activity checks use the approved fixed-size MasterValidator state header instead of isActive copying penalty history; membership/pause semantics stay status!=Deleted and !paused."
 }
