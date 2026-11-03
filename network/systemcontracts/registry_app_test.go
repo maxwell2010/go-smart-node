@@ -3,6 +3,7 @@ package systemcontracts_test
 import (
 	"crypto/ecdsa"
 	"encoding/json"
+	"errors"
 	"math/big"
 	"testing"
 	"time"
@@ -18,15 +19,21 @@ import (
 	sdk "github.com/cosmos/cosmos-sdk/types"
 	authtypes "github.com/cosmos/cosmos-sdk/x/auth/types"
 	banktypes "github.com/cosmos/cosmos-sdk/x/bank/types"
+	"github.com/cosmos/cosmos-sdk/x/gov"
+	govtypes "github.com/cosmos/cosmos-sdk/x/gov/types"
+	govv1 "github.com/cosmos/cosmos-sdk/x/gov/types/v1"
 	stakingtypes "github.com/cosmos/cosmos-sdk/x/staking/types"
 	ethsecp "github.com/cosmos/evm/crypto/ethsecp256k1"
 	srvflags "github.com/cosmos/evm/server/flags"
 	evmtypes "github.com/cosmos/evm/x/vm/types"
 	"github.com/ethereum/go-ethereum/accounts/abi"
 	"github.com/ethereum/go-ethereum/common"
+	"github.com/ethereum/go-ethereum/core"
 	ethtypes "github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/crypto"
 	ownedapp "github.com/maxwell2010/go-smart-node/network/app"
+	"github.com/maxwell2010/go-smart-node/network/authority"
+	authoritytypes "github.com/maxwell2010/go-smart-node/network/authority/types"
 	"github.com/maxwell2010/go-smart-node/network/identity"
 	contracts "github.com/maxwell2010/go-smart-node/network/systemcontracts"
 	"github.com/stretchr/testify/require"
@@ -99,10 +106,11 @@ func TestOwnedAppSignedRegistryBootstrap(t *testing.T) {
 	_, err = a.Commit()
 	require.NoError(t, err)
 	ctx := func() sdk.Context {
-		return a.NewUncachedContext(false, cmtproto.Header{ChainID: chainID, Height: a.LastBlockHeight() + 1, Time: now.Add(time.Duration(a.LastBlockHeight()+1) * time.Second)})
+		return a.NewUncachedContext(false, cmtproto.Header{ChainID: chainID, Height: a.LastBlockHeight() + 1, Time: now.Add(time.Duration(a.LastBlockHeight()+1) * time.Second), ProposerAddress: vals.Proposer.Address})
 	}
 	price := big.NewInt(1_000_000_000_000)
 	nativeCredit := new(big.Int)
+	var lastBlockEvents []abci.Event
 	send := func(key *ecdsa.PrivateKey, to *common.Address, value *big.Int, input []byte, success bool) *evmtypes.MsgEthereumTxResponse {
 		t.Helper()
 		from := crypto.PubkeyToAddress(key.PublicKey)
@@ -121,6 +129,7 @@ func TestOwnedAppSignedRegistryBootstrap(t *testing.T) {
 		height := a.LastBlockHeight() + 1
 		result, err := a.FinalizeBlock(&abci.RequestFinalizeBlock{Height: height, Time: now.Add(time.Duration(height) * time.Second), NextValidatorsHash: vals.Hash(), ProposerAddress: vals.Proposer.Address, Txs: [][]byte{encoded}})
 		require.NoError(t, err)
+		lastBlockEvents = result.Events
 		require.Len(t, result.TxResults, 1)
 		require.Zero(t, result.TxResults[0].Code, result.TxResults[0].Log)
 		var messages sdk.TxMsgData
@@ -427,6 +436,143 @@ func TestOwnedAppSignedRegistryBootstrap(t *testing.T) {
 			require.Equal(t, tokenImpls[nft.name], query(roleABI["nft-center"], roles["nft-center"], "implementation", nft.kind, nft.reserve)[0])
 		}
 
+		t.Run("canonical governance authority execution", func(t *testing.T) {
+			role := roles["master-validator"]
+			artifact := roleABI["master-validator"]
+			proxyHash := crypto.Keccak256Hash(proxy.Runtime)
+			manifest := authority.Manifest{Registry: authority.Role{Address: govRegistry, ProxyCodeHash: proxyHash, ApprovedImplementations: []common.Hash{crypto.Keccak256Hash(registry.Runtime)}}, Roles: map[string]authority.Role{
+				"master-validator": {Address: role, ProxyCodeHash: proxyHash, ApprovedImplementations: []common.Hash{crypto.Keccak256Hash(artifact.Runtime)}},
+			}}
+			markerAddress := accounts[2].GetAddress()
+			nativeFailure := false
+			hook := authorityReceiptHook(func(c sdk.Context, sender common.Address, message core.Message, receipt *ethtypes.Receipt) error {
+				require.Equal(t, govOwner, sender)
+				require.Zero(t, message.Value.Sign())
+				require.Equal(t, uint64(1), receipt.Status)
+				marker := a.AccountKeeper.GetAccount(c, markerAddress)
+				require.NoError(t, marker.SetSequence(marker.GetSequence()+1))
+				a.AccountKeeper.SetAccount(c, marker)
+				c.EventManager().EmitEvent(sdk.NewEvent("native_authority_probe"))
+				if nativeFailure {
+					return errors.New("native receipt rejected")
+				}
+				return nil
+			})
+			bridge, err := authority.NewKeeper(a.EVMKeeper, manifest, hook)
+			require.NoError(t, err)
+			authoritytypes.RegisterInterfaces(a.InterfaceRegistry())
+			authoritytypes.RegisterMsgServer(a.MsgServiceRouter(), bridge)
+			original, ok := a.ModuleManager.Modules[govtypes.ModuleName].(gov.AppModule)
+			require.True(t, ok)
+			a.ModuleManager.Modules[govtypes.ModuleName] = authorityGovModule{AppModule: original}
+			defer func() { a.ModuleManager.Modules[govtypes.ModuleName] = original }()
+			government := authtypes.NewModuleAddress(govtypes.ModuleName).String()
+			makeMessage := func(reward int64) *authoritytypes.MsgExecuteSystemContract {
+				data, err := artifact.ABI.Pack("setRewardPerBlock", big.NewInt(reward))
+				require.NoError(t, err)
+				return &authoritytypes.MsgExecuteSystemContract{Authority: government, Calls: []*authoritytypes.SystemCall{{Role: "master-validator", Target: role.Bytes(), TargetCodeHash: proxyHash.Bytes(), Implementation: implementations["master-validator"].Bytes(), ImplementationCodeHash: crypto.Keccak256Hash(artifact.Runtime).Bytes(), Data: data, GasLimit: 200000}}}
+			}
+			readReward := func() *big.Int { return query(artifact, role, "getRewardPerBlock")[0].(*big.Int) }
+			marker := func() uint64 { return a.AccountKeeper.GetAccount(ctx(), markerAddress).GetSequence() }
+			// A rejected native hook rolls back both real EVM state and native account writes.
+			beforeReward, beforeMarker := readReward(), marker()
+			nativeFailure = true
+			require.ErrorContains(t, authority.RunGovernance(ctx(), func(c sdk.Context) error { _, err := bridge.ExecuteSystemContract(c, makeMessage(123)); return err }), "native receipt rejected")
+			require.Equal(t, beforeReward, readReward())
+			require.Equal(t, beforeMarker, marker())
+			nativeFailure = false
+			unauthorized := makeMessage(123)
+			unauthorized.Authority = accounts[0].GetAddress().String()
+			_, err = bridge.ExecuteSystemContract(ctx(), unauthorized)
+			require.ErrorContains(t, err, "only governance")
+			_, err = bridge.ExecuteSystemContract(ctx(), makeMessage(123))
+			require.ErrorContains(t, err, "active same-block")
+
+			for _, mode := range []string{"noncanonical", "ownership", "unknown selector", "unapproved upgrade", "migration", "intrinsic gas"} {
+				invalid := makeMessage(123)
+				switch mode {
+				case "noncanonical":
+					invalid.Calls[0].Data = append(invalid.Calls[0].Data, 0)
+				case "ownership":
+					invalid.Calls[0].Data, err = artifact.ABI.Pack("transferOwnership", crypto.PubkeyToAddress(keys[0].PublicKey))
+					require.NoError(t, err)
+				case "unknown selector":
+					invalid.Calls[0].Data = []byte{0xde, 0xad, 0xbe, 0xef}
+				case "unapproved upgrade":
+					invalid.Calls[0].Data, err = artifact.ABI.Pack("upgrade", registryImpl, []byte{})
+					require.NoError(t, err)
+					invalid.Calls[0].ReplacementCodeHash = crypto.Keccak256Hash(registry.Runtime).Bytes()
+				case "migration":
+					invalid.Calls[0].Data, err = artifact.ABI.Pack("upgrade", implementations["master-validator"], []byte{1})
+					require.NoError(t, err)
+					invalid.Calls[0].ReplacementCodeHash = crypto.Keccak256Hash(artifact.Runtime).Bytes()
+				case "intrinsic gas":
+					invalid.Calls[0].GasLimit = 1
+				}
+				require.Error(t, authority.RunGovernance(ctx(), func(c sdk.Context) error { _, err := bridge.ExecuteSystemContract(c, invalid); return err }), mode)
+				require.Equal(t, beforeMarker, marker(), mode)
+			}
+			badRegistry := manifest
+			badRegistry.Registry.Address = address // Explicitly EOA-owned earlier registry.
+			wrongOwnerBridge, err := authority.NewKeeper(a.EVMKeeper, badRegistry, hook)
+			require.NoError(t, err)
+			require.ErrorContains(t, authority.RunGovernance(ctx(), func(c sdk.Context) error {
+				_, err := wrongOwnerBridge.ExecuteSystemContract(c, makeMessage(123))
+				return err
+			}), "owner is not governance")
+			badRegistry = manifest
+			badRegistry.Registry.ProxyCodeHash = common.HexToHash("0x01")
+			wrongCodeBridge, err := authority.NewKeeper(a.EVMKeeper, badRegistry, hook)
+			require.NoError(t, err)
+			require.ErrorContains(t, authority.RunGovernance(ctx(), func(c sdk.Context) error {
+				_, err := wrongCodeBridge.ExecuteSystemContract(c, makeMessage(123))
+				return err
+			}), "proxy code differs")
+			// All protocol signers and routes are validated by the unmodified SDK keeper.
+			params, err := a.GovKeeper.Params.Get(ctx())
+			require.NoError(t, err)
+			period := time.Second
+			expedited := 500 * time.Millisecond
+			params.VotingPeriod = &period
+			params.ExpeditedVotingPeriod = &expedited
+			params.MinDeposit = sdk.NewCoins(sdk.NewInt64Coin(identity.BaseDenom, 1))
+			require.NoError(t, a.GovKeeper.Params.Set(ctx(), params))
+			submit := func(messages []sdk.Msg) uint64 {
+				current := ctx()
+				proposal, err := a.GovKeeper.SubmitProposal(current, messages, "", "System administration", "Bounded authority execution", accounts[0].GetAddress(), false)
+				require.NoError(t, err)
+				active, err := a.GovKeeper.AddDeposit(current, proposal.Id, accounts[0].GetAddress(), params.MinDeposit)
+				require.NoError(t, err)
+				require.True(t, active)
+				require.NoError(t, a.GovKeeper.AddVote(current, proposal.Id, sdk.AccAddress(vals.Proposer.Address), govv1.NewNonSplitVoteOption(govv1.OptionYes), ""))
+				// Two genuine blocks advance to the end of the voting period. The second
+				// returns the proposal deposit; account debit still reconciles exactly.
+				ownerCall, err := registry.ABI.Pack("owner")
+				require.NoError(t, err)
+				send(keys[0], &govRegistry, new(big.Int), ownerCall, true)
+				nativeCredit.Set(sdk.Coins(params.MinDeposit).AmountOf(identity.BaseDenom).BigInt())
+				send(keys[0], &govRegistry, new(big.Int), ownerCall, true)
+				return proposal.Id
+			}
+			passed := submit([]sdk.Msg{makeMessage(321)})
+			proposal, err := a.GovKeeper.Proposals.Get(ctx(), passed)
+			require.NoError(t, err)
+			require.Equal(t, govv1.StatusPassed, proposal.Status)
+			require.Zero(t, big.NewInt(321).Cmp(readReward()))
+			require.Equal(t, beforeMarker+1, marker())
+			stale := makeMessage(999)
+			stale.Calls[0].ImplementationCodeHash = make([]byte, 32)
+			failed := submit([]sdk.Msg{makeMessage(777), stale})
+			proposal, err = a.GovKeeper.Proposals.Get(ctx(), failed)
+			require.NoError(t, err)
+			require.Equal(t, govv1.StatusFailed, proposal.Status)
+			for _, event := range lastBlockEvents {
+				require.NotEqual(t, "native_authority_probe", event.Type, "failed proposal must not leak native hook events")
+				require.NotEqual(t, "mintcandy.authority.v1.EventSystemContractExecuted", event.Type)
+			}
+			require.Zero(t, big.NewInt(321).Cmp(readReward()))
+			require.Equal(t, beforeMarker+1, marker(), "later failed proposal message must discard earlier native hook writes")
+		})
 		// A previous external registry write must also disappear on a later failure.
 		fixture := load("ConfiguredBootstrapTestTarget")
 		fixtureImpl := deploy(fixture)

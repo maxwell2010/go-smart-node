@@ -1,0 +1,40 @@
+syntax = "proto3";
+package mintcandy.authority.v1;
+import "cosmos/msg/v1/msg.proto";
+import "cosmos_proto/cosmos.proto";
+option go_package = "github.com/maxwell2010/go-smart-node/network/authority/types";
+
+service Msg {
+  option (cosmos.msg.v1.service) = true;
+  rpc ExecuteSystemContract(MsgExecuteSystemContract) returns (MsgExecuteSystemContractResponse);
+}
+message SystemCall {
+  string role = 1;
+  bytes target = 2;
+  bytes target_code_hash = 3;
+  bytes implementation = 4;
+  bytes implementation_code_hash = 5;
+  bytes data = 6;
+  uint64 gas_limit = 7;
+  bytes replacement_code_hash = 8;
+}
+message MsgExecuteSystemContract {
+  option (cosmos.msg.v1.signer) = "authority";
+  string authority = 1 [(cosmos_proto.scalar) = "cosmos.AddressString"];
+  repeated SystemCall calls = 2;
+}
+message MsgExecuteSystemContractResponse {
+  uint64 gas_used = 1;
+}
+message EventSystemContractExecuted {
+  string role = 1;
+  string target = 2;
+  string selector = 3;
+  uint64 gas_used = 4;
+  repeated SystemLog logs = 5;
+}
+message SystemLog {
+  bytes address = 1;
+  repeated bytes topics = 2;
+  bytes data = 3;
+}
