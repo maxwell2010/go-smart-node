@@ -3,11 +3,13 @@
 import argparse
 import base64
 import calendar
+from contextlib import contextmanager, nullcontext
 import hashlib
 import json
 import os
 from pathlib import Path
 import re
+import signal
 import socket
 import subprocess
 import tempfile
@@ -22,6 +24,57 @@ HTTP = urllib.request.build_opener(urllib.request.ProxyHandler({}))
 def require(condition, message):
     if not condition:
         raise RuntimeError(message)
+
+
+class TerminationRequested(RuntimeError):
+    pass
+
+
+class SignalGuard:
+    """Unwind once through owned-process cleanup, then ignore repeated stops."""
+    def __init__(self):
+        self.previous, self.requested = {}, None
+        self.registering, self.unwinding = 0, False
+
+    def handle(self, number, _frame):
+        if self.requested is None:
+            self.requested = number
+        self.check()
+
+    def check(self):
+        if self.requested is not None and not self.registering and not self.unwinding:
+            self.unwinding = True
+            raise TerminationRequested("termination requested: signal " + str(self.requested))
+
+    @contextmanager
+    def register_child(self):
+        # Record an interruption while Popen returns, then unwind only after
+        # the new child has entered the owner's cleanup list.
+        self.registering += 1
+        try:
+            yield
+        finally:
+            self.registering -= 1
+            self.check()
+
+    def __enter__(self):
+        for number in (signal.SIGINT, signal.SIGTERM):
+            self.previous[number] = signal.getsignal(number)
+            signal.signal(number, self.handle)
+        return self
+
+    def __exit__(self, *_):
+        for number, handler in self.previous.items():
+            signal.signal(number, handler)
+
+
+def private_environment(root):
+    home, temporary = root / "tool-home", root / "tmp"
+    home.mkdir(mode=0o700)
+    temporary.mkdir(mode=0o700)
+    return {"PATH": os.environ.get("PATH", "/usr/bin:/bin"), "LANG": "C.UTF-8", "TZ": "UTC",
+            "HOME": str(home), "TMPDIR": str(temporary), "TMP": str(temporary), "TEMP": str(temporary),
+            "RUST_BACKTRACE": "0", "GOMAXPROCS": "1", "NO_PROXY": "127.0.0.1,localhost"}
 
 
 def private_namespace():
@@ -40,11 +93,22 @@ def binary(path, expected):
 
 
 def command(args, env, timeout=45, secret=False, stdin=None):
-    result = subprocess.run([str(a) for a in args], input=stdin, text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, env=env, timeout=timeout)
+    try:
+        result = subprocess.run([str(a) for a in args], input=stdin, text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, env=env, timeout=timeout)
+    except (OSError, subprocess.SubprocessError) as error:
+        if secret:
+            raise RuntimeError("private key command failed (" + type(error).__name__ + "); output suppressed") from None
+        raise
     if result.returncode:
         detail = "private key command output suppressed" if secret else (result.stdout + result.stderr)[-6000:]
         raise RuntimeError("command failed: " + str(args[0]) + " " + str(args[1]) + ": " + detail)
     return result.stdout
+
+
+def import_hermes_key(hermes, config, chain, mnemonic, hd_path, env):
+    return command([hermes, "--config", config, "--json", "keys", "add", "--chain", chain,
+                    "--key-name", "lab", "--mnemonic-file", mnemonic, "--hd-path", hd_path],
+                   env, timeout=60, secret=True)
 
 
 def rpc(port, method, **params):
@@ -132,9 +196,10 @@ def open_channel(port):
 
 
 class Lab:
-    def __init__(self, root, env, report):
+    def __init__(self, root, env, report, signals=None):
         self.root, self.env, self.report = root, env, report
         self.children, self.handles, self.ports = [], [], set()
+        self.signals = signals
 
     def port(self):
         while True:
@@ -144,10 +209,11 @@ class Lab:
                 self.ports.add(port); return port
 
     def spawn(self, args, name):
-        log = open(self.root / (name + ".log"), "w", encoding="utf8")
-        self.handles.append(log)
-        child = subprocess.Popen([str(a) for a in args], env=self.env, stdout=log, stderr=subprocess.STDOUT)
-        self.children.append(child)
+        with self.signals.register_child() if self.signals else nullcontext():
+            log = open(self.root / (name + ".log"), "w", encoding="utf8")
+            self.handles.append(log)
+            child = subprocess.Popen([str(a) for a in args], env=self.env, stdout=log, stderr=subprocess.STDOUT)
+            self.children.append(child)
         return child
 
     def stop(self, child):
@@ -159,10 +225,29 @@ class Lab:
                 child.kill(); child.wait(timeout=10)
 
     def close(self):
+        with self.signals.register_child() if self.signals else nullcontext():
+            self._close_all()
+
+    def _close_all(self):
+        errors = []
         for child in reversed(self.children):
-            self.stop(child)
+            try:
+                self.stop(child)
+            except Exception as error:
+                errors.append("child cleanup: " + type(error).__name__)
+                try:
+                    if child.poll() is None:
+                        child.kill()
+                        child.wait(timeout=10)
+                except Exception as fallback:
+                    errors.append("child kill/wait: " + type(fallback).__name__)
         for handle in self.handles:
-            handle.close()
+            try:
+                handle.close()
+            except Exception as error:
+                errors.append("log cleanup: " + type(error).__name__)
+        if errors:
+            raise RuntimeError("owned process cleanup failed: " + "; ".join(errors))
 
     def wait(self, condition, message, timeout=45):
         deadline, last = time.monotonic() + timeout, None
@@ -237,7 +322,7 @@ def reference_probe(lab, reference, hermes):
     config = lab.root / "hermes.toml"
     config.write_text("[global]\nlog_level = 'warn'\n" + chain_config(B_ID, rpc_port, grpc, "cosmos", "stake", lab.root / "hermes-keys"))
     run = lambda *args: command([hermes, "--config", config, "--json", *args], lab.env, timeout=60)
-    run("keys", "add", "--chain", B_ID, "--key-name", "lab", "--mnemonic-file", home / "mnemonic.txt", "--hd-path", "m/44'/118'/0'/0/0")
+    import_hermes_key(hermes, config, B_ID, home / "mnemonic.txt", "m/44'/118'/0'/0/0", lab.env)
     health = health_check(run)
     lab.report["reference_probe"] = {"chain": B_ID, "height": lab.height(rpc_port, B_ID), "funded_address": marker["address"], "hermes_health": health}
     print("independent reference and Hermes health: PASS", flush=True)
@@ -359,7 +444,7 @@ def full_suite(lab, mcnd, reference, hermes):
     a = prepare_owned(lab, mcnd)
     config.write_text("[global]\nlog_level = 'warn'\n" + chain_config(A_ID, a["rpc"], a["grpc"], "d0", "del", lab.root / "hermes-keys") + chain_config(B_ID, b["rpc"], b["grpc"], "cosmos", "stake", lab.root / "hermes-keys"))
     run = lambda *args: command([hermes, "--config", config, "--json", *args], lab.env, timeout=120)
-    run("keys", "add", "--chain", A_ID, "--key-name", "lab", "--mnemonic-file", a["mnemonic"], "--hd-path", "m/44'/60'/0'/0/0")
+    import_hermes_key(hermes, config, A_ID, a["mnemonic"], "m/44'/60'/0'/0/0", lab.env)
     health_check(run)
     before = phase_before(a, b)
     run("create", "channel", "--a-chain", A_ID, "--b-chain", B_ID, "--a-port", "transfer", "--b-port", "transfer", "--new-client-connection", "--channel-version", "ics20-1", "--yes")
@@ -446,7 +531,7 @@ def full_suite(lab, mcnd, reference, hermes):
     lab.report["upgrade_scope"] = "Same-binary disk reopen only; no module migration, client upgrade or SDK major upgrade is verified."
 
 
-def main():
+def main(argv=None, signals=None):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--mode", choices=["reference-probe", "full"], required=True)
     parser.add_argument("--reference-binary", required=True)
@@ -457,7 +542,7 @@ def main():
     parser.add_argument("--mcnd-binary")
     parser.add_argument("--mcnd-sha256")
     parser.add_argument("--mcnd-source-commit")
-    args = parser.parse_args()
+    args = parser.parse_args(argv)
     report = {"status": "FAIL", "mode": args.mode, "release_gate": False}
     try:
         private_namespace()
@@ -472,9 +557,8 @@ def main():
             report["binaries"]["mcnd"] = {"sha256": mcnd_hash, "source_commit": args.mcnd_source_commit}
         with tempfile.TemporaryDirectory(prefix="mintcandy-hermes-lab-") as temp:
             root = Path(temp)
-            env = {"PATH": os.environ.get("PATH", "/usr/bin:/bin"), "LANG": "C.UTF-8", "TZ": "UTC", "HOME": str(root / "tool-home"), "RUST_BACKTRACE": "0", "GOMAXPROCS": "1", "NO_PROXY": "127.0.0.1,localhost"}
-            Path(env["HOME"]).mkdir(mode=0o700)
-            lab = Lab(root, env, report)
+            env = private_environment(root)
+            lab = Lab(root, env, report, signals)
             try:
                 report["hermes_version"] = command([hermes, "version"], env).strip()
                 if args.mode == "full":
@@ -486,6 +570,7 @@ def main():
             finally:
                 lab.close()
     except Exception as error:
+        report["status"], report["release_gate"] = "FAIL", False
         report["error"] = str(error)
     finally:
         # A report contains public addresses/receipts only, never fixture mnemonics.
@@ -496,4 +581,5 @@ def main():
 
 
 if __name__ == "__main__":
-    raise SystemExit(main())
+    with SignalGuard() as signals:
+        raise SystemExit(main(signals=signals))
