@@ -29,7 +29,7 @@
       "canonical": "sources/DecimalNFTCenter.sol",
       "owned": "owned/DecimalNFTCenter.sol",
       "canonicalSha256": "ff066396dd34653cc17053ce8b2884182606222965f8c2a049bb16a225420b76",
-      "ownedSha256": "7e53ccdbdcfbf237386b802ba0a11d3f4d474bf26b5114ea04fb585b241c0bda",
+      "ownedSha256": "36a3edc74c6ba8a75a6a84b99b27c363e3e666328eeb01460dc733842812f5bd",
       "transformations": [
         {
           "anchor": "function _create(",
@@ -97,6 +97,11 @@
           "anchor": "contract DRC1155 is",
           "before": "function rate(uint256 tokenId) public view returns (uint256 amount) {",
           "after": "function rate(uint256 tokenId) public view virtual returns (uint256 amount) {"
+        },
+        {
+          "anchor": "abstract contract NFTReserve",
+          "before": "function _checkToken(address token) internal view {",
+          "after": "function _checkToken(address token) internal view virtual {"
         }
       ]
     }

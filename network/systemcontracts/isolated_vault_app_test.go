@@ -139,6 +139,22 @@ func runIsolatedVaultBackend(t *testing.T, e isolatedBackendEnv) {
 		require.NoError(t, err)
 		return e.send(e.keys[key], &target, value, data, success)
 	}
+
+	// Test setup invokes the actual EVM from the already configured Gov module
+	// authority. Financial assertions below still use signed ordinary user txs.
+	govSetup := func(artifact contracts.Artifact, target common.Address, method string) {
+		t.Helper()
+		data, err := artifact.ABI.Pack(method)
+		require.NoError(t, err)
+		child, commit := e.ctx().CacheContext()
+		child = child.WithGasMeter(storetypes.NewGasMeter(3_000_000))
+		message := core.Message{From: e.govOwner, To: &target, Value: new(big.Int), GasLimit: 500000, GasPrice: new(big.Int), GasFeeCap: new(big.Int), GasTipCap: new(big.Int), Data: data, SkipNonceChecks: true, SkipFromEOACheck: true}
+		response, err := e.app.EVMKeeper.ApplyMessage(child, statedb.New(child, e.app.EVMKeeper, statedb.NewEmptyTxConfig()), message, nil, true, false, true)
+		require.NoError(t, err)
+		require.NotNil(t, response)
+		require.Empty(t, response.VmError)
+		commit()
+	}
 	position := func(id *big.Int) isolatedPosition {
 		t.Helper()
 		values := query(vault, vaultAddress, "getPosition", id)
@@ -176,6 +192,7 @@ func runIsolatedVaultBackend(t *testing.T, e isolatedBackendEnv) {
 	oneDEL := new(big.Int).Exp(big.NewInt(10), big.NewInt(18), nil)
 	primitive, err := contracts.CompiledABI("IMintCandyNativeBurn")
 	require.NoError(t, err)
+	burnAccount := vaultAddress
 	assertSupply := func(before sdkmath.Int, response *evmtypes.MsgEthereumTxResponse, loss *big.Int) {
 		t.Helper()
 		minted, burned := sdkmath.ZeroInt(), sdkmath.ZeroInt()
@@ -202,7 +219,7 @@ func runIsolatedVaultBackend(t *testing.T, e isolatedBackendEnv) {
 			if common.HexToAddress(log.Address) != common.HexToAddress("0x0000000000000000000000000000000000000900") || len(log.Topics) != 2 || common.HexToHash(log.Topics[0]) != primitive.Events["NativeBurn"].ID {
 				continue
 			}
-			require.Equal(t, vaultAddress, common.BytesToAddress(common.HexToHash(log.Topics[1]).Bytes()[12:]))
+			require.Equal(t, burnAccount, common.BytesToAddress(common.HexToHash(log.Topics[1]).Bytes()[12:]))
 			values, err := primitive.Events["NativeBurn"].Inputs.NonIndexed().Unpack(log.Data)
 			require.NoError(t, err)
 			require.Zero(t, loss.Cmp(values[0].(*big.Int)))
@@ -337,6 +354,116 @@ func runIsolatedVaultBackend(t *testing.T, e isolatedBackendEnv) {
 		call(4, vault, vaultAddress, new(big.Int), true, "redeemPosition", receipt, recipient)
 		assertVault(new(big.Int))
 	})
+
+	t.Run("factory and vault pause restore isolation after recovery", func(t *testing.T) {
+		id := big.NewInt(83)
+		call(0, origin, originAddress, ten, true, "mintByDEL", controllerAddress, id, big.NewInt(1), "ipfs://paused-origin")
+		next := query(vault, vaultAddress, "nextPositionId")[0].(*big.Int)
+		originBefore := bankBalance(originAddress)
+		for _, target := range []struct {
+			artifact contracts.Artifact
+			address  common.Address
+		}{{factory, factoryAddress}, {vault, vaultAddress}} {
+			govSetup(target.artifact, target.address, "pause")
+			require.Equal(t, true, query(target.artifact, target.address, "paused")[0])
+			call(0, controller, controllerAddress, new(big.Int), false, "isolate", originAddress, id, big.NewInt(1))
+			require.Zero(t, next.Cmp(query(vault, vaultAddress, "nextPositionId")[0].(*big.Int)))
+			require.Zero(t, originBefore.Cmp(bankBalance(originAddress)))
+			require.Equal(t, int64(1), query(origin, originAddress, "balanceOf", controllerAddress, id)[0].(*big.Int).Int64())
+			govSetup(target.artifact, target.address, "unpause")
+		}
+		receipt := integerResult(controller, "isolate", call(0, controller, controllerAddress, new(big.Int), true, "isolate", originAddress, id, big.NewInt(1)))
+		// Position views remain live under its own pause; financial changes fail.
+		govSetup(vault, vaultAddress, "pause")
+		require.Zero(t, ten.Cmp(position(receipt).Reserve.Amount))
+		call(0, controller, controllerAddress, new(big.Int), false, "penalty", receipt, uint16(10))
+		require.Zero(t, ten.Cmp(position(receipt).Reserve.Amount))
+		govSetup(vault, vaultAddress, "unpause")
+		recipient := crypto.PubkeyToAddress(e.keys[3].PublicKey)
+		call(0, controller, controllerAddress, new(big.Int), true, "release", receipt, recipient)
+		e.credit.Set(ten)
+		call(3, vault, vaultAddress, new(big.Int), true, "redeemPosition", receipt, recipient)
+		assertVault(new(big.Int))
+	})
+	t.Run("uniform origin funding stays exact", func(t *testing.T) {
+		id := big.NewInt(80)
+		originBefore := bankBalance(originAddress)
+		bad := new(big.Int).Add(twenty, big.NewInt(1))
+		call(0, origin, originAddress, bad, false, "mintByDEL", controllerAddress, id, big.NewInt(2), "ipfs://uniform-origin")
+		require.Zero(t, originBefore.Cmp(bankBalance(originAddress)))
+		require.Zero(t, query(origin, originAddress, exactABIMethod(t, origin.ABI, "totalSupply(uint256)"), id)[0].(*big.Int).Sign())
+		call(0, origin, originAddress, twenty, true, "mintByDEL", controllerAddress, id, big.NewInt(2), "ipfs://uniform-origin")
+		call(0, origin, originAddress, big.NewInt(1), false, "addReserveByDEL", id)
+		require.Zero(t, ten.Cmp(query(origin, originAddress, exactABIMethod(t, origin.ABI, "rate(uint256)"), id)[0].(*big.Int)))
+		call(0, origin, originAddress, big.NewInt(2), true, "addReserveByDEL", id)
+		unit := new(big.Int).Add(ten, big.NewInt(1))
+		require.Zero(t, unit.Cmp(query(origin, originAddress, exactABIMethod(t, origin.ABI, "rate(uint256)"), id)[0].(*big.Int)))
+		call(0, origin, originAddress, ten, false, "mintByDEL", controllerAddress, id, big.NewInt(1), "ipfs://uniform-origin")
+		call(0, origin, originAddress, unit, true, "mintByDEL", controllerAddress, id, big.NewInt(1), "ipfs://uniform-origin")
+		receipt := integerResult(controller, "isolate", call(0, controller, controllerAddress, new(big.Int), true, "isolate", originAddress, id, big.NewInt(3)))
+		amount := new(big.Int).Mul(unit, big.NewInt(3))
+		require.Zero(t, amount.Cmp(position(receipt).Reserve.Amount))
+		assertVault(amount)
+		require.Zero(t, originBefore.Cmp(bankBalance(originAddress)))
+		recipient := crypto.PubkeyToAddress(e.keys[3].PublicKey)
+		call(0, controller, controllerAddress, new(big.Int), true, "release", receipt, recipient)
+		e.credit.Set(amount)
+		call(3, vault, vaultAddress, new(big.Int), true, "redeemPosition", receipt, recipient)
+		assertVault(new(big.Int))
+	})
+	for order := 0; order < 2; order++ {
+		t.Run([]string{"WDEL A then B", "WDEL B then A"}[order], func(t *testing.T) {
+			wrapper := e.load("MintCandyWrappedDEL")
+			id := big.NewInt(int64(81 + order))
+			call(0, wrapper, wrapped, twenty, true, "deposit")
+			call(0, wrapper, wrapped, new(big.Int), true, "approve", originAddress, twenty)
+			call(0, origin, originAddress, new(big.Int), true, "mint", controllerAddress, id, big.NewInt(2), "ipfs://wrapped-origin", twenty, wrapped)
+			require.Zero(t, twenty.Cmp(query(wrapper, wrapped, "balanceOf", originAddress)[0].(*big.Int)))
+			// Native-currency minting cannot change the fixed WDEL currency of this ID.
+			call(0, origin, originAddress, ten, false, "mintByDEL", controllerAddress, id, big.NewInt(1), "ipfs://wrapped-origin")
+			beforeNext := query(vault, vaultAddress, "nextPositionId")[0].(*big.Int)
+			call(0, controller, controllerAddress, new(big.Int), false, "isolateThenRevert", originAddress, id, big.NewInt(1))
+			require.Zero(t, beforeNext.Cmp(query(vault, vaultAddress, "nextPositionId")[0].(*big.Int)))
+			require.Zero(t, twenty.Cmp(query(wrapper, wrapped, "balanceOf", originAddress)[0].(*big.Int)))
+			require.Zero(t, query(wrapper, wrapped, "balanceOf", vaultAddress)[0].(*big.Int).Sign())
+			first := integerResult(controller, "isolate", call(0, controller, controllerAddress, new(big.Int), true, "isolate", originAddress, id, big.NewInt(1)))
+			second := integerResult(controller, "isolate", call(0, controller, controllerAddress, new(big.Int), true, "isolate", originAddress, id, big.NewInt(1)))
+			assertVault(new(big.Int))
+			require.Equal(t, uint8(2), position(first).Reserve.ReserveType)
+			require.Equal(t, wrapped, position(first).Reserve.Token)
+			beforeSupply := e.app.BankKeeper.GetSupply(e.ctx(), identity.BaseDenom).Amount
+			response := call(0, controller, controllerAddress, new(big.Int), true, "penalty", first, uint16(10))
+			burnAccount = wrapped
+			assertSupply(beforeSupply, response, oneDEL)
+			burnAccount = vaultAddress
+			nine := new(big.Int).Sub(ten, oneDEL)
+			nineteen := new(big.Int).Add(nine, ten)
+			require.Zero(t, nine.Cmp(position(first).Reserve.Amount))
+			require.Zero(t, ten.Cmp(position(second).Reserve.Amount))
+			for _, balance := range []*big.Int{bankBalance(wrapped), e.app.EVMKeeper.GetBalance(e.ctx(), wrapped).ToBig(), query(wrapper, wrapped, "totalSupply")[0].(*big.Int), query(wrapper, wrapped, "balanceOf", vaultAddress)[0].(*big.Int), query(vault, vaultAddress, "declaredReserve", uint8(2), wrapped)[0].(*big.Int)} {
+				require.Zero(t, nineteen.Cmp(balance))
+			}
+			sequence := []struct {
+				id     *big.Int
+				key    int
+				amount *big.Int
+			}{{first, 1, nine}, {second, 2, ten}}
+			if order == 1 {
+				sequence[0], sequence[1] = sequence[1], sequence[0]
+			}
+			for _, item := range sequence {
+				recipient := crypto.PubkeyToAddress(e.keys[item.key].PublicKey)
+				call(0, controller, controllerAddress, new(big.Int), true, "release", item.id, recipient)
+				call(item.key, vault, vaultAddress, new(big.Int), true, "redeemPosition", item.id, recipient)
+				require.Zero(t, item.amount.Cmp(query(wrapper, wrapped, "balanceOf", recipient)[0].(*big.Int)))
+				e.credit.Set(item.amount)
+				call(item.key, wrapper, wrapped, new(big.Int), true, "withdraw", item.amount)
+			}
+			require.Zero(t, bankBalance(wrapped).Sign())
+			require.Zero(t, query(wrapper, wrapped, "totalSupply")[0].(*big.Int).Sign())
+			require.Zero(t, query(vault, vaultAddress, "declaredReserve", uint8(2), wrapped)[0].(*big.Int).Sign())
+		})
+	}
 	t.Run("surplus never funds a forged position", func(t *testing.T) {
 		e.send(e.keys[0], &vaultAddress, big.NewInt(7), nil, true)
 		require.Equal(t, int64(7), bankBalance(vaultAddress).Int64())
@@ -346,6 +473,51 @@ func runIsolatedVaultBackend(t *testing.T, e isolatedBackendEnv) {
 		require.Zero(t, next.Cmp(query(vault, vaultAddress, "nextPositionId")[0].(*big.Int)))
 		require.Equal(t, int64(7), bankBalance(vaultAddress).Int64())
 	})
+
+	t.Run("original refund and burn policy survives isolation", func(t *testing.T) {
+		createPolicy := func(symbol string, refundable, burnable bool) common.Address {
+			data, err := factory.ABI.Pack("createDRC1155", nftMeta{owner, symbol, symbol, "ipfs://policy", refundable, burnable})
+			require.NoError(t, err)
+			return integerAddress(t, factory, "createDRC1155", e.send(e.keys[0], &factoryAddress, new(big.Int), data, true))
+		}
+		nonrefundable := createPolicy("NOREFUND", false, true)
+		call(0, origin, nonrefundable, oneDEL, true, "mintByDEL", controllerAddress, big.NewInt(1), big.NewInt(1), "ipfs://nonrefundable")
+		receipt := integerResult(controller, "isolate", call(0, controller, controllerAddress, new(big.Int), true, "isolate", nonrefundable, big.NewInt(1), big.NewInt(1)))
+		require.False(t, position(receipt).Refundable)
+		require.True(t, position(receipt).Burnable)
+		recipient := crypto.PubkeyToAddress(e.keys[3].PublicKey)
+		call(0, controller, controllerAddress, new(big.Int), true, "release", receipt, recipient)
+		beforeSupply := e.app.BankKeeper.GetSupply(e.ctx(), identity.BaseDenom).Amount
+		response := call(3, vault, vaultAddress, new(big.Int), true, "redeemPosition", receipt, recipient)
+		assertSupply(beforeSupply, response, oneDEL)
+		require.Equal(t, int64(7), bankBalance(vaultAddress).Int64(), "unsolicited surplus is not destroyed as collateral")
+		require.Zero(t, query(vault, vaultAddress, "declaredReserve", uint8(1), common.Address{})[0].(*big.Int).Sign())
+		// Ordinary origin holder burn must destroy ERC20 supply as well as backing.
+		wrapper := e.load("MintCandyWrappedDEL")
+		call(0, wrapper, wrapped, oneDEL, true, "deposit")
+		call(0, wrapper, wrapped, new(big.Int), true, "approve", nonrefundable, oneDEL)
+		call(0, origin, nonrefundable, new(big.Int), true, "mint", owner, big.NewInt(2), big.NewInt(1), "ipfs://nonrefundable-wdel", oneDEL, wrapped)
+		beforeSupply = e.app.BankKeeper.GetSupply(e.ctx(), identity.BaseDenom).Amount
+		response = call(0, origin, nonrefundable, new(big.Int), true, "burn", big.NewInt(2), big.NewInt(1))
+		burnAccount = wrapped
+		assertSupply(beforeSupply, response, oneDEL)
+		burnAccount = vaultAddress
+		require.Zero(t, query(wrapper, wrapped, "totalSupply")[0].(*big.Int).Sign())
+		require.Zero(t, bankBalance(wrapped).Sign())
+		// Isolating collateral is permitted even if cash redemption is disabled;
+		// the receipt retains that policy and remains fully backed and transferable.
+		nonburnable := createPolicy("NOBURN", true, false)
+		call(0, origin, nonburnable, oneDEL, true, "mintByDEL", owner, big.NewInt(1), big.NewInt(1), "ipfs://nonburnable")
+		response = call(0, origin, nonburnable, new(big.Int), true, "isolate", big.NewInt(1), big.NewInt(1), owner)
+		receipt = integerResult(origin, "isolate", response)
+		require.False(t, position(receipt).Burnable)
+		require.True(t, position(receipt).Refundable)
+		call(0, vault, vaultAddress, new(big.Int), false, "redeemPosition", receipt, owner)
+		require.Equal(t, uint8(1), position(receipt).Status)
+		require.Zero(t, oneDEL.Cmp(position(receipt).Reserve.Amount))
+		require.Zero(t, new(big.Int).Add(oneDEL, big.NewInt(7)).Cmp(bankBalance(vaultAddress)))
+	})
+
 }
 
 func integerAddress(t *testing.T, artifact contracts.Artifact, method string, response *evmtypes.MsgEthereumTxResponse) common.Address {

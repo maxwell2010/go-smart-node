@@ -9936,7 +9936,7 @@ abstract contract NFTReserve is INFTReserve {
         return _getBeacon().NFT_CENTER();
     }
 
-    function _checkToken(address token) internal view {
+    function _checkToken(address token) internal view virtual {
         _getNFTCenter().checkToken(token);
     }
 

@@ -263,10 +263,32 @@ explicit test fixture, not the production UnifiedDelegation integration.
 The 1024-unit EVM backend control reports 462841 pre-refund gas and a 32-byte
 return value; native lineage admission and its full gas/storage cost are separate
 required checks. All 34 artifacts reproduce byte-for-byte with the pinned
-compiler. Vault/origin runtimes are 18200/20584 bytes, below EIP-170.
+compiler. Vault/origin runtimes are 18200/20766 bytes, below EIP-170.
 
 These artifacts do not activate a new App financial route. Production Gateway
 integration, authenticated native lineage/admission, current-state compaction,
 new-profile pause-aware reads and shared validator reconciliation remain release
 gates. Canonical shared-pool artifacts remain historical controls and must not
 be admitted as the new isolated-origin profile.
+
+
+The isolated-origin ordinary controls also cover explicitly registered WDEL
+collateral: both withdrawal orders return9/10WDEL, the one-unit penalty destroys
+one WDEL and one native DEL, and wrapper supply/backing reconcile before native
+redemption. Fixed-currency minting and uniform topups reject incompatible
+funding. An origin-only reviewed virtual token-check override admits the exact
+registry WDEL; other currencies still require the existing registered token
+policy. Generic canonical NFT currency admission remains separate.
+
+The origin has no per-collection pause in its inherited ABI. Its factory child
+proxy pause rejects isolation, and the vault has its own Gov-owned pause;
+ordinary signed financial calls fail atomically under either gate and recover
+after unpause. Position views remain live under vault pause. Isolating origin
+units is a collateral conversion even when cash redemption is disabled. The
+receipt preserves the original burnable/refundable flags: nonburnable receipts
+cannot redeem, while closing a nonrefundable burnable receipt destroys its
+reserve instead of paying its holder. Vault/origin ERC20 destruction checks
+both exact sender-balance loss and total-supply reduction. Pausing in the fixture
+uses bounded internal Gov-authority EVM setup, while the financial controls are
+signed transactions; these controls do not claim a production Gov proposal
+route for the new vault role.

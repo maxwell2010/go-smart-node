@@ -81,6 +81,7 @@ contract MintCandyIsolatedDRC1155 is DRC1155 {
         IERC20Permit(token).permit(msg.sender, address(this), amount, deadline, v, r, s);
         _fundMint(recipient, tokenId, quantity, tokenURI, amount, token);
     }
+    function _checkToken(address token) internal view override { _approvedToken(token); }
     function _approvedToken(address token) private view {
         if (token.code.length == 0) revert InvalidReserveType();
         address wrapped = _registry().getContractAddress("wdel");
@@ -196,7 +197,11 @@ contract MintCandyIsolatedDRC1155 is DRC1155 {
                 uint256 beforeRecipient = IERC20(unit.reserve.token).balanceOf(msg.sender);
                 if (!IERC20(unit.reserve.token).transfer(msg.sender, amount) ||
                     IERC20(unit.reserve.token).balanceOf(msg.sender) != beforeRecipient + amount) revert ReserveFundingFailed();
-            } else ERC20Burnable(unit.reserve.token).burn(amount);
+            } else {
+                uint256 beforeSupply = IERC20(unit.reserve.token).totalSupply();
+                ERC20Burnable(unit.reserve.token).burn(amount);
+                if (IERC20(unit.reserve.token).totalSupply() != beforeSupply - amount) revert ReserveFundingFailed();
+            }
             if (IERC20(unit.reserve.token).balanceOf(address(this)) != beforeBalance - amount) revert ReserveFundingFailed();
         }
     }
