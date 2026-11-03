@@ -4,6 +4,7 @@ import (
 	"crypto/ecdsa"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"math/big"
 	"testing"
@@ -31,8 +32,10 @@ import (
 	"github.com/ethereum/go-ethereum/crypto"
 	ownedapp "github.com/maxwell2010/go-smart-node/network/app"
 	"github.com/maxwell2010/go-smart-node/network/decimal/coin/evmview"
+	coinkeeper "github.com/maxwell2010/go-smart-node/network/decimal/coin/keeper"
 	cointypes "github.com/maxwell2010/go-smart-node/network/decimal/coin/types"
 	"github.com/maxwell2010/go-smart-node/network/identity"
+	"github.com/maxwell2010/go-smart-node/network/nativeexec"
 	contracts "github.com/maxwell2010/go-smart-node/network/systemcontracts"
 	"github.com/stretchr/testify/require"
 )
@@ -410,6 +413,73 @@ func TestAuthoritativeCoinViewWithSignedOwnEVM(t *testing.T) {
 	_, err = evmview.New(absent, a.BankKeeper, a.EVMKeeper, binding, compiled, 200_000, 2_000_000)
 	require.Error(t, err)
 
+	// This is the last fixture action: hooks are installed once, exclusively in
+	// this test App. Production wiring and financial route admission stay off.
+	t.Run("signed buy rolls EVM and reserve adapter back on late errors", func(t *testing.T) {
+		require.NoError(t, a.NativeCoinKeeper.SetCoin(ctx(), metadata.coin))
+		live, err := evmview.New(a.NativeCoinKeeper, a.BankKeeper, a.EVMKeeper, binding, compiled, 200_000, 2_000_000)
+		require.NoError(t, err)
+		hook, err := coinkeeper.NewReserveHook(a.NativeCoinKeeper, compiled, func(c sdk.Context, address common.Address) (math.Int, math.Int, error) {
+			require.Equal(t, token, address)
+			coin, err := live.GetCoin(c, metadata.coin.Denom)
+			return coin.Volume, coin.Reserve, err
+		}, 32)
+		require.NoError(t, err)
+		assets, err := nativeexec.NewReservePreparer(hook)
+		require.NoError(t, err)
+		mode, applied := "", 0
+		stage := reserveCompositionPrepare(func(sdk.Context, nativeexec.Execution) (nativeexec.Prepared, error) {
+			return reserveCompositionStage{validate: func(c sdk.Context) error {
+				old, err := a.NativeCoinKeeper.GetCoin(c, metadata.coin.Denom)
+				require.NoError(t, err)
+				require.Equal(t, metadata.coin, old, "all stages validate against old native metadata")
+				return nil
+			}, apply: func(c sdk.Context) error {
+				applied++
+				c.EventManager().EmitEvent(sdk.NewEvent("signed_reserve_composition_probe"))
+				if mode == "late apply" && applied == 2 {
+					return errors.New("signed reserve late stage rejected")
+				}
+				return nil
+			}}, nil
+		})
+		final := reserveCompositionFinal(func(sdk.Context, nativeexec.Execution) error {
+			if mode == "final" {
+				return errors.New("signed reserve final invariant rejected")
+			}
+			return nil
+		})
+		coordinator, err := nativeexec.New(assets, stage, stage, final, nativeexec.Limits{MaxLogs: 32, MaxBytes: 16384, MaxCopyWeight: 65536})
+		require.NoError(t, err)
+		a.EVMKeeper.SetHooks(coordinator.EthereumHooks())
+		buy, err := compiled.Pack("buy", big.NewInt(1), owner)
+		require.NoError(t, err)
+		for _, failure := range []string{"late apply", "final", "commit"} {
+			mode, applied = failure, 0
+			before, err := live.GetCoin(ctx(), metadata.coin.Denom)
+			require.NoError(t, err)
+			bankSupply := a.BankKeeper.GetSupply(ctx(), identity.BaseDenom)
+			// send checks exact fee/value debit, EVM==bank balance and nonce;
+			// a rejected hook also has no surviving EVM receipt logs.
+			send(keys[0], &token, unit, buy, failure == "commit")
+			require.Equal(t, 2, applied, "failure must occur after the real reserve plan Apply")
+			after, err := live.GetCoin(ctx(), metadata.coin.Denom)
+			require.NoError(t, err)
+			stored, err := a.NativeCoinKeeper.GetCoin(ctx(), metadata.coin.Denom)
+			require.NoError(t, err)
+			if failure == "commit" {
+				require.True(t, after.Volume.GT(before.Volume))
+				require.Equal(t, before.Reserve.Add(math.NewIntFromBigInt(unit)), after.Reserve)
+				require.Equal(t, after.Volume, stored.Volume)
+				require.Equal(t, after.Reserve, stored.Reserve)
+			} else {
+				require.Equal(t, before.Volume, after.Volume, "late failure restores real EVM totalSupply")
+				require.Equal(t, before.Reserve, after.Reserve, "late failure restores real bank DEL backing")
+				require.Equal(t, metadata.coin, stored, "late failure restores native metadata")
+			}
+			require.Equal(t, bankSupply, a.BankKeeper.GetSupply(ctx(), identity.BaseDenom), "buy and metadata projection never change native DEL supply")
+		}
+	})
 }
 
 // Only metadata and admission policy are fixtures. The deployed compiler-pinned
