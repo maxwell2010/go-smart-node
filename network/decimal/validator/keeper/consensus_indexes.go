@@ -62,7 +62,9 @@ func (k *StateKeeper) bondedValidators(ctx sdk.Context) ([]types.Validator, erro
 		// Bech32 input; reconstructing lowercase from the key would alter it.
 		operator := string(value)
 		expected, err := operatorKey(bondedIndexPrefix, operator)
-		if err != nil || !bytes.Equal(key, expected) { return errors.New("malformed bonded membership") }
+		if err != nil || !bytes.Equal(key, expected) {
+			return errors.New("malformed bonded membership")
+		}
 		v, err := k.GetValidator(ctx, operator)
 		if err != nil {
 			return err
