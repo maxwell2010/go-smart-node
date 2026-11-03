@@ -9,12 +9,14 @@ The package provides explicit `d0`/`d0valoper` validation, parameter/genesis
 checks and deterministic historical ordering. Financial values are copied by
 protobuf serialization, including nonempty NFT reserves and holds.
 
-This is a schema foundation. No native validator keeper, financial message
-routes, emergency authority, emission schedule, SDK staking alias adapter or
-application activation is included. The existing SDK staking scaffold must be
+The schema, transactional keeper and guarded read-only application module are
+present. Native financial message routes, emergency authority, emission schedule
+and consensus activation remain incomplete. The existing SDK staking scaffold must be
 replaced atomically with a native ledger and genuine consensus/index/history
 adapter before this schema controls consensus or IBC trusting periods. A keeper
 must hydrate the separate `ValidatorRS` row before computing native power.
+The mounted module is described in [its scope](module/README.md); it must not
+be mistaken for activation of that native financial/consensus controller.
 
 Genesis validation checks structural references and bounded native financial
 fields. Bank escrow, conversion-price, supply and NFT ownership reconciliation

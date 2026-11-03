@@ -552,11 +552,11 @@
     },
     {
       "importModule": "github.com/klauspost/compress",
-      "selectedRequireVersion": "v1.18.5",
+      "selectedRequireVersion": "v1.18.7",
       "effectiveModule": {
         "Path": "github.com/klauspost/compress",
-        "Version": "v1.18.5",
-        "Sum": "h1:/h1gH5Ce+VWNLSWqPzOVn6XBO+vJbCNGvjoaGBFW2IE="
+        "Version": "v1.18.7",
+        "Sum": "h1:aUyZsS4kH3QTKurYhAOwAHxllVPnOthb3vPfnF1Ehjw="
       },
       "importedByDefaultMcnd": true
     },
@@ -692,11 +692,11 @@
     },
     {
       "importModule": "golang.org/x/net",
-      "selectedRequireVersion": "v0.61.0",
+      "selectedRequireVersion": "v0.62.0",
       "effectiveModule": {
         "Path": "golang.org/x/net",
-        "Version": "v0.61.0",
-        "Sum": "h1:RR+6j/BTBCrggOLugxa+66R8FvoN6MHlzDlZIbN9YFw="
+        "Version": "v0.62.0",
+        "Sum": "h1:18ELalfM5+XNRwzM2nYqXsZQ9ByS1uhj2O/U7+5jqRY="
       },
       "importedByDefaultMcnd": true
     },
@@ -943,7 +943,8 @@
       "scope": "Actual b9636dc default-build mcnd dependency snapshot only. Preserves earlier source-specific daemon/IBC controls and requires new scans for later integrated code."
     },
     "gethCoordinateBackport": "Exact upstream GO-2026-4507 source backport, ordinary crypto/signature/math tests with CGO1 and0, actual source-bound b03012f development archive and license hashes. This is not a final integrated security PASS.",
-    "pionTransport": "Canonical STUN3.1.7/DTLS3.1.15, no alias replacement and no v2 packages in actual mcnd imports. Full318aace source/binary captures retain FAIL for OpenPGP and all module-only findings; DTLSv2 advisory absent without suppression. Final financial integration is not certified."
+    "pionTransport": "Canonical STUN3.1.7/DTLS3.1.15, no alias replacement and no v2 packages in actual mcnd imports. Full318aace source/binary captures retain FAIL for OpenPGP and all module-only findings; DTLSv2 advisory absent without suppression. Final financial integration is not certified.",
+    "compressionHTTP": "Compatible published compress1.18.7/x-net0.62 patches, ordinary bounded codecs/local TLS HTTP2/normal HTML tests and App/CLI pass. Full MVS has exactly two version changes. No bomb fixtures or advisory suppression. Final source/binary scans and OpenPGP remediation remain separate."
   },
   "remainingGates": [
     "Native Decimal validator/delegation/reward and coin/NFT feature wiring/parity.",
@@ -983,7 +984,7 @@
       "scope": "Exact upstream coordinate validation fix895a8597 in all3 files, plus actual NAT import migration to canonical STUN v3; all5 source differences declared. Ordinary crypto, codec/client, actual private-loopback NAT/DTLS and source integrity tests pass."
     }
   ],
-  "selectedModulesSourceRevision": "318aace03f41132c4b6b704a287c05c227d6c26e",
-  "selectedModulesScope": "Curated actual MVS records/h1 from source318aace; importedByDefaultMcnd describes package imports, not exploit reachability. Unused legacy STUN/DTLS v2 remain in MVS through unchanged canonical EVM metadata and are not imported by mcnd. Older daemon and scan evidence retains its own source scope.",
+  "selectedModulesSourceRevision": "d05b146f122b696a2a69e535af3d49c630d91c7f",
+  "selectedModulesScope": "Curated actual MVS records/h1 from318aace with exactly two verified selections updated atd05b146: compress1.18.7 andx/net0.62. Other module paths/core versions unchanged. ImportedByDefaultMcnd remains the prior actual package-import observation, not exploit reachability. Historical daemon/capture evidence keeps its own scope.",
   "selectedModulesBaseSourceRevision": "b9636dc388f9c6456d824ec0a96d407ac53b8c66"
 }
