@@ -71,5 +71,23 @@ class OperatorToolsTest(unittest.TestCase):
                 with self.assertRaises(ValueError):package(binary,source,'a'*40,source/'rejected.tar.gz')
             self.assertFalse((source/'rejected.tar.gz').exists())
 
+    def test_trimpath_requires_matching_native_cli_commit(self):
+        for matches in (True, False):
+            with self.subTest(matches=matches), tempfile.TemporaryDirectory() as root:
+                source=pathlib.Path(root);binary=source/'mcnd'
+                header=bytearray(20);header[:5]=b'\x7fELF\x02';header[18:20]=b'\x3e\x00';binary.write_bytes(header)
+                def output(command, **kwargs):
+                    if 'rev-parse' in command:return 'a'*40+'\n'
+                    if 'status' in command:return ''
+                    if command[0]=='go':return 'build -trimpath=true\n'
+                    return '{"server_name":"mcnd","commit":"'+('a' if matches else 'b')*40+'"}'
+                target=source/'package.tar.gz'
+                with patch('package_mcnd.subprocess.check_output',side_effect=output), patch('package_mcnd.platform.system',return_value='Linux'), patch('package_mcnd.platform.machine',return_value='x86_64'):
+                    if matches:
+                        self.assertEqual('a'*40,package(binary,source,'a'*40,target)['sourceRevision'])
+                    else:
+                        with self.assertRaises(ValueError):package(binary,source,'a'*40,target)
+                        self.assertFalse(target.exists())
+
 
 if __name__=='__main__':unittest.main()
