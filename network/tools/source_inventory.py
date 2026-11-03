@@ -1,5 +1,6 @@
 """Bind production Go source/embed inputs to a clean tracked repository."""
 import hashlib
+import argparse
 import json
 from pathlib import Path
 import subprocess
@@ -88,3 +89,14 @@ def verify_build_inputs(source, *, environment=None, package_loader=None):
     return {"schemaVersion": 1, "sourceRevision": git("rev-parse", "HEAD"),
             "scope": "Actual default mcnd source/embed inputs; external modules require module/source verifiers",
             "localPackages": local_packages, "files": dict(sorted(inputs.items()))}
+
+
+if __name__ == "__main__":
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--source", required=True)
+    parser.add_argument("--output", required=True)
+    args = parser.parse_args()
+    inventory = verify_build_inputs(args.source)
+    with Path(args.output).open("x", encoding="utf-8") as stream:
+        json.dump(inventory, stream, indent=2, sort_keys=True)
+        stream.write("\n")

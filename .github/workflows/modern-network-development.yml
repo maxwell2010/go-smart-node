@@ -40,13 +40,14 @@ jobs:
           python3 scripts/verify_pion_transport.py
           python3 scripts/verify_owned_sdk.py --compiled
           git diff --exit-code -- go.mod go.sum
+          python3 tools/source_inventory.py --source "$GITHUB_WORKSPACE" --output "$RUNNER_TEMP/mcnd-source-inputs.json"
           go build -mod=readonly -p 2 -trimpath -ldflags "-X main.buildCommit=$GITHUB_SHA" -o "$RUNNER_TEMP/mcnd" ./cmd/mcnd
           "$RUNNER_TEMP/mcnd" version
       - name: Check actual generated retention configuration
         run: |
           "$RUNNER_TEMP/mcnd" init config-check --home "$RUNNER_TEMP/mcnd-config-check" --chain-id mintcandy_990003-1 --evm.evm-chain-id 990003 > /dev/null 2>&1
           python3 network/tools/configure_history.py --home "$RUNNER_TEMP/mcnd-config-check" --apply --role rpc-ibc
-          python3 network/tools/package_mcnd.py --binary "$RUNNER_TEMP/mcnd" --source "$GITHUB_WORKSPACE" --revision "$GITHUB_SHA" --output "development-artifacts/mcnd-development-linux-amd64.tar.gz"
+          python3 network/tools/package_mcnd.py --binary "$RUNNER_TEMP/mcnd" --source "$GITHUB_WORKSPACE" --revision "$GITHUB_SHA" --source-inputs "$RUNNER_TEMP/mcnd-source-inputs.json" --output "development-artifacts/mcnd-development-linux-amd64.tar.gz"
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
         with:
           name: mcnd-development-linux-amd64-${{ github.sha }}

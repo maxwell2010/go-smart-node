@@ -1,5 +1,6 @@
 """Build a pinned DEVELOPMENT daemon without changing any node home or service."""
 import argparse, os, pathlib, platform, re, shutil, subprocess, tempfile
+from source_inventory import verify_build_inputs
 REPOSITORY="https://github.com/maxwell2010/go-smart-node.git"
 GO_VERSION="go1.26.10"
 
@@ -33,8 +34,10 @@ def install(revision, destination, source=None):
   for command in (["go","mod","download"],["go","mod","verify"]):subprocess.run(command,cwd=module,env=environment,check=True)
   subprocess.run(["python3",str(module/"scripts/verify_pion_transport.py")],cwd=module,env=environment,check=True)
   subprocess.run(["python3",str(module/"scripts/verify_owned_sdk.py"),"--compiled"],cwd=module,env=environment,check=True)
+  source_inputs=verify_build_inputs(source,environment=environment)
   target=pathlib.Path(temporary)/"mcnd"
   subprocess.run(["go","build","-mod=readonly","-p","1","-trimpath","-ldflags","-X main.buildCommit="+revision,"-o",str(target),"./cmd/mcnd"],cwd=module,env=environment,check=True)
+  if verify_build_inputs(source,environment=environment)!=source_inputs:raise ValueError("production source inputs changed during build")
   if run(["git","-C",str(source),"diff","--name-only","--","network/go.mod","network/go.sum"]):raise ValueError("module files changed")
   subprocess.run([str(target),"version","--home",str(pathlib.Path(temporary)/"version-home")],check=True)
   destination.parent.mkdir(parents=True,exist_ok=True)

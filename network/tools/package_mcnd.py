@@ -1,8 +1,9 @@
 """Package a source-bound Linux amd64 DEVELOPMENT binary; never publish it."""
 import argparse, hashlib, io, json, os, pathlib, platform, subprocess, sys, tarfile, tempfile
 from install_mcnd import validate_revision
+from source_inventory import verify_build_inputs
 
-def package(binary,source,revision,output):
+def package(binary,source,revision,output,source_inputs=None):
  validate_revision(revision);source=pathlib.Path(source).resolve(strict=True);binary=pathlib.Path(binary).resolve(strict=True)
  if subprocess.check_output(["git","-C",str(source),"rev-parse","HEAD"],text=True).strip()!=revision:raise ValueError("source mismatch")
  if subprocess.check_output(["git","-C",str(source),"status","--porcelain","--untracked-files=no"],text=True).strip():raise ValueError("source has tracked modifications")
@@ -22,7 +23,10 @@ def package(binary,source,revision,output):
   with tempfile.TemporaryDirectory(prefix="mcnd-package-version-") as version_home:
    runtime_version=json.loads(subprocess.check_output([str(binary),"version","--long","--output","json","--home",version_home],text=True,timeout=30))
   if runtime_version.get("commit")!=revision or runtime_version.get("server_name")!="mcnd":raise ValueError("runtime binary source commit mismatch")
+ inventory=verify_build_inputs(source)
+ if source_inputs is not None and json.loads(pathlib.Path(source_inputs).read_bytes())!=inventory:raise ValueError("production source inputs differ from the pre-build inventory")
  data={"bin/mcnd":binary.read_bytes(),"BUILD_INFO.txt":info.encode(),"DEVELOPMENT.txt":b"DEVELOPMENT ONLY. Native feature integration and release gates remain incomplete.\n"}
+ data["SOURCE_INPUTS.json"]=(json.dumps(inventory,sort_keys=True,indent=2)+"\n").encode()
  if runtime_version is not None:data["CLI_VERSION.json"]=(json.dumps(runtime_version,sort_keys=True,indent=2)+"\n").encode()
  third_party=source/"network/third_party"
  notices=sorted({path for pattern in ("LICENSE*","COPYING*","NOTICE*") for path in third_party.rglob(pattern) if path.is_file()})
@@ -42,4 +46,5 @@ def package(binary,source,revision,output):
 if __name__=="__main__":
  parser=argparse.ArgumentParser(description=__doc__)
  for name in ("binary","source","revision","output"):parser.add_argument("--"+name,required=True)
- args=parser.parse_args();package(args.binary,args.source,args.revision,args.output)
+ parser.add_argument("--source-inputs",help="matching production inventory captured before building")
+ args=parser.parse_args();package(args.binary,args.source,args.revision,args.output,args.source_inputs)

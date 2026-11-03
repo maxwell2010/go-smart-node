@@ -1,4 +1,4 @@
-import hashlib, os, pathlib, subprocess, tarfile, tempfile, unittest
+import hashlib, json, os, pathlib, subprocess, tarfile, tempfile, unittest
 from unittest.mock import patch
 from configure_history import PROFILE, configure, render
 from install_mcnd import validate_revision, install
@@ -97,7 +97,7 @@ class OperatorToolsTest(unittest.TestCase):
                     self.assertTrue(pathlib.Path(command[command.index('--home')+1]).is_dir())
                     return '{"server_name":"mcnd","commit":"'+('a' if matches else 'b')*40+'"}'
                 target=source/'package.tar.gz'
-                with patch('package_mcnd.subprocess.check_output',side_effect=output), patch('package_mcnd.platform.system',return_value='Linux'), patch('package_mcnd.platform.machine',return_value='x86_64'):
+                with patch('package_mcnd.subprocess.check_output',side_effect=output), patch('package_mcnd.platform.system',return_value='Linux'), patch('package_mcnd.platform.machine',return_value='x86_64'), patch('package_mcnd.verify_build_inputs',return_value={'sourceRevision':'a'*40,'files':{}}):
                     if matches:
                         self.assertEqual('a'*40,package(binary,source,'a'*40,target)['sourceRevision'])
                     else:
@@ -117,13 +117,30 @@ class OperatorToolsTest(unittest.TestCase):
                 if 'status' in command:return ''
                 return 'build -ldflags="-X main.buildCommit='+('a'*40)+'"'
             target=source/'development.tar.gz'
-            with patch('package_mcnd.subprocess.check_output',side_effect=output):
+            with patch('package_mcnd.subprocess.check_output',side_effect=output), patch('package_mcnd.verify_build_inputs',return_value={'sourceRevision':'a'*40,'files':{}}):
                 manifest=package(binary,source,'a'*40,target)
             with tarfile.open(target,'r:gz') as archive:
+                self.assertEqual({'sourceRevision':'a'*40,'files':{}},json.loads(archive.extractfile('SOURCE_INPUTS.json').read()))
                 for name,content in notices.items():
                     member='provenance/network/third_party/cosmos-geth/'+name
                     self.assertEqual(content,archive.extractfile(member).read())
                     self.assertEqual(hashlib.sha256(content).hexdigest(),manifest['files'][member])
+
+    def test_packager_rejects_untracked_or_changed_production_inputs(self):
+        with tempfile.TemporaryDirectory() as root:
+            source=pathlib.Path(root);binary=source/'mcnd'
+            header=bytearray(20);header[:5]=b'\x7fELF\x02';header[18:20]=b'\x3e\x00';binary.write_bytes(header)
+            def output(command,**kwargs):
+                if 'rev-parse' in command:return 'a'*40+'\n'
+                if 'status' in command:return ''
+                return 'build -ldflags="-X main.buildCommit='+('a'*40)+'"'
+            target=source/'rejected.tar.gz'
+            with patch('package_mcnd.subprocess.check_output',side_effect=output), patch('package_mcnd.verify_build_inputs',side_effect=ValueError('untracked or ignored production build input')):
+                with self.assertRaisesRegex(ValueError,'untracked or ignored'):package(binary,source,'a'*40,target)
+            before=source/'before.json';before.write_text('{"sourceRevision":"'+('a'*40)+'","files":{}}')
+            with patch('package_mcnd.subprocess.check_output',side_effect=output), patch('package_mcnd.verify_build_inputs',return_value={'sourceRevision':'a'*40,'files':{'network/main.go':'changed'}}):
+                with self.assertRaisesRegex(ValueError,'pre-build inventory'):package(binary,source,'a'*40,target,before)
+            self.assertFalse(target.exists())
 
 
 if __name__=='__main__':unittest.main()
