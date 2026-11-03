@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "purpose": "Fresh pause-aware creation hooks and acknowledged native NFT reserve burn; raw canonical inputs retained",
+  "purpose": "Fresh pause-aware hooks, acknowledged native NFT burn and virtual extension points for the isolated origin1155 profile; canonical inputs retained",
   "patches": [
     {
       "canonical": "sources/DecimalTokenCenter.sol",
@@ -29,7 +29,7 @@
       "canonical": "sources/DecimalNFTCenter.sol",
       "owned": "owned/DecimalNFTCenter.sol",
       "canonicalSha256": "ff066396dd34653cc17053ce8b2884182606222965f8c2a049bb16a225420b76",
-      "ownedSha256": "c4dbb763279fbb2b4f15bdeedb9818caef2f384ed7c29f1eef45134df8b1e945",
+      "ownedSha256": "7e53ccdbdcfbf237386b802ba0a11d3f4d474bf26b5114ea04fb585b241c0bda",
       "transformations": [
         {
           "anchor": "function _create(",
@@ -52,6 +52,51 @@
           "before": "payable(address(0)).transfer(reserve.amount);",
           "after": "_burnNativeReserve(reserve.amount);",
           "count": 1
+        },
+        {
+          "anchor": "abstract contract NFTReserve",
+          "before": "function addReserveByDEL(uint256 tokenId) public payable {",
+          "after": "function addReserveByDEL(uint256 tokenId) public payable virtual {"
+        },
+        {
+          "anchor": "abstract contract NFTReserve",
+          "before": "function addReserve(uint256 tokenId, uint256 addedReserveAmount) public {",
+          "after": "function addReserve(uint256 tokenId, uint256 addedReserveAmount) public virtual {"
+        },
+        {
+          "anchor": "contract DRC1155 is",
+          "before": ") public payable onlyCreator {",
+          "after": ") public payable virtual onlyCreator {"
+        },
+        {
+          "anchor": "contract DRC1155 is",
+          "before": ") public onlyCreator {",
+          "after": ") public virtual onlyCreator {"
+        },
+        {
+          "anchor": "contract DRC1155 is",
+          "before": ") public override(DRC1155Reserveless, IDRC1155Reserveless) onlyCreator {",
+          "after": ") public virtual override(DRC1155Reserveless, IDRC1155Reserveless) onlyCreator {"
+        },
+        {
+          "anchor": "contract DRC1155 is",
+          "before": ") internal {\n        if (!getAllowMint())",
+          "after": ") internal virtual {\n        if (!getAllowMint())"
+        },
+        {
+          "anchor": "contract DRC1155 is",
+          "before": ") external override(DRC1155Reserveless, IDRC1155Reserveless) {",
+          "after": ") external virtual override(DRC1155Reserveless, IDRC1155Reserveless) {"
+        },
+        {
+          "anchor": "contract DRC1155 is",
+          "before": ") public onlyNFTDelegation returns (uint256) {",
+          "after": ") public virtual onlyNFTDelegation returns (uint256) {"
+        },
+        {
+          "anchor": "contract DRC1155 is",
+          "before": "function rate(uint256 tokenId) public view returns (uint256 amount) {",
+          "after": "function rate(uint256 tokenId) public view virtual returns (uint256 amount) {"
         }
       ]
     }

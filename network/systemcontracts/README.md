@@ -243,3 +243,30 @@ native NFT reconciliation remain separate review gates.
 `NativeBurnTestTarget` contains only ordinary funding, holder-burn and outer
 financial rollback controls. Deferred security execution-mode scenarios are
 not executed, are not included in that fixture, and are not claimed verified.
+
+## Isolated ERC1155 origin and ERC721 position backend
+
+`MintCandyIsolatedDRC1155` keeps each origin ID uniformly backed. Isolation burns
+exactly the selected quantity and moves its declared reserve into
+`MintCandyNFTPositionVault`, which issues one independently backed ERC721 receipt.
+Slashing one receipt changes only that receipt. Splits use floor rounding for
+the child and retain the remainder in the parent; a full split moves the entire
+remaining reserve. Zero-backed receipts retain their original currency kind.
+The shared resource bound is 1024 origin units per receipt, checked before
+burning or moving funds. Closed receipt IDs are never reused.
+
+The ordinary signed owned-App control verifies both withdrawal orders with
+A=9 DEL and B=10 DEL after a 10 percent penalty on A, real bank-supply destruction,
+late-error rollback, split conservation, zero-backed identity, the 1024-unit
+boundary and unchanged state on rejection of 1025 units. Its controller is an
+explicit test fixture, not the production UnifiedDelegation integration.
+The 1024-unit EVM backend control reports 462841 pre-refund gas and a 32-byte
+return value; native lineage admission and its full gas/storage cost are separate
+required checks. All 34 artifacts reproduce byte-for-byte with the pinned
+compiler. Vault/origin runtimes are 18200/20584 bytes, below EIP-170.
+
+These artifacts do not activate a new App financial route. Production Gateway
+integration, authenticated native lineage/admission, current-state compaction,
+new-profile pause-aware reads and shared validator reconciliation remain release
+gates. Canonical shared-pool artifacts remain historical controls and must not
+be admitted as the new isolated-origin profile.

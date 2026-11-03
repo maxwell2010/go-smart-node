@@ -10006,7 +10006,7 @@ abstract contract NFTReserve is INFTReserve {
     }
 
     //add reserve ETH
-    function addReserveByDEL(uint256 tokenId) public payable {
+    function addReserveByDEL(uint256 tokenId) public payable virtual {
         if (getReserve(tokenId).reserveType != ReserveType.DEL) {
             revert InvalidReserveType();
         }
@@ -10015,7 +10015,7 @@ abstract contract NFTReserve is INFTReserve {
     }
 
     //add reserve Token
-    function addReserve(uint256 tokenId, uint256 addedReserveAmount) public {
+    function addReserve(uint256 tokenId, uint256 addedReserveAmount) public virtual {
         Reserve memory reserve = getReserve(tokenId);
         if (reserve.reserveType != ReserveType.DRC20) {
             revert InvalidReserveType();
@@ -10144,7 +10144,7 @@ contract DRC1155 is IDRC1155, DRC1155Reserveless, NFTReserve {
         uint256 tokenId,
         uint256 amountToMint,
         string memory tokenURI
-    ) public payable onlyCreator {
+    ) public payable virtual onlyCreator {
         if (!_getNFTCommonStorage()._allowMint) revert MintNotAllowed();
         _mintWithReserve(
             recipient,
@@ -10171,7 +10171,7 @@ contract DRC1155 is IDRC1155, DRC1155Reserveless, NFTReserve {
         uint8 v,
         bytes32 r,
         bytes32 s
-    ) public onlyCreator {
+    ) public virtual onlyCreator {
         IERC20Permit(reserveToken).permit(
             msg.sender,
             address(this),
@@ -10199,7 +10199,7 @@ contract DRC1155 is IDRC1155, DRC1155Reserveless, NFTReserve {
         string memory tokenURI,
         uint256 reserveAmount,
         address reserveToken
-    ) public override(DRC1155Reserveless, IDRC1155Reserveless) onlyCreator {
+    ) public virtual override(DRC1155Reserveless, IDRC1155Reserveless) onlyCreator {
         IERC20(reserveToken).transferFrom(
             msg.sender,
             address(this),
@@ -10224,7 +10224,7 @@ contract DRC1155 is IDRC1155, DRC1155Reserveless, NFTReserve {
         uint256 amountToMint,
         string memory tokenURI,
         Reserve memory reserve
-    ) internal {
+    ) internal virtual {
         if (!getAllowMint()) revert MintNotAllowed();
 
         Reserve memory currentReserve = getReserve(tokenId);
@@ -10255,7 +10255,7 @@ contract DRC1155 is IDRC1155, DRC1155Reserveless, NFTReserve {
     function burn(
         uint256 tokenId,
         uint256 amount
-    ) external override(DRC1155Reserveless, IDRC1155Reserveless) {
+    ) external virtual override(DRC1155Reserveless, IDRC1155Reserveless) {
         uint256 reserveToBurn = rate(tokenId) * amount;
 
         _burn(msg.sender, tokenId, amount);
@@ -10295,7 +10295,7 @@ contract DRC1155 is IDRC1155, DRC1155Reserveless, NFTReserve {
         uint256 tokenId,
         uint256 amountToPenalty,
         uint16 percentage
-    ) public onlyNFTDelegation returns (uint256) {
+    ) public virtual onlyNFTDelegation returns (uint256) {
         uint256 reserveToBurn = (rate(tokenId) *
             amountToPenalty *
             uint256(percentage)) / 100;
@@ -10306,7 +10306,7 @@ contract DRC1155 is IDRC1155, DRC1155Reserveless, NFTReserve {
 
     /* ========== GETTERS ========== */
 
-    function rate(uint256 tokenId) public view returns (uint256 amount) {
+    function rate(uint256 tokenId) public view virtual returns (uint256 amount) {
         return getReserve(tokenId).amount / totalSupply(tokenId);
     }
 

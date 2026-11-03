@@ -1344,5 +1344,8 @@ func TestOwnedAppSignedRegistryBootstrap(t *testing.T) {
 		require.NoError(t, err)
 		require.Equal(t, amount, values[0].(*big.Int), "rejected native withdrawal must restore burned wrapped units")
 	})
+	t.Run("isolated NFT vault backend", func(t *testing.T) {
+		runIsolatedVaultBackend(t, isolatedBackendEnv{app: a, ctx: ctx, send: send, load: load, deploy: deploy, keys: keys, credit: nativeCredit, events: func() []abci.Event { return lastAllEvents }, setup: setup, govOwner: common.BytesToAddress(authtypes.NewModuleAddress(govtypes.ModuleName))})
+	})
 	t.Log("actual owned-App signed registry/proxy constructor, explicit owner, authorization, reinitialization rejection and exact native/EVM fees passed")
 }

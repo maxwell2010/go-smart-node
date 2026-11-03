@@ -47,6 +47,10 @@
   "creationBytecode": "",
   "creationLinks": {},
   "freshFactorySourcesSha256": {
+    "IsolatedNFTTestController.sol": "b836f6defaefdf5f1a1a5a5e67e968ad4af690ac3c94f4a5d15b31c6245592a1",
+    "MintCandyIsolatedDRC1155.sol": "8deda5f1a599bde1b719499f87ceb0adf8e98287076e7204b6349e485cc134e2",
+    "MintCandyNFTIsolationLimits.sol": "ad1331111e2f0917f69a715a2525408816b6f8a49ae216b5dd9d2dcaffdfd668",
+    "MintCandyNFTPositionVault.sol": "02665ab29dbbda312c60b641cfd7c81ebe06c6dfffeb2c16b78dd1a52b9633e2",
     "NativeBurnTestTarget.sol": "6ec0df3642180ac05e3a739d892973a1ac0afbad33a1d113b16ba6d3dfb46e7b",
     "NewNetworkNFTCenter.sol": "6f606ba0615696a159cf8ad4124b12152caed231893cb03c870b69ecc0a0d0c1",
     "NewNetworkPausedViews.sol": "b653cce92897a8b3a02d4f781da79ff5145284f4fe99c5ebd68240cc8fdbe92f",
@@ -57,7 +61,7 @@
   "freshValidatorSourceSha256": "6274783a7741bce513a96e53a545fe6af8487957473d4271f2123eae0aa47e17",
   "immutableReferences": {},
   "immutableVariables": {},
-  "pauseSourcePatchesSha256": "c2c8a34822d0051c6ef3752e0418f5b606965ce74d472932168dc2f3bc66c352",
+  "pauseSourcePatchesSha256": "e9b1d226ac85aa5894fe0bd72e2cfc309ac7855518d12edb0c37b812cdd6a6d6",
   "runtimeBytecode": "",
   "runtimeLinks": {},
   "settings": {
