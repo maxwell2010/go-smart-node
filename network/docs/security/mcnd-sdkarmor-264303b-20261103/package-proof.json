@@ -1,0 +1,23 @@
+{
+  "allManifestFileHashesVerified": true,
+  "archive": {
+    "bytes": 75720648,
+    "sha256": "99b129a47645d1c2ce205c941eff1b5dfe4cb50f6176c92a2d9a917ccd4c045d"
+  },
+  "selectedSDKAndMaintainedNotices": {
+    "provenance/network/third_party/armor-notices/LICENSE.ProtonMail": {
+      "bytes": 1479,
+      "sha256": "2d36597f7117c38b006835ae7f537487207d8ec407aa9d9980794b2030cbc067"
+    },
+    "provenance/network/third_party/cosmos-sdk/LICENSE": {
+      "bytes": 11378,
+      "sha256": "2e5f34bd95a67b6f918f8282a903ed9d5af29ad0c68a0cde21e229040935995b"
+    },
+    "provenance/network/third_party/cosmos-sdk/crypto/internal/armorcompat/LICENSE": {
+      "bytes": 1453,
+      "sha256": "911f8f5782931320f5b8d1160a76365b83aea6447ee6c04fa6d5591467db9dad"
+    }
+  },
+  "sourceCommit": "264303bd5ca8bd8107ba219c77b60c9c14818f1c",
+  "status": "development snapshot; not stable or full SBOM"
+}

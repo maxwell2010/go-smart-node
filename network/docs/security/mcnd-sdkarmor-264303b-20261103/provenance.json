@@ -1,0 +1,157 @@
+{
+  "binary": {
+    "bytes": 185984920,
+    "localArtifactDirectory": "C:\\MintCandyBuild\\mcnd-sdkarmor-264303b-20261103",
+    "sha256": "652ad716f18c7723fe22aff5f48c42e63330cec11c5ce275c77da225e6959348"
+  },
+  "coverageGaps": [
+    "local owned SDK version lookup requires canonical SDK advisory supplement",
+    "local owned EVM/geth source provenance does not automatically close their complete advisory surfaces",
+    "final integrated financial source has not been scanned by these captures"
+  ],
+  "files": {
+    ".gitattributes": {
+      "bytes": 9,
+      "sha256": "48747480eddba024928d03be9bf83dc579e5515768647507a767e8187a85c9ab"
+    },
+    "GO-2025-3442.json": {
+      "bytes": 2426,
+      "sha256": "2746f5ff84fae62c34716e71c371ecd855312f01f00a0da52b5f18b44e509c3f"
+    },
+    "GO-2026-5932.json": {
+      "bytes": 1827,
+      "sha256": "bde8769150ec1368d9a8dbd61fbbde52296de692c57147e02e3ae295e1981f11"
+    },
+    "README.md": {
+      "bytes": 3450,
+      "sha256": "2ed83dc5c3741eecc9f51a93d807184da38eb0dbe63ec37e8ca3c2a66b0db7fa"
+    },
+    "armor-spike.log": {
+      "bytes": 307,
+      "sha256": "f698ce188b06d9d551c426181757a1a76e45cd925b4718b20466b9170e995ada"
+    },
+    "binary-buildinfo.txt.gz": {
+      "bytes": 12387,
+      "sha256": "b7b7b7a3ffbdcc333525c5aa264ebf4ee17ce704af1d8fcc5a23ab2e90cbd915"
+    },
+    "binary.gate.json": {
+      "bytes": 772,
+      "sha256": "3657f26f45cc2115834643d1882cf1f09c7f00f262bee5d2cad271c6d0fd7359"
+    },
+    "binary.jsonl.gz": {
+      "bytes": 117069,
+      "sha256": "e9107d29d42cd4c7b667561ed9ffbd4c0b27590f08eb5bd2b3938829d9778377"
+    },
+    "binary.levels.json": {
+      "bytes": 61,
+      "sha256": "273edbedddf61e40315243fc55aefc3ce4b2ec65367e97ec9a3ab91b3cdea1ec"
+    },
+    "binary.manifest.json": {
+      "bytes": 740,
+      "sha256": "221b8a44a932b6e37dd96b4a7b998db928e420c823f165fbab24b49a54282d0c"
+    },
+    "binary.summary.json": {
+      "bytes": 356,
+      "sha256": "970126e9c6a880174cc5b6c10fe1d08a9addc1b4dbf566d4c592ae5c1259c662"
+    },
+    "canonical-sdk-advisory-supplement.json": {
+      "bytes": 651,
+      "sha256": "c40c882c504430ba424e620e06f85d48d3e73f1b49bd6cb8491cc7e1a1b3f12d"
+    },
+    "canonical-sdk-osv-request.json": {
+      "bytes": 113,
+      "sha256": "5a8a8f797b3781496438d5a486b8663dff08c76629865a32f5e8937e911aeb00"
+    },
+    "canonical-sdk-osv-response.json": {
+      "bytes": 2341,
+      "sha256": "82ef92803f337df98101953db2886f90ab7798a20d20802b9e000df6153bd5e9"
+    },
+    "compiled-deps.txt.gz": {
+      "bytes": 12718,
+      "sha256": "c525a8e7253df551e59030d66016e0b3bf39d5c09b663a90ef185c080b6ae9c6"
+    },
+    "modules.jsonl.gz": {
+      "bytes": 58748,
+      "sha256": "71b0facd714332e89b47eaf80e80e8d348d4f8d528a507e9f291ccb86196a522"
+    },
+    "operator-tools-linux.log": {
+      "bytes": 109,
+      "sha256": "d9853af017010fbcf76d87c8fe46b87ae058237da982d900a1181a4a916ad331"
+    },
+    "owned-integrity-tests.log": {
+      "bytes": 107,
+      "sha256": "6fa940a1b51680fb26bfb594873773c77ba010a2536e9fd3bd93a55ed78bbe2d"
+    },
+    "package-proof.json": {
+      "bytes": 887,
+      "sha256": "84c4bc5c0ae3c97ea7da5743955f8ae46d9cf8deba5bee0e890039afa952802d"
+    },
+    "remaining-module-disposition.json": {
+      "bytes": 985,
+      "sha256": "c4e9e478e47a9482ce3be7d75bb55583d2cc60d25e25267f8a6febc23b92537e"
+    },
+    "runtime-version.json": {
+      "bytes": 10843,
+      "sha256": "08f621a7de4084644ec9ff17864e57851e4d2d7c8081892175507f80c10c4a23"
+    },
+    "sdk-app-cli.log": {
+      "bytes": 127,
+      "sha256": "f8f33ac776125d1ddb8aa9d85380a84867d866cf47c0e6045c90f9e44ad57662"
+    },
+    "sdk-crypto-keyring.log": {
+      "bytes": 297,
+      "sha256": "fb73ec7d2fed6186083cddfc96e7b5f262de60809f47b8a80dfe6870b4e3ee24"
+    },
+    "sdk-fixtures.log": {
+      "bytes": 71,
+      "sha256": "32b7e84ca395f06ca4732674d47e029a09389e9c1093db0a51e1c48fde11e401"
+    },
+    "sdk-integrity-imports-final.log": {
+      "bytes": 467,
+      "sha256": "cd999b0b7d797a689d88ade47f90927124fe6a2f80084d0fda8abf6aca6956fa"
+    },
+    "sdk-mvs-delta.json": {
+      "bytes": 148,
+      "sha256": "183c76e8e5d15fe3898fa397894905cac9c93621cc7ff3563f31a5f68fc46655"
+    },
+    "sdk-signatures-nocgo.log": {
+      "bytes": 124,
+      "sha256": "faf0e0e66b3a3e2884f076a0ce8f15bf21efb572ea03448d22876c190d66b5c6"
+    },
+    "sdk-source.patch": {
+      "bytes": 8364,
+      "sha256": "6404a444920ff0eddd18b7aebc9b4e0b4fa529d890ecdb27824b696ec13d998d"
+    },
+    "source.gate.json": {
+      "bytes": 724,
+      "sha256": "425ebaa0f49dec6fea1855e2937a14c79d8e614f03894808f3b9cea614bf7fca"
+    },
+    "source.jsonl.gz": {
+      "bytes": 118059,
+      "sha256": "15d1ddec0d67cb8f484b205a60ef204a818fd9a9dcdf683c6eb0b4a40af65554"
+    },
+    "source.levels.json": {
+      "bytes": 61,
+      "sha256": "273edbedddf61e40315243fc55aefc3ce4b2ec65367e97ec9a3ab91b3cdea1ec"
+    },
+    "source.manifest.json": {
+      "bytes": 684,
+      "sha256": "79d7a7616af95d72b74bb57c9081d2c46eba46b207eef54458c5d99f4fc6f4e8"
+    },
+    "source.summary.json": {
+      "bytes": 356,
+      "sha256": "970126e9c6a880174cc5b6c10fe1d08a9addc1b4dbf566d4c592ae5c1259c662"
+    },
+    "strict-spike.log": {
+      "bytes": 2729,
+      "sha256": "ba38cd8cc46aeae9dce84ca7a430e6b287a0a419fa237dbddd02a2e8542cbf26"
+    }
+  },
+  "scope": "Independent dependency snapshot; not final integrated financial node or stable release",
+  "sourceBinding": {
+    "goModSha256": "8b80a6187f0907b25fd53061fe2626bb931bd8573ab300a733acadb6aad17ad3",
+    "goSumSha256": "f0fc72dd7e2f75e0cbab5dbe2c5e9a3db5a361db6bce463ed0e758b57603786d",
+    "ownedSDKManifestSha256": "d14d2d81a9bf7cc3c4ab0d7733cf208afeb9ad98209fa0215c064f95cf735b1b"
+  },
+  "sourceCommit": "264303bd5ca8bd8107ba219c77b60c9c14818f1c"
+}

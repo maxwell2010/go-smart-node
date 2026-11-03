@@ -1,0 +1,51 @@
+=== RUN   TestSDKWireFormatsCrossRead
+--- PASS: TestSDKWireFormatsCrossRead (0.13s)
+=== RUN   TestObserveLegacyCRCRejection
+    armor_compat_test.go:97: legacy_crc_rejected=true maintained_crc_rejected=false
+--- PASS: TestObserveLegacyCRCRejection (0.00s)
+=== RUN   TestStrictCRCCompatibility
+=== RUN   TestStrictCRCCompatibility/trailing-block
+=== RUN   TestStrictCRCCompatibility/valid
+=== RUN   TestStrictCRCCompatibility/crlf
+=== RUN   TestStrictCRCCompatibility/prefix
+=== RUN   TestStrictCRCCompatibility/missing-crc
+=== RUN   TestStrictCRCCompatibility/bad-crc
+=== RUN   TestStrictCRCCompatibility/missing-end-after-crc
+=== RUN   TestStrictCRCCompatibility/prefix#01
+=== RUN   TestStrictCRCCompatibility/missing-crc#01
+=== RUN   TestStrictCRCCompatibility/bad-crc#01
+=== RUN   TestStrictCRCCompatibility/missing-end-after-crc#01
+=== RUN   TestStrictCRCCompatibility/trailing-block#01
+=== RUN   TestStrictCRCCompatibility/valid#01
+=== RUN   TestStrictCRCCompatibility/crlf#01
+=== RUN   TestStrictCRCCompatibility/valid#02
+=== RUN   TestStrictCRCCompatibility/crlf#02
+=== RUN   TestStrictCRCCompatibility/prefix#02
+=== RUN   TestStrictCRCCompatibility/missing-crc#02
+=== RUN   TestStrictCRCCompatibility/bad-crc#02
+=== RUN   TestStrictCRCCompatibility/missing-end-after-crc#02
+=== RUN   TestStrictCRCCompatibility/trailing-block#02
+--- PASS: TestStrictCRCCompatibility (0.00s)
+    --- PASS: TestStrictCRCCompatibility/trailing-block (0.00s)
+    --- PASS: TestStrictCRCCompatibility/valid (0.00s)
+    --- PASS: TestStrictCRCCompatibility/crlf (0.00s)
+    --- PASS: TestStrictCRCCompatibility/prefix (0.00s)
+    --- PASS: TestStrictCRCCompatibility/missing-crc (0.00s)
+    --- PASS: TestStrictCRCCompatibility/bad-crc (0.00s)
+    --- PASS: TestStrictCRCCompatibility/missing-end-after-crc (0.00s)
+    --- PASS: TestStrictCRCCompatibility/prefix#01 (0.00s)
+    --- PASS: TestStrictCRCCompatibility/missing-crc#01 (0.00s)
+    --- PASS: TestStrictCRCCompatibility/bad-crc#01 (0.00s)
+    --- PASS: TestStrictCRCCompatibility/missing-end-after-crc#01 (0.00s)
+    --- PASS: TestStrictCRCCompatibility/trailing-block#01 (0.00s)
+    --- PASS: TestStrictCRCCompatibility/valid#01 (0.00s)
+    --- PASS: TestStrictCRCCompatibility/crlf#01 (0.00s)
+    --- PASS: TestStrictCRCCompatibility/valid#02 (0.00s)
+    --- PASS: TestStrictCRCCompatibility/crlf#02 (0.00s)
+    --- PASS: TestStrictCRCCompatibility/prefix#02 (0.00s)
+    --- PASS: TestStrictCRCCompatibility/missing-crc#02 (0.00s)
+    --- PASS: TestStrictCRCCompatibility/bad-crc#02 (0.00s)
+    --- PASS: TestStrictCRCCompatibility/missing-end-after-crc#02 (0.00s)
+    --- PASS: TestStrictCRCCompatibility/trailing-block#02 (0.00s)
+PASS
+ok  	example.invalid/mcnd-armor-compat	0.299s

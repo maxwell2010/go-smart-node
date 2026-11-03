@@ -1,0 +1,10 @@
+{
+  "advisories": [],
+  "distinct_symbol_advisories": 0,
+  "notes": [
+    "Symbol traces are static potential reachability, not exploit validation.",
+    "Toolchain vulnerabilities execute in runtime libraries too; provenance is not exposure.",
+    "Direct means an explicit non-indirect go.mod require in this snapshot."
+  ],
+  "provenance_buckets": {}
+}

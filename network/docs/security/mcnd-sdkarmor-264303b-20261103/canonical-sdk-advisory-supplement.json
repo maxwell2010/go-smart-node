@@ -1,0 +1,25 @@
+{
+  "advisories": [
+    {
+      "id": "GO-2023-1821",
+      "imports": [
+        {
+          "compiled": false,
+          "path": "github.com/cosmos/cosmos-sdk/x/crisis"
+        }
+      ]
+    },
+    {
+      "id": "GO-2023-1881",
+      "imports": [
+        {
+          "compiled": false,
+          "path": "github.com/cosmos/cosmos-sdk/x/crisis"
+        }
+      ]
+    }
+  ],
+  "canonicalVersion": "v0.53.8",
+  "scope": "Local replacement is not automatically covered by the SDK version lookup; this is a separate explicit package inventory comparison, not an exploitability or whole-SDK safety assertion.",
+  "source": "https://api.osv.dev/v1/query"
+}

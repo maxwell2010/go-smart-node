@@ -1,0 +1,17 @@
+{
+  "GO-2025-3442": {
+    "classification": "module finding, no symbol/package finding in this snapshot",
+    "compiledInternalBlocksync": false,
+    "compiledPublicBlocksync": true,
+    "primaryBranchAdvisory": "https://github.com/cometbft/cometbft/security/advisories/GHSA-22qq-3xwm-r5x4",
+    "publicBlocksyncPatchedBranchVersion": "v0.38.17",
+    "scope": "Selected 0.38 branch is above its published 0.38.17 fix; separate internal/blocksync 1.0.1 range must not be mistaken for an instruction to upgrade core families.",
+    "selectedVersion": "v0.38.26"
+  },
+  "GO-2026-5932": {
+    "classification": "module finding through selected x/crypto v0.58.0; no old OpenPGP compiled package/function",
+    "legacyCompiledImports": [],
+    "maintainedCompiledArmor": true,
+    "scope": "Actual maintained source path plus strict SDK compatibility fixtures address this armor migration; raw module finding is retained, not excluded, and does not certify every package in x/crypto."
+  }
+}

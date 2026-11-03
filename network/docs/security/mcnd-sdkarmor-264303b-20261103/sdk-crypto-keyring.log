@@ -1,0 +1,5 @@
+ok  	github.com/cosmos/cosmos-sdk/crypto/internal/armorcompat	0.028s
+ok  	github.com/cosmos/cosmos-sdk/crypto	1.383s
+ok  	github.com/cosmos/cosmos-sdk/crypto/keyring	4.920s
+ok  	github.com/cosmos/cosmos-sdk/crypto/keys/secp256k1	0.246s
+ok  	github.com/cosmos/cosmos-sdk/crypto/keys/ed25519	0.191s

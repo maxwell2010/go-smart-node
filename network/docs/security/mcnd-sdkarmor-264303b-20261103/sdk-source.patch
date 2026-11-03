@@ -1,0 +1,251 @@
+--- a/crypto/armor.go
++++ b/crypto/armor.go
+@@ -5,12 +5,12 @@
+ 	"encoding/hex"
+ 	"errors"
+ 	"fmt"
+-	"io"
+-
++
++	"github.com/ProtonMail/go-crypto/openpgp/armor"
+ 	"github.com/cometbft/cometbft/crypto"
++	"github.com/cosmos/cosmos-sdk/crypto/internal/armorcompat"
+ 	"golang.org/x/crypto/argon2"
+ 	"golang.org/x/crypto/chacha20poly1305"
+-	"golang.org/x/crypto/openpgp/armor" //nolint:staticcheck //TODO: remove this dependency
+ 
+ 	errorsmod "cosmossdk.io/errors"
+ 
+@@ -276,14 +276,5 @@
+ }
+ 
+ func DecodeArmor(armorStr string) (blockType string, headers map[string]string, data []byte, err error) {
+-	buf := bytes.NewBufferString(armorStr)
+-	block, err := armor.Decode(buf)
+-	if err != nil {
+-		return "", nil, nil, err
+-	}
+-	data, err = io.ReadAll(block.Body)
+-	if err != nil {
+-		return "", nil, nil, err
+-	}
+-	return block.Type, block.Header, data, nil
+-}
++	return armorcompat.Decode(armorStr)
++}
+--- /dev/null
++++ b/crypto/internal/armorcompat/LICENSE
+@@ -0,0 +1,27 @@
++Copyright 2009 The Go Authors.
++
++Redistribution and use in source and binary forms, with or without
++modification, are permitted provided that the following conditions are
++met:
++
++   * Redistributions of source code must retain the above copyright
++notice, this list of conditions and the following disclaimer.
++   * Redistributions in binary form must reproduce the above
++copyright notice, this list of conditions and the following disclaimer
++in the documentation and/or other materials provided with the
++distribution.
++   * Neither the name of Google LLC nor the names of its
++contributors may be used to endorse or promote products derived from
++this software without specific prior written permission.
++
++THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
++"AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
++LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR
++A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT
++OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
++SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT
++LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
++DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
++THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
++(INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
++OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+--- /dev/null
++++ b/crypto/internal/armorcompat/armor.go
+@@ -0,0 +1,101 @@
++// Copyright 2010 The Go Authors. All rights reserved.
++// CRC-24 compatibility logic derives from golang.org/x/crypto/openpgp/armor,
++// distributed under its BSD-style LICENSE. CRC-24 is a transport checksum,
++// not an authentication or cryptographic integrity mechanism.
++package armorcompat
++
++import (
++	"bufio"
++	"encoding/base64"
++	"io"
++	"strings"
++
++	"github.com/ProtonMail/go-crypto/openpgp/armor"
++)
++
++// Decode preserves SDK legacy optional-CRC verification while using the
++// maintained armor decoder. The SDK already materializes the decoded body.
++func Decode(source string) (string, map[string]string, []byte, error) {
++	in := &lineInput{reader: bufio.NewReader(strings.NewReader(source))}
++	block, err := armor.Decode(in)
++	if err != nil {
++		return "", nil, nil, err
++	}
++	// Read returns at most one complete line per call. Decode has consumed
++	// the header delimiter, so no body bytes can be buffered before this switch.
++	if len(in.pending) != 0 {
++		return "", nil, nil, armor.ArmorCorrupt
++	}
++	in.body = true
++	data, err := io.ReadAll(block.Body)
++	if err != nil {
++		return "", nil, nil, err
++	}
++	if in.hasCRC && crc24(data) != in.crc {
++		return "", nil, nil, armor.ArmorCorrupt
++	}
++	return block.Type, block.Header, data, nil
++}
++
++type lineInput struct {
++	reader       *bufio.Reader
++	pending      []byte
++	body, hasCRC bool
++	crc          uint32
++}
++
++func (in *lineInput) Read(p []byte) (int, error) {
++	if len(p) == 0 {
++		return 0, nil
++	}
++	if len(in.pending) == 0 {
++		line, err := in.reader.ReadString('\n')
++		if len(line) == 0 {
++			return 0, err
++		}
++		if err != nil && err != io.EOF {
++			return 0, err
++		}
++		if in.body {
++			value := strings.TrimSuffix(strings.TrimSuffix(line, "\n"), "\r")
++			if len(value) == 5 && value[0] == '=' {
++				decoded, decodeErr := base64.StdEncoding.DecodeString(value[1:])
++				if decodeErr != nil || len(decoded) != 3 {
++					return 0, armor.ArmorCorrupt
++				}
++				end, endErr := in.reader.ReadString('\n')
++				if endErr != nil && endErr != io.EOF {
++					return 0, endErr
++				}
++				if !strings.HasPrefix(end, "-----END ") {
++					return 0, armor.ArmorCorrupt
++				}
++				in.hasCRC = true
++				in.crc = uint32(decoded[0])<<16 | uint32(decoded[1])<<8 | uint32(decoded[2])
++			} else if !strings.HasPrefix(value, "-----END ") {
++				// The maintained parser trims whitespace; the legacy SDK did not.
++				if len(value) > 96 || strings.TrimSpace(value) != value {
++					return 0, armor.ArmorCorrupt
++				}
++			}
++		}
++		in.pending = []byte(line)
++	}
++	n := copy(p, in.pending)
++	in.pending = in.pending[n:]
++	return n, nil
++}
++
++func crc24(data []byte) uint32 {
++	crc := uint32(0xb704ce)
++	for _, value := range data {
++		crc ^= uint32(value) << 16
++		for bit := 0; bit < 8; bit++ {
++			crc <<= 1
++			if crc&0x1000000 != 0 {
++				crc ^= 0x1864cfb
++			}
++		}
++	}
++	return crc & 0xffffff
++}
+--- /dev/null
++++ b/crypto/internal/armorcompat/armor_test.go
+@@ -0,0 +1,61 @@
++package armorcompat
++
++import (
++	"bytes"
++	"strings"
++	"testing"
++
++	"github.com/ProtonMail/go-crypto/openpgp/armor"
++)
++
++// This ordinary ASCII fixture was emitted by canonical SDK v0.53.8.
++const legacyInfo = "-----BEGIN TENDERMINT KEY INFO-----\ntype: Info\nversion: 0.0.0\n\nb3JkaW5hcnkgU0RLIGluZm9ybWF0aW9u\n=5yvz\n-----END TENDERMINT KEY INFO-----"
++
++func TestLegacyOptionalCRC(t *testing.T) {
++	for name, input := range map[string]string{
++		"original":       legacyInfo,
++		"crlf":           strings.ReplaceAll(legacyInfo, "\n", "\r\n"),
++		"missing-crc":    strings.Replace(legacyInfo, "=5yvz\n", "", 1),
++		"preamble":       "ignored text\n" + legacyInfo,
++		"trailing-block": legacyInfo + "\n" + legacyInfo,
++	} {
++		t.Run(name, func(t *testing.T) {
++			kind, headers, body, err := Decode(input)
++			if err != nil || kind != "TENDERMINT KEY INFO" || headers["type"] != "Info" || string(body) != "ordinary SDK information" {
++				t.Fatalf("SDK wire format changed: %v", err)
++			}
++		})
++	}
++	for name, input := range map[string]string{
++		"corrupt-crc":           strings.Replace(legacyInfo, "=5yvz", "=Ayvz", 1),
++		"invalid-crc":           strings.Replace(legacyInfo, "=5yvz", "=!!!!", 1),
++		"missing-end-after-crc": strings.Split(legacyInfo, "-----END ")[0],
++		"body-whitespace":       strings.Replace(legacyInfo, "\nb3J", "\n b3J", 1),
++	} {
++		t.Run(name, func(t *testing.T) {
++			if _, _, _, err := Decode(input); err == nil {
++				t.Fatal("legacy invalid input accepted")
++			}
++		})
++	}
++}
++
++func TestMaintainedEncodingAndBoundedOrdinaryBodies(t *testing.T) {
++	for _, body := range [][]byte{nil, []byte("a"), bytes.Repeat([]byte("ordinary fixture"), 37)} {
++		var encoded bytes.Buffer
++		writer, err := armor.Encode(&encoded, "TENDERMINT KEY INFO", map[string]string{"version": "0.0.0"})
++		if err != nil {
++			t.Fatal(err)
++		}
++		if _, err := writer.Write(body); err != nil {
++			t.Fatal(err)
++		}
++		if err := writer.Close(); err != nil {
++			t.Fatal(err)
++		}
++		_, _, decoded, err := Decode(encoded.String())
++		if err != nil || !bytes.Equal(decoded, body) {
++			t.Fatalf("ordinary round trip failed: %v", err)
++		}
++	}
++}
+--- a/go.mod
++++ b/go.mod
+@@ -3,6 +3,7 @@
+ module github.com/cosmos/cosmos-sdk
+ 
+ require (
++	github.com/ProtonMail/go-crypto v1.5.2
+ 	cosmossdk.io/api v0.9.2
+ 	cosmossdk.io/collections v1.3.1
+ 	cosmossdk.io/core v0.11.3
+--- a/go.sum
++++ b/go.sum
+@@ -1077,3 +1077,5 @@
+ sigs.k8s.io/yaml v1.6.0 h1:G8fkbMSAFqgEFgh4b1wmtzDnioxFCUgTZhlbj5P9QYs=
+ sigs.k8s.io/yaml v1.6.0/go.mod h1:796bPqUfzR/0jLAl6XjHl3Ck7MiyVv8dbTdyT3/pMf4=
+ sourcegraph.com/sourcegraph/appdash v0.0.0-20190731080439-ebfcffb1b5c0/go.mod h1:hI742Nqp5OhwiqlzhgfbWU4mW4yO10fP+LoT9WOswdU=
++github.com/ProtonMail/go-crypto v1.5.2 h1:cucYnvqcY7UOXVD//mSyjeaPY0SSN3v5cDkYPxumINk=
++github.com/ProtonMail/go-crypto v1.5.2/go.mod h1:/RaSu30DaKO4RY+XdV/ACcCcZkGr7AhUIduq5sjzzCo=

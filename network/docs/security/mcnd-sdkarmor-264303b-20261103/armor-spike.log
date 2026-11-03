@@ -1,0 +1,7 @@
+=== RUN   TestSDKWireFormatsCrossRead
+--- PASS: TestSDKWireFormatsCrossRead (0.14s)
+=== RUN   TestObserveLegacyCRCRejection
+    armor_compat_test.go:97: legacy_crc_rejected=true maintained_crc_rejected=false
+--- PASS: TestObserveLegacyCRCRejection (0.00s)
+PASS
+ok  	example.invalid/mcnd-armor-compat	0.312s

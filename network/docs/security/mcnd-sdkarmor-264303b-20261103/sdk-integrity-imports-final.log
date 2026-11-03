@@ -1,0 +1,2 @@
+Owned SDK integrity PASS: 2141 files, 3 modified canonical files
+{"legacyCompiledImports": [], "maintainedModule": {"GoModSum": "h1:/RaSu30DaKO4RY+XdV/ACcCcZkGr7AhUIduq5sjzzCo=", "Sum": "h1:cucYnvqcY7UOXVD//mSyjeaPY0SSN3v5cDkYPxumINk=", "Version": "v1.5.2"}, "moduleIntegrity": "all modules verified", "scannerCoverage": "Local SDK replacement requires explicit canonical SDK advisory review; import verification alone is not an advisory closure or complete audit."}

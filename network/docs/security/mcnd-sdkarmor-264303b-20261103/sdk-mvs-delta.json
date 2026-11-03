@@ -1,0 +1,10 @@
+{
+  "afterModules": 773,
+  "beforeModules": 773,
+  "changed": {
+    "github.com/ProtonMail/go-crypto": [
+      "v1.1.5",
+      "v1.5.2"
+    ]
+  }
+}

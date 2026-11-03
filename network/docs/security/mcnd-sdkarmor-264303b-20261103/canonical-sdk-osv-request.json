@@ -1,0 +1,7 @@
+{
+  "package": {
+    "ecosystem": "Go",
+    "name": "github.com/cosmos/cosmos-sdk"
+  },
+  "version": "v0.53.8"
+}

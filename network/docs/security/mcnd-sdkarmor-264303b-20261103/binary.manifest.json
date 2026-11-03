@@ -1,0 +1,19 @@
+{
+  "argv": [
+    "/opt/mintcandy-tools/vuln190/govulncheck",
+    "-json",
+    "-mode",
+    "binary",
+    "/mnt/c/MintCandyBuild/mcnd-sdkarmor-264303b-20261103/mcnd-264303b"
+  ],
+  "completed": true,
+  "completed_utc": "2026-11-03T08:01:13.224340+00:00",
+  "raw_bytes": 1087898,
+  "raw_sha256": "9af099e46369c01ee33e0eb9d64f8d7e24070bb01cdb8b6ef9e124e6ddf98ce3",
+  "scanner_exit_code": 0,
+  "schema_version": 1,
+  "scope": "actual mcnd264303b CGO1 linuxamd64 binary; owned SDK/EVM/geth coverage requires manual supplement; no exclusions; not final financial integration",
+  "source_commit": "264303bd5ca8bd8107ba219c77b60c9c14818f1c",
+  "started_utc": "2026-11-03T08:00:30.204185+00:00",
+  "toolchain": "go version go1.26.10 linux/amd64"
+}
