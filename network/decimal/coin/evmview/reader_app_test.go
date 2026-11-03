@@ -191,6 +191,14 @@ func TestAuthoritativeCoinViewWithSignedOwnEVM(t *testing.T) {
 	hydrated, err := reader.GetCoin(metered, "viewcoin")
 	require.NoError(t, err)
 	require.Positive(t, metered.GasMeter().GasConsumed())
+	// Raising a read cap cannot inflate billed work through a transaction fee
+	// floor. Both readers execute the same approved getter in the same state.
+	widerReader, err := evmview.New(metadata, a.BankKeeper, a.EVMKeeper, binding, compiled, 400_000, 2_000_000)
+	require.NoError(t, err)
+	widerMeter := ctx().WithGasMeter(storetypes.NewGasMeter(3_000_000))
+	_, err = widerReader.GetCoin(widerMeter, "viewcoin")
+	require.NoError(t, err)
+	require.Equal(t, metered.GasMeter().GasConsumed(), widerMeter.GasMeter().GasConsumed(), "query resource charge must not depend on an unused read cap")
 	require.Equal(t, math.NewIntFromBigInt(new(big.Int).Mul(unit, big.NewInt(10))), hydrated.Volume)
 	require.Equal(t, math.NewIntFromBigInt(new(big.Int).Mul(unit, big.NewInt(5))), hydrated.Reserve)
 	require.Equal(t, metadata.coin.Reserve, math.NewIntFromBigInt(unit), "metadata fixture intentionally remains stale")

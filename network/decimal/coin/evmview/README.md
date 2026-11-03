@@ -57,6 +57,9 @@ Both native-store work and EVM gas, including failed EVM calls, are charged to
 the caller's SDK meter. SDK out-of-gas in the view is returned as an error;
 exhaustion of the caller's own meter retains normal SDK panic semantics.
 Gas caps are explicit reviewed policy, not user-controlled query options.
+Read calls use internal execution so the transaction minimum-fee multiplier
+does not inflate query work when an unused cap is increased. Billing includes
+pre-refund VM work; discarded writes cannot provide a resource-charge refund.
 
 The supplied context must contain genuine current block metadata, including
 the proposer required by upstream EVM configuration. A missing/unknown proposer

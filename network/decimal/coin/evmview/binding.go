@@ -95,14 +95,16 @@ func (r *Reader) readWord(charge, ctx sdk.Context, address common.Address, data 
 	callCtx, _ := ctx.CacheContext()
 	message := core.Message{From: common.Address{}, To: &address, GasLimit: r.evmGas, GasPrice: new(big.Int), GasFeeCap: new(big.Int), GasTipCap: new(big.Int), Value: new(big.Int), Data: bytes.Clone(data), SkipNonceChecks: true, SkipFromEOACheck: true}
 	stateDB := statedb.New(callCtx, r.evm, statedb.NewEmptyTxConfig())
-	response, err := r.evm.ApplyMessage(callCtx, stateDB, message, nil, false, false, false)
+	// Read-only simulation is internal work, not a fee-paying transaction.
+	response, err := r.evm.ApplyMessage(callCtx, stateDB, message, nil, false, false, true)
 	if response != nil {
-		charge.GasMeter().ConsumeGas(min(response.GasUsed, r.evmGas), "native coin EVM view")
+		// Discarded writes cannot reduce the resource charge through refunds.
+		charge.GasMeter().ConsumeGas(min(max(response.MaxUsedGas, response.GasUsed), r.evmGas), "native coin EVM view")
 	}
 	if err != nil {
 		return nil, fmt.Errorf("coin bounded view: %w", err)
 	}
-	if response == nil || response.VmError != "" || len(response.Ret) != 32 || response.GasUsed > r.evmGas {
+	if response == nil || response.VmError != "" || len(response.Ret) != 32 || response.GasUsed > r.evmGas || response.MaxUsedGas > r.evmGas {
 		return nil, errors.New("coin bounded view reverted or returned malformed output")
 	}
 	return bytes.Clone(response.Ret), nil
