@@ -306,6 +306,169 @@ func TestOwnedAppSignedRegistryBootstrap(t *testing.T) {
 			require.Equal(t, implementation, values[0])
 		}
 	})
+
+	t.Run("atomic constructor handoff to governance", func(t *testing.T) {
+		govOwner := common.BytesToAddress(authtypes.NewModuleAddress("gov"))
+		require.NotEqual(t, crypto.PubkeyToAddress(keys[0].PublicKey), govOwner)
+		from := crypto.PubkeyToAddress(keys[0].PublicKey)
+		lib := load("DelegationNFTLib")
+		libAddress := crypto.CreateAddress(from, a.EVMKeeper.GetNonce(ctx(), from))
+		libCode, err := lib.Deployment()
+		require.NoError(t, err)
+		send(keys[0], nil, new(big.Int), libCode, true)
+		linked, err := contracts.LoadLinked("DecimalDelegation", map[string]common.Address{"sources/DecimalDelegation.sol:DelegationNFTLib": libAddress})
+		require.NoError(t, err)
+		names := []string{"master-validator", "delegation", "delegation-nft", "token-center", "nft-center"}
+		roleABI := map[string]contracts.Artifact{}
+		implementations := map[string]common.Address{}
+		for _, role := range names {
+			name := map[string]string{"master-validator": "NewNetworkMasterValidator", "delegation-nft": "DecimalDelegationNFT", "token-center": "DecimalTokenCenter", "nft-center": "DecimalNFTCenter"}[role]
+			artifact := linked
+			if role != "delegation" {
+				artifact = load(name)
+			}
+			roleABI[role] = artifact
+			implementations[role] = deploy(artifact)
+		}
+		tokenImpls := map[string]common.Address{}
+		for _, name := range []string{"DRC20", "DRC20Reserveless", "DRC721", "DRC1155", "DRC721Reserveless", "DRC1155Reserveless"} {
+			tokenImpls[name] = deploy(load(name))
+		}
+		wrapped := deploy(load("MintCandyWrappedDEL"))
+		registryImpl := deploy(registry)
+		nonce := a.EVMKeeper.GetNonce(ctx(), from)
+		govRegistry := crypto.CreateAddress(from, nonce)
+		roles := map[string]common.Address{}
+		var registryConfig [][]byte
+		for i, role := range names {
+			roles[role] = crypto.CreateAddress(from, nonce+1+uint64(i))
+			call, err := registry.ABI.Pack("setContractAddress", role, roles[role])
+			require.NoError(t, err)
+			registryConfig = append(registryConfig, call)
+		}
+		wrappedRegister, err := registry.ABI.Pack("setContractAddress", "wdel", wrapped)
+		require.NoError(t, err)
+		registryConfig = append(registryConfig, wrappedRegister)
+		registryInit, err := bootstrap.ABI.Pack("bootstrapConfigured", govOwner, registryImpl, []byte{}, registryConfig)
+		require.NoError(t, err)
+
+		expectedCreation, err := proxy.Deployment(setup, registryInit)
+		require.NoError(t, err)
+		configuredCreation, err := contracts.ConfiguredProxyDeployment(setup, registryImpl, govOwner, []byte{}, registryConfig)
+		require.NoError(t, err)
+		require.Equal(t, expectedCreation, configuredCreation)
+		send(keys[0], nil, new(big.Int), configuredCreation, true)
+		require.Equal(t, crypto.Keccak256Hash(proxy.Runtime), a.EVMKeeper.GetCodeHash(ctx(), govRegistry))
+
+		for _, role := range names {
+			artifact := roleABI[role]
+			var initialization []byte
+			var config [][]byte
+			pack := func(method string, args ...interface{}) []byte {
+				call, err := artifact.ABI.Pack(method, args...)
+				require.NoError(t, err)
+				return call
+			}
+			if role == "master-validator" {
+				initialization = pack("initializeFresh", govRegistry)
+			} else {
+				config = append(config, pack("setContractCenter", govRegistry))
+			}
+			if role == "token-center" {
+				initialization = pack("initialize")
+				config = append(config, pack("upgradeToken", tokenImpls["DRC20"]), pack("upgradeTokenReserveless", tokenImpls["DRC20Reserveless"]))
+			}
+			if role == "nft-center" {
+				initialization = pack("initialize")
+				for _, nft := range []struct {
+					name    string
+					kind    uint8
+					reserve bool
+				}{{"DRC721", 0, true}, {"DRC1155", 1, true}, {"DRC721Reserveless", 0, false}, {"DRC1155Reserveless", 1, false}} {
+					config = append(config, pack("upgradeNFT", tokenImpls[nft.name], nft.kind, nft.reserve))
+				}
+			}
+			init, err := bootstrap.ABI.Pack("bootstrapConfigured", govOwner, implementations[role], initialization, config)
+			require.NoError(t, err)
+			require.Equal(t, roles[role], deploy(proxy, setup, init))
+		}
+		query := func(artifact contracts.Artifact, address common.Address, method string, args ...interface{}) []interface{} {
+			call, err := artifact.ABI.Pack(method, args...)
+			require.NoError(t, err)
+			response := send(keys[0], &address, new(big.Int), call, true)
+			values, err := artifact.ABI.Unpack(method, response.Ret)
+			require.NoError(t, err)
+			return values
+		}
+		require.Equal(t, govOwner, query(registry, govRegistry, "owner")[0])
+		send(keys[0], &govRegistry, new(big.Int), registryInit, false)
+		send(keys[0], &setup, new(big.Int), registryInit, false)
+		for _, role := range names {
+			artifact, target := roleABI[role], roles[role]
+			require.Equal(t, govOwner, query(artifact, target, "owner")[0])
+			require.Equal(t, target, query(registry, govRegistry, "getContractAddress", role)[0])
+			getter := "getContractCenter"
+			if role == "master-validator" {
+				getter = "contractCenter"
+			}
+			require.Equal(t, govRegistry, query(artifact, target, getter)[0])
+			forbidden, err := artifact.ABI.Pack("upgrade", implementations[role], []byte{})
+			require.NoError(t, err)
+			send(keys[0], &target, new(big.Int), forbidden, false)
+			send(keys[1], &target, new(big.Int), forbidden, false)
+		}
+		require.Equal(t, tokenImpls["DRC20"], query(roleABI["token-center"], roles["token-center"], "implementation")[0])
+		require.Equal(t, tokenImpls["DRC20Reserveless"], query(roleABI["token-center"], roles["token-center"], "implementationReserveless")[0])
+		for _, nft := range []struct {
+			name    string
+			kind    uint8
+			reserve bool
+		}{{"DRC721", 0, true}, {"DRC1155", 1, true}, {"DRC721Reserveless", 0, false}, {"DRC1155Reserveless", 1, false}} {
+			require.Equal(t, tokenImpls[nft.name], query(roleABI["nft-center"], roles["nft-center"], "implementation", nft.kind, nft.reserve)[0])
+		}
+
+		// A previous external registry write must also disappear on a later failure.
+		fixture := load("ConfiguredBootstrapTestTarget")
+		fixtureImpl := deploy(fixture)
+		registryImpl = deploy(registry)
+		currentNonce := a.EVMKeeper.GetNonce(ctx(), from)
+		externalRegistry := crypto.CreateAddress(from, currentNonce)
+		failedProxy := crypto.CreateAddress(from, currentNonce+1)
+		externalInit, err := bootstrap.ABI.Pack("bootstrap", failedProxy, registryImpl, []byte{})
+		require.NoError(t, err)
+		require.Equal(t, externalRegistry, deploy(proxy, setup, externalInit))
+		earlier, err := fixture.ABI.Pack("configureExternal", externalRegistry, "rollback-proof", wrapped)
+		require.NoError(t, err)
+		later, err := fixture.ABI.Pack("failConfiguration")
+		require.NoError(t, err)
+		failing, err := bootstrap.ABI.Pack("bootstrapConfigured", govOwner, fixtureImpl, []byte{}, [][]byte{earlier, later})
+		require.NoError(t, err)
+		creation, err := proxy.Deployment(setup, failing)
+		require.NoError(t, err)
+		response := send(keys[0], nil, new(big.Int), creation, false)
+		require.Empty(t, a.EVMKeeper.GetCode(ctx(), a.EVMKeeper.GetCodeHash(ctx(), failedProxy)))
+		var selector [4]byte
+		require.GreaterOrEqual(t, len(response.Ret), 4)
+		copy(selector[:], response.Ret[:4])
+		custom, err := fixture.ABI.ErrorByID(selector)
+		require.NoError(t, err)
+		require.Equal(t, "RejectedConfiguration", custom.Name)
+		require.Equal(t, common.Address{}, query(registry, externalRegistry, "getContractAddress", "rollback-proof")[0])
+		require.Equal(t, failedProxy, query(registry, externalRegistry, "owner")[0])
+		// Configurations may not take ownership or redirect implementation mid-setup.
+		changed, err := fixture.ABI.Pack("transferOwnership", govOwner)
+		require.NoError(t, err)
+		invalid, err := bootstrap.ABI.Pack("bootstrapConfigured", govOwner, fixtureImpl, []byte{}, [][]byte{changed})
+		require.NoError(t, err)
+		creation, err = proxy.Deployment(setup, invalid)
+		require.NoError(t, err)
+		send(keys[0], nil, new(big.Int), creation, false)
+		invalid, err = bootstrap.ABI.Pack("bootstrapConfigured", common.Address{}, fixtureImpl, []byte{}, [][]byte{})
+		require.NoError(t, err)
+		creation, err = proxy.Deployment(setup, invalid)
+		require.NoError(t, err)
+		send(keys[0], nil, new(big.Int), creation, false)
+	})
 	t.Run("fresh native-backed wrapper", func(t *testing.T) {
 		wrapper := load("MintCandyWrappedDEL")
 		address := deploy(wrapper)

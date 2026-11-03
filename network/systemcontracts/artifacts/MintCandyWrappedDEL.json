@@ -371,7 +371,7 @@
       "type": "receive"
     }
   ],
-  "bootstrapSourceSha256": "34e34f100d9127950ba1eb97a341a1b44e9a7afeb78c596e83cd7e4a242e9107",
+  "bootstrapSourceSha256": "9f01344149e50afd35a98fd7dad231c3f983603f57acd4d4f1d1433c85065ed0",
   "compilerSha256": "0479d44fdf9c501c25337fdc540419f1593b884a87b47f023da4f1c700fda782",
   "compilerVersion": "0.8.20+commit.a1b79de6.Linux.g++",
   "contractName": "MintCandyWrappedDEL",
@@ -394,6 +394,7 @@
   },
   "sourceManifestSha256": "092362653c6141e282162da2b91e0517d0de40365bd284d4c8dfebe6f55dcb46",
   "sourceUnit": "MintCandyWrappedDEL.sol",
+  "testConfigSourceSha256": "77e875024f120625822275b5a78f5b4668e2922a7fab2c5bf0f56a537e772dad",
   "testReceiverSourceSha256": "03ad3fa8a515ad2a62cf486db3ffeaf7ae89da0df7d7db4e33d63ae241ddf40f",
   "wrapperSourceSha256": "ab0baee2221c4e8d7f32ef07c895728c6becabadb7ac01b3a05e7ace70086f93"
 }

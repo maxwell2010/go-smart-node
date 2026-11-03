@@ -38,12 +38,16 @@ def main():
     fresh_name = "NewNetworkMasterValidator.sol"
     fresh_source = (ROOT / fresh_name).read_bytes()
     sources[fresh_name] = {"content": fresh_source.decode("utf-8")}
+    config_name = "ConfiguredBootstrapTestTarget.sol"
+    config_source = (ROOT / config_name).read_bytes()
+    sources[config_name] = {"content": config_source.decode("utf-8")}
     targets = {
         "sources/DecimalContractCenter.sol": ["DecimalContractCenter"],
         "sources/DecimalContractCenterProxy.sol": ["DecimalContractCenterProxy"],
         own_name: ["NewNetworkProxyBootstrap"],
         wrapper_name: ["MintCandyWrappedDEL"],
         fresh_name: ["NewNetworkMasterValidator"],
+        config_name: ["ConfiguredBootstrapTestTarget"],
         probe_name: ["WrappedDELTestReceiver"],
         "sources/DecimalMasterValidator.sol": ["DecimalMasterValidator"],
         "sources/DecimalDelegation.sol": ["DecimalDelegation", "DelegationNFTLib"],
@@ -88,6 +92,7 @@ def main():
                         "wrapperSourceSha256": hashlib.sha256(wrapper_source).hexdigest(),
                         "testReceiverSourceSha256": hashlib.sha256(probe_source).hexdigest(),
                         "freshValidatorSourceSha256": hashlib.sha256(fresh_source).hexdigest(),
+                        "testConfigSourceSha256": hashlib.sha256(config_source).hexdigest(),
                         "settings": {key: value for key, value in selected.items() if key != "outputSelection"}}
             (directory / (target + ".json")).write_text(json.dumps(artifact, sort_keys=True, indent=2) + "\n", encoding="utf-8", newline="\n")
             print(target, "creation", len(creation) // 2, "runtime", len(runtime) // 2, flush=True)

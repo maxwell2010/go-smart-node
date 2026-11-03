@@ -35,3 +35,24 @@ func TestPinnedABIsAndExplicitFreshLibraryLinking(t *testing.T) {
 	_, err = contracts.CompiledABI("../DRC20")
 	require.Error(t, err)
 }
+
+func TestConstructorConfigurationPolicy(t *testing.T) {
+	address := common.HexToAddress("0x1234567890123456789012345678901234567890")
+	calls, err := contracts.PackConstructorConfiguration("DecimalTokenCenter", contracts.ConstructorCall{Method: "setContractCenter", Arguments: []interface{}{address}}, contracts.ConstructorCall{Method: "upgradeToken", Arguments: []interface{}{address}})
+	require.NoError(t, err)
+	require.Len(t, calls, 2)
+	_, err = contracts.ConfiguredProxyDeployment(address, address, address, nil, calls)
+	require.NoError(t, err)
+	for _, method := range []string{"upgrade", "transferOwnership", "renounceOwnership", "unknown"} {
+		_, err = contracts.PackConstructorConfiguration("DecimalTokenCenter", contracts.ConstructorCall{Method: method, Arguments: []interface{}{address}})
+		require.Error(t, err)
+	}
+	_, err = contracts.ConfiguredProxyDeployment(address, address, common.Address{}, nil, calls)
+	require.Error(t, err)
+	_, err = contracts.ConfiguredProxyDeployment(address, address, address, nil, [][]byte{{1}})
+	require.Error(t, err)
+	_, err = contracts.ConfiguredProxyDeployment(address, address, address, nil, make([][]byte, 33))
+	require.Error(t, err)
+	_, err = contracts.ConfiguredProxyDeployment(address, address, address, make([]byte, 49152), nil)
+	require.Error(t, err)
+}

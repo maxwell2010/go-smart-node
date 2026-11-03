@@ -88,3 +88,33 @@ real governance execution as owner, native coin/NFT/delegation receipt wiring,
 consensus validator lifecycle, supply/reserve reconciliation across modules,
 and a complete deploy/install/restart/upgrade rehearsal. These artifacts and
 bounded tests do not alone establish a production-ready genesis.
+
+
+## Atomic constructor configuration and governance handoff
+
+`bootstrapConfigured` is a new method on the NEW setup contract; the existing
+`bootstrap` method remains compatible. During proxy construction only, it gives
+the original constructor caller temporary ownership, invokes the explicit final
+implementation and its reviewed ABI-packed setup calls, then transfers ownership
+to the nonzero final authority. Owner and ERC1967 implementation must remain
+unchanged after initialization and every setup call. There is no configuration
+entry point on the final implementation after construction. Calls are capped
+at32 and32KiB; malformed selectors, changed authority/implementation and any
+later failure revert the entire creation including earlier external effects.
+
+`PackConstructorConfiguration` uses compiler ABIs and a narrow setup-method
+allowlist. `ConfiguredProxyDeployment` returns unsigned creation data and checks
+explicit nonzero addresses and the EIP3860 initcode limit. It does not certify
+supplied addresses or execute a network transaction. The reviewed genesis
+manifest must bind the implementation/library addresses to their exact code,
+and finalOwner to the actual governance module account.
+
+The signed ABCI test now creates a registry and all five system proxies with
+the actual SDK governance module address as final owner, complete token/NFT
+implementation configuration and deterministic fresh registry links. Both the
+deployer and another signer fail later upgrades. A failed later setup call
+also restores a previously modified external registry and leaves no proxy code,
+while charging the exact failed transaction fee. Canonical delegation runtime
+stays24316bytes because the constructor setup is a separate temporary artifact.
+This verifies genesis handoff, not subsequent approved governance proposal
+execution, which remains a required application integration gate.
