@@ -110,8 +110,26 @@ func ValidateNativeGenesisAllocation(cdc codec.JSONCodec, genesis map[string]jso
 	if validators.Params.BaseDenom != identity.BaseDenom {
 		return errors.New("native validator base denomination must be del")
 	}
-	if len(validators.Validators) != 0 || len(validators.Delegations) != 0 || len(validators.Undelegations) != 0 || len(validators.Redelegations) != 0 || len(validators.LastValidatorPowers) != 0 || validators.LastTotalPower != 0 || len(validators.ValidatorOfflineSince) != 0 || len(validators.ScheduledValidatorSets) != 0 {
+	if len(validators.Validators) != 0 || len(validators.Delegations) != 0 || len(validators.Undelegations) != 0 || len(validators.Redelegations) != 0 || len(validators.LastValidatorPowers) != 0 || validators.LastTotalPower != 0 || len(validators.ValidatorOfflineSince) != 0 || len(validators.ScheduledValidatorSets) != 0 || len(validators.EVMStakeBindings) != 0 || len(validators.EVMFrozenBindings) != 0 || validators.BindingRevision != 0 {
 		return errors.New("nonempty native validator genesis requires authenticated financial bootstrap and consensus-controller activation, not yet enabled")
+	}
+	return nil
+}
+
+// Check the optional exported domain before any module writes. Omitted domains
+// in fresh defaults are initialized by the configured keeper; exported domains
+// may never silently retarget their source network.
+func (app *App) validateNativeBindingGenesis(genesis map[string]json.RawMessage) error {
+	var validators nativevalidatortypes.GenesisState
+	if err := app.appCodec.UnmarshalJSON(genesis[nativevalidatortypes.ModuleName], &validators); err != nil {
+		return err
+	}
+	expected, ok := app.NativeValidatorKeeper.ConfiguredEVMSourceDomain()
+	if !ok || expected.ChainID != app.chainID || expected.EVMChainID != app.evmChainID {
+		return errors.New("native validator binding domain is not configured for this application")
+	}
+	if validators.BindingDomain != nil && !nativevalidatortypes.SameEVMSourceDomain(validators.BindingDomain, &expected) {
+		return errors.New("native validator genesis binding domain differs from configured application")
 	}
 	return nil
 }

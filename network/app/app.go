@@ -305,7 +305,7 @@ func NewApp(
 	if nativeErr != nil {
 		panic(nativeErr)
 	}
-	app.NativeValidatorKeeper, nativeErr = nativevalidatorkeeper.NewStateKeeper(runtime.NewKVStoreService(keys[nativevalidatortypes.StoreKey]))
+	app.NativeValidatorKeeper, nativeErr = nativevalidatorkeeper.NewStateKeeperWithDomain(runtime.NewKVStoreService(keys[nativevalidatortypes.StoreKey]), chainID, evmChainID)
 	if nativeErr != nil {
 		panic(nativeErr)
 	}
@@ -882,6 +882,9 @@ func (app *App) InitChainer(ctx sdk.Context, req *abci.RequestInitChain) (*abci.
 	}
 
 	if err := ValidateNativeGenesisAllocation(app.appCodec, genesisState); err != nil {
+		return nil, err
+	}
+	if err := app.validateNativeBindingGenesis(genesisState); err != nil {
 		return nil, err
 	}
 	if err := app.UpgradeKeeper.SetModuleVersionMap(ctx, app.ModuleManager.GetVersionMap()); err != nil {

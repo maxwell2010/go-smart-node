@@ -136,6 +136,7 @@ func TestFreshOwnApplicationSignedNativeEVMTransfer(t *testing.T) {
 	a := testApp(t, chainID, 990001)
 	assertOwnApplicationConstructorAndGenesis(t, a)
 	assertMountedNativeAssetsBeforeInit(t, a)
+	assertNativeValidatorBindingDomainAdmission(t, a)
 	key, err := ethsecp.GenerateKey()
 	require.NoError(t, err)
 	account := authtypes.NewBaseAccount(key.PubKey().Address().Bytes(), key.PubKey(), 0, 0)

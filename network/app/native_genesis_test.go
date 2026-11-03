@@ -2,9 +2,12 @@ package app
 
 import (
 	"bytes"
+	"encoding/json"
 	"testing"
 
 	sdkmath "cosmossdk.io/math"
+	abci "github.com/cometbft/cometbft/abci/types"
+	cmtproto "github.com/cometbft/cometbft/proto/tendermint/types"
 	"github.com/cosmos/cosmos-sdk/codec/address"
 	sdk "github.com/cosmos/cosmos-sdk/types"
 	banktypes "github.com/cosmos/cosmos-sdk/x/bank/types"
@@ -52,4 +55,53 @@ func TestNativeValidatorGenesisRequiresExplicitModuleAndDEL(t *testing.T) {
 	require.ErrorContains(t, ValidateNativeGenesisAllocation(cfg.Codec, genesis), "native validator base denomination must be del")
 	genesis[nativevalidatortypes.ModuleName] = before
 	require.NoError(t, ValidateNativeGenesisAllocation(cfg.Codec, genesis))
+}
+
+func assertNativeValidatorBindingDomainAdmission(t *testing.T, a *App) {
+	t.Helper()
+	const chainID = "mintcandy_990001-1"
+	expected, ok := a.NativeValidatorKeeper.ConfiguredEVMSourceDomain()
+	require.True(t, ok)
+	require.Equal(t, nativevalidatortypes.EVMSourceDomain{ChainID: chainID, EVMChainID: 990001}, expected)
+
+	genesis := a.DefaultGenesis()
+	require.NoError(t, a.validateNativeBindingGenesis(genesis), "fresh defaults have no exported domain")
+	var g nativevalidatortypes.GenesisState
+	a.appCodec.MustUnmarshalJSON(genesis[nativevalidatortypes.ModuleName], &g)
+	g.BindingDomain = &expected
+	genesis[nativevalidatortypes.ModuleName] = a.appCodec.MustMarshalJSON(&g)
+	require.NoError(t, a.validateNativeBindingGenesis(genesis))
+
+	ctx := a.NewUncachedContext(false, cmtproto.Header{ChainID: chainID})
+	for _, wrong := range []nativevalidatortypes.EVMSourceDomain{
+		{ChainID: "mintcandy_990001-2", EVMChainID: 990001},
+		{ChainID: chainID, EVMChainID: 990002},
+	} {
+		g.BindingDomain = &wrong
+		genesis[nativevalidatortypes.ModuleName] = a.appCodec.MustMarshalJSON(&g)
+		data, err := json.Marshal(genesis)
+		require.NoError(t, err)
+		_, err = a.InitChainer(ctx, &abci.RequestInitChain{ChainId: chainID, AppStateBytes: data})
+		require.ErrorContains(t, err, "binding domain differs")
+		_, err = a.NativeCoinKeeper.GetParams(ctx)
+		require.Error(t, err, "domain rejection must precede all module writes")
+	}
+
+	g.BindingDomain = &expected
+	g.BindingRevision = 1
+	genesis[nativevalidatortypes.ModuleName] = a.appCodec.MustMarshalJSON(&g)
+	require.NoError(t, g.Validate(), "a valid keeper export still requires application bootstrap admission")
+	require.ErrorContains(t, ValidateNativeGenesisAllocation(a.appCodec, genesis), "authenticated financial bootstrap")
+
+	child, _ := ctx.CacheContext()
+	g.BindingRevision = 0
+	require.NoError(t, a.NativeValidatorKeeper.InitGenesis(child, &g))
+	actual, err := a.NativeValidatorKeeper.GetEVMSourceDomain(child)
+	require.NoError(t, err)
+	require.Equal(t, expected, actual)
+	exported, err := a.NativeValidatorKeeper.ExportGenesis(child)
+	require.NoError(t, err)
+	require.Equal(t, &expected, exported.BindingDomain)
+	_, err = a.NativeValidatorKeeper.GetEVMSourceDomain(ctx)
+	require.Error(t, err, "discarded child must not persist the domain")
 }
