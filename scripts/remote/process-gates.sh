@@ -70,16 +70,21 @@ go version -m "$work/mcnd" > "$output/mcnd-build.log"
 go version -m "$work/ibcreference" > "$output/reference-build.log"
 mcnd_sha="$(sha256sum "$work/mcnd" | awk '{print $1}')"
 reference_sha="$(sha256sum "$work/ibcreference" | awk '{print $1}')"
+"$python" - "$output" "$revision" "$mcnd_sha" "$reference_sha" <<'PY'
+import json,sys
+from pathlib import Path
+with (Path(sys.argv[1])/'manifest.json').open('x') as stream:
+    json.dump(dict(sourceCommit=sys.argv[2],mcndSHA256=sys.argv[3],referenceSHA256=sys.argv[4],
+        provenanceVerified=False),stream,indent=2)
+PY
 "$work/mcnd" version --long --output json > "$output/mcnd-version.json"
 "$python" - "$output" "$revision" "$mcnd_sha" "$reference_sha" "$root" <<'PY'
-import json,sys
+import json,subprocess,sys
 from pathlib import Path
 out=Path(sys.argv[1]);revision=sys.argv[2]
 root=Path(sys.argv[5]);sys.path.insert(0,str(root/'network/tools'))
-from binary_provenance import parse_build_info,verify_binary_build
-with (out/'manifest.json').open('x') as stream:
-    json.dump(dict(sourceCommit=revision,mcndSHA256=sys.argv[3],referenceSHA256=sys.argv[4],
-        provenanceVerified=False),stream,indent=2)
+from binary_provenance import module_identity,parse_build_info,verify_binary_build
+from source_inventory import json_records,production_environment
 for name in ('mcnd','reference'):
     metadata=(out/(name+'-build.log')).read_text()
     parsed=parse_build_info(metadata)
@@ -91,6 +96,20 @@ for name in ('mcnd','reference'):
         (out/'mcnd-metadata-verified.json').write_text(json.dumps(verified,indent=2)+'\n')
     else:
         assert parsed['path']=='github.com/maxwell2010/go-smart-node/network/internal/ibcreference'
+        expected={};main=None
+        raw=subprocess.check_output(['go','list','-mod=readonly','-tags=','-deps','-json','./internal/ibcreference'],
+            cwd=root/'network',env=production_environment(),text=True)
+        for package in json_records(raw):
+            if package.get('Error') or package.get('Incomplete'):
+                raise ValueError('Incomplete reference dependency inventory')
+            module=package.get('Module')
+            if not module: continue
+            identity=module_identity(module)
+            if module.get('Main'): main=identity
+            elif expected.setdefault(module['Path'],identity)!=identity:
+                raise ValueError('Inconsistent reference module identity')
+        assert main==parsed['module'] and expected==parsed['dependencies'], 'Reference module graph differs from binary'
+        assert parsed['settings']==verified['settings'], 'Reference default build settings differ from mcnd'
 assert json.loads((out/'mcnd-version.json').read_text())['commit']==revision
 with (out/'manifest.json').open('w') as stream:
     json.dump(dict(sourceCommit=revision,mcndSHA256=sys.argv[3],referenceSHA256=sys.argv[4],

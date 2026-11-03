@@ -107,3 +107,48 @@ gh workflow run reliability-linux.yml --repo maxwell2010/go-smart-node \
 Чтобы проверить отдельный checkpoint, перенесите в него только `scripts/remote/`
 из ветки подготовки отдельным коммитом. Не переносите весь baseline поверх
 финансовых изменений и не объявляйте checkpoint прошедшим проверки заранее.
+
+## Полная генерация и настоящие daemon/Hermes
+
+В интеграционной ветке `integration/remote-financial-validation-20261103`
+существующий workflow `modern-network-linux.yml` получает отдельный `scope`:
+
+- `module`: прежние Go/SDK/EVM/ICS20-проверки;
+- `contracts`: только полная генерация обоими закреплёнными Solidity builders;
+- `process`: сборка двух production-бинарников и настоящие daemon/Hermes-проверки.
+
+Каждый scope имеет свою очередь. Запуск process не отменяет module/contracts.
+На операторском Windows/WSL компьютере выполняются только правки, gofmt и лёгкий
+статический анализ. Go/Solidity-сборки, скачивание модулей и ноды запускаются
+на одноразовом Linux-runner GitHub.
+
+```bash
+gh workflow run modern-network-linux.yml --repo maxwell2010/go-smart-node \
+  --ref integration/remote-financial-validation-20261103 -f scope=contracts -f remote_profile=off
+# После переноса полного проверенного набора артефактов и успешного module:
+gh workflow run modern-network-linux.yml --repo maxwell2010/go-smart-node \
+  --ref integration/remote-financial-validation-20261103 -f scope=process -f remote_profile=off
+```
+
+Генерация публикует JSON только при полном успехе, с sourceCommit и SHA256
+каждого файла. Наборы из разных Solidity-веток нельзя смешивать: после
+объединения исходников выполняется новая полная генерация.
+
+Process job использует Ubuntu 24.04 и явно проверенный Python >=3.11.
+Оба бинарника собираются без test tags из одного точного коммита; фактические
+Go/embed-входы проверяются до и после сборки. VCS/toolchain/module metadata
+и SHA256 сохраняются до запуска нод. Hermes имеет отдельный фиксированный SHA256.
+
+Daemon и Hermes запускаются в новых net namespace только с loopback, без
+внешних маршрутов. Для каждого прогона создаются собственные home, TMPDIR,
+ключи и базы; останавливаются только собственные PID. Ошибка очистки или
+обработанный сигнал означает FAIL. Временные данные удаляются после остановки
+дочерних процессов, публичные JSON/логи остаются с доступом для CI-uploader.
+Принудительный SIGKILL/потеря машины требуют инфраструктурной очистки worker.
+
+Daemon gate проверяет init/genesis, подпись Ethereum operator в native bank,
+точные fee/value/nonce, реальные блоки, restart и отказ неверного домена без
+изменения home. Hermes gate проверяет handshake, DEL send, voucher return,
+сохранение pending packet при перезапуске обеих баз, error ACK и timeout refund.
+Это проверка совместимости процессов с теми же бинарниками. Она не доказывает
+SDK/module migration, IBC client upgrade или включение полного NFT/Gateway AsDEL.
