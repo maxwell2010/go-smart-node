@@ -65,6 +65,11 @@
       "importModule": "github.com/ethereum/go-ethereum",
       "selectedRequireVersion": "v1.15.11",
       "effectiveModule": {
+        "Path": "./third_party/cosmos-geth",
+        "Local": true,
+        "Manifest": "third_party/cosmos-geth/UPSTREAM.json"
+      },
+      "canonicalModule": {
         "Path": "github.com/cosmos/go-ethereum",
         "Version": "v1.16.2-cosmos-1",
         "Sum": "h1:QIaIS6HIdPSBdTvpFhxswhMLUJgcr4irbd2o9ZKldAI="
@@ -771,7 +776,8 @@
       ],
       "coverage": "Local EVM/STUN replacements require separate provenance/source review; Cosmos geth replacement identity does not close upstream inherited advisories. GO-2026-4507 affected-base BitCurve.IsOnCurve is retained in this binary. No final-release clean claim.",
       "scope": "Actual b9636dc default-build mcnd dependency snapshot only. Preserves earlier source-specific daemon/IBC controls and requires new scans for later integrated code."
-    }
+    },
+    "gethCoordinateBackport": "Exact upstream GO-2026-4507 source backport, ordinary crypto/signature/math tests with CGO1 and0, actual source-bound b03012f development archive and license hashes. This is not a final integrated security PASS."
   },
   "remainingGates": [
     "Native Decimal validator/delegation/reward and coin/NFT feature wiring/parity.",
@@ -808,8 +814,18 @@
       "manifest": "third_party/pion-stun-v2/UPSTREAM.json",
       "patchLabel": "v2.0.0-mintcandy.1",
       "scope": "Upstream short XOR-MAPPED-ADDRESS guard; canonical panic and owned pass on actual v2 parser."
+    },
+    {
+      "module": "github.com/ethereum/go-ethereum",
+      "selectedRequireVersion": "v1.15.11",
+      "replacement": "./third_party/cosmos-geth",
+      "manifest": "third_party/cosmos-geth/UPSTREAM.json",
+      "patchLabel": "v1.16.2-cosmos-1-mintcandy.1",
+      "canonicalModule": "github.com/cosmos/go-ethereum@v1.16.2-cosmos-1",
+      "scope": "Exact upstream coordinate validation fix895a8597 in all3 files, including CGO header and non-CGO path; ordinary crypto tests pass in both modes. Other advisories and final integrated source/binary scans remain separate gates."
     }
   ],
-  "selectedModulesSourceRevision": "b9636dc388f9c6456d824ec0a96d407ac53b8c66",
-  "selectedModulesScope": "Core selections retained plus all require selections changed by the 62474a3/b9636dc security batches and unresolved Pion DTLS/STUN replacements. Exact MVS metadata is bound in docs/security/mcnd-b9636dc-20261103/modules.jsonl.gz. This dependency snapshot does not update historical daemon validation."
+  "selectedModulesSourceRevision": "46b571901be3d91468561e21796ac79c76411635",
+  "selectedModulesScope": "Curated module versions/h1 from b9636dc with the explicitly declared owned geth replacement at46b5719; other external selections unchanged. These records do not retarget older daemon validation or scan evidence.",
+  "selectedModulesBaseSourceRevision": "b9636dc388f9c6456d824ec0a96d407ac53b8c66"
 }
