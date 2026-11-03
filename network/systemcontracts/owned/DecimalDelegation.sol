@@ -4418,7 +4418,7 @@ library DelegationNFTLib {
         if (token == address(WETH($))) {
             return;
         }
-        if (token == address(0) || !_getTokenCenter($).isTokenExists(token)) {
+        if (token == address(0) || _getTokenCenter($).tokens(IERC20Metadata(token).symbol()) != token) {
             revert InvalidToken();
         }
     }
@@ -7023,7 +7023,7 @@ contract DecimalDelegation is
         if (token == address(WETH())) {
             return;
         }
-        if (token == address(0) || !_getTokenCenter().isTokenExists(token)) {
+        if (token == address(0) || _getTokenCenter().tokens(IERC20Metadata(token).symbol()) != token) {
             revert InvalidToken();
         }
     }
