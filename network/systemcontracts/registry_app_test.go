@@ -421,6 +421,12 @@ func TestOwnedAppSignedRegistryBootstrap(t *testing.T) {
 			require.NoError(t, err)
 			require.Equal(t, implementation, values[0])
 		}
+		t.Run("bounded penalty pages and ordered same-block records", func(t *testing.T) {
+			checkSignedPagedPenalties(t, keys, roles, artifacts, wrapped, func() *big.Int { return a.BankKeeper.GetSupply(ctx(), identity.BaseDenom).Amount.BigInt() }, send,
+				func(key *ecdsa.PrivateKey, target common.Address, inputs [][]byte) int64 {
+					return appendSignedPenaltiesSameBlock(t, a, ctx, vals, now, price, key, target, inputs...)
+				})
+		})
 		t.Run("lazy tiny unit settlement both withdrawal orders", func(t *testing.T) {
 			for _, reverse := range []bool{false, true} {
 				checkSignedLazyTinyUnitSettlement(t, reverse, keys, roles, artifacts, wrapped,

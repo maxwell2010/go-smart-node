@@ -1,9 +1,9 @@
 {
-  "patchLabel": "mintcandy-delegation-realized-loss-2",
+  "patchLabel": "mintcandy-delegation-bounded-penalties-3",
   "canonicalSource": "sources/DecimalDelegation.sol",
   "canonicalSha256": "4478ab6d8b4a7feb230d70715c72f3be816fdbfd0efe7743e3572cfd4ce010c2",
   "ownedSource": "owned/DecimalDelegation.sol",
-  "ownedSha256": "2f22e3d187b54c1524a498ad62c1311d3c59cc6ee5c1ceefc50f12deb49637c5",
+  "ownedSha256": "457cb721fb7489ec72dc966a37b5d629c28618645eef1e33b4b8d958da9e7aba",
   "changedFunctions": [
     "DelegationNFTLib._applyPenaltiesToStake",
     "DecimalDelegation._applyPenaltiesToStake",
@@ -18,7 +18,20 @@
     "DelegationNFTLib.transferNFT",
     "DelegationNFTLib.transferNFT1155",
     "DelegationNFTLib.forcedNFTWithdrawal",
-    "DelegationNFTLib.forcedNFT1155Withdrawal"
+    "DelegationNFTLib.forcedNFT1155Withdrawal",
+    "IPagedDecimalMasterValidator",
+    "DecimalDelegationCommon._getValidatorPenaltyCount",
+    "DecimalDelegationCommon._applyPenalties",
+    "DelegationNFTLib._getValidatorPenaltyCount",
+    "DelegationNFTLib._getPenaltyPage",
+    "DelegationNFTLib.requireCoinPenaltyCaughtUp",
+    "DelegationNFTLib._requireCoinPenaltyCaughtUp",
+    "DelegationNFTLib._requireNFTPenaltyCaughtUp",
+    "DelegationNFTLib._registerNFTStake",
+    "DelegationNFTLib.applyPenaltiesToNFTStakeWithLimit",
+    "DelegationNFTLib._applyPenaltiesToNFTStake",
+    "DecimalDelegation.applyPenaltiesToStakes",
+    "DecimalDelegation.applyPenaltiesToNFTStakes"
   ],
-  "financialScope": "Preserve per-position claim rounding; burn exact realized direct loss and debit recorded validator reserve once; NFT contract burns its own reserve loss once; global penalty application only acknowledges target index. ERC1155 preserves quantity-return API; companion/reserve mirrors debit exact observed approved NFT pool loss, without reinterpreting quantity as reserve wei."
+  "financialScope": "Preserve per-position claim rounding; burn exact realized direct loss and debit recorded validator reserve once; NFT contract burns its own reserve loss once; global penalty application only acknowledges target index. ERC1155 preserves quantity-return API; companion/reserve mirrors debit exact observed approved NFT pool loss, without reinterpreting quantity as reserve wei. Explicit coin applications consume at most32 append entries per position, at most16 position IDs. NFT applications share at most16 append entries for the whole call, at most16 IDs; mutations require completed catchup. New and zero positions use current append count; no timestamp deduplication."
 }

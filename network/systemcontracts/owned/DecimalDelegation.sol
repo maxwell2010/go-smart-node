@@ -2744,6 +2744,13 @@ interface IDecimalContractCenter {
 
 pragma solidity 0.8.20;
 
+// New-network bounded history API. Entries are ordered by append index,
+// including entries appended at the same block timestamp.
+interface IPagedDecimalMasterValidator {
+    function getPenaltyCount(address validator) external view returns (uint256);
+    function getPenaltiesRange(address validator, uint256 start, uint256 limit) external view returns (uint16[] memory);
+}
+
 interface IDecimalDelegationCommon {
     /* ========== STORAGE ========== */
 
@@ -2776,6 +2783,7 @@ interface IDecimalDelegationCommon {
 
     error InvalidValidator();
     error InvalidAmount();
+    error PenaltyCatchupRequired(bytes32 positionId, uint256 cursor, uint256 target);
     error FrozenStakesQueueIsEmpty();
     error NoPenaltyToApply();
     error StakeAlreadyUnfrozen();
@@ -3109,8 +3117,7 @@ abstract contract DecimalDelegationCommon is
                 newStake.holdStartTime = 0;
 
                 // Set penalty index to current length to skip past penalties
-                uint256 currentPenaltyIndex = _getValidatorPenalties(validator)
-                    .length;
+                uint256 currentPenaltyIndex = _getValidatorPenaltyCount(validator);
                 _setStakePenaltyIndex(newStakeId, currentPenaltyIndex);
             } else {
                 // Existing stake for new delegator - just add the amount
@@ -3132,9 +3139,7 @@ abstract contract DecimalDelegationCommon is
         Stake storage currentStake = _getStake(stakeId);
         bool isNewStake = currentStake.amount == 0;
         if (isNewStake) {
-            uint256 currentPenaltyIndex = _getValidatorPenalties(
-                stake.validator
-            ).length;
+            uint256 currentPenaltyIndex = _getValidatorPenaltyCount(stake.validator);
 
             currentStake.amount = stake.amount;
             currentStake.validator = stake.validator;
@@ -3621,6 +3626,7 @@ abstract contract DecimalDelegationCommon is
 
     function _applyPenalties(bytes32 stakeId) internal returns (bool) {
         bool stakeApplied = _applyPenaltiesToStake(stakeId);
+        DelegationNFTLib.requireCoinPenaltyCaughtUp(_getDelegationStorage(), stakeId);
         Stake memory stake = _getStake(stakeId);
         bool validatorApplied = _applyPenaltiesToValidator(
             stake.validator,
@@ -3660,10 +3666,10 @@ abstract contract DecimalDelegationCommon is
 
     /* ========== GETTERS ========== */
 
-    function _getValidatorPenalties(
+    function _getValidatorPenaltyCount(
         address validator
-    ) internal view virtual returns (uint16[] memory) {
-        return _masterValidator().getValidatorPenalties(validator);
+    ) internal view virtual returns (uint256) {
+        return IPagedDecimalMasterValidator(address(_masterValidator())).getPenaltyCount(validator);
     }
 
     function _checkStake(Stake memory stake) internal view {
@@ -4167,6 +4173,11 @@ library DelegationNFTLib {
         bytes32 nftStakeId,
         IDecimalDelegationCommon.NFTStake memory nftStake
     ) internal {
+        if ($._nftStakes[nftStakeId].isActive) {
+            applyPenaltiesToNFTStake($, nftStakeId);
+            _requireNFTPenaltyCaughtUp($, nftStakeId);
+        }
+
         $._nftBackedAmounts[coinStakeId] += nftStake.reserveAmount;
 
         // Merge into an occupied active slot rather than overwriting it. The NFT stake id
@@ -4184,10 +4195,7 @@ library DelegationNFTLib {
         } else {
             $._nftStakes[nftStakeId] = nftStake;
             // A fresh position owes only penalties added from now on (as coin stakes do).
-            $._nftStakePenaltyIndex[nftStakeId] = _getValidatorPenalties(
-                $,
-                nftStake.validator
-            ).length;
+            $._nftStakePenaltyIndex[nftStakeId] = _getValidatorPenaltyCount($, nftStake.validator);
         }
 
         bytes32 pairKey = keccak256(abi.encodePacked(coinStakeId, nftStakeId));
@@ -4273,11 +4281,56 @@ library DelegationNFTLib {
         return _masterValidator($).isActive(validator);
     }
 
-    function _getValidatorPenalties(
+    function _getValidatorPenaltyCount(
         IDecimalDelegationCommon.DelegationStorage storage $,
         address validator
-    ) internal view returns (uint16[] memory) {
-        return _masterValidator($).getValidatorPenalties(validator);
+    ) internal view returns (uint256) {
+        return IPagedDecimalMasterValidator(address(_masterValidator($))).getPenaltyCount(validator);
+    }
+
+    function _getPenaltyPage(
+        IDecimalDelegationCommon.DelegationStorage storage $,
+        address validator,
+        uint256 cursor,
+        uint256 maxItems
+    ) internal view returns (uint16[] memory page, uint256 count) {
+        IPagedDecimalMasterValidator master = IPagedDecimalMasterValidator(address(_masterValidator($)));
+        count = master.getPenaltyCount(validator);
+        if (cursor > count) revert IDecimalDelegationCommon.InvalidAmount();
+        uint256 limit = count - cursor;
+        if (maxItems == 0 || maxItems > 32) revert IDecimalDelegationCommon.InvalidAmount();
+        if (limit > maxItems) limit = maxItems;
+        page = master.getPenaltiesRange(validator, cursor, limit);
+        if (page.length != limit) revert IDecimalDelegationCommon.InvalidAmount();
+    }
+
+    function requireCoinPenaltyCaughtUp(
+        IDecimalDelegationCommon.DelegationStorage storage $,
+        bytes32 stakeId
+    ) public view {
+        _requireCoinPenaltyCaughtUp($, stakeId);
+    }
+
+    function _requireCoinPenaltyCaughtUp(
+        IDecimalDelegationCommon.DelegationStorage storage $,
+        bytes32 stakeId
+    ) internal view {
+        IDecimalDelegationCommon.Stake storage stake = _getStake($, stakeId);
+        if (stake.amount == 0) return;
+        uint256 count = _getValidatorPenaltyCount($, stake.validator);
+        uint256 cursor = $._stakePenaltyIndex[stakeId];
+        if (cursor != count) revert IDecimalDelegationCommon.PenaltyCatchupRequired(stakeId, cursor, count);
+    }
+
+    function _requireNFTPenaltyCaughtUp(
+        IDecimalDelegationCommon.DelegationStorage storage $,
+        bytes32 nftStakeId
+    ) internal view {
+        IDecimalDelegationCommon.NFTStake storage stake = $._nftStakes[nftStakeId];
+        if (!stake.isActive || stake.reserveAmount == 0) return;
+        uint256 count = _getValidatorPenaltyCount($, stake.validator);
+        uint256 cursor = $._nftStakePenaltyIndex[nftStakeId];
+        if (cursor != count) revert IDecimalDelegationCommon.PenaltyCatchupRequired(nftStakeId, cursor, count);
     }
 
     function getFreezeTime(
@@ -4411,30 +4464,22 @@ library DelegationNFTLib {
     ) internal returns (bool) {
         IDecimalDelegationCommon.Stake storage stake = _getStake($, stakeId);
 
-        uint16[] memory percantages = _getValidatorPenalties(
-            $,
-            stake.validator
-        );
         uint256 currentPenaltyIndex = getStakePenaltyIndex($, stakeId);
-        bool allApplied = percantages.length == currentPenaltyIndex;
-        if (allApplied || stake.amount == 0 || percantages.length == 0) {
-            return false;
+        (uint16[] memory percentages, uint256 count) = _getPenaltyPage($, stake.validator, currentPenaltyIndex, 32);
+        if (currentPenaltyIndex == count) return false;
+        if (stake.amount == 0) {
+            _setStakePenaltyIndex($, stakeId, count);
+            emit PenaltyAppliedToStake(stakeId, count);
+            return true;
         }
 
         uint256 nftBackedAmount = $._nftBackedAmounts[stakeId];
         if (nftBackedAmount > stake.amount) revert IDecimalDelegationCommon.InvalidAmount();
         uint256 currentAmount = stake.amount - nftBackedAmount;
-        for (
-            ;
-            currentPenaltyIndex < percantages.length;
-            currentPenaltyIndex += 1
-        ) {
-            uint256 amountToPenalty = _getAmountToPenalty(
-                currentAmount,
-                percantages[currentPenaltyIndex]
-            );
-            currentAmount -= amountToPenalty;
+        for (uint256 i; i < percentages.length; i++) {
+            currentAmount -= _getAmountToPenalty(currentAmount, percentages[i]);
         }
+        currentPenaltyIndex += percentages.length;
         _setStakePenaltyIndex($, stakeId, currentPenaltyIndex);
 
         uint256 amountToRemove = (stake.amount - nftBackedAmount) - currentAmount;
@@ -4458,7 +4503,7 @@ library DelegationNFTLib {
         address validator,
         address token
     ) internal returns (bool) {
-        uint256 count = _getValidatorPenalties($, validator).length;
+        uint256 count = _getValidatorPenaltyCount($, validator);
         IDecimalDelegationCommon.ValidatorReserve storage reserve =
             _getValidatorReserve($, validator, token, 0);
         if (reserve.penaltyIndex == count || count == 0) return false;
@@ -4475,6 +4520,7 @@ library DelegationNFTLib {
         bytes32 stakeId
     ) internal returns (bool) {
         bool stakeApplied = _applyPenaltiesToStake($, stakeId);
+        _requireCoinPenaltyCaughtUp($, stakeId);
         IDecimalDelegationCommon.Stake memory stake = _getStake($, stakeId);
         bool validatorApplied = _applyPenaltiesToValidator(
             $,
@@ -4499,10 +4545,7 @@ library DelegationNFTLib {
         );
         bool isNewStake = currentStake.amount == 0;
         if (isNewStake) {
-            uint256 currentPenaltyIndex = _getValidatorPenalties(
-                $,
-                stake.validator
-            ).length;
+            uint256 currentPenaltyIndex = _getValidatorPenaltyCount($, stake.validator);
 
             currentStake.amount = stake.amount;
             currentStake.validator = stake.validator;
@@ -4848,6 +4891,7 @@ library DelegationNFTLib {
 
         // Realize NFT loss while it is still paired with its coin position.
         applyPenaltiesToNFTStake($, nftStakeId);
+        _requireNFTPenaltyCaughtUp($, nftStakeId);
 
         // Settle the reserve amount recorded for this stake (kept in lockstep with
         // penalties), not the NFT's live reserve. Reading the live reserve let a
@@ -4959,6 +5003,7 @@ library DelegationNFTLib {
 
         // Realize NFT loss while it is still paired with its coin position.
         applyPenaltiesToNFTStake($, nftStakeId);
+        _requireNFTPenaltyCaughtUp($, nftStakeId);
 
         // Settle the recorded reserve (kept in lockstep with penalties), not rate*amount.
         // rate*amount reads the NFT's live rate, so a post-delegation rate increase would
@@ -5133,6 +5178,7 @@ library DelegationNFTLib {
 
         // Realize NFT loss while it is still paired with its coin position.
         applyPenaltiesToNFTStake($, nftStakeId);
+        _requireNFTPenaltyCaughtUp($, nftStakeId);
 
         // Settle the reserve amount recorded for this stake (kept in lockstep with
         // penalties), not the NFT's live reserve, so a post-delegation reserve increase
@@ -5239,6 +5285,7 @@ library DelegationNFTLib {
 
         // Realize NFT loss while it is still paired with its coin position.
         applyPenaltiesToNFTStake($, nftStakeId);
+        _requireNFTPenaltyCaughtUp($, nftStakeId);
 
         // Settle the recorded reserve (kept in lockstep with penalties), not rate*amount,
         // so a post-delegation rate increase cannot underflow the backed-amount
@@ -5495,6 +5542,23 @@ library DelegationNFTLib {
         IDecimalDelegationCommon.DelegationStorage storage $,
         bytes32 nftStakeId
     ) public returns (bool) {
+        return _applyPenaltiesToNFTStake($, nftStakeId, 16);
+    }
+
+    function applyPenaltiesToNFTStakeWithLimit(
+        IDecimalDelegationCommon.DelegationStorage storage $,
+        bytes32 nftStakeId,
+        uint256 maxItems
+    ) public returns (bool) {
+        if (maxItems == 0 || maxItems > 16) revert IDecimalDelegationCommon.InvalidAmount();
+        return _applyPenaltiesToNFTStake($, nftStakeId, maxItems);
+    }
+
+    function _applyPenaltiesToNFTStake(
+        IDecimalDelegationCommon.DelegationStorage storage $,
+        bytes32 nftStakeId,
+        uint256 maxItems
+    ) internal returns (bool) {
         IDecimalDelegationCommon.NFTStake storage nftStake = $._nftStakes[
             nftStakeId
         ];
@@ -5503,16 +5567,12 @@ library DelegationNFTLib {
             return false;
         }
 
-        uint16[] memory percentages = _getValidatorPenalties(
-            $,
-            nftStake.validator
-        );
         uint256 currentPenaltyIndex = $._nftStakePenaltyIndex[nftStakeId];
-        bool allApplied = percentages.length == currentPenaltyIndex;
-        if (
-            allApplied || nftStake.reserveAmount == 0 || percentages.length == 0
-        ) {
-            return false;
+        (uint16[] memory percentages, uint256 count) = _getPenaltyPage($, nftStake.validator, currentPenaltyIndex, maxItems);
+        if (currentPenaltyIndex == count) return false;
+        if (nftStake.reserveAmount == 0) {
+            $._nftStakePenaltyIndex[nftStakeId] = count;
+            return true;
         }
 
         // Get coin stake to update its amount
@@ -5529,11 +5589,7 @@ library DelegationNFTLib {
         );
 
         // Apply penalties
-        for (
-            ;
-            currentPenaltyIndex < percentages.length;
-            currentPenaltyIndex += 1
-        ) {
+        for (uint256 pageIndex; pageIndex < percentages.length; pageIndex++) {
             // Call NFT penalty function to burn reserve
             uint256 burnedAmount;
             if (
@@ -5545,7 +5601,7 @@ library DelegationNFTLib {
                 IDRC1155(nftStake.nftContract).penalty(
                     nftStake.tokenId,
                     nftStake.amount,
-                    percentages[currentPenaltyIndex]
+                    percentages[pageIndex]
                 );
                 INFTReserve.Reserve memory afterReserve = IDRC1155(nftStake.nftContract).getReserve(nftStake.tokenId);
                 if (beforeReserve.token != afterReserve.token ||
@@ -5558,7 +5614,7 @@ library DelegationNFTLib {
                 // DRC721 penalty signature
                 burnedAmount = IDRC721(nftStake.nftContract).penalty(
                     nftStake.tokenId,
-                    percentages[currentPenaltyIndex]
+                    percentages[pageIndex]
                 );
             }
 
@@ -5579,13 +5635,14 @@ library DelegationNFTLib {
                 nftStakeId,
                 nftStake.nftContract,
                 nftStake.tokenId,
-                percentages[currentPenaltyIndex],
+                percentages[pageIndex],
                 burnedAmount
             );
 
             emit StakeAmountUpdated(coinStakeId, -int256(burnedAmount));
         }
 
+        currentPenaltyIndex += percentages.length;
         $._nftStakePenaltyIndex[nftStakeId] = currentPenaltyIndex;
 
         emit StakeUpdated(coinStakeId, coinStake, false);
@@ -5619,6 +5676,7 @@ library DelegationNFTLib {
 
         // Realize NFT loss while it is still paired with its coin position.
         applyPenaltiesToNFTStake($, nftStakeId);
+        _requireNFTPenaltyCaughtUp($, nftStakeId);
 
         // Settle the reserve amount recorded for this stake (kept in lockstep with
         // penalties), not the NFT's live reserve, so a post-delegation reserve increase
@@ -5697,6 +5755,7 @@ library DelegationNFTLib {
 
         // Realize NFT loss while it is still paired with its coin position.
         applyPenaltiesToNFTStake($, nftStakeId);
+        _requireNFTPenaltyCaughtUp($, nftStakeId);
 
         // Settle the recorded reserve (kept in lockstep with penalties), not rate*amount,
         // so a post-delegation rate increase cannot underflow the backed-amount
@@ -6843,7 +6902,7 @@ contract DecimalDelegation is
         address token,
         uint256
     ) internal override returns (bool) {
-        uint256 count = _getValidatorPenalties(validator).length;
+        uint256 count = _getValidatorPenaltyCount(validator);
         ValidatorReserve storage reserve = _getValidatorReserve(validator, token, 0);
         if (reserve.penaltyIndex == count || count == 0) return false;
         reserve.penaltyIndex = count;
@@ -6857,6 +6916,7 @@ contract DecimalDelegation is
     function applyPenaltiesToStakes(
         bytes32[] memory stakeIds
     ) public virtual whenNotPaused {
+        if (stakeIds.length > 16) revert InvalidAmount();
         bool hasPenalty = false;
         for (uint256 i = 0; i < stakeIds.length; i += 1) {
             hasPenalty = _applyPenaltiesToStake(stakeIds[i]) || hasPenalty;
@@ -6877,16 +6937,21 @@ contract DecimalDelegation is
     function applyPenaltiesToNFTStakes(
         bytes32[] memory nftStakeIds
     ) public virtual whenNotPaused {
+        if (nftStakeIds.length > 16) revert InvalidAmount();
         DelegationStorage storage $ = _getDelegationStorage();
         bool hasPenalty = false;
-        for (uint256 i = 0; i < nftStakeIds.length; i += 1) {
-            hasPenalty =
-                DelegationNFTLib.applyPenaltiesToNFTStake($, nftStakeIds[i]) ||
-                hasPenalty;
+        uint256 remainingItems = 16;
+        // The whole entrypoint, not each array element, shares the native-call
+        // budget. The EVM's existing total20 native-action guard is unchanged.
+        for (uint256 i; i < nftStakeIds.length && remainingItems != 0; i++) {
+            bytes32 id = nftStakeIds[i];
+            uint256 beforeCursor = $._nftStakePenaltyIndex[id];
+            hasPenalty = DelegationNFTLib.applyPenaltiesToNFTStakeWithLimit($, id, remainingItems) || hasPenalty;
+            uint256 used = $._nftStakePenaltyIndex[id] - beforeCursor;
+            if (used >= remainingItems) remainingItems = 0;
+            else remainingItems -= used;
         }
-        if (!hasPenalty) {
-            revert NoPenaltyToApply();
-        }
+        if (!hasPenalty) revert NoPenaltyToApply();
     }
 
     function getNFTStakePenaltyIndex(
