@@ -43,6 +43,7 @@ const (
 // A different implementation family requires an independently reviewed release.
 type Config struct {
 	Protocol          ProtocolProfile
+	MasterValidator   common.Address
 	PositionVault     common.Address
 	WrappedDEL        common.Address
 	ChainID           string
@@ -63,7 +64,7 @@ type Reader struct {
 	config                               Config
 	owner                                common.Address
 	registry, factory, delegation, proxy contracts.Artifact
-	vault                                contracts.Artifact
+	vault, master, wrapper               contracts.Artifact
 	children                             map[uint8]contracts.Artifact
 	libraryRuntime                       []byte
 }
@@ -93,12 +94,15 @@ func New(metadata Metadata, evm *evmkeeper.Keeper, config Config) (*Reader, erro
 	if config.Protocol != ProfileSharedReference && config.Protocol != ProfileIsolatedPositionsV1 {
 		return nil, errors.New("unknown NFT protocol profile")
 	}
-	if config.Protocol == ProfileSharedReference && (config.PositionVault != (common.Address{}) || config.WrappedDEL != (common.Address{})) {
+	if config.Protocol == ProfileSharedReference && (config.PositionVault != (common.Address{}) || config.WrappedDEL != (common.Address{}) || config.MasterValidator != (common.Address{})) {
 		return nil, errors.New("shared reference profile cannot carry isolated role bindings")
 	}
 	addresses := []common.Address{config.Registry, config.NFTCenter, config.Delegation, config.DelegationLibrary}
 	if config.Protocol == ProfileIsolatedPositionsV1 {
 		addresses = append(addresses, config.PositionVault, config.WrappedDEL)
+		if config.MasterValidator != (common.Address{}) {
+			addresses = append(addresses, config.MasterValidator)
+		}
 	}
 	seen := make(map[common.Address]bool)
 	for _, address := range addresses {
@@ -125,6 +129,12 @@ func New(metadata Metadata, evm *evmkeeper.Keeper, config Config) (*Reader, erro
 	if config.Protocol == ProfileIsolatedPositionsV1 {
 		delegationName = "MintCandyIsolatedDelegation"
 		if r.vault, err = contracts.Load("MintCandyNFTPositionVault"); err != nil {
+			return nil, err
+		}
+		if r.master, err = contracts.Load("NewNetworkMasterValidator"); err != nil {
+			return nil, err
+		}
+		if r.wrapper, err = contracts.Load("MintCandyWrappedDEL"); err != nil {
 			return nil, err
 		}
 	}
@@ -405,6 +415,14 @@ func (r *Reader) systems(ctx sdk.Context) error {
 	}
 	if center != r.config.Registry {
 		return errors.New("NFT factory registry binding differs")
+	}
+
+	gatewayRegistry, err := r.address(ctx, r.config.Delegation, r.delegation.ABI, "getContractCenter")
+	if err != nil {
+		return err
+	}
+	if gatewayRegistry != r.config.Registry {
+		return errors.New("NFT Gateway registry binding differs")
 	}
 
 	return nil

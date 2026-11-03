@@ -96,7 +96,25 @@ native collection admission в этом reader-тесте остаётся metad
 Проверены полный ID больше2^200, full split с закрытым родителем, wallet transfer,
 неизменённый surplus, DEL/WDEL collateral, неправильный domain и недостаток бюджета.
 
-В этом fixture одно чтение active DEL позиции расходует около2,44 млн SDK gas,
-WDEL -2,57 млн, closed proof -1,88 млн. Значения не включают проверку native lineage
+В этом fixture одно чтение active DEL позиции расходует около2,58 млн SDK gas,
+WDEL -2,71 млн, closed proof -2,02 млн. Значения не включают проверку native lineage
 и полный NFT/validator pipeline. Увеличение production budgets не выполнялось.
 Пакет не включает App financial hooks, mint admission или новые IBC callbacks.
+
+
+`AuthenticateStakeSource(ctx, receipts.Execution)` проверяет только актуальные
+системные роли, код и domain. Для него обязателен явный `Config.MasterValidator`:
+проверяются compiler runtime, Gov owner, registry role и обратная ссылка Master.
+Обратная ссылка самого Gateway на registry также проверяется. Метод возвращает
+`StakeSource{ChainID,EVMChainID,Gateway,Fingerprint}` без зависимости от native NFT
+prestate, владельцев, сумм, lineage или текущего количества позиций. Fingerprint
+связывает одобренные runtime templates и уже проверенные live implementation
+addresses, а не разрешает код по наблюдаемому хешу. Validator adapter копирует
+этот исходный fingerprint в свой тип, не создавая самостоятельного approval.
+
+Реальная signed App проверка сохраняет fingerprint после обычного изменения
+состояния NFT, отклоняет Master с владельцем EOA, failed/unsupported execution,
+и допускает внутренний Gov execution с нулевым transaction hash. На одном и том
+же контексте read caps100000/200000 дали одинаковую стоимость. Измеренный Source
+Auth -2 066 582 SDK gas; native stake capture и полный pipeline в это не входят.
+Неподтверждённые callbacks IBC по-прежнему отклоняются.

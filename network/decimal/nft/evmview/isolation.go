@@ -9,7 +9,6 @@ import (
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/maxwell2010/go-smart-node/network/decimal/nft/receipts"
 	"github.com/maxwell2010/go-smart-node/network/decimal/nft/types"
-	contracts "github.com/maxwell2010/go-smart-node/network/systemcontracts"
 )
 
 type PositionStatus uint8
@@ -198,10 +197,8 @@ func (r *Reader) currency(ctx sdk.Context, p *PositionSnapshot) error {
 		if p.ReserveToken != r.config.WrappedDEL {
 			return errors.New("isolated currency has no approved backing reader")
 		}
-		wrapper, e := contracts.Load("MintCandyWrappedDEL")
-		if e != nil {
-			return e
-		}
+		wrapper := r.wrapper
+		var e error
 		if e = r.code(ctx, p.ReserveToken, wrapper.Runtime); e != nil {
 			return e
 		}
