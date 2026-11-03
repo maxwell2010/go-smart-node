@@ -21,8 +21,8 @@ preserve_public_reports() {
   for file in "$output/daemon.json" "$output/hermes.json"; do
     if [[ -L "$file" ]]; then echo 'Refuse symbolic report file.' >&2; return 1; fi
     if [[ -f "$file" ]]; then
-      sudo -n chown -- "$evidence_owner" "$file"
-      sudo -n chmod 600 -- "$file"
+      sudo -n chown -- "$evidence_owner" "$file" || return 1
+      sudo -n chmod 600 -- "$file" || return 1
     fi
   done
 }
