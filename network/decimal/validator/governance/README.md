@@ -110,3 +110,8 @@ Primary policy integration references:
 - [SDK53 default tally and delegator override](https://github.com/cosmos/cosmos-sdk/blob/v0.53.8/x/gov/keeper/tally.go)
 - [Native legacy aggregate valuation](../../../../x/validator/keeper/utils.go)
 - [Native legacy custom-price and reserve weighting](../../../../x/validator/keeper/reward.go)
+
+The explicit custom-asset ownership source is now staged in
+`AggregateReserveSource`; see [its policy, fingerprinting and limits](CUSTOM_OWNERSHIP.md).
+It retains the required separation between native power, voting ownership and
+actual redeemable assets. It does not complete application authority wiring.

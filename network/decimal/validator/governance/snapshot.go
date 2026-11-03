@@ -29,6 +29,9 @@ type Request struct {
 	StateHash     [32]byte
 	NativeGenesis []byte
 }
+
+func cloneRequest(r Request) Request { r.NativeGenesis = bytes.Clone(r.NativeGenesis); return r }
+
 type PositionWeight struct {
 	PositionHash [32]byte
 	Ownership    sdkmath.Int
@@ -49,6 +52,11 @@ type Weights struct {
 // WeightSource must return one weight per complete native delegation position,
 // including zero-value positions and all validators. Custom valuation must use
 // authoritative same-context conversion/ownership data, not an RPC/spot quote.
+// DependencySource binds all non-validator valuation inputs to the tally.
+type DependencySource interface {
+	DependencyHash(context.Context, Request) ([32]byte, error)
+}
+
 type WeightSource interface {
 	SnapshotWeights(context.Context, Request) (Weights, error)
 }
@@ -95,14 +103,17 @@ type votingDelegation struct {
 // Adapter is a frozen tally-time snapshot, not a proposal-creation snapshot.
 // Every SDK read verifies that its chain/height/native records still match.
 type Adapter struct {
-	native      *nativekeeper.StateKeeper
-	chainID     string
-	height      int64
-	digest      [32]byte
-	validators  []votingValidator
-	delegations map[string][]votingDelegation
-	total       sdkmath.Int
-	valuationID string
+	native         *nativekeeper.StateKeeper
+	chainID        string
+	height         int64
+	digest         [32]byte
+	validators     []votingValidator
+	delegations    map[string][]votingDelegation
+	total          sdkmath.Int
+	valuationID    string
+	dependency     DependencySource
+	dependencyHash [32]byte
+	request        Request
 }
 
 func Build(ctx sdk.Context, native *nativekeeper.StateKeeper, source WeightSource, powerScale sdkmath.Int) (*Adapter, error) {
@@ -134,7 +145,16 @@ func Build(ctx sdk.Context, native *nativekeeper.StateKeeper, source WeightSourc
 		return nil, e
 	}
 	child, _ := ctx.CacheContext()
-	weights, e := source.SnapshotWeights(child, Request{ChainID: ctx.ChainID(), Height: ctx.BlockHeight(), StateHash: digest, NativeGenesis: bytes.Clone(data)})
+	request := Request{ChainID: ctx.ChainID(), Height: ctx.BlockHeight(), StateHash: digest, NativeGenesis: bytes.Clone(data)}
+	var dependencyHash [32]byte
+	dependency, hasDependency := source.(DependencySource)
+	if hasDependency {
+		dependencyHash, e = dependency.DependencyHash(child, cloneRequest(request))
+		if e != nil {
+			return nil, e
+		}
+	}
+	weights, e := source.SnapshotWeights(child, cloneRequest(request))
 	if e != nil {
 		return nil, e
 	}
@@ -151,6 +171,15 @@ func Build(ctx sdk.Context, native *nativekeeper.StateKeeper, source WeightSourc
 	}
 	if weights.ChainID != ctx.ChainID() || weights.Height != ctx.BlockHeight() || weights.StateHash != digest || weights.ValuationID == "" {
 		return nil, errors.New("ownership source snapshot does not match native tally state")
+	}
+	if hasDependency {
+		after, err := dependency.DependencyHash(child, cloneRequest(request))
+		if err != nil {
+			return nil, err
+		}
+		if after != dependencyHash {
+			return nil, errors.New("valuation dependency changed during snapshot")
+		}
 	}
 	known := map[[32]byte]nativetypes.Delegation{}
 	for _, d := range g.Delegations {
@@ -211,7 +240,7 @@ func Build(ctx sdk.Context, native *nativekeeper.StateKeeper, source WeightSourc
 		}
 		expected[v.Validator] = v.Ownership
 	}
-	a := &Adapter{native: native, chainID: ctx.ChainID(), height: ctx.BlockHeight(), digest: digest, delegations: map[string][]votingDelegation{}, total: sdkmath.ZeroInt(), valuationID: weights.ValuationID}
+	a := &Adapter{native: native, chainID: ctx.ChainID(), height: ctx.BlockHeight(), digest: digest, delegations: map[string][]votingDelegation{}, total: sdkmath.ZeroInt(), valuationID: weights.ValuationID, dependency: dependency, dependencyHash: dependencyHash, request: request}
 	for _, v := range g.Validators {
 		power := v.ConsensusPower()
 		if power == 0 {
@@ -283,6 +312,16 @@ func (a *Adapter) guard(ctx context.Context) error {
 	}
 	if digest != a.digest {
 		return errors.New("native records changed after voting snapshot")
+	}
+	if a.dependency != nil {
+		child, _ := s.CacheContext()
+		current, err := a.dependency.DependencyHash(child, cloneRequest(a.request))
+		if err != nil {
+			return err
+		}
+		if current != a.dependencyHash {
+			return errors.New("valuation dependency changed after voting snapshot")
+		}
 	}
 	return nil
 }
