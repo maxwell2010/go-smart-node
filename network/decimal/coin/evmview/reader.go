@@ -12,10 +12,8 @@ import (
 	storetypes "cosmossdk.io/store/types"
 	sdk "github.com/cosmos/cosmos-sdk/types"
 	evmkeeper "github.com/cosmos/evm/x/vm/keeper"
-	"github.com/cosmos/evm/x/vm/statedb"
 	"github.com/ethereum/go-ethereum/accounts/abi"
 	"github.com/ethereum/go-ethereum/common"
-	"github.com/ethereum/go-ethereum/core"
 	"github.com/maxwell2010/go-smart-node/network/decimal/coin/types"
 	"github.com/maxwell2010/go-smart-node/network/identity"
 )
@@ -28,12 +26,6 @@ type Bank interface {
 	GetBalance(context.Context, sdk.AccAddress, string) sdk.Coin
 }
 
-// Binding is an explicitly approved deployment, never inferred from an event.
-// Proxies must pin both the proxy runtime and its current implementation.
-type Binding struct {
-	Address, Implementation         common.Address
-	RuntimeHash, ImplementationHash common.Hash
-}
 type BindingSource interface {
 	CoinBinding(sdk.Context, string) (Binding, error)
 }
@@ -45,6 +37,7 @@ type Reader struct {
 	evm            *evmkeeper.Keeper
 	bindings       BindingSource
 	data           []byte
+	beaconData     []byte
 	evmGas, sdkGas uint64
 }
 
@@ -64,11 +57,7 @@ func New(metadata Metadata, bank Bank, evm *evmkeeper.Keeper, bindings BindingSo
 	if nilDependency(metadata) || nilDependency(bank) || evm == nil || nilDependency(bindings) || evmGas < 21000 || evmGas > 5_000_000 || sdkGas == 0 || sdkGas > 20_000_000 {
 		return nil, errors.New("coin view requires explicit dependencies and bounded EVM/SDK gas")
 	}
-	method, ok := compiledABI.Methods["totalSupply"]
-	if !ok || method.Sig != "totalSupply()" || len(method.Outputs) != 1 || method.Outputs[0].Type.T != abi.UintTy || method.Outputs[0].Type.Size != 256 || (method.StateMutability != "view" && method.StateMutability != "pure") {
-		return nil, errors.New("unexpected compiled totalSupply ABI")
-	}
-	data, err := compiledABI.Pack("totalSupply")
+	data, err := viewSelector(compiledABI, "totalSupply", abi.UintTy, 256)
 	if err != nil {
 		return nil, err
 	}
@@ -130,20 +119,6 @@ func (r *Reader) GetCoin(ctx sdk.Context, denom string) (coin types.Coin, err er
 	if binding.Address != address || binding.Address == (common.Address{}) || binding.RuntimeHash == (common.Hash{}) || r.evm.GetCodeHash(child, address) != binding.RuntimeHash {
 		return types.Coin{}, errors.New("coin contract is not the approved runtime")
 	}
-	slot := common.HexToHash("0x360894a13ba1a3210667c828492db98dca3e2076cc3735a920a3ca505d382bbc")
-	value := r.evm.GetState(child, address, slot)
-	beaconSlot := common.HexToHash("0xa3f0ad74e5423aebfd80d3ef4346578335a9a72aeaee59ff6cb3582b35133d50")
-	if r.evm.GetState(child, address, beaconSlot) != (common.Hash{}) {
-		return types.Coin{}, errors.New("beacon proxy requires explicit reviewed beacon binding; unsupported by this reader")
-	}
-	if binding.Implementation != (common.Address{}) {
-		// The standard EIP1967 slot is approved only for an explicitly pinned proxy.
-		if value != common.BytesToHash(binding.Implementation.Bytes()) || binding.ImplementationHash == (common.Hash{}) || r.evm.GetCodeHash(child, binding.Implementation) != binding.ImplementationHash {
-			return types.Coin{}, errors.New("coin implementation is not approved")
-		}
-	} else if binding.ImplementationHash != (common.Hash{}) || value != (common.Hash{}) {
-		return types.Coin{}, errors.New("implementation hash requires explicit implementation address")
-	}
 	// Capture backing before executing even an approved getter. Native
 	// precompiles invoked by bad getter code could write in its discarded child;
 	// those speculative writes must not become the returned reserve either.
@@ -151,21 +126,14 @@ func (r *Reader) GetCoin(ctx sdk.Context, denom string) (coin types.Coin, err er
 	if balance.Denom != identity.BaseDenom {
 		return types.Coin{}, errors.New("coin reserve bank returned a different denomination")
 	}
-	message := core.Message{From: common.Address{}, To: &address, GasLimit: r.evmGas, GasPrice: new(big.Int), GasFeeCap: new(big.Int), GasTipCap: new(big.Int), Value: new(big.Int), Data: append([]byte(nil), r.data...), SkipNonceChecks: true, SkipFromEOACheck: true}
-	stateDB := statedb.New(child, r.evm, statedb.NewEmptyTxConfig())
-	response, e := r.evm.ApplyMessage(child, stateDB, message, nil, false, false, false)
+	if err := r.verifyBinding(ctx, child, binding, address); err != nil {
+		return types.Coin{}, err
+	}
+	word, e := r.readWord(ctx, child, address, r.data)
 	if e != nil {
-		return types.Coin{}, fmt.Errorf("coin totalSupply view: %w", e)
+		return types.Coin{}, e
 	}
-	// EVM execution is separately metered from native store reads. Charge it to
-	// the caller too; gas configuration is reviewed chain policy, not a free query.
-	if response != nil {
-		ctx.GasMeter().ConsumeGas(min(response.GasUsed, r.evmGas), "native coin EVM view")
-	}
-	if response == nil || response.VmError != "" || len(response.Ret) != 32 || response.GasUsed > r.evmGas {
-		return types.Coin{}, errors.New("coin totalSupply view reverted or returned malformed output")
-	}
-	volume := new(big.Int).SetBytes(response.Ret)
+	volume := new(big.Int).SetBytes(word)
 	coin.Volume = sdkmath.NewIntFromBigInt(volume)
 	coin.Reserve = balance.Amount
 	if e = coin.Validate(); e != nil {

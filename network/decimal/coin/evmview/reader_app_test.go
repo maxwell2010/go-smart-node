@@ -181,7 +181,7 @@ func TestAuthoritativeCoinViewWithSignedOwnEVM(t *testing.T) {
 	token := deployCode(creation, new(big.Int))
 	send(keys[0], &token, new(big.Int).Mul(unit, big.NewInt(5)), initialization, true)
 	metadata := &fixtureMetadata{coin: cointypes.Coin{Denom: "viewcoin", Title: "Coin view fixture", Creator: accounts[0].GetAddress().String(), CRR: 50, Volume: math.NewIntFromBigInt(new(big.Int).Mul(unit, big.NewInt(9))), Reserve: math.NewIntFromBigInt(unit), MinVolume: math.NewIntFromBigInt(unit), LimitVolume: math.NewIntFromBigInt(new(big.Int).Mul(unit, big.NewInt(100))), DRC20Contract: token.Hex()}}
-	binding := &fixtureBinding{binding: evmview.Binding{Address: token, RuntimeHash: a.EVMKeeper.GetCodeHash(ctx(), token), Implementation: implementation, ImplementationHash: a.EVMKeeper.GetCodeHash(ctx(), implementation)}}
+	binding := &fixtureBinding{binding: evmview.Binding{Kind: evmview.ERC1967Proxy, Address: token, RuntimeHash: a.EVMKeeper.GetCodeHash(ctx(), token), Implementation: implementation, ImplementationHash: a.EVMKeeper.GetCodeHash(ctx(), implementation)}}
 	compiled, err := contracts.CompiledABI("DRC20")
 	require.NoError(t, err)
 	reader, err := evmview.New(metadata, a.BankKeeper, a.EVMKeeper, binding, compiled, 200_000, 2_000_000)
@@ -238,7 +238,7 @@ func TestAuthoritativeCoinViewWithSignedOwnEVM(t *testing.T) {
 			require.NoError(t, err)
 			target := deployCode(append(prefix, runtime...), new(big.Int))
 			metadata.coin.DRC20Contract = target.Hex()
-			binding.binding = evmview.Binding{Address: target, RuntimeHash: a.EVMKeeper.GetCodeHash(ctx(), target)}
+			binding.binding = evmview.Binding{Kind: evmview.DirectRuntime, Address: target, RuntimeHash: a.EVMKeeper.GetCodeHash(ctx(), target)}
 			before := a.EVMKeeper.GetState(ctx(), target, common.Hash{})
 			viewContext := ctx().WithGasMeter(storetypes.NewGasMeter(3_000_000))
 			result, err := reader.GetCoin(viewContext, "viewcoin")
@@ -265,7 +265,7 @@ func TestAuthoritativeCoinViewWithSignedOwnEVM(t *testing.T) {
 	require.NoError(t, err)
 	beaconFixture := deployCode(append(beaconInit, beaconRuntime...), new(big.Int))
 	metadata.coin.DRC20Contract = beaconFixture.Hex()
-	binding.binding = evmview.Binding{Address: beaconFixture, RuntimeHash: a.EVMKeeper.GetCodeHash(ctx(), beaconFixture)}
+	binding.binding = evmview.Binding{Kind: evmview.DirectRuntime, Address: beaconFixture, RuntimeHash: a.EVMKeeper.GetCodeHash(ctx(), beaconFixture)}
 	_, err = reader.GetCoin(ctx(), "viewcoin")
 	require.ErrorContains(t, err, "beacon proxy requires")
 	metadata.coin.DRC20Contract = token.Hex()
@@ -274,6 +274,89 @@ func TestAuthoritativeCoinViewWithSignedOwnEVM(t *testing.T) {
 	require.NoError(t, err)
 	_, err = bounded.GetCoin(ctx(), "viewcoin")
 	require.ErrorContains(t, err, "SDK gas")
+
+	t.Run("actual factory-created beacon token", func(t *testing.T) {
+		originalMetadata, originalBinding := metadata.coin, binding.binding
+		defer func() { metadata.coin = originalMetadata; binding.binding = originalBinding }()
+		factoryArtifact := load("DecimalTokenCenter")
+		setupArtifact := load("NewNetworkProxyBootstrap")
+		factoryImplementation := deployCode(factoryArtifact.Creation, new(big.Int))
+		setup := deployCode(setupArtifact.Creation, new(big.Int))
+		initial, err := factoryArtifact.ABI.Pack("initialize")
+		require.NoError(t, err)
+		bootstrapData, err := setupArtifact.ABI.Pack("bootstrap", owner, factoryImplementation, initial)
+		require.NoError(t, err)
+		factoryCode, err := proxy.Deployment(setup, bootstrapData)
+		require.NoError(t, err)
+		factory := deployCode(factoryCode, new(big.Int))
+		configure, err := factoryArtifact.ABI.Pack("upgradeToken", implementation)
+		require.NoError(t, err)
+		send(keys[0], &factory, new(big.Int), configure, true)
+		tokenMeta := struct {
+			InitialMint, MinTotalSupply, MaxTotalSupply *big.Int
+			Creator                                     common.Address
+			Crr                                         uint8
+			Identity, Symbol, Name                      string
+		}{new(big.Int).Mul(unit, big.NewInt(10)), unit, new(big.Int).Mul(unit, big.NewInt(100)), owner, 50, "", "beacoin", "Beacon coin fixture"}
+		create, err := factoryArtifact.ABI.Pack("createToken", tokenMeta)
+		require.NoError(t, err)
+		reserveAndCommission := new(big.Int).Add(new(big.Int).Mul(unit, big.NewInt(5)), new(big.Int).Div(new(big.Int).Set(unit), big.NewInt(4)))
+		send(keys[0], &factory, reserveAndCommission, create, true)
+		lookup, err := factoryArtifact.ABI.Pack("tokens", "beacoin")
+		require.NoError(t, err)
+		lookupResponse := send(keys[0], &factory, new(big.Int), lookup, true)
+		require.Len(t, lookupResponse.Ret, 32)
+		beaconToken := common.BytesToAddress(lookupResponse.Ret)
+		require.NotEqual(t, common.Address{}, beaconToken)
+		metadata.coin.Denom = "beacoin"
+		metadata.coin.DRC20Contract = beaconToken.Hex()
+		approved := evmview.Binding{Kind: evmview.BeaconProxy, Address: beaconToken, RuntimeHash: a.EVMKeeper.GetCodeHash(ctx(), beaconToken), Implementation: implementation, ImplementationHash: a.EVMKeeper.GetCodeHash(ctx(), implementation), Beacon: factory, BeaconRuntimeHash: a.EVMKeeper.GetCodeHash(ctx(), factory), BeaconImplementation: factoryImplementation, BeaconImplementationHash: a.EVMKeeper.GetCodeHash(ctx(), factoryImplementation)}
+		binding.binding = approved
+		_, err = reader.GetCoin(ctx(), "beacoin")
+		require.ErrorContains(t, err, "compiled beacon ABI")
+		beaconABI, err := contracts.CompiledABI("DecimalTokenCenter")
+		require.NoError(t, err)
+		beaconReader, err := evmview.NewWithBeacon(metadata, a.BankKeeper, a.EVMKeeper, binding, compiled, beaconABI, 200_000, 2_000_000)
+		require.NoError(t, err)
+		actual, err := beaconReader.GetCoin(ctx(), "beacoin")
+		require.NoError(t, err)
+		require.Equal(t, math.NewIntFromBigInt(new(big.Int).Mul(unit, big.NewInt(10))), actual.Volume)
+		require.Equal(t, math.NewIntFromBigInt(new(big.Int).Mul(unit, big.NewInt(5))), actual.Reserve)
+		for _, change := range []func(*evmview.Binding){
+			func(b *evmview.Binding) { b.Kind = evmview.DirectRuntime },
+			func(b *evmview.Binding) { b.Kind = 0 },
+			func(b *evmview.Binding) { b.Beacon = owner },
+			func(b *evmview.Binding) { b.BeaconImplementationHash = common.HexToHash("0x01") },
+			func(b *evmview.Binding) { b.ImplementationHash = common.HexToHash("0x01") },
+		} {
+			broken := approved
+			change(&broken)
+			binding.binding = broken
+			_, err = beaconReader.GetCoin(ctx(), "beacoin")
+			require.Error(t, err)
+		}
+		binding.binding = approved
+		pause, err := factoryArtifact.ABI.Pack("pause")
+		require.NoError(t, err)
+		send(keys[0], &factory, new(big.Int), pause, true)
+		_, err = beaconReader.GetCoin(ctx(), "beacoin")
+		require.ErrorContains(t, err, "paused/zero")
+		unpause, err := factoryArtifact.ABI.Pack("unpause")
+		require.NoError(t, err)
+		send(keys[0], &factory, new(big.Int), unpause, true)
+		_, err = beaconReader.GetCoin(ctx(), "beacoin")
+		require.NoError(t, err)
+		replacement := deployCode(artifact.Creation, new(big.Int))
+		upgrade, err := factoryArtifact.ABI.Pack("upgradeToken", replacement)
+		require.NoError(t, err)
+		send(keys[0], &factory, new(big.Int), upgrade, true)
+		_, err = beaconReader.GetCoin(ctx(), "beacoin")
+		require.ErrorContains(t, err, "resolved beacon token implementation")
+		binding.binding.Implementation = replacement
+		binding.binding.ImplementationHash = a.EVMKeeper.GetCodeHash(ctx(), replacement)
+		_, err = beaconReader.GetCoin(ctx(), "beacoin")
+		require.NoError(t, err)
+	})
 	var absent *fixtureMetadata
 	_, err = evmview.New(absent, a.BankKeeper, a.EVMKeeper, binding, compiled, 200_000, 2_000_000)
 	require.Error(t, err)

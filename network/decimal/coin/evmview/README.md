@@ -15,21 +15,37 @@ must still satisfy the stored reviewed coin limits; the reader never silently
 loosens limits following an upgrade or substitutes an RPC quote.
 
 Application configuration must provide an approved `BindingSource`, based on
-authenticated chain deployment/governance state. Each binding specifies the
-native token address and expected runtime hash. EIP1967 proxies also require
-their exact current implementation address/hash. An occupied implementation
-slot without that approval fails closed. A nonzero EIP1967 beacon slot is explicitly rejected even when its runtime
-hash is pinned and no implementation binding is supplied. Factory-created
-BeaconProxy tokens need a separate explicit beacon/factory/implementation
-approval and bounded beacon resolution before monetary use.
-Other proxy/forwarding schemes require
-separate review; an arbitrary runtime must not be admitted just because its
-hash can be read. This interface is not an authentication mechanism for an
-untrusted binding provider.
+authenticated deployment/governance state. `Binding.Kind` must explicitly be
+`DirectRuntime`, `ERC1967Proxy` or `BeaconProxy`; zero is invalid. Each binding
+pins the native token address and runtime hash. An EIP1967 implementation proxy
+also pins its current implementation address and code hash. A direct binding
+rejects occupied implementation/beacon slots and proxy-specific approval fields.
+
+Canonical factory-created BeaconProxy tokens require `NewWithBeacon` with the
+separate compiler-pinned `DecimalTokenCenter` ABI. Approval pins the token
+runtime, beacon/factory address and runtime, the factory proxy's own EIP1967
+implementation address/hash, and the underlying token implementation address/hash.
+The actual bounded `implementation()` getter must return that approved token
+logic. Wrong kinds, missing approval, changed factory/logic, recursive beacon
+schemes and malformed/zero results fail closed. A pinned proxy runtime alone
+never admits an unverified beacon. These checks authenticate only a correctly
+configured reviewed source; an untrusted provider cannot authenticate itself
+by reading arbitrary code hashes from the same chain.
+
+The canonical factory returns zero from `implementation()` while paused. This
+reader deliberately rejects that state without a stale metadata fallback.
+Therefore governance over positions in such tokens needs an explicit reviewed
+pause/recovery design before activation: a global valuation failure must not
+make an unpause proposal impossible. A future fresh pause-aware proxy/factory
+profile requires its own explicit ABI/code approval and tests; it is not enabled
+by this canonical path. Other proxy/forwarding schemes require separate review.
 
 Construct with the compiler-pinned `systemcontracts.CompiledABI("DRC20")`.
 The selector is copied; no mutable ABI map or financial result is cached.
-Execution uses an actual bounded `core.Message.GasLimit` and `ApplyMessage`
+For a beacon, resolving the factory and reading token supply are two separately
+bounded EVM calls. Each has a discarded child cache, so speculative native
+precompile writes cannot influence the other. Backing is captured before either
+getter. Execution uses an actual bounded `core.Message.GasLimit` and `ApplyMessage`
 with `commit=false`, in a discarded child SDK context with its own finite gas
 meter. It does not call upstream `CallEVM` with an ineffective gas-cap argument.
 Both native-store work and EVM gas, including failed EVM calls, are charged to
@@ -60,3 +76,11 @@ on the selected SDK53 family, with whole-module verification and both owned
 source verifiers passing before/after the grouped checks. This is not an
 aggregate block/proposal-work bound; callers must also bound assets, positions
 and repeated fingerprint reads across a tally.
+
+The actual factory-created-token case deploys the compiler-pinned TokenCenter
+proxy, authorizes DRC20 logic, calls `createToken` with5DEL reserve plus the
+actual0.25DEL symbol commission, and reconciles exact signed transaction fees.
+It verifies supply/reserve, wrong-kind/code/binding rejection, canonical pause
+rejection, successful recovery after unpause, and logic-upgrade rejection until
+its binding is explicitly updated. Factory and native metadata admission rows
+remain fixtures, not a completed production bootstrap/receipt pipeline.
