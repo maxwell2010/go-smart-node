@@ -10,6 +10,7 @@ import (
 	evmtypes "github.com/cosmos/evm/x/vm/types"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core"
+	ethtypes "github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/crypto"
 	nftview "github.com/maxwell2010/go-smart-node/network/decimal/nft/evmview"
 	nftkeeper "github.com/maxwell2010/go-smart-node/network/decimal/nft/keeper"
@@ -88,8 +89,8 @@ func runIsolatedPositionReader(t *testing.T, e isolatedBackendEnv) {
 		require.NoError(t, err)
 		return values[0].(*big.Int)
 	}
-	govSetup := func(artifact contracts.Artifact, target common.Address, method string) {
-		data, err := artifact.ABI.Pack(method)
+	govSetup := func(artifact contracts.Artifact, target common.Address, method string, args ...interface{}) {
+		data, err := artifact.ABI.Pack(method, args...)
 		require.NoError(t, err)
 		child, commit := e.ctx().CacheContext()
 		child = child.WithGasMeter(storetypes.NewGasMeter(3_000_000))
@@ -212,4 +213,64 @@ func runIsolatedPositionReader(t *testing.T, e isolatedBackendEnv) {
 	call(0, vault, vaultAddress, new(big.Int), true, "redeemPosition", wrappedPosition, owner)
 	e.credit.Set(unit)
 	call(0, wrapper, wrapped, new(big.Int), true, "withdraw", unit)
+
+	// Source authentication has no dependency on native NFT metadata or balances.
+	master := e.load("NewNetworkMasterValidator")
+	masterImpl := e.deploy(master)
+	masterInit, err := master.ABI.Pack("initializeFresh", registryAddress)
+	require.NoError(t, err)
+	masterConfig, err := bootstrap.ABI.Pack("bootstrapConfigured", e.govOwner, masterImpl, masterInit, [][]byte{})
+	require.NoError(t, err)
+	masterAddress := e.deploy(proxy, e.setup, masterConfig)
+	govSetup(registry, registryAddress, "setContractAddress", "master-validator", masterAddress)
+	missingMaster := receipts.Execution{EntryPoint: receipts.EntryPointSignedEthereum, Receipt: &ethtypes.Receipt{Status: ethtypes.ReceiptStatusSuccessful}}
+	_, err = reader.AuthenticateStakeSource(e.ctx(), missingMaster)
+	require.Error(t, err)
+	config.MasterValidator = masterAddress
+	sourceReader, err := nftview.New(metadata, e.app.EVMKeeper, config)
+	require.NoError(t, err)
+	response := call(0, origin, originAddress, unit, true, "mintByDEL", owner, big.NewInt(303), big.NewInt(1), "ipfs://source-auth")
+	execution := receipts.Execution{EntryPoint: receipts.EntryPointSignedEthereum, Receipt: &ethtypes.Receipt{Status: ethtypes.ReceiptStatusSuccessful, Logs: evmtypes.LogsToEthereum(response.Logs)}}
+	auth := func(reader *nftview.Reader, execution receipts.Execution) (nftview.StakeSource, uint64) {
+		child := e.ctx().WithGasMeter(storetypes.NewGasMeter(15_000_000))
+		source, err := reader.AuthenticateStakeSource(child, execution)
+		require.NoError(t, err)
+		return source, child.GasMeter().GasConsumed()
+	}
+	source, cost := auth(sourceReader, execution)
+	require.Equal(t, config.ChainID, source.ChainID)
+	require.Equal(t, config.EVMChainID, source.EVMChainID)
+	require.Equal(t, gatewayAddress, source.Gateway)
+	require.NotEqual(t, common.Hash{}, source.Fingerprint)
+	newPosition := integer(origin, "isolate", call(0, origin, originAddress, new(big.Int), true, "isolate", big.NewInt(303), big.NewInt(1), owner))
+	afterFinancial, afterFinancialCost := auth(sourceReader, execution)
+	require.Equal(t, source, afterFinancial, "current NFT state cannot invalidate role-only source capture")
+	larger := config
+	larger.EVMGas = 200000
+	largerReader, err := nftview.New(metadata, e.app.EVMKeeper, larger)
+	require.NoError(t, err)
+	largerSource, largerCost := auth(largerReader, execution)
+	require.Equal(t, source, largerSource)
+	require.Equal(t, afterFinancialCost, largerCost, "same-context internal getter billing has no cap-dependent transaction minimum")
+	execution.EntryPoint = receipts.EntryPointGovernance
+	execution.Receipt.TxHash = common.Hash{}
+	internal, _ := auth(sourceReader, execution)
+	require.Equal(t, source, internal, "zero-hash internal Gov execution uses role identity, not transaction-hash deduplication")
+	execution.Receipt.Status = ethtypes.ReceiptStatusFailed
+	_, err = sourceReader.AuthenticateStakeSource(e.ctx(), execution)
+	require.Error(t, err)
+	execution.Receipt.Status = ethtypes.ReceiptStatusSuccessful
+	execution.EntryPoint = receipts.EntryPointIBC
+	_, err = sourceReader.AuthenticateStakeSource(e.ctx(), execution)
+	require.Error(t, err)
+	execution.EntryPoint = receipts.EntryPointSignedEthereum
+	govSetup(master, masterAddress, "transferOwnership", owner)
+	_, err = sourceReader.AuthenticateStakeSource(e.ctx(), execution)
+	require.Error(t, err, "a known-code Master owned by an EOA must fail closed")
+	call(0, master, masterAddress, new(big.Int), true, "transferOwnership", e.govOwner)
+	restored, _ := auth(sourceReader, execution)
+	require.Equal(t, source, restored)
+	e.credit.Set(unit)
+	call(0, vault, vaultAddress, new(big.Int), true, "redeemPosition", newPosition, owner)
+	t.Logf("actual isolated StakeSource authentication SDKgas=%d; native capture/pipeline costs separate", cost)
 }
