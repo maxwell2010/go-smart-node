@@ -68,7 +68,13 @@ func TestReserveAdapterSharesRealMetadataAndLaterStageRollback(t *testing.T) {
 					}}, nil
 				})
 			}
-			coordinator, err := New(assets, probe("nft-probe", false), probe("validator-probe", mode == "late apply failure"), finalFunc(func(c sdk.Context, _ Execution) error {
+			var captured Prepared
+			capture := prepareFunc(func(c sdk.Context, e Execution) (Prepared, error) {
+				var err error
+				captured, err = assets.Prepare(c, e)
+				return captured, err
+			})
+			coordinator, err := New(capture, probe("nft-probe", false), probe("validator-probe", mode == "late apply failure"), finalFunc(func(c sdk.Context, _ Execution) error {
 				if mode == "final failure" {
 					return errors.New("later validator final invariant rejected")
 				}
@@ -79,6 +85,7 @@ func TestReserveAdapterSharesRealMetadataAndLaterStageRollback(t *testing.T) {
 			current, readErr := keeper.GetCoin(ctx, coin.Denom)
 			require.NoError(t, readErr)
 			require.Equal(t, 3, reads, "prepare/validate/apply each check authoritative final backing")
+			require.ErrorContains(t, captured.Apply(ctx), "consumed", "outer rollback cannot reuse the same prepared token")
 			if mode != "commit" {
 				require.ErrorContains(t, err, "later validator")
 				require.Equal(t, coin.Volume, current.Volume)
