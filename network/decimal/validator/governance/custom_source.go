@@ -7,12 +7,14 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
+	sdk "github.com/cosmos/cosmos-sdk/types"
+	cointypes "github.com/maxwell2010/go-smart-node/network/decimal/coin/types"
 	"math/big"
+	"reflect"
 	"sort"
 
 	sdkmath "cosmossdk.io/math"
 	"github.com/cosmos/gogoproto/proto"
-	coinkeeper "github.com/maxwell2010/go-smart-node/network/decimal/coin/keeper"
 	"github.com/maxwell2010/go-smart-node/network/decimal/formulas"
 	nativetypes "github.com/maxwell2010/go-smart-node/network/decimal/validator/types"
 	"github.com/maxwell2010/go-smart-node/network/identity"
@@ -21,7 +23,12 @@ import (
 // AggregateReserveSource values complete active native ownership, including NFT
 // reserve amounts, using same-context custom coin records. No RPC or bank mint
 // is involved. This is an explicit governance policy, not a redemption quote.
-type AggregateReserveSource struct{ Coins *coinkeeper.StateKeeper }
+type CoinSnapshotReader interface {
+	GetCoin(sdk.Context, string) (cointypes.Coin, error)
+	GetParams(sdk.Context) (cointypes.Params, error)
+}
+
+type AggregateReserveSource struct{ Coins CoinSnapshotReader }
 
 func ownershipGenesis(r Request) (*nativetypes.GenesisState, error) {
 	var g nativetypes.GenesisState
@@ -38,7 +45,7 @@ func ownershipGenesis(r Request) (*nativetypes.GenesisState, error) {
 }
 
 func (s AggregateReserveSource) DependencyHash(ctx context.Context, r Request) ([32]byte, error) {
-	if s.Coins == nil {
+	if s.Coins == nil || (reflect.ValueOf(s.Coins).Kind() == reflect.Pointer && reflect.ValueOf(s.Coins).IsNil()) {
 		return [32]byte{}, errors.New("native coin state is required")
 	}
 	g, err := ownershipGenesis(r)

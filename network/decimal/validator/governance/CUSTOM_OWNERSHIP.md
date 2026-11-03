@@ -56,3 +56,12 @@ passes with `go test -mod=readonly -p 1 -count=1 -tags sdk53 ./decimal/validator
 coin/NFT keeper and schema tests also pass. Full external module verification
 and both owned-source verifiers pass before and after. The final focused
 governance rerun includes the added exact grouped-owner-share assertion.
+
+Production integration must supply a reviewed live `CoinSnapshotReader` combining
+native metadata with actual same-context token total supply and the BankKeeper
+DEL balance at its token contract address. Merely reading the metadata keeper
+is a unit/staging source, not proof of current backing: native bank transfers or
+forced EVM credits can change backing without a ReserveUpdated event. The source
+fingerprints whatever reviewed reader supplies, so actual backing changes must
+invalidate tally state too. The live reader is a required separate integration
+gate; the tests here intentionally exercise metadata-stage coin keepers.
