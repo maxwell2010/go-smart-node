@@ -29,7 +29,7 @@ type Decoder struct {
 // argument readers. Later mutation of caller ABI maps or type pointers cannot
 // alter receipt interpretation.
 func NewDecoder(auth Authenticator, nft721, nft1155 abi.ABI, limits Limits) (*Decoder, error) {
-	if auth == nil {
+	if nilDependency(auth) {
 		return nil, errors.New("NFT decoder requires an approved-state authenticator")
 	}
 	if err := limits.Validate(); err != nil {

@@ -12,6 +12,7 @@ import (
 	"github.com/cosmos/cosmos-sdk/codec/address"
 	sdk "github.com/cosmos/cosmos-sdk/types"
 	"github.com/cosmos/gogoproto/proto"
+	"github.com/ethereum/go-ethereum/common"
 	"github.com/maxwell2010/go-smart-node/network/decimal/compat"
 	"github.com/maxwell2010/go-smart-node/network/decimal/nft/types"
 	"github.com/maxwell2010/go-smart-node/network/identity"
@@ -274,6 +275,40 @@ func (k *StateKeeper) GetCollection(ctx sdk.Context, creator, denom string) (typ
 	}
 	if err := collection.Validate(); err != nil {
 		return types.Collection{}, err
+	}
+	return collection, nil
+}
+
+// GetCollectionByDRC resolves a native collection identity only. Authentication
+// of factory, implementation and immutable proxy runtime belongs to evmview.
+func (k *StateKeeper) GetCollectionByDRC(ctx sdk.Context, contract string) (types.Collection, error) {
+	if len(contract) != 42 || !strings.HasPrefix(contract, "0x") || !common.IsHexAddress(contract) || common.HexToAddress(contract) == (common.Address{}) {
+		return types.Collection{}, errors.New("invalid NFT collection contract")
+	}
+	key, err := k.service.OpenKVStore(ctx).Get(types.GetCollectionsByAddressDRCKey(strings.ToLower(contract)))
+	if err != nil {
+		return types.Collection{}, err
+	}
+	if key == nil {
+		return types.Collection{}, ErrNotFound
+	}
+	if len(key) > 128 || len(key) == 0 || key[0] != types.GetCollectionsKey()[0] {
+		return types.Collection{}, errors.New("NFT collection contract index mismatch")
+	}
+	var record types.Collection
+	if err := k.read(ctx, key, &record); err != nil {
+		return types.Collection{}, err
+	}
+	collection, err := k.GetCollection(ctx, record.Creator, record.Denom)
+	if err != nil {
+		return types.Collection{}, err
+	}
+	creator, err := account(collection.Creator)
+	if err != nil {
+		return types.Collection{}, err
+	}
+	if !bytes.Equal(key, types.GetCollectionKey(creator, collection.Denom)) || !strings.EqualFold(collection.AddressDRC, contract) {
+		return types.Collection{}, errors.New("NFT collection contract index mismatch")
 	}
 	return collection, nil
 }

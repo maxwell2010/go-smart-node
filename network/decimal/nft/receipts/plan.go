@@ -28,7 +28,7 @@ type Planner struct {
 }
 
 func NewPlanner(decoder *Decoder, state NativeState, reader FinalReader, stakes StakeCapture) (*Planner, error) {
-	if decoder == nil || state == nil || reader == nil || stakes == nil {
+	if decoder == nil || nilDependency(state) || nilDependency(reader) || nilDependency(stakes) {
 		return nil, errors.New("NFT planner requires decoding, native state, final reader and stake capture")
 	}
 	return &Planner{decoder: decoder, state: state, reader: reader, stakes: stakes}, nil

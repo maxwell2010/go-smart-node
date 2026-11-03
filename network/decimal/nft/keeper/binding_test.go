@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"math"
+	"strings"
 	"testing"
 
 	"cosmossdk.io/core/store"
@@ -60,6 +61,23 @@ func TestExternalNFTBindingWriteFailureIsAtomic(t *testing.T) {
 	require.ErrorIs(t, err, ErrNotFound)
 	require.Empty(t, ctx.EventManager().Events())
 	require.NoError(t, k.InitGenesis(ctx, g), "the failed import must leave params and every index empty")
+}
+
+func TestExternalNFTCollectionContractLookupChecksNativeIndex(t *testing.T) {
+	ctx, k, g, _ := externalFixture(t)
+	require.NoError(t, k.InitGenesis(ctx, g))
+	contract := g.Collections[0].AddressDRC
+	collection, err := k.GetCollectionByDRC(ctx, contract)
+	require.NoError(t, err)
+	require.Equal(t, g.Collections[0].Denom, collection.Denom)
+	require.Empty(t, collection.Tokens, "contract identity lookup must stay shallow")
+	_, err = k.GetCollectionByDRC(ctx, "0x0000000000000000000000000000000000000000")
+	require.Error(t, err)
+	_, err = k.GetCollectionByDRC(ctx, "0x9999999999999999999999999999999999999999")
+	require.ErrorIs(t, err, ErrNotFound)
+	require.NoError(t, k.service.OpenKVStore(ctx).Set(types.GetCollectionsByAddressDRCKey(strings.ToLower(contract)), []byte{0x21, 1}))
+	_, err = k.GetCollectionByDRC(ctx, contract)
+	require.ErrorContains(t, err, "index mismatch")
 }
 
 type failBindingIndexService struct{ store.KVStoreService }
