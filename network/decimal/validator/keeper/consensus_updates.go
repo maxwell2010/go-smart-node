@@ -3,9 +3,7 @@ package keeper
 import (
 	"bytes"
 	sdkmath "cosmossdk.io/math"
-	"encoding/binary"
 	"errors"
-	cmttypes "github.com/cometbft/cometbft/types"
 	"math"
 	"sort"
 
@@ -13,7 +11,6 @@ import (
 	cryptoencoding "github.com/cometbft/cometbft/crypto/encoding"
 	cryptocodec "github.com/cosmos/cosmos-sdk/crypto/codec"
 	sdk "github.com/cosmos/cosmos-sdk/types"
-	"github.com/cosmos/gogoproto/proto"
 	"github.com/maxwell2010/go-smart-node/network/decimal/validator/types"
 )
 
@@ -40,14 +37,33 @@ func (k *StateKeeper) EndBlockValidatorUpdates(ctx sdk.Context, effective []type
 	if err != nil {
 		return nil, err
 	}
-	all, err := k.GetValidators(child)
+	bonded, err := k.bondedValidators(child)
+	if err != nil {
+		return nil, err
+	}
+	previous, err := k.previousPositivePowers(child)
 	if err != nil {
 		return nil, err
 	}
 	byOperator := map[string]types.Validator{}
 	var candidates []types.Validator
-	for _, v := range all {
+	for _, v := range bonded {
 		byOperator[v.OperatorAddress] = v
+	}
+	previousOperators := make([]string, 0, len(previous))
+	for operator := range previous {
+		previousOperators = append(previousOperators, operator)
+	}
+	sort.Strings(previousOperators)
+	for _, operator := range previousOperators {
+		if _, exists := byOperator[operator]; exists {
+			continue
+		}
+		v, err := k.GetValidator(child, operator)
+		if err != nil {
+			return nil, errors.New("previous validator metadata is missing or invalid")
+		}
+		byOperator[operator] = v
 	}
 	seenEligible := map[string]bool{}
 	for _, operator := range eligible {
@@ -57,7 +73,11 @@ func (k *StateKeeper) EndBlockValidatorUpdates(ctx sdk.Context, effective []type
 		seenEligible[operator] = true
 		v, ok := byOperator[operator]
 		if !ok {
-			return nil, errors.New("eligible validator metadata is missing")
+			v, err = k.GetValidator(child, operator)
+			if err != nil {
+				return nil, errors.New("eligible validator metadata is missing or invalid")
+			}
+			byOperator[operator] = v
 		}
 		if !v.Jailed && v.Stake > 0 {
 			candidates = append(candidates, v)
@@ -79,43 +99,6 @@ func (k *StateKeeper) EndBlockValidatorUpdates(ctx sdk.Context, effective []type
 	}
 	if _, err = ConsensusSet(candidates); err != nil {
 		return nil, err
-	}
-	previous := map[string]int64{}
-	var previousTotal int64
-	err = k.scan(child, powerPrefix, func(key, data []byte) error {
-		var p types.LastValidatorPower
-		if len(data) > MaxRecordBytes {
-			return errors.New("previous validator power record exceeds size limit")
-		}
-		if err := proto.Unmarshal(data, &p); err != nil {
-			return err
-		}
-		expected, err := operatorKey(powerPrefix, p.Address)
-		if err != nil {
-			return err
-		}
-		if !bytes.Equal(key, expected) || p.Power < 0 {
-			return errors.New("invalid previous validator power record")
-		}
-		if _, ok := byOperator[p.Address]; !ok {
-			return errors.New("previous validator metadata is missing")
-		}
-		if p.Power > cmttypes.MaxTotalVotingPower-previousTotal {
-			return errors.New("invalid previous total power")
-		}
-		previousTotal += p.Power
-		previous[p.Address] = p.Power
-		return nil
-	})
-	if err != nil {
-		return nil, err
-	}
-	storedTotal, err := k.service.OpenKVStore(child).Get([]byte{3})
-	if err != nil {
-		return nil, err
-	}
-	if len(storedTotal) != 8 || binary.BigEndian.Uint64(storedTotal) != uint64(previousTotal) {
-		return nil, errors.New("previous native total power mismatch")
 	}
 	next := map[string]int64{}
 	powers := make([]types.LastValidatorPower, 0, len(candidates))
@@ -159,11 +142,18 @@ func (k *StateKeeper) EndBlockValidatorUpdates(ctx sdk.Context, effective []type
 		}
 		updates = append(updates, abci.ValidatorUpdate{PubKey: wire, Power: changed[operator]})
 	}
-	// Validate the complete final status map once. Writing individual validated
-	// transitions would reject a valid swap at MaxValidators or require O(N^2)
-	// repeated metadata scans. All writes remain inside this outer child cache.
+	// The union covers every old bonded row plus every previous/eligible row.
+	// Other unbonded candidates cannot change the final bonded constraint.
 	changedStatuses := make([]types.Validator, 0)
-	finalValidators := append([]types.Validator(nil), all...)
+	unionOperators := make([]string, 0, len(byOperator))
+	for operator := range byOperator {
+		unionOperators = append(unionOperators, operator)
+	}
+	sort.Strings(unionOperators)
+	finalValidators := make([]types.Validator, 0, len(unionOperators))
+	for _, operator := range unionOperators {
+		finalValidators = append(finalValidators, byOperator[operator])
+	}
 	for i, v := range finalValidators {
 		status := v.Status
 		if next[v.OperatorAddress] > 0 {
@@ -191,6 +181,9 @@ func (k *StateKeeper) EndBlockValidatorUpdates(ctx sdk.Context, effective []type
 		if err = k.put(child, key, &v); err != nil {
 			return nil, err
 		}
+	}
+	if err = k.replaceBondedMembers(child, bonded, candidates); err != nil {
+		return nil, err
 	}
 	if err = k.SetLastValidatorPowers(child, powers); err != nil {
 		return nil, err

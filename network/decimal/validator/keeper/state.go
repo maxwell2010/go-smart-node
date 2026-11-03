@@ -259,31 +259,16 @@ func (k *StateKeeper) SetValidator(ctx sdk.Context, v types.Validator) error {
 		return e
 	}
 	child, commit := ctx.CacheContext()
-	p, e := k.GetParams(child)
-	if e != nil {
-		return e
-	}
-	vals, e := k.GetValidators(child)
-	if e != nil {
-		return e
-	}
-	replaced := false
-	for i, old := range vals {
-		if old.OperatorAddress == v.OperatorAddress {
-			oldKey, _ := old.GetConsAddr()
-			newKey, _ := v.GetConsAddr()
-			if !bytes.Equal(oldKey, newKey) {
-				return errors.New("consensus key is immutable")
-			}
-			vals[i] = v
-			replaced = true
+	old, e := k.GetValidator(child, v.OperatorAddress)
+	var previous *types.Validator
+	if e == nil {
+		oldKey, _ := old.GetConsAddr()
+		newKey, _ := v.GetConsAddr()
+		if !bytes.Equal(oldKey, newKey) {
+			return errors.New("consensus key is immutable")
 		}
-	}
-	if !replaced {
-		vals = append(vals, v)
-	}
-	g := types.GenesisState{Params: p, Validators: vals}
-	if e = g.Validate(); e != nil {
+		previous = &old
+	} else if !errors.Is(e, ErrNotFound) {
 		return e
 	}
 	key, e := operatorKey(validatorPrefix, v.OperatorAddress)
@@ -301,6 +286,9 @@ func (k *StateKeeper) SetValidator(ctx sdk.Context, v types.Validator) error {
 	}
 	if stored != nil && string(stored) != v.OperatorAddress {
 		return errors.New("consensus address belongs to another validator")
+	}
+	if e = k.updateBondedMember(child, previous, v); e != nil {
+		return e
 	}
 	row := &types.ValidatorRS{Rewards: v.Rewards, TotalRewards: v.TotalRewards, Stake: v.Stake}
 	// Encode the full row first, then clear only serialized metadata fields.
