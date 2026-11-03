@@ -63,7 +63,7 @@ def main():
     config_source = (ROOT / config_name).read_bytes()
     sources[config_name] = {"content": config_source.decode("utf-8")}
     factory_sources = {}
-    for filename in ["NewNetworkTokenCenter.sol", "NewNetworkNFTCenter.sol", "NewNetworkReadableProxies.sol", "NewNetworkPausedViews.sol", "NewNetworkReserveNFTs.sol", "NativeBurnTestTarget.sol", "MintCandyNFTPositionVault.sol", "MintCandyIsolatedDRC1155.sol", "IsolatedNFTTestController.sol", "MintCandyNFTIsolationLimits.sol", "MintCandyCurveConverter.sol"]:
+    for filename in ["NewNetworkTokenCenter.sol", "NewNetworkNFTCenter.sol", "NewNetworkReadableProxies.sol", "NewNetworkPausedViews.sol", "NewNetworkReserveNFTs.sol", "NativeBurnTestTarget.sol", "MintCandyNFTPositionVault.sol", "MintCandyIsolatedDRC1155.sol", "IsolatedNFTTestController.sol", "MintCandyNFTIsolationLimits.sol", "MintCandyCurveConverter.sol", "CurveConverterTestController.sol"]:
         data = (ROOT / filename).read_bytes()
         factory_sources[filename] = hashlib.sha256(data).hexdigest()
         sources[filename] = {"content": data.decode("utf-8")}
@@ -80,6 +80,7 @@ def main():
         "NativeBurnTestTarget.sol": ["NativeBurnTestTarget"],
         "MintCandyNFTPositionVault.sol": ["MintCandyNFTPositionVault"],
         "MintCandyCurveConverter.sol": ["MintCandyCurveConverter"],
+        "CurveConverterTestController.sol": ["CurveConverterTestController"],
         "MintCandyIsolatedDRC1155.sol": ["MintCandyIsolatedDRC1155"],
         "IsolatedNFTTestController.sol": ["IsolatedNFTTestController"],
         "NewNetworkReadableProxies.sol": ["NewNetworkTokenReadableProxy", "NewNetworkNFTReadableProxy"],

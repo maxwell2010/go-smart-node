@@ -31,13 +31,11 @@ interface IMintCandyUnwrapDEL {
 /// @dev Raw receive is deliberately stipend-safe for the pinned curve's transfer.
 contract MintCandyCurveConverter is ReentrancyGuard {
     address public immutable REGISTRY;
-    uint256 public constant MAX_DEADLINE_WINDOW = 1 days;
 
     error ConversionNotConfigured();
     error UnauthorizedController();
     error InvalidConversionLimits();
     error ConversionDeadlineExpired();
-    error InvalidConversionDeadline();
     error UnapprovedReserveCurve();
     error ConversionLiquidityUnavailable();
     error UnbackedWrappedCurrency();
@@ -75,7 +73,6 @@ contract MintCandyCurveConverter is ReentrancyGuard {
         uint256 deadline) private view returns (uint256 nativeQuote, address center, bool wrapped) {
         if (token.code.length == 0 || amount == 0 || minimumNativeOutput == 0) revert InvalidConversionLimits();
         if (deadline < block.timestamp) revert ConversionDeadlineExpired();
-        if (deadline > block.timestamp + MAX_DEADLINE_WINDOW) revert InvalidConversionDeadline();
         IMintCandyConversionRegistry registry = _registry();
         wrapped = token == registry.getContractAddress("wdel");
         uint256 supply = IERC20(token).totalSupply();
@@ -101,30 +98,52 @@ contract MintCandyCurveConverter is ReentrancyGuard {
         if (nativeQuote == 0 || nativeQuote < minimumNativeOutput) revert ConversionLiquidityUnavailable();
     }
 
+    struct ConversionSnapshot {
+        uint256 quote;
+        address center;
+        bool wrapped;
+        uint256 inputBalance;
+        uint256 callerBalance;
+        uint256 supply;
+        uint256 reserve;
+        uint256 nativeBalance;
+    }
+
+    function _pullExact(address token, uint256 amount, ConversionSnapshot memory beforeState) private {
+        if (beforeState.callerBalance < amount || !IERC20(token).transferFrom(msg.sender, address(this), amount) ||
+            IERC20(token).balanceOf(address(this)) != beforeState.inputBalance + amount ||
+            IERC20(token).balanceOf(msg.sender) != beforeState.callerBalance - amount) revert ConversionTokenTransferFailed();
+    }
+
+    function _validateResult(address token, uint256 amount, uint256 minimumNativeOutput,
+        ConversionSnapshot memory beforeState) private view returns (uint256 nativeOutput) {
+        uint256 afterNative = address(this).balance;
+        if (afterNative < beforeState.nativeBalance) revert UnexpectedConversionDelta();
+        nativeOutput = afterNative - beforeState.nativeBalance;
+        if (nativeOutput == 0 || nativeOutput != beforeState.quote || nativeOutput < minimumNativeOutput ||
+            IERC20(token).balanceOf(address(this)) != beforeState.inputBalance ||
+            IERC20(token).totalSupply() != beforeState.supply - amount ||
+            token.balance != beforeState.reserve - nativeOutput) revert UnexpectedConversionDelta();
+    }
+
     function convert(address token, uint256 amount, uint256 minimumNativeOutput,
         uint256 deadline) external nonReentrant returns (uint256 nativeOutput) {
         _controller();
-        (uint256 quote, address center, bool wrapped) = _preview(token, amount, minimumNativeOutput, deadline);
-        uint256 beforeInput = IERC20(token).balanceOf(address(this));
-        uint256 beforeCaller = IERC20(token).balanceOf(msg.sender);
-        uint256 beforeSupply = IERC20(token).totalSupply();
-        uint256 beforeReserve = token.balance;
-        uint256 beforeNative = address(this).balance;
-        if (beforeCaller < amount || !IERC20(token).transferFrom(msg.sender, address(this), amount) ||
-            IERC20(token).balanceOf(address(this)) != beforeInput + amount ||
-            IERC20(token).balanceOf(msg.sender) != beforeCaller - amount) revert ConversionTokenTransferFailed();
-        if (wrapped) IMintCandyUnwrapDEL(token).withdraw(amount);
+        ConversionSnapshot memory beforeState;
+        (beforeState.quote, beforeState.center, beforeState.wrapped) = _preview(token, amount, minimumNativeOutput, deadline);
+        beforeState.inputBalance = IERC20(token).balanceOf(address(this));
+        beforeState.callerBalance = IERC20(token).balanceOf(msg.sender);
+        beforeState.supply = IERC20(token).totalSupply();
+        beforeState.reserve = token.balance;
+        beforeState.nativeBalance = address(this).balance;
+        _pullExact(token, amount, beforeState);
+        if (beforeState.wrapped) IMintCandyUnwrapDEL(token).withdraw(amount);
         else IMintCandyReserveCurve(token).sellExactTokensForDEL(amount, minimumNativeOutput, address(this));
-        uint256 afterNative = address(this).balance;
-        if (afterNative < beforeNative) revert UnexpectedConversionDelta();
-        nativeOutput = afterNative - beforeNative;
-        if (nativeOutput == 0 || nativeOutput != quote || nativeOutput < minimumNativeOutput ||
-            IERC20(token).balanceOf(address(this)) != beforeInput ||
-            IERC20(token).totalSupply() != beforeSupply - amount ||
-            token.balance != beforeReserve - nativeOutput) revert UnexpectedConversionDelta();
+        nativeOutput = _validateResult(token, amount, minimumNativeOutput, beforeState);
         (bool sent,) = payable(msg.sender).call{value:nativeOutput}("");
-        if (!sent || address(this).balance != beforeNative) revert ConversionNativeTransferFailed();
-        emit CollateralConverted(msg.sender, token, center, amount, nativeOutput, minimumNativeOutput, deadline, wrapped);
+        if (!sent || address(this).balance != beforeState.nativeBalance) revert ConversionNativeTransferFailed();
+        emit CollateralConverted(msg.sender, token, beforeState.center, amount, nativeOutput,
+            minimumNativeOutput, deadline, beforeState.wrapped);
     }
     receive() external payable {}
 }
