@@ -89,7 +89,7 @@
     "MintCandyNFTIsolationLimits.sol": "ad1331111e2f0917f69a715a2525408816b6f8a49ae216b5dd9d2dcaffdfd668",
     "MintCandyNFTPositionVault.sol": "02665ab29dbbda312c60b641cfd7c81ebe06c6dfffeb2c16b78dd1a52b9633e2",
     "NativeBurnTestTarget.sol": "6ec0df3642180ac05e3a739d892973a1ac0afbad33a1d113b16ba6d3dfb46e7b",
-    "NewNetworkNFTCenter.sol": "6f606ba0615696a159cf8ad4124b12152caed231893cb03c870b69ecc0a0d0c1",
+    "NewNetworkNFTCenter.sol": "f144b6cadd4cef827578b1c7ec4698e28dc1b60eb5af07eee4e456296da621c1",
     "NewNetworkPausedViews.sol": "b653cce92897a8b3a02d4f781da79ff5145284f4fe99c5ebd68240cc8fdbe92f",
     "NewNetworkReadableProxies.sol": "96261f83888c5ece6e9eb72dffc9ff472e01d330a9545f87b2c2c647aa2a503d",
     "NewNetworkReserveNFTs.sol": "033a39be984b2f5271899b93ac054618a66ad84ca4bcc039e02bb9a496d6c894",
@@ -97,7 +97,7 @@
   },
   "freshValidatorSourceSha256": "c3869b024f44508f8ba67b18dfd6745b56d1083d652d2f4a2db5d7a7771cab25",
   "immutableReferences": {
-    "24215": [
+    "24262": [
       {
         "length": 32,
         "start": 86
@@ -107,7 +107,7 @@
         "start": 290
       }
     ],
-    "24218": [
+    "24265": [
       {
         "length": 32,
         "start": 217
@@ -117,7 +117,7 @@
         "start": 335
       }
     ],
-    "24220": [
+    "24267": [
       {
         "length": 32,
         "start": 162
@@ -129,15 +129,15 @@
     ]
   },
   "immutableVariables": {
-    "24215": {
+    "24262": {
       "key": "owned/DecimalNFTCenter.sol:BeaconNFT.NFT_CENTER",
       "type": "contract IDecimalNFTCenter"
     },
-    "24218": {
+    "24265": {
       "key": "owned/DecimalNFTCenter.sol:BeaconNFT.TYPE_NFT",
       "type": "enum NFTType"
     },
-    "24220": {
+    "24267": {
       "key": "owned/DecimalNFTCenter.sol:BeaconNFT.WITH_RESERVE",
       "type": "bool"
     }
