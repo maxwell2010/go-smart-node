@@ -9,6 +9,7 @@
 [газ нативной обработки](NATIVE_WORK_GAS.md),
 [проверка зависимостей отдельной сборки](../security/mcnd-sdkarmor-264303b-20261103/README.md).
 [Подробно о синхронизации и хранении](SYNCHRONIZATION_AND_STORAGE.md).
+[Удалённая проверка индексов и следующие process gates](REMOTE_CONSENSUS_VERIFICATION_20261103.md).
 [Выбранная модель изолированных NFT-позиций](ISOLATED_1155_MODEL.md).
 
 ## Сервер и зависимости
