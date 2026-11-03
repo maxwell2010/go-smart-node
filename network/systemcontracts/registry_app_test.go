@@ -411,7 +411,7 @@ func TestOwnedAppSignedRegistryBootstrap(t *testing.T) {
 			kind    uint8
 			reserve bool
 		}{{"DRC721", 0, true}, {"DRC1155", 1, true}, {"DRC721Reserveless", 0, false}, {"DRC1155Reserveless", 1, false}} {
-			implementation := deploy(load(nft.name))
+			implementation := deploy(freshAsset(nft.name))
 			configure("nft-center", "upgradeNFT", implementation, nft.kind, nft.reserve)
 			target := roles["nft-center"]
 			input, err := artifacts["nft-center"].ABI.Pack("implementation", nft.kind, nft.reserve)
@@ -421,31 +421,46 @@ func TestOwnedAppSignedRegistryBootstrap(t *testing.T) {
 			require.NoError(t, err)
 			require.Equal(t, implementation, values[0])
 		}
+		t.Run("lazy tiny unit settlement both withdrawal orders", func(t *testing.T) {
+			for _, reverse := range []bool{false, true} {
+				checkSignedLazyTinyUnitSettlement(t, reverse, keys, roles, artifacts, wrapped,
+					func() *big.Int { return a.BankKeeper.GetSupply(ctx(), identity.BaseDenom).Amount.BigInt() },
+					func(owner common.Address) *big.Int {
+						return a.BankKeeper.GetBalance(ctx(), sdk.AccAddress(owner.Bytes()), identity.BaseDenom).Amount.BigInt()
+					}, send)
+			}
+		})
+		t.Run("pending NFT exit realizes native loss", func(t *testing.T) {
+			checkSignedNFTBusinessCase(t, false, "withdraw", keys, roles, artifacts, wrapped, func() *big.Int { return a.BankKeeper.GetSupply(ctx(), identity.BaseDenom).Amount.BigInt() }, send)
+		})
+		for _, exitMode := range []string{"transfer", "forced"} {
+			t.Run("pending NFT "+exitMode+" realizes native loss", func(t *testing.T) {
+				checkSignedNFTBusinessCase(t, false, exitMode, keys, roles, artifacts, wrapped, func() *big.Int { return a.BankKeeper.GetSupply(ctx(), identity.BaseDenom).Amount.BigInt() }, send)
+			})
+		}
+		t.Run("ERC1155 reserve units reconcile", func(t *testing.T) {
+			checkSignedNFTBusinessCase(t, true, "penalty", keys, roles, artifacts, wrapped, func() *big.Int { return a.BankKeeper.GetSupply(ctx(), identity.BaseDenom).Amount.BigInt() }, send)
+		})
+		for _, exitMode := range []string{"withdraw", "transfer", "forced", "rounding"} {
+			t.Run("ERC1155 "+exitMode+" realizes native reserve loss", func(t *testing.T) {
+				checkSignedNFTBusinessCase(t, true, exitMode, keys, roles, artifacts, wrapped, func() *big.Int { return a.BankKeeper.GetSupply(ctx(), identity.BaseDenom).Amount.BigInt() }, send)
+			})
+		}
 		t.Run("mixed coin NFT penalty conservation", func(t *testing.T) {
 			checkSignedMixedPenalty(t, 0, false, true, keys, roles, artifacts, wrapped, address, registry, func() *big.Int { return a.BankKeeper.GetSupply(ctx(), identity.BaseDenom).Amount.BigInt() }, send)
 			checkSignedMixedPenalty(t, 2, true, true, keys, roles, artifacts, wrapped, address, registry, func() *big.Int { return a.BankKeeper.GetSupply(ctx(), identity.BaseDenom).Amount.BigInt() }, send)
 		})
 
-		t.Run("tiny unit global rounding negative control", func(t *testing.T) { checkSignedTinyUnitRounding(t, keys, roles, artifacts, send) })
 		t.Run("canonical NFT penalty negative control", func(t *testing.T) {
+			configure("nft-center", "upgradeNFT", deploy(load("DRC721")), uint8(0), true)
 			canonicalLibrary := load("DelegationNFTLib")
 			from := crypto.PubkeyToAddress(keys[0].PublicKey)
 			canonicalLib := crypto.CreateAddress(from, a.EVMKeeper.GetNonce(ctx(), from))
 			creation, err := canonicalLibrary.Deployment()
 			require.NoError(t, err)
 			send(keys[0], nil, new(big.Int), creation, true)
-			expectedLibraryRuntime := append([]byte(nil), canonicalLibrary.Runtime...)
-			require.GreaterOrEqual(t, len(expectedLibraryRuntime), 21)
-			if expectedLibraryRuntime[0] == 0x73 {
-				require.Equal(t, make([]byte, 20), expectedLibraryRuntime[1:21])
-				copy(expectedLibraryRuntime[1:21], canonicalLib.Bytes())
-			} else {
-				// viaIR encodes the same constructor self-address guard as PUSH32.
-				require.Equal(t, []byte{0x60, 0x80, 0x60, 0x40, 0x52, 0x30, 0x7f}, expectedLibraryRuntime[:7])
-				require.Equal(t, make([]byte, 32), expectedLibraryRuntime[7:39])
-				require.Equal(t, byte(0x14), expectedLibraryRuntime[39])
-				copy(expectedLibraryRuntime[19:39], canonicalLib.Bytes())
-			}
+			expectedLibraryRuntime, err := contracts.ExpectedRuntime("DelegationNFTLib", nil, map[string]common.Hash{"sources/DecimalDelegation.sol:DelegationNFTLib.library_deploy_address": common.BytesToHash(canonicalLib.Bytes())})
+			require.NoError(t, err)
 			require.Equal(t, expectedLibraryRuntime, a.EVMKeeper.GetCode(ctx(), a.EVMKeeper.GetCodeHash(ctx(), canonicalLib)))
 			canonical, err := contracts.LoadLinked("DecimalDelegation", map[string]common.Address{"sources/DecimalDelegation.sol:DelegationNFTLib": canonicalLib})
 			require.NoError(t, err)
@@ -470,6 +485,7 @@ func TestOwnedAppSignedRegistryBootstrap(t *testing.T) {
 				send(keys[1], &address, new(big.Int), input, true)
 			}
 			supply := func() *big.Int { return a.BankKeeper.GetSupply(ctx(), identity.BaseDenom).Amount.BigInt() }
+			t.Run("tiny unit global rounding negative control", func(t *testing.T) { checkSignedTinyUnitRounding(t, keys, controlRoles, controlArtifacts, send) })
 			checkSignedMixedPenalty(t, 3, false, false, keys, controlRoles, controlArtifacts, wrapped, address, registry, supply, send)
 			checkSignedMixedPenalty(t, 4, true, false, keys, controlRoles, controlArtifacts, wrapped, address, registry, supply, send)
 		})

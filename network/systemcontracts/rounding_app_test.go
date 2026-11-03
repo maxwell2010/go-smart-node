@@ -35,7 +35,7 @@ func checkSignedTinyUnitRounding(t *testing.T, keys []*ecdsa.PrivateKey, roles m
 	}
 	owner := crypto.PubkeyToAddress(keys[0].PublicKey)
 	second := crypto.PubkeyToAddress(keys[2].PublicKey)
-	validator := crypto.PubkeyToAddress(keys[4].PublicKey)
+	validator := common.BytesToAddress(crypto.Keccak256([]byte("canonical-rounding-validator"), owner.Bytes())[12:])
 	operator, err := address.NewBech32Codec(identity.Bech32PrefixValAddr).BytesToString(validator.Bytes())
 	require.NoError(t, err)
 	meta, err := json.Marshal(map[string]interface{}{"operator_address": operator, "reward_address": validator.Hex(), "consensus_pubkey": base64.StdEncoding.EncodeToString(bytes.Repeat([]byte{0x65}, 32)), "description": map[string]string{"moniker": "rounding-validator"}, "commission": "10"})

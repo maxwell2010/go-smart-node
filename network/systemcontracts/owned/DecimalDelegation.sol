@@ -4335,11 +4335,8 @@ library DelegationNFTLib {
         address token,
         uint256 amountToBurn
     ) internal {
-        if (token == address(WETH($))) {
-            WETH($).transfer(address(0), amountToBurn);
-        } else {
-            ERC20Burnable(token).burn(amountToBurn);
-        }
+        // WDEL burns its matching native SDK backing in the same transaction.
+        ERC20Burnable(token).burn(amountToBurn);
     }
 
     function _checkToken(
@@ -4400,6 +4397,14 @@ library DelegationNFTLib {
         validatorReserve.reserve -= amountToRemove;
     }
 
+    // Linked delegatecall preserves the proxy storage and holder address.
+    function applyPenaltiesToCoinStake(
+        IDecimalDelegationCommon.DelegationStorage storage $,
+        bytes32 stakeId
+    ) public returns (bool) {
+        return _applyPenaltiesToStake($, stakeId);
+    }
+
     function _applyPenaltiesToStake(
         IDecimalDelegationCommon.DelegationStorage storage $,
         bytes32 stakeId
@@ -4435,6 +4440,10 @@ library DelegationNFTLib {
         uint256 amountToRemove = (stake.amount - nftBackedAmount) - currentAmount;
 
         stake.amount = currentAmount + nftBackedAmount;
+        if (amountToRemove != 0) {
+            _reduceValidatorReserve($, stake, amountToRemove);
+            _burnToken($, stake.token, amountToRemove);
+        }
 
         bool isNewStake = false;
         emit StakeAmountUpdated(stakeId, -int256(amountToRemove));
@@ -4449,54 +4458,15 @@ library DelegationNFTLib {
         address validator,
         address token
     ) internal returns (bool) {
-        uint16[] memory percantages = _getValidatorPenalties($, validator);
-        uint256 tokenId = 0;
-        IDecimalDelegationCommon.ValidatorReserve
-            storage validatorReserve = _getValidatorReserve(
-                $,
-                validator,
-                token,
-                tokenId
-            );
-
-        uint256 currentReserve = validatorReserve.reserve;
-        uint256 currentPenaltyIndex = validatorReserve.penaltyIndex;
-        bool allApplied = percantages.length == currentPenaltyIndex;
-
-        if (allApplied || currentReserve == 0 || percantages.length == 0) {
-            return false;
-        }
-
-        for (
-            ;
-            currentPenaltyIndex < percantages.length;
-            currentPenaltyIndex += 1
-        ) {
-            uint256 amountToPenalty = _getAmountToPenalty(
-                currentReserve,
-                percantages[currentPenaltyIndex]
-            );
-            _burnToken($, token, amountToPenalty);
-
-            bool isDel = token == address(WETH($));
-            IDecimalDelegationCommon.TokenType tokenType = isDel
-                ? IDecimalDelegationCommon.TokenType.DEL
-                : IDecimalDelegationCommon.TokenType.DRC20;
-            emit PenaltyAppliedToValidator(
-                validator,
-                token,
-                tokenType,
-                tokenId,
-                currentPenaltyIndex,
-                amountToPenalty
-            );
-
-            currentReserve -= amountToPenalty;
-        }
-
-        validatorReserve.penaltyIndex = percantages.length;
-        validatorReserve.reserve = currentReserve;
-
+        uint256 count = _getValidatorPenalties($, validator).length;
+        IDecimalDelegationCommon.ValidatorReserve storage reserve =
+            _getValidatorReserve($, validator, token, 0);
+        if (reserve.penaltyIndex == count || count == 0) return false;
+        reserve.penaltyIndex = count;
+        // This event acknowledges the target index; losses burn on realization.
+        emit PenaltyAppliedToValidator(validator, token,
+            token == address(WETH($)) ? IDecimalDelegationCommon.TokenType.DEL : IDecimalDelegationCommon.TokenType.DRC20,
+            0, count - 1, 0);
         return true;
     }
 
@@ -4876,6 +4846,9 @@ library DelegationNFTLib {
             revert IDecimalDelegationCommon.NFTNotOwned();
         }
 
+        // Realize NFT loss while it is still paired with its coin position.
+        applyPenaltiesToNFTStake($, nftStakeId);
+
         // Settle the reserve amount recorded for this stake (kept in lockstep with
         // penalties), not the NFT's live reserve. Reading the live reserve let a
         // post-delegation reserve increase underflow the backed-amount subtraction below
@@ -4891,6 +4864,9 @@ library DelegationNFTLib {
             holdTimestamp
         );
 
+        // Keep NFT collateral excluded from the generic direct-coin loss.
+        _applyPenalties($, coinStakeId);
+
         // Update NFT backed amount tracking
         $._nftBackedAmounts[coinStakeId] -= currentReserveAmount;
 
@@ -4898,7 +4874,6 @@ library DelegationNFTLib {
         nftStake.isActive = false;
 
         // Remove from coin stake via freeze
-        _applyPenalties($, coinStakeId);
         IDecimalDelegationCommon.FrozenStake
             memory frozenStake = _createNFTFrozenStake(
                 $,
@@ -4982,6 +4957,9 @@ library DelegationNFTLib {
 
         uint256 nftAmount = nftStake.amount;
 
+        // Realize NFT loss while it is still paired with its coin position.
+        applyPenaltiesToNFTStake($, nftStakeId);
+
         // Settle the recorded reserve (kept in lockstep with penalties), not rate*amount.
         // rate*amount reads the NFT's live rate, so a post-delegation rate increase would
         // underflow the backed-amount subtraction below (panic 0x11) and brick the exit.
@@ -4996,6 +4974,9 @@ library DelegationNFTLib {
             holdTimestamp
         );
 
+        // Keep NFT collateral excluded from the generic direct-coin loss.
+        _applyPenalties($, coinStakeId);
+
         // Update NFT backed amount tracking
         $._nftBackedAmounts[coinStakeId] -= currentReserveAmount;
 
@@ -5003,7 +4984,6 @@ library DelegationNFTLib {
         nftStake.isActive = false;
 
         // Remove from coin stake via freeze
-        _applyPenalties($, coinStakeId);
         IDecimalDelegationCommon.FrozenStake
             memory frozenStake = _createNFT1155FrozenStake(
                 $,
@@ -5151,6 +5131,9 @@ library DelegationNFTLib {
             revert IDecimalDelegationCommon.NFTNotOwned();
         }
 
+        // Realize NFT loss while it is still paired with its coin position.
+        applyPenaltiesToNFTStake($, nftStakeId);
+
         // Settle the reserve amount recorded for this stake (kept in lockstep with
         // penalties), not the NFT's live reserve, so a post-delegation reserve increase
         // cannot underflow the backed-amount subtraction below (panic 0x11) and brick it.
@@ -5165,6 +5148,9 @@ library DelegationNFTLib {
             holdTimestamp
         );
 
+        // Keep NFT collateral excluded from the generic direct-coin loss.
+        _applyPenalties($, oldCoinStakeId);
+
         // Update NFT backed amount tracking for old validator
         $._nftBackedAmounts[oldCoinStakeId] -= currentReserveAmount;
 
@@ -5172,7 +5158,6 @@ library DelegationNFTLib {
         nftStake.isActive = false;
 
         // Remove from old coin stake
-        _applyPenalties($, oldCoinStakeId);
         IDecimalDelegationCommon.Stake storage oldCoinStake = _getStake(
             $,
             oldCoinStakeId
@@ -5252,6 +5237,9 @@ library DelegationNFTLib {
 
         uint256 nftAmount = nftStake.amount;
 
+        // Realize NFT loss while it is still paired with its coin position.
+        applyPenaltiesToNFTStake($, nftStakeId);
+
         // Settle the recorded reserve (kept in lockstep with penalties), not rate*amount,
         // so a post-delegation rate increase cannot underflow the backed-amount
         // subtraction below (panic 0x11) and brick the transfer.
@@ -5266,6 +5254,9 @@ library DelegationNFTLib {
             holdTimestamp
         );
 
+        // Keep NFT collateral excluded from the generic direct-coin loss.
+        _applyPenalties($, oldCoinStakeId);
+
         // Update NFT backed amount tracking for old validator
         $._nftBackedAmounts[oldCoinStakeId] -= currentReserveAmount;
 
@@ -5273,7 +5264,6 @@ library DelegationNFTLib {
         nftStake.isActive = false;
 
         // Remove from old coin stake
-        _applyPenalties($, oldCoinStakeId);
         IDecimalDelegationCommon.Stake storage oldCoinStake = _getStake(
             $,
             oldCoinStakeId
@@ -5549,12 +5539,21 @@ library DelegationNFTLib {
             if (
                 nftStake.nftType == IDecimalDelegationCommon.TokenType.DRC1155
             ) {
-                // DRC1155 penalty signature includes amountToPenalty
-                burnedAmount = IDRC1155(nftStake.nftContract).penalty(
+                // The inherited return value is NFT quantity, not reserve wei.
+                // Preserve that API and settle the exact pool loss it realized.
+                INFTReserve.Reserve memory beforeReserve = IDRC1155(nftStake.nftContract).getReserve(nftStake.tokenId);
+                IDRC1155(nftStake.nftContract).penalty(
                     nftStake.tokenId,
                     nftStake.amount,
                     percentages[currentPenaltyIndex]
                 );
+                INFTReserve.Reserve memory afterReserve = IDRC1155(nftStake.nftContract).getReserve(nftStake.tokenId);
+                if (beforeReserve.token != afterReserve.token ||
+                    beforeReserve.reserveType != afterReserve.reserveType ||
+                    afterReserve.amount > beforeReserve.amount) {
+                    revert IDecimalDelegationCommon.InvalidAmount();
+                }
+                burnedAmount = beforeReserve.amount - afterReserve.amount;
             } else {
                 // DRC721 penalty signature
                 burnedAmount = IDRC721(nftStake.nftContract).penalty(
@@ -5563,25 +5562,17 @@ library DelegationNFTLib {
                 );
             }
 
-            // Update NFT stake reserve amount
-            if (nftStake.reserveAmount >= burnedAmount) {
-                nftStake.reserveAmount -= burnedAmount;
-            } else {
-                nftStake.reserveAmount = 0;
+            // All three mirrors must cover the actual NFT-contract loss.
+            if (burnedAmount > nftStake.reserveAmount ||
+                burnedAmount > coinStake.amount ||
+                burnedAmount > $._nftBackedAmounts[coinStakeId]) {
+                revert IDecimalDelegationCommon.InvalidAmount();
             }
-
-            // Update coin stake amount
-            if (coinStake.amount >= burnedAmount) {
-                coinStake.amount -= burnedAmount;
-            } else {
-                coinStake.amount = 0;
-            }
-
-            // Update NFT backed amount
-            if ($._nftBackedAmounts[coinStakeId] >= burnedAmount) {
-                $._nftBackedAmounts[coinStakeId] -= burnedAmount;
-            } else {
-                $._nftBackedAmounts[coinStakeId] = 0;
+            nftStake.reserveAmount -= burnedAmount;
+            coinStake.amount -= burnedAmount;
+            $._nftBackedAmounts[coinStakeId] -= burnedAmount;
+            if (burnedAmount != 0) {
+                _reduceValidatorReserve($, coinStake, burnedAmount);
             }
 
             emit NFTPenaltyApplied(
@@ -5626,6 +5617,9 @@ library DelegationNFTLib {
             revert IDecimalDelegationCommon.NFTStakeNotActive();
         }
 
+        // Realize NFT loss while it is still paired with its coin position.
+        applyPenaltiesToNFTStake($, nftStakeId);
+
         // Settle the reserve amount recorded for this stake (kept in lockstep with
         // penalties), not the NFT's live reserve, so a post-delegation reserve increase
         // cannot underflow the backed-amount subtraction below (panic 0x11) and brick even
@@ -5641,6 +5635,9 @@ library DelegationNFTLib {
             holdTimestamp
         );
 
+        // Keep NFT collateral excluded from the generic direct-coin loss.
+        _applyPenalties($, coinStakeId);
+
         // Update NFT backed amount tracking
         $._nftBackedAmounts[coinStakeId] -= currentReserveAmount;
 
@@ -5652,11 +5649,11 @@ library DelegationNFTLib {
             $,
             coinStakeId
         );
-        if (coinStake.amount >= currentReserveAmount) {
-            coinStake.amount -= currentReserveAmount;
-        } else {
-            coinStake.amount = 0;
+        if (coinStake.amount < currentReserveAmount) {
+            revert IDecimalDelegationCommon.InvalidAmount();
         }
+        coinStake.amount -= currentReserveAmount;
+        _reduceValidatorReserve($, coinStake, currentReserveAmount);
 
         // Transfer NFT back to delegator
         IDRC721(nftContract).safeTransferFrom(
@@ -5698,6 +5695,9 @@ library DelegationNFTLib {
 
         uint256 nftAmount = nftStake.amount;
 
+        // Realize NFT loss while it is still paired with its coin position.
+        applyPenaltiesToNFTStake($, nftStakeId);
+
         // Settle the recorded reserve (kept in lockstep with penalties), not rate*amount,
         // so a post-delegation rate increase cannot underflow the backed-amount
         // subtraction below (panic 0x11) and brick even the owner's forced exit.
@@ -5712,6 +5712,9 @@ library DelegationNFTLib {
             holdTimestamp
         );
 
+        // Keep NFT collateral excluded from the generic direct-coin loss.
+        _applyPenalties($, coinStakeId);
+
         // Update NFT backed amount tracking
         $._nftBackedAmounts[coinStakeId] -= currentReserveAmount;
 
@@ -5723,11 +5726,11 @@ library DelegationNFTLib {
             $,
             coinStakeId
         );
-        if (coinStake.amount >= currentReserveAmount) {
-            coinStake.amount -= currentReserveAmount;
-        } else {
-            coinStake.amount = 0;
+        if (coinStake.amount < currentReserveAmount) {
+            revert IDecimalDelegationCommon.InvalidAmount();
         }
+        coinStake.amount -= currentReserveAmount;
+        _reduceValidatorReserve($, coinStake, currentReserveAmount);
 
         // Transfer NFT back to delegator
         IERC1155(nftContract).safeTransferFrom(
@@ -6840,50 +6843,14 @@ contract DecimalDelegation is
         address token,
         uint256
     ) internal override returns (bool) {
-        uint16[] memory percantages = _getValidatorPenalties(validator);
-        uint256 tokenId = 0;
-        ValidatorReserve storage validatorReserve = _getValidatorReserve(
-            validator,
-            token,
-            tokenId
-        );
-
-        uint256 currentReserve = validatorReserve.reserve;
-        uint256 currentPenaltyIndex = validatorReserve.penaltyIndex;
-        bool allApplied = percantages.length == currentPenaltyIndex;
-
-        if (allApplied || currentReserve == 0 || percantages.length == 0) {
-            return false;
-        }
-
-        for (
-            ;
-            currentPenaltyIndex < percantages.length;
-            currentPenaltyIndex += 1
-        ) {
-            uint256 amountToPenalty = _getAmountToPenalty(
-                currentReserve,
-                percantages[currentPenaltyIndex]
-            );
-            _burnToken(token, amountToPenalty);
-
-            bool isDel = token == address(WETH());
-            TokenType tokenType = isDel ? TokenType.DEL : TokenType.DRC20;
-            emit PenaltyAppliedToValidator(
-                validator,
-                token,
-                tokenType,
-                tokenId,
-                currentPenaltyIndex,
-                amountToPenalty
-            );
-
-            currentReserve -= amountToPenalty;
-        }
-
-        validatorReserve.penaltyIndex = percantages.length;
-        validatorReserve.reserve = currentReserve;
-
+        uint256 count = _getValidatorPenalties(validator).length;
+        ValidatorReserve storage reserve = _getValidatorReserve(validator, token, 0);
+        if (reserve.penaltyIndex == count || count == 0) return false;
+        reserve.penaltyIndex = count;
+        // This event acknowledges the target index; losses burn on realization.
+        emit PenaltyAppliedToValidator(validator, token,
+            token == address(WETH()) ? TokenType.DEL : TokenType.DRC20,
+            0, count - 1, 0);
         return true;
     }
 
@@ -6902,41 +6869,7 @@ contract DecimalDelegation is
     function _applyPenaltiesToStake(
         bytes32 stakeId
     ) internal override returns (bool) {
-        Stake storage stake = _getStake(stakeId);
-
-        uint16[] memory percantages = _getValidatorPenalties(stake.validator);
-        uint256 currentPenaltyIndex = getStakePenaltyIndex(stakeId);
-        bool allApplied = percantages.length == currentPenaltyIndex;
-        if (allApplied || stake.amount == 0 || percantages.length == 0) {
-            return false;
-        }
-
-        uint256 nftBackedAmount = _getDelegationStorage()._nftBackedAmounts[stakeId];
-        if (nftBackedAmount > stake.amount) revert InvalidAmount();
-        uint256 currentAmount = stake.amount - nftBackedAmount;
-        for (
-            ;
-            currentPenaltyIndex < percantages.length;
-            currentPenaltyIndex += 1
-        ) {
-            uint256 amountToPenalty = _getAmountToPenalty(
-                currentAmount,
-                percantages[currentPenaltyIndex]
-            );
-            currentAmount -= amountToPenalty;
-        }
-        _setStakePenaltyIndex(stakeId, currentPenaltyIndex);
-
-        uint256 amountToRemove = (stake.amount - nftBackedAmount) - currentAmount;
-
-        stake.amount = currentAmount + nftBackedAmount;
-
-        bool isNewStake = false;
-        emit StakeAmountUpdated(stakeId, -int256(amountToRemove));
-        emit StakeUpdated(stakeId, _getStake(stakeId), isNewStake);
-
-        emit PenaltyAppliedToStake(stakeId, currentPenaltyIndex);
-        return true;
+        return DelegationNFTLib.applyPenaltiesToCoinStake(_getDelegationStorage(), stakeId);
     }
 
     /* ========== NFT PENALTY ========== */
@@ -6963,11 +6896,8 @@ contract DecimalDelegation is
     }
 
     function _burnToken(address token, uint256 amountToBurn) internal {
-        if (token == address(WETH())) {
-            WETH().transfer(address(0), amountToBurn);
-        } else {
-            ERC20Burnable(token).burn(amountToBurn);
-        }
+        // WDEL burns its matching native SDK backing in the same transaction.
+        ERC20Burnable(token).burn(amountToBurn);
     }
 
     function _checkToken(address token, TokenType) internal view override {

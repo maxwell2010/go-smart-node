@@ -1,12 +1,24 @@
 {
-  "patchLabel": "mintcandy-delegation-nft-penalty-1",
+  "patchLabel": "mintcandy-delegation-realized-loss-2",
   "canonicalSource": "sources/DecimalDelegation.sol",
   "canonicalSha256": "4478ab6d8b4a7feb230d70715c72f3be816fdbfd0efe7743e3572cfd4ce010c2",
   "ownedSource": "owned/DecimalDelegation.sol",
-  "ownedSha256": "743832a9add772ef04403a717a9191077475a37409b49129b0f9bdd2fdb83516",
+  "ownedSha256": "2f22e3d187b54c1524a498ad62c1311d3c59cc6ee5c1ceefc50f12deb49637c5",
   "changedFunctions": [
     "DelegationNFTLib._applyPenaltiesToStake",
-    "DecimalDelegation._applyPenaltiesToStake"
+    "DecimalDelegation._applyPenaltiesToStake",
+    "DelegationNFTLib._applyPenaltiesToValidator",
+    "DecimalDelegation._applyPenaltiesToValidator",
+    "DelegationNFTLib._burnToken",
+    "DecimalDelegation._burnToken",
+    "DelegationNFTLib.applyPenaltiesToNFTStake",
+    "DelegationNFTLib.applyPenaltiesToCoinStake",
+    "DelegationNFTLib.withdrawNFT",
+    "DelegationNFTLib.withdrawNFT1155",
+    "DelegationNFTLib.transferNFT",
+    "DelegationNFTLib.transferNFT1155",
+    "DelegationNFTLib.forcedNFTWithdrawal",
+    "DelegationNFTLib.forcedNFT1155Withdrawal"
   ],
-  "financialScope": "Apply generic coin penalty only to direct amount; NFT-backed part is penalized by NFT path. No supply-burn or aggregate-validator-reserve policy change."
+  "financialScope": "Preserve per-position claim rounding; burn exact realized direct loss and debit recorded validator reserve once; NFT contract burns its own reserve loss once; global penalty application only acknowledges target index. ERC1155 preserves quantity-return API; companion/reserve mirrors debit exact observed approved NFT pool loss, without reinterpreting quantity as reserve wei."
 }
