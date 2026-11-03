@@ -297,7 +297,7 @@ func NewApp(
 	if nativeErr != nil {
 		panic(nativeErr)
 	}
-	app.NativeNFTKeeper, nativeErr = nativenftkeeper.NewStateKeeper(runtime.NewKVStoreService(keys[nativenfttypes.StoreKey]))
+	app.NativeNFTKeeper, nativeErr = nativenftkeeper.NewStateKeeperWithDomain(runtime.NewKVStoreService(keys[nativenfttypes.StoreKey]), chainID, evmChainID)
 	if nativeErr != nil {
 		panic(nativeErr)
 	}
