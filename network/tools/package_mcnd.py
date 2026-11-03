@@ -1,5 +1,5 @@
 """Package a source-bound Linux amd64 DEVELOPMENT binary; never publish it."""
-import argparse, hashlib, io, json, os, pathlib, subprocess, tarfile
+import argparse, hashlib, io, json, os, pathlib, platform, subprocess, tarfile
 from install_mcnd import validate_revision
 
 def package(binary,source,revision,output):
@@ -9,8 +9,16 @@ def package(binary,source,revision,output):
  header=binary.read_bytes()[:20]
  if header[:5]!=b"\x7fELF\x02" or header[18:20]!=b"\x3e\x00":raise ValueError("Linux amd64 ELF required")
  info=subprocess.check_output(["go","version","-m",str(binary)],text=True)
- if "main.buildCommit="+revision not in info:raise ValueError("binary lacks exact source buildCommit")
+ runtime_version=None
+ if "main.buildCommit=" in info:
+  if "main.buildCommit="+revision not in info:raise ValueError("binary lacks exact source buildCommit")
+ else:
+  # Go omits linker flags from build info under -trimpath.
+  if platform.system()!="Linux" or platform.machine()!="x86_64":raise ValueError("trimpath provenance requires native Linux amd64 version verification")
+  runtime_version=json.loads(subprocess.check_output([str(binary),"version","--long","--output","json"],text=True,timeout=30))
+  if runtime_version.get("commit")!=revision or runtime_version.get("server_name")!="mcnd":raise ValueError("runtime binary source commit mismatch")
  data={"bin/mcnd":binary.read_bytes(),"BUILD_INFO.txt":info.encode(),"DEVELOPMENT.txt":b"DEVELOPMENT ONLY. Native feature integration and release gates remain incomplete.\n"}
+ if runtime_version is not None:data["CLI_VERSION.json"]=(json.dumps(runtime_version,sort_keys=True,indent=2)+"\n").encode()
  for path in [source/"LICENSE",source/"network/LICENSE",*sorted((source/"network/systemcontracts").glob("LICENSE*")),*sorted((source/"network/third_party").glob("*/LICENSE*")),*sorted((source/"network/third_party").glob("*/UPSTREAM.json"))]:
   if path.is_file():data["provenance/"+path.relative_to(source).as_posix()]=path.read_bytes()
  manifest={"schemaVersion":1,"status":"development","sourceRevision":revision,"binarySha256":hashlib.sha256(data["bin/mcnd"]).hexdigest(),"files":{name:hashlib.sha256(value).hexdigest() for name,value in data.items()},"dependencyScope":"Go build information records effective module replacements. UPSTREAM manifests identify local owned patches; this is not a complete security audit or signed provenance."}
