@@ -18,6 +18,59 @@
       "metadata_sha256": "055b5c66a2d765601f992d1ccfd627cfba05cdf901ab5acf5f7d3b0a24066c9b",
       "upstream_compiler": "0.8.20+commit.a1b79de6",
       "license": "MIT"
+    },
+    {
+      "file": "DecimalMasterValidator.sol",
+      "source_url": "https://explorer.decimalchain.com/contracts/0xefedc75ee88d2a4e8163506ed769ebbacaa788d5",
+      "sha256": "fca5aa569f6d0dfea70ebc7db83b96fe565ee016a40ca0ce5b757b99b2214149",
+      "bytes": 28662,
+      "metadata_sha256": "3697f038055f8cfa79e9830325aff9db78b68dfe9f7214c432670bcbfe8637ae",
+      "upstream_compiler": "0.8.20+commit.a1b79de6",
+      "license": "MIT"
+    },
+    {
+      "file": "DecimalDelegation.sol",
+      "source_url": "https://explorer.decimalchain.com/contracts/0x2f29724dcf9e3fe2864db03c5310cb368aa96f09",
+      "sha256": "4478ab6d8b4a7feb230d70715c72f3be816fdbfd0efe7743e3572cfd4ce010c2",
+      "bytes": 233370,
+      "metadata_sha256": "df16c547e6dfdbe1c7d8210c867399a06b3aaa62190888aac68858a5c86e11a6",
+      "upstream_compiler": "0.8.20+commit.a1b79de6",
+      "license": "MIT"
+    },
+    {
+      "file": "DecimalTokenCenter.sol",
+      "source_url": "https://explorer.decimalchain.com/contracts/0x0d01189be8dcab77b088a21353deff979dc83788",
+      "sha256": "be1ec89d432cd8b5d2f09164a4e381add11974d1124190434856aca043ec33a5",
+      "bytes": 111774,
+      "metadata_sha256": "90a27d919d843e6c2636b942ff9dc9c7dba4a6630ce13318dfadba051a2f2e1c",
+      "upstream_compiler": "0.8.20+commit.a1b79de6",
+      "license": "MIT"
+    },
+    {
+      "file": "DecimalNFTCenter.sol",
+      "source_url": "https://explorer.decimalchain.com/contracts/0xced55da70f42ab101b4ce10aa9e767607cef5146",
+      "sha256": "ff066396dd34653cc17053ce8b2884182606222965f8c2a049bb16a225420b76",
+      "bytes": 386213,
+      "metadata_sha256": "96757600df06bc72a9dc04fee0c15a32efa94c48eaafaba12759bf64c99124ec",
+      "upstream_compiler": "0.8.20+commit.a1b79de6",
+      "license": "MIT"
+    },
+    {
+      "file": "DecimalDelegationNFT.sol",
+      "source_url": "https://explorer.decimalchain.com/contracts/0xaffe98bbd4c74ccc95d7d99a684bd83fecaece6c",
+      "sha256": "6354adaa00e90b1f60683959f9ce311365c5836ac267202af78e069cd33ea233",
+      "bytes": 288737,
+      "metadata_sha256": "99e12e90b9ae51f07d5cc0b6ca29ace2c8c6fb5c4f0fce3b03b6745d9b560e25",
+      "upstream_compiler": "0.8.20+commit.a1b79de6",
+      "license": "MIT"
+    },
+    {
+      "file": "OpenZeppelinReentrancyGuard.sol",
+      "source_url": "https://raw.githubusercontent.com/OpenZeppelin/openzeppelin-contracts/v5.0.2/contracts/utils/ReentrancyGuard.sol",
+      "sha256": "8d0bac508a25133c9ff80206f65164cef959ec084645d1e7b06050c2971ae0fc",
+      "bytes": 3240,
+      "license": "MIT",
+      "version": "v5.0.2"
     }
   ]
 }

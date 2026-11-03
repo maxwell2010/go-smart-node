@@ -102,6 +102,7 @@ func TestOwnedAppSignedRegistryBootstrap(t *testing.T) {
 		return a.NewUncachedContext(false, cmtproto.Header{ChainID: chainID, Height: a.LastBlockHeight() + 1, Time: now.Add(time.Duration(a.LastBlockHeight()+1) * time.Second)})
 	}
 	price := big.NewInt(1_000_000_000_000)
+	nativeCredit := new(big.Int)
 	send := func(key *ecdsa.PrivateKey, to *common.Address, value *big.Int, input []byte, success bool) *evmtypes.MsgEthereumTxResponse {
 		t.Helper()
 		from := crypto.PubkeyToAddress(key.PublicKey)
@@ -140,11 +141,12 @@ func TestOwnedAppSignedRegistryBootstrap(t *testing.T) {
 		fee := math.NewIntFromBigInt(new(big.Int).Mul(price, new(big.Int).SetUint64(response.GasUsed)))
 		debit := fee
 		if success {
-			debit = debit.Add(math.NewIntFromBigInt(value))
+			debit = debit.Add(math.NewIntFromBigInt(value)).Sub(math.NewIntFromBigInt(nativeCredit))
 		}
 		require.Equal(t, debit, before.Sub(a.BankKeeper.GetBalance(ctx(), sdk.AccAddress(from.Bytes()), identity.BaseDenom).Amount), "actual signed transaction must charge exactly receipt gas plus committed value")
 		require.Equal(t, a.BankKeeper.GetBalance(ctx(), sdk.AccAddress(from.Bytes()), identity.BaseDenom).Amount.BigInt(), a.EVMKeeper.GetBalance(ctx(), from).ToBig())
 		require.Equal(t, nonce+1, a.EVMKeeper.GetNonce(ctx(), from))
+		nativeCredit.SetUint64(0)
 		return response
 	}
 	load := func(name string) contracts.Artifact {
@@ -208,5 +210,162 @@ func TestOwnedAppSignedRegistryBootstrap(t *testing.T) {
 	send(keys[0], nil, new(big.Int), invalid, false)
 	require.Empty(t, a.EVMKeeper.GetCode(ctx(), a.EVMKeeper.GetCodeHash(ctx(), failedAddress)))
 	require.Equal(t, owner, read("owner"))
+
+	t.Run("fresh validator registry initialization", func(t *testing.T) {
+		fresh := load("NewNetworkMasterValidator")
+		implementation := deploy(fresh)
+		initialization, err := fresh.ABI.Pack("initializeFresh", address)
+		require.NoError(t, err)
+		init, err := bootstrap.ABI.Pack("bootstrap", owner, implementation, initialization)
+		require.NoError(t, err)
+		validatorAddress := deploy(proxy, setup, init)
+		read, err := fresh.ABI.Pack("contractCenter")
+		require.NoError(t, err)
+		response := send(keys[1], &validatorAddress, new(big.Int), read, true)
+		values, err := fresh.ABI.Unpack("contractCenter", response.Ret)
+		require.NoError(t, err)
+		require.Equal(t, address, values[0].(common.Address))
+		send(keys[1], &validatorAddress, new(big.Int), initialization, false)
+		send(keys[1], &implementation, new(big.Int), initialization, false)
+	})
+
+	t.Run("fresh full system proxy set", func(t *testing.T) {
+		lib := load("DelegationNFTLib")
+		from := crypto.PubkeyToAddress(keys[0].PublicKey)
+		libAddress := crypto.CreateAddress(from, a.EVMKeeper.GetNonce(ctx(), from))
+		code, err := lib.Deployment()
+		require.NoError(t, err)
+		send(keys[0], nil, new(big.Int), code, true)
+		require.NotEmpty(t, a.EVMKeeper.GetCode(ctx(), a.EVMKeeper.GetCodeHash(ctx(), libAddress)))
+		delegation, err := contracts.LoadLinked("DecimalDelegation", map[string]common.Address{"sources/DecimalDelegation.sol:DelegationNFTLib": libAddress})
+		require.NoError(t, err)
+		roles := map[string]common.Address{}
+		artifacts := map[string]contracts.Artifact{}
+		for _, role := range []string{"master-validator", "delegation", "delegation-nft", "token-center", "nft-center"} {
+			name := map[string]string{"master-validator": "NewNetworkMasterValidator", "delegation": "DecimalDelegation", "delegation-nft": "DecimalDelegationNFT", "token-center": "DecimalTokenCenter", "nft-center": "DecimalNFTCenter"}[role]
+			artifact := delegation
+			if role != "delegation" {
+				artifact = load(name)
+			}
+			impl := deploy(artifact)
+			var initialization []byte
+			if role == "master-validator" {
+				initialization, err = artifact.ABI.Pack("initializeFresh", address)
+				require.NoError(t, err)
+			}
+			if role == "token-center" || role == "nft-center" {
+				initialization, err = artifact.ABI.Pack("initialize")
+				require.NoError(t, err)
+			}
+			init, err := bootstrap.ABI.Pack("bootstrap", owner, impl, initialization)
+			require.NoError(t, err)
+			instance := deploy(proxy, setup, init)
+			roles[role], artifacts[role] = instance, artifact
+			ownerInput, err := artifact.ABI.Pack("owner")
+			require.NoError(t, err)
+			response := send(keys[1], &instance, new(big.Int), ownerInput, true)
+			values, err := artifact.ABI.Unpack("owner", response.Ret)
+			require.NoError(t, err)
+			require.Equal(t, owner, values[0])
+			if role != "master-validator" {
+				input, err := artifact.ABI.Pack("setContractCenter", address)
+				require.NoError(t, err)
+				send(keys[1], &instance, new(big.Int), input, true)
+			}
+			register, err := registry.ABI.Pack("setContractAddress", role, instance)
+			require.NoError(t, err)
+			send(keys[1], &address, new(big.Int), register, true)
+			require.Equal(t, instance, read("getContractAddress", role))
+		}
+		wrapped := deploy(load("MintCandyWrappedDEL"))
+		register, err := registry.ABI.Pack("setContractAddress", "wdel", wrapped)
+		require.NoError(t, err)
+		send(keys[1], &address, new(big.Int), register, true)
+		configure := func(role, method string, args ...interface{}) {
+			target := roles[role]
+			input, err := artifacts[role].ABI.Pack(method, args...)
+			require.NoError(t, err)
+			send(keys[2], &target, new(big.Int), input, false)
+			send(keys[1], &target, new(big.Int), input, true)
+		}
+		configure("token-center", "upgradeToken", deploy(load("DRC20")))
+		configure("token-center", "upgradeTokenReserveless", deploy(load("DRC20Reserveless")))
+		for _, nft := range []struct {
+			name    string
+			kind    uint8
+			reserve bool
+		}{{"DRC721", 0, true}, {"DRC1155", 1, true}, {"DRC721Reserveless", 0, false}, {"DRC1155Reserveless", 1, false}} {
+			implementation := deploy(load(nft.name))
+			configure("nft-center", "upgradeNFT", implementation, nft.kind, nft.reserve)
+			target := roles["nft-center"]
+			input, err := artifacts["nft-center"].ABI.Pack("implementation", nft.kind, nft.reserve)
+			require.NoError(t, err)
+			result := send(keys[1], &target, new(big.Int), input, true)
+			values, err := artifacts["nft-center"].ABI.Unpack("implementation", result.Ret)
+			require.NoError(t, err)
+			require.Equal(t, implementation, values[0])
+		}
+	})
+	t.Run("fresh native-backed wrapper", func(t *testing.T) {
+		wrapper := load("MintCandyWrappedDEL")
+		address := deploy(wrapper)
+		amount := big.NewInt(1_000_000_000_000_000_000)
+		call := func(key *ecdsa.PrivateKey, method string, success bool, args ...interface{}) *evmtypes.MsgEthereumTxResponse {
+			if method == "withdraw" && success {
+				nativeCredit.Set(args[0].(*big.Int))
+			}
+			input, err := wrapper.ABI.Pack(method, args...)
+			require.NoError(t, err)
+			return send(key, &address, new(big.Int), input, success)
+		}
+		supply := func() *big.Int {
+			response := call(keys[0], "totalSupply", true)
+			values, err := wrapper.ABI.Unpack("totalSupply", response.Ret)
+			require.NoError(t, err)
+			return values[0].(*big.Int)
+		}
+		balanced := func(expected *big.Int) {
+			require.Zero(t, expected.Cmp(supply()))
+			require.Zero(t, expected.Cmp(a.BankKeeper.GetBalance(ctx(), sdk.AccAddress(address.Bytes()), identity.BaseDenom).Amount.BigInt()))
+			require.Zero(t, expected.Cmp(a.EVMKeeper.GetBalance(ctx(), address).ToBig()))
+		}
+		deposit, err := wrapper.ABI.Pack("deposit")
+		require.NoError(t, err)
+		send(keys[0], &address, amount, deposit, true)
+		balanced(amount)
+		// receive() follows the same backing rule for a plain native transfer.
+		send(keys[0], &address, amount, nil, true)
+		twice := new(big.Int).Mul(amount, big.NewInt(2))
+		balanced(twice)
+		recipient := crypto.PubkeyToAddress(keys[1].PublicKey)
+		call(keys[0], "transfer", true, recipient, amount)
+		call(keys[1], "withdraw", true, amount)
+		balanced(amount)
+		call(keys[1], "withdraw", false, big.NewInt(1))
+		balanced(amount)
+		call(keys[0], "approve", true, recipient, amount)
+		call(keys[1], "transferFrom", true, crypto.PubkeyToAddress(keys[0].PublicKey), recipient, amount)
+		call(keys[1], "withdraw", true, amount)
+		balanced(new(big.Int))
+
+		probe := load("WrappedDELTestReceiver")
+		owner := crypto.PubkeyToAddress(keys[0].PublicKey)
+		probeAddress := crypto.CreateAddress(owner, a.EVMKeeper.GetNonce(ctx(), owner))
+		code, err := probe.Deployment(address)
+		require.NoError(t, err)
+		send(keys[0], nil, new(big.Int), code, true) // Immutable wrapper address changes runtime bytes.
+		fund, err := probe.ABI.Pack("fund")
+		require.NoError(t, err)
+		send(keys[0], &probeAddress, amount, fund, true)
+		balanced(amount)
+		redeem, err := probe.ABI.Pack("redeem", amount)
+		require.NoError(t, err)
+		send(keys[0], &probeAddress, new(big.Int), redeem, false)
+		balanced(amount)
+		balance := call(keys[0], "balanceOf", true, probeAddress)
+		values, err := wrapper.ABI.Unpack("balanceOf", balance.Ret)
+		require.NoError(t, err)
+		require.Equal(t, amount, values[0].(*big.Int), "rejected native withdrawal must restore burned wrapped units")
+	})
 	t.Log("actual owned-App signed registry/proxy constructor, explicit owner, authorization, reinitialization rejection and exact native/EVM fees passed")
 }

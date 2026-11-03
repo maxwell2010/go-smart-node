@@ -29,10 +29,27 @@ def main():
     own_name = "NewNetworkProxyBootstrap.sol"
     own_source = (ROOT / own_name).read_bytes()
     sources[own_name] = {"content": own_source.decode("utf-8")}
+    wrapper_name = "MintCandyWrappedDEL.sol"
+    wrapper_source = (ROOT / wrapper_name).read_bytes()
+    sources[wrapper_name] = {"content": wrapper_source.decode("utf-8")}
+    probe_name = "WrappedDELTestReceiver.sol"
+    probe_source = (ROOT / probe_name).read_bytes()
+    sources[probe_name] = {"content": probe_source.decode("utf-8")}
+    fresh_name = "NewNetworkMasterValidator.sol"
+    fresh_source = (ROOT / fresh_name).read_bytes()
+    sources[fresh_name] = {"content": fresh_source.decode("utf-8")}
     targets = {
-        "sources/DecimalContractCenter.sol": "DecimalContractCenter",
-        "sources/DecimalContractCenterProxy.sol": "DecimalContractCenterProxy",
-        own_name: "NewNetworkProxyBootstrap",
+        "sources/DecimalContractCenter.sol": ["DecimalContractCenter"],
+        "sources/DecimalContractCenterProxy.sol": ["DecimalContractCenterProxy"],
+        own_name: ["NewNetworkProxyBootstrap"],
+        wrapper_name: ["MintCandyWrappedDEL"],
+        fresh_name: ["NewNetworkMasterValidator"],
+        probe_name: ["WrappedDELTestReceiver"],
+        "sources/DecimalMasterValidator.sol": ["DecimalMasterValidator"],
+        "sources/DecimalDelegation.sol": ["DecimalDelegation", "DelegationNFTLib"],
+        "sources/DecimalDelegationNFT.sol": ["DecimalDelegationNFT"],
+        "sources/DecimalTokenCenter.sol": ["DecimalTokenCenter", "DRC20", "DRC20Reserveless"],
+        "sources/DecimalNFTCenter.sol": ["DecimalNFTCenter", "DRC721", "DRC1155", "DRC721Reserveless", "DRC1155Reserveless"],
     }
     output_fields = ["abi", "evm.bytecode.object", "evm.bytecode.linkReferences", "evm.deployedBytecode.object", "evm.deployedBytecode.linkReferences"]
     settings = {
@@ -41,32 +58,39 @@ def main():
         "viaIR": False,
         "metadata": {"bytecodeHash": "ipfs"},
         "libraries": {},
-        "outputSelection": {source: {target: output_fields} for source, target in targets.items()},
+        "outputSelection": {source: {target: output_fields for target in names} for source, names in targets.items()},
     }
-    request = {"language": "Solidity", "sources": sources, "settings": settings}
-    result = subprocess.run([str(compiler), "--standard-json"], input=json.dumps(request), text=True, capture_output=True, check=True, timeout=120)
-    response = json.loads(result.stdout)
-    errors = [error for error in response.get("errors", []) if error["severity"] == "error"]
-    if errors:
-        raise RuntimeError("\n".join(error["formattedMessage"] for error in errors))
     directory = ROOT / "artifacts"
     directory.mkdir(exist_ok=True)
-    for source, target in targets.items():
-        contract = response["contracts"][source][target]
-        evm = contract["evm"]
-        if evm["bytecode"]["linkReferences"] or evm["deployedBytecode"]["linkReferences"]:
-            raise RuntimeError("Unresolved library references: " + target)
-        creation = evm["bytecode"]["object"]
-        runtime = evm["deployedBytecode"]["object"]
-        if not creation or not runtime:
-            raise RuntimeError("Missing executable bytecode: " + target)
-        artifact = {"contractName": target, "abi": contract["abi"], "creationBytecode": creation, "runtimeBytecode": runtime,
-                    "compilerVersion": COMPILER_VERSION, "compilerSha256": COMPILER_SHA256,
-                    "sourceManifestSha256": hashlib.sha256(manifest_data).hexdigest(),
-                    "bootstrapSourceSha256": hashlib.sha256(own_source).hexdigest(),
-                    "settings": {key: value for key, value in settings.items() if key != "outputSelection"}}
-        (directory / (target + ".json")).write_text(json.dumps(artifact, sort_keys=True, indent=2) + "\n", encoding="utf-8", newline="\n")
-        print(target, "creation", len(creation) // 2, "runtime", len(runtime) // 2)
+    for source, names in targets.items():
+        selected = dict(settings)
+        selected["viaIR"] = source == "sources/DecimalDelegation.sol"
+        selected["outputSelection"] = {source: {name: output_fields for name in names}}
+        request = {"language": "Solidity", "sources": sources, "settings": selected}
+        result = subprocess.run([str(compiler), "--standard-json"], input=json.dumps(request), text=True, capture_output=True, check=True, timeout=240)
+        response = json.loads(result.stdout)
+        errors = [error for error in response.get("errors", []) if error["severity"] == "error"]
+        if errors:
+            raise RuntimeError("\n".join(error["formattedMessage"] for error in errors))
+        for target in names:
+            contract = response["contracts"][source][target]
+            evm = contract["evm"]
+            creation, runtime = evm["bytecode"]["object"], evm["deployedBytecode"]["object"]
+            if not creation or not runtime:
+                raise RuntimeError("Missing executable bytecode: " + target)
+            artifact = {"contractName": target, "sourceUnit": source,
+                        "abi": contract["abi"], "creationBytecode": creation, "runtimeBytecode": runtime,
+                        "creationLinks": evm["bytecode"]["linkReferences"],
+                        "runtimeLinks": evm["deployedBytecode"]["linkReferences"],
+                        "compilerVersion": COMPILER_VERSION, "compilerSha256": COMPILER_SHA256,
+                        "sourceManifestSha256": hashlib.sha256(manifest_data).hexdigest(),
+                        "bootstrapSourceSha256": hashlib.sha256(own_source).hexdigest(),
+                        "wrapperSourceSha256": hashlib.sha256(wrapper_source).hexdigest(),
+                        "testReceiverSourceSha256": hashlib.sha256(probe_source).hexdigest(),
+                        "freshValidatorSourceSha256": hashlib.sha256(fresh_source).hexdigest(),
+                        "settings": {key: value for key, value in selected.items() if key != "outputSelection"}}
+            (directory / (target + ".json")).write_text(json.dumps(artifact, sort_keys=True, indent=2) + "\n", encoding="utf-8", newline="\n")
+            print(target, "creation", len(creation) // 2, "runtime", len(runtime) // 2, flush=True)
 
 
 if __name__ == "__main__":

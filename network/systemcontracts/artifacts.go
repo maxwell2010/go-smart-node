@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/ethereum/go-ethereum/accounts/abi"
+	"github.com/ethereum/go-ethereum/common"
 )
 
 //go:embed artifacts/*.json
@@ -21,20 +22,59 @@ type Artifact struct {
 
 // Load returns code, not a deployment or an authority configuration.
 func Load(name string) (Artifact, error) {
+	return LoadLinked(name, nil)
+}
+
+func checkName(name string) error {
 	switch name {
-	case "DecimalContractCenter", "DecimalContractCenterProxy", "NewNetworkProxyBootstrap":
+	case "DecimalContractCenter", "DecimalContractCenterProxy", "NewNetworkProxyBootstrap", "NewNetworkMasterValidator", "MintCandyWrappedDEL", "WrappedDELTestReceiver", "DecimalMasterValidator", "DecimalDelegation", "DelegationNFTLib", "DecimalDelegationNFT", "DecimalTokenCenter", "DecimalNFTCenter", "DRC20", "DRC20Reserveless", "DRC721", "DRC1155", "DRC721Reserveless", "DRC1155Reserveless":
 	default:
-		return Artifact{}, fmt.Errorf("unknown pinned system-contract artifact %q", name)
+		return fmt.Errorf("unknown pinned system-contract artifact %q", name)
+	}
+	return nil
+}
+
+// CompiledABI returns the exact ABI emitted from pinned sources, including linked targets.
+func CompiledABI(name string) (abi.ABI, error) {
+	if err := checkName(name); err != nil {
+		return abi.ABI{}, err
+	}
+	data, err := compiled.ReadFile("artifacts/" + name + ".json")
+	if err != nil {
+		return abi.ABI{}, err
+	}
+	var source struct {
+		ABI json.RawMessage `json:"abi"`
+	}
+	if err := json.Unmarshal(data, &source); err != nil {
+		return abi.ABI{}, err
+	}
+	return abi.JSON(strings.NewReader(string(source.ABI)))
+}
+
+type linkReference struct {
+	Start  int `json:"start"`
+	Length int `json:"length"`
+}
+type linkReferences map[string]map[string][]linkReference
+
+// LoadLinked requires fresh explicit addresses for every solc-declared library.
+// It never supplies historical deployment addresses or guesses byte offsets.
+func LoadLinked(name string, libraries map[string]common.Address) (Artifact, error) {
+	if err := checkName(name); err != nil {
+		return Artifact{}, err
 	}
 	data, err := compiled.ReadFile("artifacts/" + name + ".json")
 	if err != nil {
 		return Artifact{}, err
 	}
 	var source struct {
-		ContractName string          `json:"contractName"`
-		ABI          json.RawMessage `json:"abi"`
-		Creation     string          `json:"creationBytecode"`
-		Runtime      string          `json:"runtimeBytecode"`
+		ContractName  string          `json:"contractName"`
+		ABI           json.RawMessage `json:"abi"`
+		Creation      string          `json:"creationBytecode"`
+		Runtime       string          `json:"runtimeBytecode"`
+		CreationLinks linkReferences  `json:"creationLinks"`
+		RuntimeLinks  linkReferences  `json:"runtimeLinks"`
 	}
 	if err := json.Unmarshal(data, &source); err != nil {
 		return Artifact{}, err
@@ -46,11 +86,25 @@ func Load(name string) (Artifact, error) {
 	if err != nil {
 		return Artifact{}, err
 	}
-	creation, err := hex.DecodeString(source.Creation)
+	used := map[string]bool{}
+	creationText, err := applyLinks(source.Creation, source.CreationLinks, libraries, used)
 	if err != nil {
 		return Artifact{}, err
 	}
-	runtime, err := hex.DecodeString(source.Runtime)
+	runtimeText, err := applyLinks(source.Runtime, source.RuntimeLinks, libraries, used)
+	if err != nil {
+		return Artifact{}, err
+	}
+	for key := range libraries {
+		if !used[key] {
+			return Artifact{}, fmt.Errorf("unused library %q", key)
+		}
+	}
+	creation, err := hex.DecodeString(creationText)
+	if err != nil {
+		return Artifact{}, err
+	}
+	runtime, err := hex.DecodeString(runtimeText)
 	if err != nil {
 		return Artifact{}, err
 	}
@@ -66,4 +120,32 @@ func (a Artifact) Deployment(args ...interface{}) ([]byte, error) {
 		return nil, err
 	}
 	return append(append([]byte(nil), a.Creation...), encoded...), nil
+}
+
+func applyLinks(code string, references linkReferences, libraries map[string]common.Address, used map[string]bool) (string, error) {
+	occupied := map[int]bool{}
+	for source, names := range references {
+		for name, positions := range names {
+			key := source + ":" + name
+			address, ok := libraries[key]
+			if !ok || address == (common.Address{}) {
+				return "", fmt.Errorf("missing nonzero fresh library %q", key)
+			}
+			used[key] = true
+			for _, ref := range positions {
+				if ref.Length != common.AddressLength || ref.Start < 0 || ref.Start > len(code)/2-ref.Length {
+					return "", fmt.Errorf("invalid library offset for %q", key)
+				}
+				for i := ref.Start; i < ref.Start+ref.Length; i++ {
+					if occupied[i] {
+						return "", fmt.Errorf("overlapping library offsets")
+					}
+					occupied[i] = true
+				}
+				begin, end := ref.Start*2, (ref.Start+ref.Length)*2
+				code = code[:begin] + hex.EncodeToString(address.Bytes()) + code[end:]
+			}
+		}
+	}
+	return code, nil
 }
