@@ -1,0 +1,49 @@
+{
+  "baseSourceRevision": "318aace03f41132c4b6b704a287c05c227d6c26e",
+  "changes": {
+    "github.com/klauspost/compress": {
+      "after": {
+        "GoModSum": "h1:cwPg85FWrGar70rWktvGQj8/hthj3wpl0PGDogxkrSQ=",
+        "Path": "github.com/klauspost/compress",
+        "Sum": "h1:aUyZsS4kH3QTKurYhAOwAHxllVPnOthb3vPfnF1Ehjw=",
+        "Version": "v1.18.7"
+      },
+      "before": {
+        "GoModSum": "h1:cwPg85FWrGar70rWktvGQj8/hthj3wpl0PGDogxkrSQ=",
+        "Path": "github.com/klauspost/compress",
+        "Sum": "h1:/h1gH5Ce+VWNLSWqPzOVn6XBO+vJbCNGvjoaGBFW2IE=",
+        "Version": "v1.18.5"
+      }
+    },
+    "golang.org/x/net": {
+      "after": {
+        "GoModSum": "h1:WgDCOTH8iwtB66T4/GfI94AHo/hhdb7Hah9NDseQfiI=",
+        "Path": "golang.org/x/net",
+        "Sum": "h1:18ELalfM5+XNRwzM2nYqXsZQ9ByS1uhj2O/U7+5jqRY=",
+        "Version": "v0.62.0"
+      },
+      "before": {
+        "GoModSum": "h1:WgDCOTH8iwtB66T4/GfI94AHo/hhdb7Hah9NDseQfiI=",
+        "Path": "golang.org/x/net",
+        "Sum": "h1:RR+6j/BTBCrggOLugxa+66R8FvoN6MHlzDlZIbN9YFw=",
+        "Version": "v0.61.0"
+      }
+    }
+  },
+  "checks": {
+    "appCLI": "ok  \tgithub.com/maxwell2010/go-smart-node/network/app\t0.694s\nok  \tgithub.com/maxwell2010/go-smart-node/network/cmd/mcnd\t0.544s\n",
+    "moduleIntegrity": "all modules verified\n",
+    "ordinaryPrivateLoopback": "=== RUN   TestDependencyPatchCompressionRoundTrips\n--- PASS: TestDependencyPatchCompressionRoundTrips (0.00s)\n=== RUN   TestDependencyPatchHTTP2LocalConnection\n--- PASS: TestDependencyPatchHTTP2LocalConnection (0.02s)\n=== RUN   TestDependencyPatchOrdinaryHTMLRoundTrip\n--- PASS: TestDependencyPatchOrdinaryHTMLRoundTrip (0.00s)\nPASS\n"
+  },
+  "coreVersionsUnchanged": true,
+  "goVersion": "go1.26.10 linux/amd64",
+  "moduleCount": 772,
+  "moduleNamesUnchanged": true,
+  "scope": "Ordinary compression/HTML/HTTP2 and App/CLI compatibility snapshot; no bomb fixtures or security clean claim.",
+  "sourceBindings": {
+    "network/go.mod": "45d5d4109955b6176910d19268b19cd652b541b5ba5ba53f7cfd2943caf1db27",
+    "network/go.sum": "d790600f14137c0620aceac144056ae9c4be4d2139b1848aa6b0e3bd0b79c2d5",
+    "network/securitytests/dependency_patch_test.go": "f72a479de28a663f525df5c65460985f6c882a1a236128427d0593963024ae5a"
+  },
+  "xCryptoUnchanged": true
+}
