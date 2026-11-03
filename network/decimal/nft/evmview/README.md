@@ -61,3 +61,42 @@ stake capture и записей. Это расчёт по отдельным и�
 общего pipeline. Перед включением нужны совместные end-to-end измерения;
 переиспользование проверок допустимо только с явно ограниченной областью
 execution и проверкой неизменности состояния.
+
+## Явный профиль изолированных позиций
+
+`Config.Protocol=ProfileIsolatedPositionsV1` задаётся явно вместе с адресами
+`PositionVault` и `WrappedDEL`. В этом профиле код Gateway соответствует только
+`MintCandyIsolatedDelegation`, origin1155 - только `MintCandyIsolatedDRC1155`.
+Дополнительно проверяются ERC1967 vault, Gov-владелец, registry roles, фабрика,
+библиотека и точные compiler/runtime templates. Профиль `ProfileSharedReference`
+остаётся отдельным control для чтения старой shared-модели; он не включает
+финансовый допуск изолированных позиций и не принимает isolated role bindings.
+
+`Position(ctx, fullUint256ID)` возвращает неизменяемые по ссылкам fixed-width
+поля фактического состояния. Для активной позиции проверяются origin, qty1..1024,
+owner, parent, backed currency kind, собственный declared reserve, совокупный
+объявленный резерв этой валюты и реальные holdings vault. Необъявленный surplus
+остаётся отдельным остатком и не увеличивает резерв позиции. Для WDEL проверяются
+код обёртки, её totalSupply и нативное обеспечение. Другие ERC20 сейчас дают явную
+ошибку отсутствующего approved backing reader; их admission требует отдельной
+проверки actual coin economics и native coin adapter.
+
+Closed snapshot принимается только при подлинном vault/runtime, ID меньше
+текущего nextPositionId, статусе Closed, нулевом owner и полностью очищенной записи.
+Ошибка или revert `ownerOf` не считается доказательством закрытия. Такой snapshot
+не разрешает native compaction сам по себе: план должен повторно проверить
+актуальное состояние и полную lineage в атомарном orchestration.
+
+Чтение не требует новых origin view-селекторов: необходимая policy уже хранится
+в vault, а код origin проверяется через NFTCenter и compiler template. Поэтому
+ordinary signed controls читают active/closed позиции при паузе factory и vault,
+сохраняя финансовые ограничения. Положительные проверки используют реальные
+Gov-owned Gateway/registry/factory/vault и подписанные пользовательские операции;
+native collection admission в этом reader-тесте остаётся metadata fixture.
+Проверены полный ID больше2^200, full split с закрытым родителем, wallet transfer,
+неизменённый surplus, DEL/WDEL collateral, неправильный domain и недостаток бюджета.
+
+В этом fixture одно чтение active DEL позиции расходует около2,44 млн SDK gas,
+WDEL -2,57 млн, closed proof -1,88 млн. Значения не включают проверку native lineage
+и полный NFT/validator pipeline. Увеличение production budgets не выполнялось.
+Пакет не включает App financial hooks, mint admission или новые IBC callbacks.
