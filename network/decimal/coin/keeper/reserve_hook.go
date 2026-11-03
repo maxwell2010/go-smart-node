@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"math/big"
+	"sync/atomic"
 
 	sdkmath "cosmossdk.io/math"
 	sdk "github.com/cosmos/cosmos-sdk/types"
@@ -75,7 +76,7 @@ type ReservePlan struct {
 
 type reservePlanUse struct {
 	owner *ReserveHook
-	used  bool
+	used  atomic.Bool
 }
 
 func (p *ReservePlan) IsNoop() bool {
@@ -229,7 +230,7 @@ func (p *ReservePlan) validate(ctx sdk.Context) error {
 // Validate rechecks native prestate and actual EVM/bank backing. Context identity
 // alone cannot exclude a later EVM change within one height or governance call.
 func (p *ReservePlan) Validate(ctx sdk.Context) error {
-	if p == nil || p.use == nil || p.use.used {
+	if p == nil || p.use == nil || p.use.used.Load() {
 		return errors.New("reserve plan is missing or already consumed")
 	}
 	return p.validate(ctx)
@@ -238,10 +239,9 @@ func (p *ReservePlan) Validate(ctx sdk.Context) error {
 // Apply revalidates even for standalone callers, consumes the plan once, and
 // keeps all metadata writes and typed events in one child transaction.
 func (p *ReservePlan) Apply(ctx sdk.Context) error {
-	if p == nil || p.use == nil || p.use.used {
+	if p == nil || p.use == nil || !p.use.used.CompareAndSwap(false, true) {
 		return errors.New("reserve plan is missing or already consumed")
 	}
-	p.use.used = true
 	if err := p.validate(ctx); err != nil {
 		return err
 	}
