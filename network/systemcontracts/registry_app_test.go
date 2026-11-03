@@ -294,6 +294,13 @@ func TestOwnedAppSignedRegistryBootstrap(t *testing.T) {
 		add, err := fresh.ABI.Pack("addValidators", meta)
 		require.NoError(t, err)
 		send(keys[1], &validatorAddress, new(big.Int), add, true)
+		require.True(t, penaltyReader("isActive", member)[0].(bool))
+		activeReadAtZero := penaltyReadGas
+		headerAtZero := penaltyReader("getValidatorState", member)
+		require.Equal(t, uint8(2), headerAtZero[0])
+		require.False(t, headerAtZero[1].(bool))
+		require.Zero(t, headerAtZero[2].(*big.Int).Sign())
+		headerReadAtZero := penaltyReadGas
 		for _, penalty := range []uint16{1, 2} {
 			data, err := fresh.ABI.Pack("addPenalty", member, penalty)
 			require.NoError(t, err)
@@ -329,6 +336,14 @@ func TestOwnedAppSignedRegistryBootstrap(t *testing.T) {
 			require.NoError(t, err)
 			send(keys[1], &validatorAddress, new(big.Int), data, true)
 		}
+		require.True(t, penaltyReader("isActive", member)[0].(bool))
+		t.Logf("ordinary isActive MaxUsedGas history0=%d history257=%d", activeReadAtZero, penaltyReadGas)
+		headerAt257 := penaltyReader("getValidatorState", member)
+		require.Equal(t, uint8(2), headerAt257[0])
+		require.False(t, headerAt257[1].(bool))
+		require.Equal(t, int64(257), headerAt257[2].(*big.Int).Int64())
+		require.Equal(t, headerReadAtZero, penaltyReadGas, "fixed header must not copy history")
+		t.Logf("actual fixed validator header MaxUsedGas history0=%d history257=%d ABIwords=3", headerReadAtZero, penaltyReadGas)
 		require.Equal(t, int64(257), penaltyReader("getPenaltyCount", member)[0].(*big.Int).Int64())
 		require.Len(t, penaltyReader("getPenaltiesRange", member, big.NewInt(0), big.NewInt(32))[0], 32)
 		t.Logf("actual penalty range32 MaxUsedGas=%d", penaltyReadGas)
