@@ -56,6 +56,14 @@ jobs:
           python3 -m unittest discover -s scripts -p 'test_*.py'
       - name: Test modern module and native feature port
         run: go test -mod=readonly -p 2 -count=1 -v -timeout 10m ./... |& tee validation-logs/tests.log
+      - name: Reproduce pinned system contract artifacts
+        run: |
+          SOLC="$RUNNER_TEMP/solc-0.8.20"
+          curl --fail --location --proto '=https' --tlsv1.2 'https://raw.githubusercontent.com/ethereum/solc-bin/gh-pages/linux-amd64/solc-linux-amd64-v0.8.20+commit.a1b79de6' --output "$SOLC"
+          echo "0479d44fdf9c501c25337fdc540419f1593b884a87b47f023da4f1c700fda782  $SOLC" | sha256sum --check
+          chmod 755 "$SOLC"
+          SOLC="$SOLC" python3 systemcontracts/build.py |& tee validation-logs/system-contract-reproduction.log
+          git diff --exit-code -- systemcontracts/artifacts
       - name: Test native ownership against actual SDK governance tally
         run: go test -mod=readonly -p 2 -count=1 -v -timeout 10m -tags sdk53 ./decimal/validator/governance |& tee validation-logs/native-governance-tally.log
       - name: Test owned application ICS20 with test-only configuration isolation
