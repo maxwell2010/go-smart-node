@@ -1424,7 +1424,7 @@
   "freshFactorySourcesSha256": {
     "CurveConverterTestController.sol": "1024c061755435a79ce74b02400569c5ca4bd4e484192c5d1f527ea23b7e83d7",
     "IsolatedNFTTestController.sol": "b836f6defaefdf5f1a1a5a5e67e968ad4af690ac3c94f4a5d15b31c6245592a1",
-    "MintCandyCurveConverter.sol": "788fec3975fe58758f0ee5615ad4c1e35cb5c9ad8a4207286e0e6bdddc48a711",
+    "MintCandyCurveConverter.sol": "5470b8c09996071a9d9efac3c26337ec57f10184a72b3694d039c1ab0e9ad45f",
     "MintCandyIsolatedDRC1155.sol": "371c3eabec6e8043bc7f01698a69bf4f05d78025979c5f2cb1c1e0a7b49cd301",
     "MintCandyNFTIsolationLimits.sol": "ad1331111e2f0917f69a715a2525408816b6f8a49ae216b5dd9d2dcaffdfd668",
     "MintCandyNFTPositionVault.sol": "02665ab29dbbda312c60b641cfd7c81ebe06c6dfffeb2c16b78dd1a52b9633e2",
