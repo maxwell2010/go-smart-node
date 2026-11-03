@@ -1,0 +1,14 @@
+test_config_drift_rejected (test_operator_tools.OperatorToolsTest.test_config_drift_rejected) ... ok
+test_dangling_backup_symlink_is_never_followed (test_operator_tools.OperatorToolsTest.test_dangling_backup_symlink_is_never_followed) ... ok
+test_existing_database_is_never_changed (test_operator_tools.OperatorToolsTest.test_existing_database_is_never_changed) ... ok
+test_installer_never_overwrites_existing_binary (test_operator_tools.OperatorToolsTest.test_installer_never_overwrites_existing_binary) ... ok
+test_packager_preserves_distinct_owned_licenses_and_notices (test_operator_tools.OperatorToolsTest.test_packager_preserves_distinct_owned_licenses_and_notices) ... ok
+test_packager_rejects_binary_from_different_revision (test_operator_tools.OperatorToolsTest.test_packager_rejects_binary_from_different_revision) ... ok
+test_revision_rejects_branch_and_shell_text (test_operator_tools.OperatorToolsTest.test_revision_rejects_branch_and_shell_text) ... ok
+test_roles_keep_rpc_events_and_apply_backups (test_operator_tools.OperatorToolsTest.test_roles_keep_rpc_events_and_apply_backups) ... ok
+test_trimpath_requires_matching_native_cli_commit (test_operator_tools.OperatorToolsTest.test_trimpath_requires_matching_native_cli_commit) ... ok
+
+----------------------------------------------------------------------
+Ran 9 tests in 0.613s
+
+OK

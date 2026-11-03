@@ -1,0 +1,38 @@
+{
+  "distinct_symbol_advisories": 1,
+  "provenance_buckets": {
+    "direct": 1
+  },
+  "notes": [
+    "Symbol traces are static potential reachability, not exploit validation.",
+    "Toolchain vulnerabilities execute in runtime libraries too; provenance is not exposure.",
+    "Direct means an explicit non-indirect go.mod require in this snapshot."
+  ],
+  "advisories": [
+    {
+      "id": "GO-2026-5932",
+      "summary": "The golang.org/x/crypto/openpgp package is unmaintained, unsafe by design, and has known security issues",
+      "modules": {
+        "golang.org/x/crypto": "direct"
+      },
+      "symbol_finding_count": 10,
+      "entrypoints": [
+        "github.com/maxwell2010/go-smart-node/network/cmd/mcnd.init",
+        "github.com/maxwell2010/go-smart-node/network/cmd/mcnd.main"
+      ],
+      "shortest_trace": [
+        "github.com/maxwell2010/go-smart-node/network/cmd/mcnd.init",
+        "github.com/cosmos/evm/server/flags.init",
+        "github.com/cosmos/cosmos-sdk/crypto/keyring.init",
+        "github.com/cosmos/cosmos-sdk/crypto.init",
+        "golang.org/x/crypto/openpgp/armor.init"
+      ],
+      "fixed_versions_in_scanned_modules": {
+        "golang.org/x/crypto": [
+          "0.58.1-0.20261009181718-2f1f834330b2"
+        ]
+      },
+      "source": "https://pkg.go.dev/vuln/GO-2026-5932"
+    }
+  ]
+}

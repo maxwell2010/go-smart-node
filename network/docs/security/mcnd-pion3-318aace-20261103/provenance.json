@@ -1,0 +1,173 @@
+{
+  "binary": {
+    "bytes": 185983768,
+    "local_artifact_directory": "C:\\MintCandyBuild\\mcnd-pion3-20261103",
+    "runtime_commit": "318aace03f41132c4b6b704a287c05c227d6c26e",
+    "server_name": "mcnd",
+    "sha256": "514dd9f6010c3458dccedd27c93ad178ed573c9ab3e29ac186ab42c7e7a57139"
+  },
+  "files": {
+    ".gitattributes": {
+      "bytes": 9,
+      "sha256": "48747480eddba024928d03be9bf83dc579e5515768647507a767e8187a85c9ab"
+    },
+    "README.md": {
+      "bytes": 7885,
+      "sha256": "31d1d9f22cc1139932fcb957640a564926a50d0483c1c1cfb2208c6832234486"
+    },
+    "advisories/GO-2023-1821.json": {
+      "bytes": 1474,
+      "sha256": "3bf32b584653f335e41c45edf52a49dffbe56da846ea1143b4d86a474006a280"
+    },
+    "advisories/GO-2023-1881.json": {
+      "bytes": 1330,
+      "sha256": "fe440b7424db8431123ad6a82a2b72004ac661a286a966cff450ce38986b38ea"
+    },
+    "advisories/GO-2025-3442.json": {
+      "bytes": 2426,
+      "sha256": "2746f5ff84fae62c34716e71c371ecd855312f01f00a0da52b5f18b44e509c3f"
+    },
+    "advisories/GO-2026-5841.json": {
+      "bytes": 1365,
+      "sha256": "12ba8d3f5ea1469c7103f70ed5d6ef0737d99310d541e401a27a6b2e44456df1"
+    },
+    "advisories/GO-2026-5932.json": {
+      "bytes": 2862,
+      "sha256": "f045249ee63d9dc67a60b86baac6985a2a7a4d321d2accf8d36c98db5fb23171"
+    },
+    "advisories/GO-2026-6860.json": {
+      "bytes": 1970,
+      "sha256": "3f003d77b5cc8b9bdbf39dd8772ebfc33f5b12621e137ab6f82fccc68a6a0a40"
+    },
+    "advisories/GO-2026-6866.json": {
+      "bytes": 2003,
+      "sha256": "e8a1aeb8f3ed06973a2d716ed4c4d7156234b8c74d2c865993203746733be5e7"
+    },
+    "app-cli-tests.log": {
+      "bytes": 127,
+      "sha256": "f5b72e9ec325fa5a0f00893d46bcc0095cda45678ac2f4306c68928f72fb47d5"
+    },
+    "binary-buildinfo.txt.gz": {
+      "bytes": 12366,
+      "sha256": "7ecad0b591f7e3364a674273d90480039d8f289cbd3a533cd8c88cc6e6a94e26"
+    },
+    "binary.gate.json": {
+      "bytes": 864,
+      "sha256": "a8c224b7866fc9a7574cf06a64b072343c32a4d13876adf30cb6fa01b46621fc"
+    },
+    "binary.jsonl.gz": {
+      "bytes": 119670,
+      "sha256": "1f60e2d68632ef8d2461f5462641884e9bee9c19bf1b5267642f31a01325552c"
+    },
+    "binary.levels.json": {
+      "bytes": 325,
+      "sha256": "d32e1cff51542ff911144af016d8c766d8918691bcde1e0219ce87ac3963e219"
+    },
+    "binary.manifest.json": {
+      "bytes": 665,
+      "sha256": "b19030d5752a57aadbf18ae286b575f277956ba650c664a89a6c7a5aefe8b06a"
+    },
+    "binary.summary.json": {
+      "bytes": 1270,
+      "sha256": "174161dc0b0a701652b7a9f56e647f805a49c25513bd01df16be11095d51e284"
+    },
+    "compiled-deps.txt.gz": {
+      "bytes": 12697,
+      "sha256": "764255774cad8fb8ca2b13d20fb982d295fc7d59fd833c8846da52b305e4c998"
+    },
+    "crypto-cgo0.log": {
+      "bytes": 71,
+      "sha256": "2c58a0ade23601c10d82d497fa58089e57aaeb00f155ffe919337d0509752560"
+    },
+    "crypto-cgo1.log": {
+      "bytes": 71,
+      "sha256": "4f87af9f8355f45f7f3b1b1ccaf4e35991ee7064a5e430d3756e73d37f117f49"
+    },
+    "geth-integrity.txt": {
+      "bytes": 68,
+      "sha256": "ed1bbb0d265b793893a063ab743c6f510381b3da7486b73b5e76cdc47942b043"
+    },
+    "module-only-disposition.json": {
+      "bytes": 8297,
+      "sha256": "b6986789990b41157d829153732ff00c54710becc157e564df2dbbda4d38cf63"
+    },
+    "modules.jsonl.gz": {
+      "bytes": 58717,
+      "sha256": "71dc235a5fc44c691c0958b1f0bb3e2dcdf1ac36284f0aa67ff8aba1bb8a3115"
+    },
+    "mvs-delta.json": {
+      "bytes": 13909,
+      "sha256": "78bed8c6dc591e1d172eb78264023e89c4c2fa6e443b27d5011eda747eb0962c"
+    },
+    "operator-tools.log": {
+      "bytes": 1349,
+      "sha256": "c65a08c002fdc7649e134eba5c4757487dfc840bfd53d07af4ba98144ea684f8"
+    },
+    "pion-integrity.json": {
+      "bytes": 834,
+      "sha256": "59e3086312c08aea722b3e5a306fd307d6629dbcd2936f171d1555e53d542e10"
+    },
+    "runtime-version.json": {
+      "bytes": 10761,
+      "sha256": "a9fc300c2d8d9cf5db6baaec0ad77c8e9c22464a75434cadc1b9228395a4c302"
+    },
+    "source.gate.json": {
+      "bytes": 818,
+      "sha256": "4e1575effb99e7dc282f77f63452fd5f224161c79a9e2b1b4691adee7b3f0b85"
+    },
+    "source.jsonl.gz": {
+      "bytes": 122149,
+      "sha256": "56e9b86d3e10bc892c3ff67b8d0f0d05006c8ea201fdc748018e5b5b924624aa"
+    },
+    "source.levels.json": {
+      "bytes": 326,
+      "sha256": "cccc17c2e0fa164663d44d64fd98f9385b9cb90d82e87170f14c2bb3cc081ddb"
+    },
+    "source.manifest.json": {
+      "bytes": 623,
+      "sha256": "a89039181e3ff41c807692b1b6ba2fa8ad79b8ffdb9048ffb0044b8885ffe344"
+    },
+    "source.summary.json": {
+      "bytes": 1334,
+      "sha256": "3992503abe38e45f5ad93d7ba123a2cc9c21f88e01751004d31573ea2059bd54"
+    },
+    "transport-private-loopback.log": {
+      "bytes": 369,
+      "sha256": "791d1216f8ea134e4fc572c82c24307184831cb0c080f7592033118e3f3ac48a"
+    },
+    "upstream-crypto-cgo0.log": {
+      "bytes": 111,
+      "sha256": "d158bade585a4be40ed9857c961901ee591e7d4a8e10c8e8df55e646a82dd95c"
+    },
+    "upstream-crypto-cgo1.log": {
+      "bytes": 174,
+      "sha256": "21c0cdf0205307c4ad3b502891b39f69b2eea935cb4e7adb13d3ac426234896c"
+    },
+    "verifier-tests.log": {
+      "bytes": 109,
+      "sha256": "dc04f4e58f7b86814682d98da2f8800c76437c337edfb326aaf2fd73b13aca8f"
+    }
+  },
+  "recorded_utc": "2026-11-03T06:59:39.143272+00:00",
+  "scanner": {
+    "db_last_modified": "2026-11-02T22:01:43Z",
+    "exclusions": [],
+    "name": "govulncheck",
+    "sha256": "18b257e9a691f1357255aec1228fa6cd74c0a50096130b99c230169cab7013d9",
+    "version": "v1.9.0"
+  },
+  "schema_version": 1,
+  "scope": "Independent default mcnd318aace dependency snapshot, not the later full financial integration or a stable release.",
+  "source_bindings": {
+    "network/go.mod": "38fdad825c5592ceaac6c5ddb5d6509c286450de0b51a66f89db8a189c3b23f9",
+    "network/go.sum": "61d1fd30b31fabcb80cd6cc4521e9b11f13a608b88aadecd01fc106157ef026f",
+    "network/scripts/verify_owned_geth.py": "0da3b879c5a7ea1cd4ad0be60ec59a904abc90ee2aeadea768fee45d7595b82e",
+    "network/scripts/verify_pion_transport.py": "0f5e9318ff3c482d963f0bb92bd5779884276abbaa6aa6cf82ab3a56cb3cd420",
+    "network/third_party/cosmos-evm/UPSTREAM.json": "4595f84643e2a103b9d5e279a33405e5ce79ed3ef973e920bc7e1c5927274c02",
+    "network/third_party/cosmos-geth/UPSTREAM.json": "cff655ceaeba2dc89b890ce4a1e0cd806780f4beb12927c2605cae88351a0b28",
+    "scripts/audit/capture_govuln.py": "81c0646a02dbb5f13a9f5277318d0944b8adb68b39afe9edb482263f8c2bbe1f"
+  },
+  "source_clean_during_build_and_scans": true,
+  "source_commit": "318aace03f41132c4b6b704a287c05c227d6c26e",
+  "toolchain": "go1.26.10 linux/amd64; CGO1/GCC; trimpath; no test tags"
+}

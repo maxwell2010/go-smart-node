@@ -1,0 +1,9 @@
+=== RUN   TestPionTransportCodec
+--- PASS: TestPionTransportCodec (0.00s)
+=== RUN   TestPionTransportClientClose
+--- PASS: TestPionTransportClientClose (0.00s)
+=== RUN   TestPionTransportUDPAndActualGethNAT
+--- PASS: TestPionTransportUDPAndActualGethNAT (0.00s)
+=== RUN   TestPionTransportDTLSLocalConnection
+--- PASS: TestPionTransportDTLSLocalConnection (0.00s)
+PASS

@@ -1,0 +1,28 @@
+{
+  "gate_exit_code": 1,
+  "report": {
+    "scanner_exit_code": 0,
+    "distinct_symbol_advisories": 1,
+    "advisory_ids": [
+      "GO-2026-5932"
+    ],
+    "scanner_version": "v1.9.0",
+    "go_version": "go1.26.10",
+    "db_last_modified": "2026-11-02T22:01:43Z",
+    "completion_verified": true,
+    "diagnostic_clean": false,
+    "passed": false,
+    "source_commit": "318aace03f41132c4b6b704a287c05c227d6c26e",
+    "scope": "actual mcnd318aace snapshotbinary; CGO1 linuxamd64; canonicalPionv3; full scanner",
+    "toolchain": "go version go1.26.10 linux/amd64",
+    "raw_sha256": "5b3030678ca35cbad91c5b4b833d8c5ec1659733b16c0a5a0fd81a3294bb513c",
+    "raw_bytes": 1113801,
+    "argv": [
+      "/opt/mintcandy-tools/vuln190/govulncheck",
+      "-json",
+      "-mode",
+      "binary",
+      "/mnt/c/MintCandyBuild/mcnd-pion3-20261103/mcnd-318aace"
+    ]
+  }
+}

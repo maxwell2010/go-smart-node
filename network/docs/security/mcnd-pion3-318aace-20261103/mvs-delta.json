@@ -1,0 +1,469 @@
+{
+  "added": {
+    "github.com/pion/dtls/v3": {
+      "Path": "github.com/pion/dtls/v3",
+      "Sum": "h1:okWk5LNwU21DfhvG8z4wm45knHVSPEdkihwp6BxfQcc=",
+      "Version": "v3.1.15"
+    },
+    "github.com/pion/stun/v3": {
+      "Path": "github.com/pion/stun/v3",
+      "Sum": "h1:uRXMTlGLf89WgItGNyZ6aR5jMTX0NBbybXADpQCzn+E=",
+      "Version": "v3.1.7"
+    },
+    "github.com/pion/transport/v4": {
+      "Path": "github.com/pion/transport/v4",
+      "Sum": "h1:8S+nF2reM2cJuqC6g78OVy2BBgmbdns+acx3jA97BvQ=",
+      "Version": "v4.1.0"
+    },
+    "github.com/pion/transport/v5": {
+      "Path": "github.com/pion/transport/v5",
+      "Sum": "h1:XWdfCnG6oLaTp07Sr4lbyWVs+MXuaD3eggUsSn6LK90=",
+      "Version": "v5.0.0"
+    },
+    "github.com/wlynxg/anet": {
+      "Path": "github.com/wlynxg/anet",
+      "Sum": "h1:J3VJGi1gvo0JwZ/P1/Yc/8p63SoW98B5dHkYDmpgvvU=",
+      "Version": "v0.0.5"
+    }
+  },
+  "after_count": 772,
+  "base_source": "b03012ff052026d867da03fc9a44fe06cb9f4a1e",
+  "before_count": 767,
+  "changed": {
+    "cloud.google.com/go/logging": {
+      "after": {
+        "Path": "cloud.google.com/go/logging",
+        "Sum": "h1:O7LvmO0kGLaHY/gq8cV7T0dyp6zJhYAOtZPX4TF3QtY=",
+        "Version": "v1.13.1"
+      },
+      "before": {
+        "Path": "cloud.google.com/go/logging",
+        "Sum": null,
+        "Version": "v1.13.1"
+      }
+    },
+    "cloud.google.com/go/longrunning": {
+      "after": {
+        "Path": "cloud.google.com/go/longrunning",
+        "Sum": "h1:LiKK77J3bx5gDLi4SMViHixjD2ohlkwBi+mKA7EhfW8=",
+        "Version": "v0.8.0"
+      },
+      "before": {
+        "Path": "cloud.google.com/go/longrunning",
+        "Sum": null,
+        "Version": "v0.8.0"
+      }
+    },
+    "cloud.google.com/go/trace": {
+      "after": {
+        "Path": "cloud.google.com/go/trace",
+        "Sum": "h1:kDNDX8JkaAG3R2nq1lIdkb7FCSi1rCmsEtKVsty7p+U=",
+        "Version": "v1.11.7"
+      },
+      "before": {
+        "Path": "cloud.google.com/go/trace",
+        "Sum": null,
+        "Version": "v1.11.7"
+      }
+    },
+    "github.com/Azure/go-ansiterm": {
+      "after": {
+        "Path": "github.com/Azure/go-ansiterm",
+        "Sum": "h1:L/gRVlceqvL25UVaW/CKtUDjefjrs0SPonmDGUVOYP0=",
+        "Version": "v0.0.0-20230124172434-306776ec8161"
+      },
+      "before": {
+        "Path": "github.com/Azure/go-ansiterm",
+        "Sum": null,
+        "Version": "v0.0.0-20230124172434-306776ec8161"
+      }
+    },
+    "github.com/GoogleCloudPlatform/opentelemetry-operations-go/internal/cloudmock": {
+      "after": {
+        "Path": "github.com/GoogleCloudPlatform/opentelemetry-operations-go/internal/cloudmock",
+        "Sum": "h1:7t/qx5Ost0s0wbA/VDrByOooURhp+ikYwv20i9Y07TQ=",
+        "Version": "v0.55.0"
+      },
+      "before": {
+        "Path": "github.com/GoogleCloudPlatform/opentelemetry-operations-go/internal/cloudmock",
+        "Sum": null,
+        "Version": "v0.55.0"
+      }
+    },
+    "github.com/adlio/schema": {
+      "after": {
+        "Path": "github.com/adlio/schema",
+        "Sum": "h1:k1/zc2jNfeiZBA5aFTRy37jlBIuCkXCm0XmvpzCKI9I=",
+        "Version": "v1.3.6"
+      },
+      "before": {
+        "Path": "github.com/adlio/schema",
+        "Sum": null,
+        "Version": "v1.3.6"
+      }
+    },
+    "github.com/bufbuild/protocompile": {
+      "after": {
+        "Path": "github.com/bufbuild/protocompile",
+        "Sum": "h1:iA73zAf/fyljNjQKwYzUHD6AD4R8KMasmwa/FBatYVw=",
+        "Version": "v0.14.1"
+      },
+      "before": {
+        "Path": "github.com/bufbuild/protocompile",
+        "Sum": null,
+        "Version": "v0.14.1"
+      }
+    },
+    "github.com/containerd/continuity": {
+      "after": {
+        "Path": "github.com/containerd/continuity",
+        "Sum": "h1:nisirsYROK15TAMVukJOUyGJjz4BNQJBVsNvAXZJ/eg=",
+        "Version": "v0.3.0"
+      },
+      "before": {
+        "Path": "github.com/containerd/continuity",
+        "Sum": null,
+        "Version": "v0.3.0"
+      }
+    },
+    "github.com/danieljoos/wincred": {
+      "after": {
+        "Path": "github.com/danieljoos/wincred",
+        "Sum": "h1:dl9cBrupW8+r5250DYkYxocLeZ1Y4vB1kxgtjxw8GQs=",
+        "Version": "v1.2.1"
+      },
+      "before": {
+        "Path": "github.com/danieljoos/wincred",
+        "Sum": null,
+        "Version": "v1.2.1"
+      }
+    },
+    "github.com/dgraph-io/badger/v4": {
+      "after": {
+        "Path": "github.com/dgraph-io/badger/v4",
+        "Sum": "h1:kJrlajbXXL9DFTNuhhu9yCx7JJa4qpYWxtE8BzuWsEs=",
+        "Version": "v4.2.0"
+      },
+      "before": {
+        "Path": "github.com/dgraph-io/badger/v4",
+        "Sum": null,
+        "Version": "v4.2.0"
+      }
+    },
+    "github.com/dgraph-io/ristretto": {
+      "after": {
+        "Path": "github.com/dgraph-io/ristretto",
+        "Sum": "h1:XAfl+7cmoUDWW/2Lx8TGZQjjxIQ2Ley9DSf52dru4WE=",
+        "Version": "v0.2.0"
+      },
+      "before": {
+        "Path": "github.com/dgraph-io/ristretto",
+        "Sum": null,
+        "Version": "v0.2.0"
+      }
+    },
+    "github.com/dgryski/go-farm": {
+      "after": {
+        "Path": "github.com/dgryski/go-farm",
+        "Sum": "h1:fAjc9m62+UWV/WAFKLNi6ZS0675eEUC9y3AlwSbQu1Y=",
+        "Version": "v0.0.0-20200201041132-a6ae2369ad13"
+      },
+      "before": {
+        "Path": "github.com/dgryski/go-farm",
+        "Sum": null,
+        "Version": "v0.0.0-20200201041132-a6ae2369ad13"
+      }
+    },
+    "github.com/docker/go-connections": {
+      "after": {
+        "Path": "github.com/docker/go-connections",
+        "Sum": "h1:USnMq7hx7gwdVZq1L49hLXaFtUdTADjXGp+uj1Br63c=",
+        "Version": "v0.5.0"
+      },
+      "before": {
+        "Path": "github.com/docker/go-connections",
+        "Sum": null,
+        "Version": "v0.5.0"
+      }
+    },
+    "github.com/ethereum/c-kzg-4844/v2": {
+      "after": {
+        "Path": "github.com/ethereum/c-kzg-4844/v2",
+        "Sum": "h1:gQropX9YFBhl3g4HYhwE70zq3IHFRgbbNPw0Shwzf5w=",
+        "Version": "v2.1.0"
+      },
+      "before": {
+        "Path": "github.com/ethereum/c-kzg-4844/v2",
+        "Sum": null,
+        "Version": "v2.1.0"
+      }
+    },
+    "github.com/golang-jwt/jwt/v4": {
+      "after": {
+        "Path": "github.com/golang-jwt/jwt/v4",
+        "Sum": "h1:JdqV9zKUdtaa9gdPlywC3aeoEsR681PlKC+4F5gQgeo=",
+        "Version": "v4.5.1"
+      },
+      "before": {
+        "Path": "github.com/golang-jwt/jwt/v4",
+        "Sum": null,
+        "Version": "v4.5.1"
+      }
+    },
+    "github.com/golang/groupcache": {
+      "after": {
+        "Path": "github.com/golang/groupcache",
+        "Sum": "h1:f+oWsMOmNPc8JmEHVZIycC7hBoQxHH9pNKQORJNozsQ=",
+        "Version": "v0.0.0-20241129210726-2c02b8208cf8"
+      },
+      "before": {
+        "Path": "github.com/golang/groupcache",
+        "Sum": null,
+        "Version": "v0.0.0-20241129210726-2c02b8208cf8"
+      }
+    },
+    "github.com/google/flatbuffers": {
+      "after": {
+        "Path": "github.com/google/flatbuffers",
+        "Sum": "h1:CX395cjN9Kke9mmalRoL3d81AtFUxJM+yDthflgJGkI=",
+        "Version": "v24.3.25+incompatible"
+      },
+      "before": {
+        "Path": "github.com/google/flatbuffers",
+        "Sum": null,
+        "Version": "v24.3.25+incompatible"
+      }
+    },
+    "github.com/holiman/billy": {
+      "after": {
+        "Path": "github.com/holiman/billy",
+        "Sum": "h1:X4egAf/gcS1zATw6wn4Ej8vjuVGxeHdan+bRb2ebyv4=",
+        "Version": "v0.0.0-20240216141850-2abb0c79d3c4"
+      },
+      "before": {
+        "Path": "github.com/holiman/billy",
+        "Sum": null,
+        "Version": "v0.0.0-20240216141850-2abb0c79d3c4"
+      }
+    },
+    "github.com/huandu/go-assert": {
+      "after": {
+        "Path": "github.com/huandu/go-assert",
+        "Sum": "h1:fjemmA7sSfYHJD7CUqs9qTwwfdNAx7/j2/ZlHXzNB3c=",
+        "Version": "v1.1.5"
+      },
+      "before": {
+        "Path": "github.com/huandu/go-assert",
+        "Sum": null,
+        "Version": "v1.1.5"
+      }
+    },
+    "github.com/jhump/protoreflect": {
+      "after": {
+        "Path": "github.com/jhump/protoreflect",
+        "Sum": "h1:qOEr613fac2lOuTgWN4tPAtLL7fUSbuJL5X5XumQh94=",
+        "Version": "v1.17.0"
+      },
+      "before": {
+        "Path": "github.com/jhump/protoreflect",
+        "Sum": null,
+        "Version": "v1.17.0"
+      }
+    },
+    "github.com/linxGnu/grocksdb": {
+      "after": {
+        "Path": "github.com/linxGnu/grocksdb",
+        "Sum": "h1:O3mzvO0wuzQ9mtlHbDrShixyVjVbmuqTjFrzlf43wZ8=",
+        "Version": "v1.9.2"
+      },
+      "before": {
+        "Path": "github.com/linxGnu/grocksdb",
+        "Sum": null,
+        "Version": "v1.9.2"
+      }
+    },
+    "github.com/opencontainers/image-spec": {
+      "after": {
+        "Path": "github.com/opencontainers/image-spec",
+        "Sum": "h1:Ygwkfw9bpDvs+c9E34SdgGOj41dX/cbdlwvlWt0pnFI=",
+        "Version": "v1.1.0-rc5"
+      },
+      "before": {
+        "Path": "github.com/opencontainers/image-spec",
+        "Sum": null,
+        "Version": "v1.1.0-rc5"
+      }
+    },
+    "github.com/opencontainers/runc": {
+      "after": {
+        "Path": "github.com/opencontainers/runc",
+        "Sum": "h1:BOIssBaW1La0/qbNZHXOOa71dZfZEQOzW7dqQf3phss=",
+        "Version": "v1.1.12"
+      },
+      "before": {
+        "Path": "github.com/opencontainers/runc",
+        "Sum": null,
+        "Version": "v1.1.12"
+      }
+    },
+    "github.com/pascaldekloe/goe": {
+      "after": {
+        "Path": "github.com/pascaldekloe/goe",
+        "Sum": "h1:cBOtyMzM9HTpWjXfbbunk26uA6nG3a8n06Wieeh0MwY=",
+        "Version": "v0.1.0"
+      },
+      "before": {
+        "Path": "github.com/pascaldekloe/goe",
+        "Sum": null,
+        "Version": "v0.1.0"
+      }
+    },
+    "github.com/petermattis/goid": {
+      "after": {
+        "Path": "github.com/petermattis/goid",
+        "Sum": "h1:vHpqOnPlnkba8iSxU4j/CvDSS9J4+F4473esQsYLGoE=",
+        "Version": "v0.0.0-20250813065127-a731cc31b4fe"
+      },
+      "before": {
+        "Path": "github.com/petermattis/goid",
+        "Sum": null,
+        "Version": "v0.0.0-20250813065127-a731cc31b4fe"
+      }
+    },
+    "github.com/pion/logging": {
+      "after": {
+        "Path": "github.com/pion/logging",
+        "Sum": "h1:tTew+7cmQ+Mc1pTBLKH2puKsOvhm32dROumOZ655zB8=",
+        "Version": "v0.2.4"
+      },
+      "before": {
+        "Path": "github.com/pion/logging",
+        "Sum": "h1:M9+AIj/+pxNsDfAT64+MAVgJO0rsyLnoJKCqf//DoeY=",
+        "Version": "v0.2.2"
+      }
+    },
+    "github.com/pion/stun/v2": {
+      "after": {
+        "Path": "github.com/pion/stun/v2",
+        "Sum": "h1:A5+wXKLAypxQri59+tmQKVs7+l6mMM+3d+eER9ifRU0=",
+        "Version": "v2.0.0"
+      },
+      "before": {
+        "Path": "./third_party/pion-stun-v2",
+        "Sum": null,
+        "Version": null
+      }
+    },
+    "github.com/sirupsen/logrus": {
+      "after": {
+        "Path": "github.com/sirupsen/logrus",
+        "Sum": "h1:dueUQJ1C2q9oE3F7wvmSGAaVtTmUizReu6fjN8uqzbQ=",
+        "Version": "v1.9.3"
+      },
+      "before": {
+        "Path": "github.com/sirupsen/logrus",
+        "Sum": null,
+        "Version": "v1.9.3"
+      }
+    },
+    "github.com/stretchr/objx": {
+      "after": {
+        "Path": "github.com/stretchr/objx",
+        "Sum": "h1:jmXUvGomnU1o3W/V5h2VEradbpJDwGrzugQQvL0POH4=",
+        "Version": "v0.5.3"
+      },
+      "before": {
+        "Path": "github.com/stretchr/objx",
+        "Sum": null,
+        "Version": "v0.5.2"
+      }
+    },
+    "github.com/stretchr/testify": {
+      "after": {
+        "Path": "github.com/stretchr/testify",
+        "Sum": "h1:EuwCh5fleGS7H32xRwO3wRGT7DxrDhLAT6FF8MpWDWE=",
+        "Version": "v1.12.1"
+      },
+      "before": {
+        "Path": "github.com/stretchr/testify",
+        "Sum": "h1:7s2iGBzp5EwR7/aIZr8ao5+dra3wiQyKjjFuvgVKu7U=",
+        "Version": "v1.11.1"
+      }
+    },
+    "github.com/supranational/blst": {
+      "after": {
+        "Path": "github.com/supranational/blst",
+        "Sum": "h1:xNMoHRJOTwMn63ip6qoWJ2Ymgvj7E2b9jY2FAwY+qRo=",
+        "Version": "v0.3.14"
+      },
+      "before": {
+        "Path": "github.com/supranational/blst",
+        "Sum": null,
+        "Version": "v0.3.14"
+      }
+    },
+    "go.etcd.io/bbolt": {
+      "after": {
+        "Path": "go.etcd.io/bbolt",
+        "Sum": "h1:3yrqQzbRRPFPdOMWS/QQIVxVnzSkAZQYeWlZFv1kbj4=",
+        "Version": "v1.4.0-alpha.1"
+      },
+      "before": {
+        "Path": "go.etcd.io/bbolt",
+        "Sum": null,
+        "Version": "v1.4.0-alpha.1"
+      }
+    },
+    "go.opencensus.io": {
+      "after": {
+        "Path": "go.opencensus.io",
+        "Sum": "h1:y73uSU6J157QMP2kn2r30vwW1A2W2WFwSCGnAVxeaD0=",
+        "Version": "v0.24.0"
+      },
+      "before": {
+        "Path": "go.opencensus.io",
+        "Sum": null,
+        "Version": "v0.24.0"
+      }
+    },
+    "go.opentelemetry.io/otel/exporters/stdout/stdoutmetric": {
+      "after": {
+        "Path": "go.opentelemetry.io/otel/exporters/stdout/stdoutmetric",
+        "Sum": "h1:ZrPRak/kS4xI3AVXy8F7pipuDXmDsrO8Lg+yQjBLjw0=",
+        "Version": "v1.40.0"
+      },
+      "before": {
+        "Path": "go.opentelemetry.io/otel/exporters/stdout/stdoutmetric",
+        "Sum": null,
+        "Version": "v1.40.0"
+      }
+    },
+    "go.uber.org/zap": {
+      "after": {
+        "Path": "go.uber.org/zap",
+        "Sum": "h1:aJMhYGrd5QSmlpLMr2MftRKl7t8J8PTZPA732ud/XR8=",
+        "Version": "v1.27.0"
+      },
+      "before": {
+        "Path": "go.uber.org/zap",
+        "Sum": null,
+        "Version": "v1.27.0"
+      }
+    },
+    "go.yaml.in/yaml/v3": {
+      "after": {
+        "Path": "go.yaml.in/yaml/v3",
+        "Sum": "h1:N6y/pJk8buWs9NY5ERU2HSMfm+IuD/OtfdAnq6kESPw=",
+        "Version": "v3.0.5"
+      },
+      "before": {
+        "Path": "go.yaml.in/yaml/v3",
+        "Sum": "h1:tfq32ie2Jv2UxXFdLJdh3jXuOzWiL1fo0bu/FbuKpbc=",
+        "Version": "v3.0.4"
+      }
+    }
+  },
+  "note": "Local geth source patch identity is bound by its separate UPSTREAM manifest; Go MVS does not version local source trees.",
+  "removed": [],
+  "source_commit": "318aace03f41132c4b6b704a287c05c227d6c26e"
+}

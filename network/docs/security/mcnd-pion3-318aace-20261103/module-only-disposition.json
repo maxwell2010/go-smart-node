@@ -1,0 +1,305 @@
+{
+  "advisories": [
+    {
+      "affected_entries": [
+        {
+          "imports": [
+            {
+              "path": "github.com/cometbft/cometbft/blocksync",
+              "present_in_mcnd_deps": true,
+              "symbols": [
+                "BlockPool.SetPeerRange",
+                "Reactor.Receive"
+              ]
+            }
+          ],
+          "module": "github.com/cometbft/cometbft",
+          "ranges": [
+            {
+              "events": [
+                {
+                  "introduced": "0"
+                },
+                {
+                  "fixed": "0.38.17"
+                }
+              ],
+              "type": "SEMVER"
+            }
+          ]
+        },
+        {
+          "imports": [
+            {
+              "path": "github.com/cometbft/cometbft/internal/blocksync",
+              "present_in_mcnd_deps": false,
+              "symbols": [
+                "BlockPool.SetPeerRange",
+                "Reactor.Receive"
+              ]
+            }
+          ],
+          "module": "github.com/cometbft/cometbft",
+          "ranges": [
+            {
+              "events": [
+                {
+                  "introduced": "0"
+                },
+                {
+                  "fixed": "1.0.1"
+                }
+              ],
+              "type": "SEMVER"
+            }
+          ]
+        }
+      ],
+      "id": "GO-2025-3442",
+      "references": [
+        {
+          "type": "ADVISORY",
+          "url": "https://github.com/cometbft/cometbft/security/advisories/GHSA-22qq-3xwm-r5x4"
+        },
+        {
+          "type": "FIX",
+          "url": "https://github.com/cometbft/cometbft/commit/0ee80cd609c7ae9fe856bdd1c6d38553fdae90ce"
+        },
+        {
+          "type": "FIX",
+          "url": "https://github.com/cometbft/cometbft/commit/2cebfde06ae5073c0b296a9d2ca6ab4b95397ea5"
+        },
+        {
+          "type": "WEB",
+          "url": "https://github.com/cometbft/cometbft/releases/tag/v0.38.17"
+        },
+        {
+          "type": "WEB",
+          "url": "https://github.com/cometbft/cometbft/releases/tag/v1.0.1"
+        }
+      ],
+      "source": "https://pkg.go.dev/vuln/GO-2025-3442",
+      "summary": "CometBFT allows a malicious peer to make node stuck in blocksync in github.com/cometbft/cometbft"
+    },
+    {
+      "affected_entries": [
+        {
+          "imports": [
+            {
+              "path": "github.com/klauspost/compress/s2",
+              "present_in_mcnd_deps": false,
+              "symbols": [
+                "NewDict"
+              ]
+            }
+          ],
+          "module": "github.com/klauspost/compress",
+          "ranges": [
+            {
+              "events": [
+                {
+                  "introduced": "1.16.0"
+                },
+                {
+                  "fixed": "1.18.7"
+                }
+              ],
+              "type": "SEMVER"
+            }
+          ]
+        }
+      ],
+      "id": "GO-2026-5841",
+      "references": [
+        {
+          "type": "ADVISORY",
+          "url": "https://github.com/klauspost/compress/security/advisories/GHSA-259r-337f-4rfw"
+        },
+        {
+          "type": "FIX",
+          "url": "https://github.com/klauspost/compress/commit/8668e357e776d5152ed62f33c17f21b8690664fa"
+        }
+      ],
+      "source": "https://pkg.go.dev/vuln/GO-2026-5841",
+      "summary": "OOB read in github.com/klauspost/compress/s2"
+    },
+    {
+      "affected_entries": [
+        {
+          "imports": [
+            {
+              "path": "golang.org/x/net/html",
+              "present_in_mcnd_deps": false,
+              "symbols": [
+                "Parse",
+                "ParseFragment",
+                "ParseFragmentWithOptions",
+                "ParseWithOptions",
+                "parser.addText",
+                "parser.fosterParent",
+                "parser.parse"
+              ]
+            }
+          ],
+          "module": "golang.org/x/net",
+          "ranges": [
+            {
+              "events": [
+                {
+                  "introduced": "0"
+                },
+                {
+                  "fixed": "0.62.0"
+                }
+              ],
+              "type": "SEMVER"
+            }
+          ]
+        }
+      ],
+      "id": "GO-2026-6860",
+      "references": [
+        {
+          "type": "FIX",
+          "url": "https://go.dev/cl/849365"
+        },
+        {
+          "type": "REPORT",
+          "url": "https://go.dev/issue/82224"
+        },
+        {
+          "type": "WEB",
+          "url": "https://groups.google.com/g/golang-announce/c/sqrs2vTx_Xs"
+        }
+      ],
+      "source": "https://pkg.go.dev/vuln/GO-2026-6860",
+      "summary": "Avoid quadratic complexity when coalescing text nodes in html in golang.org/x/net"
+    },
+    {
+      "affected_entries": [
+        {
+          "imports": [
+            {
+              "path": "golang.org/x/net/html",
+              "present_in_mcnd_deps": false,
+              "symbols": [
+                "Render",
+                "childTextNodesAreLiteral"
+              ]
+            }
+          ],
+          "module": "golang.org/x/net",
+          "ranges": [
+            {
+              "events": [
+                {
+                  "introduced": "0"
+                },
+                {
+                  "fixed": "0.62.0"
+                }
+              ],
+              "type": "SEMVER"
+            }
+          ]
+        }
+      ],
+      "id": "GO-2026-6866",
+      "references": [
+        {
+          "type": "FIX",
+          "url": "https://go.dev/cl/855121"
+        },
+        {
+          "type": "REPORT",
+          "url": "https://go.dev/issue/82622"
+        },
+        {
+          "type": "WEB",
+          "url": "https://groups.google.com/g/golang-announce/c/sqrs2vTx_Xs"
+        }
+      ],
+      "source": "https://pkg.go.dev/vuln/GO-2026-6866",
+      "summary": "Check all ancestor namespace transitions when rendering raw text in html in golang.org/x/net"
+    },
+    {
+      "affected_entries": [
+        {
+          "imports": [
+            {
+              "path": "github.com/cosmos/cosmos-sdk/x/crisis",
+              "present_in_mcnd_deps": false,
+              "symbols": []
+            }
+          ],
+          "module": "github.com/cosmos/cosmos-sdk",
+          "ranges": [
+            {
+              "events": [
+                {
+                  "introduced": "0"
+                }
+              ],
+              "type": "SEMVER"
+            }
+          ]
+        }
+      ],
+      "id": "GO-2023-1821",
+      "references": [
+        {
+          "type": "ADVISORY",
+          "url": "https://github.com/cosmos/cosmos-sdk/security/advisories/GHSA-qfc5-6r3j-jj22"
+        },
+        {
+          "type": "REPORT",
+          "url": "https://github.com/cosmos/cosmos-sdk/issues/15325"
+        },
+        {
+          "type": "REPORT",
+          "url": "https://github.com/cosmos/cosmos-sdk/issues/15706"
+        }
+      ],
+      "source": "https://pkg.go.dev/vuln/GO-2023-1821",
+      "summary": "The x/crisis package does not cause chain halt in github.com/cosmos/cosmos-sdk"
+    },
+    {
+      "affected_entries": [
+        {
+          "imports": [
+            {
+              "path": "github.com/cosmos/cosmos-sdk/x/crisis",
+              "present_in_mcnd_deps": false,
+              "symbols": []
+            }
+          ],
+          "module": "github.com/cosmos/cosmos-sdk",
+          "ranges": [
+            {
+              "events": [
+                {
+                  "introduced": "0"
+                }
+              ],
+              "type": "SEMVER"
+            }
+          ]
+        }
+      ],
+      "id": "GO-2023-1881",
+      "references": [
+        {
+          "type": "ADVISORY",
+          "url": "https://github.com/cosmos/cosmos-sdk/security/advisories/GHSA-w5w5-2882-47pc"
+        },
+        {
+          "type": "REPORT",
+          "url": "https://github.com/cosmos/cosmos-sdk/issues/15706"
+        }
+      ],
+      "source": "https://pkg.go.dev/vuln/GO-2023-1881",
+      "summary": "The x/crisis package does not charge ConstantFee in github.com/cosmos/cosmos-sdk"
+    }
+  ],
+  "scope": "Primary ranges and actual default package imports. Module-only findings are preserved without suppression; absence of an affected package is not a whole-module security certificate."
+}

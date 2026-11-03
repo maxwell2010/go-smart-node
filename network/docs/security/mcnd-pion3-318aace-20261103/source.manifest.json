@@ -1,0 +1,17 @@
+{
+  "argv": [
+    "/opt/mintcandy-tools/vuln190/govulncheck",
+    "-json",
+    "./cmd/mcnd"
+  ],
+  "completed": true,
+  "completed_utc": "2026-11-03T06:51:12.790672+00:00",
+  "raw_bytes": 1140225,
+  "raw_sha256": "be54ee094d17f2e4489249f455236207ce7787fbf2b25288404ea6e595bdf09b",
+  "scanner_exit_code": 0,
+  "schema_version": 1,
+  "scope": "actual default mcnd source snapshot318aace; canonicalSTUNv3.1.7/DTLSv3.1.15; no test entrypoints; full scanner",
+  "source_commit": "318aace03f41132c4b6b704a287c05c227d6c26e",
+  "started_utc": "2026-11-03T06:48:19.897625+00:00",
+  "toolchain": "go version go1.26.10 linux/amd64"
+}
