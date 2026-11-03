@@ -5,12 +5,14 @@ package app
 
 import (
 	"encoding/json"
+	"slices"
 
 	"cosmossdk.io/math"
 	erc20types "github.com/cosmos/evm/x/erc20/types"
 	feemarkettypes "github.com/cosmos/evm/x/feemarket/types"
 	evmtypes "github.com/cosmos/evm/x/vm/types"
 	"github.com/maxwell2010/go-smart-node/network/identity"
+	"github.com/maxwell2010/go-smart-node/network/nativeburn"
 
 	minttypes "github.com/cosmos/cosmos-sdk/x/mint/types"
 )
@@ -32,7 +34,8 @@ func NewEVMGenesisState() *evmtypes.GenesisState {
 	evmGenState := evmtypes.DefaultGenesisState()
 	evmGenState.Params.EvmDenom = identity.BaseDenom
 	evmGenState.Params.ExtendedDenomOptions = &evmtypes.ExtendedDenomOptions{ExtendedDenom: identity.BaseDenom}
-	evmGenState.Params.ActiveStaticPrecompiles = evmtypes.AvailableStaticPrecompiles
+	evmGenState.Params.ActiveStaticPrecompiles = append(append([]string(nil), evmtypes.AvailableStaticPrecompiles...), nativeburn.AddressString)
+	slices.Sort(evmGenState.Params.ActiveStaticPrecompiles)
 	evmGenState.Preinstalls = evmtypes.DefaultPreinstalls
 
 	return evmGenState

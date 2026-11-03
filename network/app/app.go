@@ -10,6 +10,8 @@ import (
 	nativenftkeeper "github.com/maxwell2010/go-smart-node/network/decimal/nft/keeper"
 	nativenft "github.com/maxwell2010/go-smart-node/network/decimal/nft/module"
 	nativenfttypes "github.com/maxwell2010/go-smart-node/network/decimal/nft/types"
+	"github.com/maxwell2010/go-smart-node/network/nativeburn"
+	contracts "github.com/maxwell2010/go-smart-node/network/systemcontracts"
 
 	"encoding/json"
 	"errors"
@@ -322,11 +324,13 @@ func NewApp(
 		authAddr,
 	)
 
+	blockedAddresses := evmconfig.BlockedAddresses()
+	blockedAddresses[sdk.AccAddress(common.HexToAddress(nativeburn.AddressString).Bytes()).String()] = true
 	app.BankKeeper = bankkeeper.NewBaseKeeper(
 		appCodec,
 		runtime.NewKVStoreService(keys[banktypes.StoreKey]),
 		app.AccountKeeper,
-		evmconfig.BlockedAddresses(),
+		blockedAddresses,
 		authAddr,
 		logger,
 	)
@@ -463,6 +467,29 @@ func NewApp(
 	tracer := cast.ToString(appOpts.Get(srvflags.EVMTracer))
 
 	// NOTE: it's required to set up the EVM keeper before the ERC-20 keeper, because it is used in its instantiation.
+	burnABI, err := contracts.CompiledABI("IMintCandyNativeBurn")
+	if err != nil {
+		panic(err)
+	}
+	burnPrecompile, err := nativeburn.NewPrecompile(app.BankKeeper, burnABI)
+	if err != nil {
+		panic(err)
+	}
+	nativePrecompiles := precompiletypes.DefaultStaticPrecompiles(
+		*app.StakingKeeper,
+		app.DistrKeeper,
+		app.BankKeeper,
+		&app.Erc20Keeper,
+		&app.TransferKeeper,
+		app.IBCKeeper.ChannelKeeper,
+		app.GovKeeper,
+		app.SlashingKeeper,
+		appCodec,
+	)
+	if _, exists := nativePrecompiles[burnPrecompile.Address()]; exists {
+		panic("native burn precompile address collides with existing implementation")
+	}
+	nativePrecompiles[burnPrecompile.Address()] = burnPrecompile
 	app.EVMKeeper = evmkeeper.NewKeeper(
 		// TODO: check why this is not adjusted to use the runtime module methods like SDK native keepers
 		appCodec, keys[evmtypes.StoreKey], tkeys[evmtypes.TransientKey], keys,
@@ -476,17 +503,7 @@ func NewApp(
 		evmChainID,
 		tracer,
 	).WithStaticPrecompiles(
-		precompiletypes.DefaultStaticPrecompiles(
-			*app.StakingKeeper,
-			app.DistrKeeper,
-			app.BankKeeper,
-			&app.Erc20Keeper,
-			&app.TransferKeeper,
-			app.IBCKeeper.ChannelKeeper,
-			app.GovKeeper,
-			app.SlashingKeeper,
-			appCodec,
-		),
+		nativePrecompiles,
 	)
 
 	app.Erc20Keeper = erc20keeper.NewKeeper(
