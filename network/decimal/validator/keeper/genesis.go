@@ -53,6 +53,9 @@ func (k *StateKeeper) InitGenesis(ctx sdk.Context, g *types.GenesisState) error 
 			return e
 		}
 	}
+	if e = k.initDelegationIndexes(child, g.Delegations); e != nil {
+		return e
+	}
 	for _, u := range g.Undelegations {
 		if e = k.put(child, composite(undelegationPrefix, u.Delegator, u.Validator), &u); e != nil {
 			return e
@@ -208,37 +211,24 @@ func (k *StateKeeper) ExportGenesis(ctx sdk.Context) (*types.GenesisState, error
 	if e = g.Validate(); e != nil {
 		return nil, fmt.Errorf("invalid native export: %w", e)
 	}
+	if e = k.validateDelegationIndexes(ctx, g.Delegations); e != nil {
+		return nil, e
+	}
 	return g, nil
 }
 
 // SetDelegation persists native totals/holds only. It never transfers reserves
 // or recomputes CRR/NFT voting power; those require native financial execution.
 func (k *StateKeeper) SetDelegation(ctx sdk.Context, d types.Delegation) error {
-	child, commit := ctx.CacheContext()
-	g, e := k.ExportGenesis(child)
-	if e != nil {
-		return e
+	var previous types.Delegation
+	var expected *types.Delegation
+	err := k.read(ctx, delegationKey(d), &previous)
+	if err == nil {
+		expected = &previous
+	} else if !errors.Is(err, ErrNotFound) {
+		return err
 	}
-	found := false
-	key := delegationKey(d)
-	for i, old := range g.Delegations {
-		if bytes.Equal(delegationKey(old), key) {
-			g.Delegations[i] = d
-			found = true
-			break
-		}
-	}
-	if !found {
-		g.Delegations = append(g.Delegations, d)
-	}
-	if e = g.Validate(); e != nil {
-		return e
-	}
-	if e = k.put(child, key, &d); e != nil {
-		return e
-	}
-	commit()
-	return nil
+	return k.ApplyDelegationBatch(ctx, []DelegationChange{{Expected: expected, Next: &d}})
 }
 
 func (k *StateKeeper) SetLastValidatorPowers(ctx sdk.Context, powers []types.LastValidatorPower) error {

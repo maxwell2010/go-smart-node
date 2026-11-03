@@ -18,6 +18,16 @@ headers are a retained runtime cache, omitted from the native genesis schema.
 adding holds twice. It does not transfer assets or calculate custom-coin/NFT
 conversion prices. `SetValidator` accepts validated, already computed native
 integer power. It does not invent SDK staking tokens or delegation shares.
+
+Delegation updates use bounded `ApplyDelegationBatch` compare-and-swap records.
+It checks the exact previous records, validator counts and unique NFT-unit
+indexes, removes old indexes before final-state reassignment, and commits all
+changes in one cache. The hot path uses point reads rather than exporting every
+unrelated position. Genesis/import builds the indexes; export checks both their
+contents and populations. Marker06 and prefixes23/24/25 are a fresh-layout
+change requiring explicit migration for older development stores. These indexes
+cover active delegation records, not the separate pending-custody binding ledger.
+They authorize no financial operation and do not calculate voting power.
 Consensus-key identity is immutable through this ordinary metadata setter.
 
 `ConsensusSet` builds actual Comet validators directly from native consensus
