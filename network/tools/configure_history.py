@@ -6,6 +6,20 @@ PROFILE = {
  "config.toml": {("tx_index","indexer"): '"kv"', ("storage","discard_abci_responses"): 'false'},
 }
 
+def validate_fresh_home(home):
+ for directory in (home/"config", home/"data"):
+  if directory.is_symlink() or not directory.is_dir():raise ValueError("real configuration/data directories required")
+ for path in (home/"data").iterdir():
+  if path.name != "priv_validator_state.json" or path.is_symlink() or not path.is_file():
+   raise ValueError("existing chain data or unexpected artifact: fresh homes only")
+  state=json.loads(path.read_bytes())
+  if not isinstance(state,dict) or set(state)-{"height","round","step","signature","signbytes"}:
+   raise ValueError("unrecognized validator signing state")
+  if state.get("height") != "0" or type(state.get("round")) is not int or state["round"] != 0 or type(state.get("step")) is not int or state["step"] != 0:
+   raise ValueError("validator has existing signing state: fresh homes only")
+  if any(state.get(name) not in (None, "") for name in ("signature","signbytes")):
+   raise ValueError("validator has existing signature: fresh homes only")
+
 def render(text, changes):
  section=None; seen=set(); lines=[]
  for line in text.splitlines():
@@ -23,28 +37,32 @@ def render(text, changes):
 def configure(home, apply=False, role="rpc-ibc"):
  if role not in {"rpc-ibc", "consensus"}:raise ValueError("unknown role")
  home=pathlib.Path(home).resolve(strict=True)
- if (home/"config").is_symlink() or (home/"data").is_symlink():raise ValueError("configuration/data directory symlink rejected")
- # Never edit a running/existing chain database. Init's validator state JSON is harmless.
- if any((home/"data").glob("*.db")) or (home/"data/cs.wal").exists():
-  raise ValueError("existing chain data: stop and review retention manually; this helper only supports fresh homes")
- outputs={}
+ # A zeroed init signing-state file is allowed; unknown data is never guessed safe.
+ validate_fresh_home(home)
+ outputs={};originals={};modes={}
  for name,changes in PROFILE.items():
   path=home/"config"/name
-  if path.is_symlink():raise ValueError("configuration symlink rejected")
+  if path.is_symlink() or not path.is_file():raise ValueError("regular configuration file required")
+  originals[path]=path.read_bytes();modes[path]=path.stat().st_mode & 0o777
   effective=dict(changes)
   if name == "config.toml" and role == "consensus":
    effective[("tx_index","indexer")]='"null"';effective[("storage","discard_abci_responses")]='true'
-  outputs[path]=render(path.read_text(encoding="utf-8"),effective)
+  outputs[path]=render(originals[path].decode("utf-8"),effective)
  if apply:
   for path in outputs:
-   if os.path.lexists(path.with_suffix(path.suffix+".before-history")):raise ValueError("backup already exists; refusing overwrite")
+   for suffix in (".before-history", ".new"):
+    if os.path.lexists(path.with_suffix(path.suffix+suffix)):raise ValueError("backup/staging file already exists; refusing overwrite")
+  validate_fresh_home(home)
+  if any(path.is_symlink() or path.read_bytes()!=originals[path] for path in outputs):raise ValueError("configuration changed during review")
   for path,result in outputs.items():
-   with path.with_suffix(path.suffix+".before-history").open("xb") as backup:backup.write(path.read_bytes())
-   path.with_suffix(path.suffix+".before-history").chmod(path.stat().st_mode & 0o777)
+   with path.with_suffix(path.suffix+".before-history").open("xb") as backup:backup.write(originals[path])
+   path.with_suffix(path.suffix+".before-history").chmod(modes[path])
   for path,result in outputs.items():
    temporary=path.with_suffix(path.suffix+".new")
    with temporary.open("x",encoding="utf-8",newline="\n") as stream:stream.write(result)
-   temporary.chmod(path.stat().st_mode & 0o777)
+   temporary.chmod(modes[path])
+  validate_fresh_home(home)
+  if any(path.is_symlink() or path.read_bytes()!=originals[path] for path in outputs):raise ValueError("configuration changed during staging")
   for path in outputs:
    temporary=path.with_suffix(path.suffix+".new")
    os.replace(temporary,path)
