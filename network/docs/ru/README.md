@@ -47,31 +47,31 @@ go version
 
 ## Быстрая сборка точной development-ревизии
 
-Утверждённого production pin нет. Используйте modern development pin,
-для которого опубликован успешный Linux CI с SDK/source-inventory проверками.
-Не выбирайте `master`, `HEAD`, tag или случайный SHA вместо полного commit.
-Команда ниже - шаблон для утверждённой ревизии, не рекомендация текущей
-финансовой сборки. Нужен commit, содержащий актуальные operator tools.
+Утверждённого production pin нет. Проверенный development snapshot:
+`8cf619da1c77ee5efffc80a678272010fd2263dd`. Он прошёл четыре CI, включая
+[сборку и упаковку](https://github.com/maxwell2010/go-smart-node/actions/runs/41608914841)
+и [candidate-проверки](https://github.com/maxwell2010/go-smart-node/actions/runs/41608914982).
+В него входят SDK/source-inventory/binary-metadata checks, guard нового
+retention-home и исправления version/completion/snapshots CLI.
+[Проверка готового артефакта](evidence/published-cli-8cf619d-20261103/README.md)
+подтверждает конкретные обычные CLI-регрессии, не финансовую активацию.
 
-Промежуточный опубликованный snapshot
-`88ed5365340a6cf22bb757b27a9a9e5eef3dbe28` прошёл
-[Development CI](https://github.com/maxwell2010/go-smart-node/actions/runs/41601774112)
-со сборкой, source inventory, архивом и проверкой retention-конфига.
-Это не stable и не полный финансовый релиз. Свежий guard retention-helper
-из этого документа добавлен позднее: для совместного использования нужен
-следующий pin, включающий этот guard и собственный успешный CI.
-
-Сначала задайте `MCND_REVISION` равным проверенному полному SHA из 40
-строчных hex-символов и экспортируйте переменную. Затем из любого каталога:
+Это не stable и не полноценный финансовый релиз. Более поздние исправления
+не приписываются этому pin: следующей ревизии нужны собственные CI/gates.
+Не заменяйте полный commit на `master`, `HEAD`, tag или случайный SHA.
+После установки зависимостей выполните из любого каталога:
 
 ```sh
-python3 -c 'import os,re,sys; sys.exit(0 if re.fullmatch(r"[0-9a-f]{40}", os.environ.get("MCND_REVISION", "")) else "Сначала экспортируйте утверждённый MCND_REVISION")' && TASK_SRC=$(mktemp -d) && git -C "$TASK_SRC" init -q && git -C "$TASK_SRC" fetch --depth 1 https://github.com/maxwell2010/go-smart-node.git "$MCND_REVISION" && git -C "$TASK_SRC" checkout --detach FETCH_HEAD && test "$(git -C "$TASK_SRC" rev-parse HEAD)" = "$MCND_REVISION" && env -u GOFLAGS -u GOEXPERIMENT -u CGO_CFLAGS -u CGO_CPPFLAGS -u CGO_CXXFLAGS -u CGO_FFLAGS -u CGO_LDFLAGS GOENV=off GOWORK=off GOTOOLCHAIN=local python3 "$TASK_SRC/network/tools/install_mcnd.py" --source "$TASK_SRC" --revision "$MCND_REVISION" --destination "$HOME/.local/bin/mcnd-development-$MCND_REVISION"
+MCND_REVISION=8cf619da1c77ee5efffc80a678272010fd2263dd && export MCND_REVISION && python3 -c 'import os,re,sys; sys.exit(0 if re.fullmatch(r"[0-9a-f]{40}", os.environ.get("MCND_REVISION", "")) else "Нужен утверждённый полный MCND_REVISION")' && TASK_SRC=$(mktemp -d) && git -C "$TASK_SRC" init -q && git -C "$TASK_SRC" fetch --depth 1 https://github.com/maxwell2010/go-smart-node.git "$MCND_REVISION" && git -C "$TASK_SRC" checkout --detach FETCH_HEAD && test "$(git -C "$TASK_SRC" rev-parse HEAD)" = "$MCND_REVISION" && env -u GOFLAGS -u GOEXPERIMENT -u CGO_CFLAGS -u CGO_CPPFLAGS -u CGO_CXXFLAGS -u CGO_FFLAGS -u CGO_LDFLAGS GOENV=off GOWORK=off GOTOOLCHAIN=local python3 "$TASK_SRC/network/tools/install_mcnd.py" --source "$TASK_SRC" --revision "$MCND_REVISION" --destination "$HOME/.local/bin/mcnd-development-$MCND_REVISION"
 ```
 
 SHA идентифицирует исходники, но сам по себе не удостоверяет издателя.
 Проверяйте канал публикации ревизии. Стабильный архив, подписанный genesis
 и каталог пиров новой сети пока не опубликованы. Установщик создаёт только
 новый бинарник; ноду, ключи, genesis, home и systemd он не создаёт.
+CI-архивы имеют ограниченный срок хранения и не заменяют постоянную
+подписанную релизную публикацию. Этот однострочник собирает source pin,
+а не скачивает будущий stable asset.
 
 В уже проверенном чистом checkout можно использовать короткий вариант
 из корня репозитория; `MCND_REVISION` должен совпадать с checkout:
@@ -88,6 +88,9 @@ GOENV и workspace отключаются для этой команды. Это
 до и после сборки. Игнорируемый или untracked production input недопустим.
 Это проверка состава исходников; она не является подписью издателя,
 полной аттестацией toolchain, SBOM или доказательством финансовой корректности.
+Go metadata этой trimpath-сборки не содержит `-ldflags`: VERIFIED_BUILD
+проверяет записанные поля и module identities, но не доказывает полный
+набор linker inputs или побайтную воспроизводимость.
 
 Упаковщик дополнительно сравнивает метаданные самого ELF-бинарника с этой
 политикой: версию Go, основной пакет, архитектуру, CGO, `trimpath`, отсутствие

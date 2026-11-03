@@ -1,0 +1,51 @@
+{
+  "files": {
+    ".gitattributes": {
+      "bytes": 9,
+      "sha256": "48747480eddba024928d03be9bf83dc579e5515768647507a767e8187a85c9ab"
+    },
+    "BUILD_INFO.txt.gz": {
+      "bytes": 12447,
+      "sha256": "f2a92755c40c61a3e13bd49a9dc871c1a00349301955a466affb92633ec02cd5"
+    },
+    "README.md": {
+      "bytes": 2823,
+      "sha256": "4bf0cdfa0c31bb7752a348a23d16d3b4953ad78b9398ee8f6b12ad711f286b9f"
+    },
+    "SOURCE_INPUTS.json.gz": {
+      "bytes": 88672,
+      "sha256": "48b38e69866f377c9eb9f8e614e17807ce67b05165e0d095e0354f1ed894d814"
+    },
+    "VERIFIED_BUILD.json.gz": {
+      "bytes": 13972,
+      "sha256": "45fbb806ddf9de3858702d2f60ea0b65d73cb263ae8c104aad8419eb08dc6c27"
+    },
+    "ci-artifact-acceptance.log": {
+      "bytes": 699,
+      "sha256": "4e08cc46db907e7a93b7dd67cfe99357580b2355130ef47d46417a0316335270"
+    },
+    "cli-regression.json": {
+      "bytes": 941,
+      "sha256": "8926f1bbc9bebf439892ce1742478825248922b4d1d777cef2ee2cc024a3826f"
+    },
+    "cli_regression.py": {
+      "bytes": 2349,
+      "sha256": "8e1115322137575e6e6929f729492e7c880507650f7755ce9923b5e5da72642b"
+    },
+    "github-artifact-metadata.json": {
+      "bytes": 907,
+      "sha256": "728ade9b23db3c932b5cbdb0a8e314faaea55cda894126f2666749ab83afa4b7"
+    },
+    "mcnd-development-linux-amd64.tar.gz.sha256": {
+      "bytes": 102,
+      "sha256": "c0e84ee1bc27ef2026f61c4c0359886dd427eafedd64c9b541d58f8bf498c854"
+    },
+    "summary.json": {
+      "bytes": 510,
+      "sha256": "cfed842de5ef3b7cc1d9b63d368205b3487c5a6c48139499131c4a676ef11cd9"
+    }
+  },
+  "scope": "Published existing CI binary +archive/default metadata +ordinary CLI checks only, no new build/runtime activation or financial/snapshot restore claim",
+  "sourceCommit": "8cf619da1c77ee5efffc80a678272010fd2263dd",
+  "testMethodCommit": "da4506d7e6a418e837ea09d8227958a29c8568dc"
+}

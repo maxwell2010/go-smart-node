@@ -1,0 +1,32 @@
+{
+  "binarySha256": "d70f04927738a5a7459fb5607ed8b28daafef260f8ca6773eeece817456fb099",
+  "checks": {
+    "completionNewHome": {
+      "exitCode": 0,
+      "homeCreated": false,
+      "outputBytes": 852630
+    },
+    "completionUnrelatedFixture": {
+      "exitCode": 0,
+      "fixtureUnchanged": true,
+      "noOtherFilesCreated": true
+    },
+    "snapshotsMissingDomain": {
+      "exitCode": 1,
+      "homeCreated": false,
+      "rejectedBeforeSnapshotStore": true
+    },
+    "versionNewHome": {
+      "exitCode": 0,
+      "homeCreated": false,
+      "outputBytes": 10843
+    },
+    "versionUnrelatedFixture": {
+      "exitCode": 0,
+      "fixtureUnchanged": true,
+      "noOtherFilesCreated": true
+    }
+  },
+  "scope": "Published binary ordinary informational/missing-domain CLI regression only; no node start, RPC, transactions, snapshots mutation or financial activation",
+  "sourceCommit": "8cf619da1c77ee5efffc80a678272010fd2263dd"
+}

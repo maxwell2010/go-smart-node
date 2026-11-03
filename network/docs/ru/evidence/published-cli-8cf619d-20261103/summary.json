@@ -1,0 +1,11 @@
+{
+  "artifactID": 13218266382,
+  "binarySha256": "d70f04927738a5a7459fb5607ed8b28daafef260f8ca6773eeece817456fb099",
+  "linkedDependencyIdentities": 247,
+  "localPackages": 366,
+  "runID": 41608914841,
+  "scope": "Published existing CI binary +archive/default metadata +ordinary CLI checks only, no new build/runtime activation or financial/snapshot restore claim",
+  "sourceCommit": "8cf619da1c77ee5efffc80a678272010fd2263dd",
+  "sourceInputFiles": 1890,
+  "verifiedBuildEqualsParsedArchivedMetadata": true
+}
