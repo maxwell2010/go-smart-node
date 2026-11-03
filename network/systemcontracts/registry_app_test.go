@@ -832,6 +832,7 @@ func TestOwnedAppSignedRegistryBootstrap(t *testing.T) {
 			meta := nftMeta{Creator: creator, Symbol: "FRESH", Name: "Fresh collection", ContractURI: "ipfs://collection", Refundable: true, Burnable: true}
 			center := roles["nft-center"]
 			factory := roleABI["nft-center"]
+			receiptAuth := &signedNFTAuthenticator{App: a, Registry: govRegistry, RegistryImplementation: registryImpl, Factory: center, FactoryImplementation: implementations["nft-center"], Owner: govOwner, Proxy: proxy, RegistryABI: registry, FactoryABI: factory, Collections: make(map[common.Address]signedNFTCollection)}
 			// Both independent fresh profiles now create collections through the canonical ABI.
 			originalCenter := read("getContractAddress", "nft-center")
 			originalABI := load("DecimalNFTCenter")
@@ -871,6 +872,7 @@ func TestOwnedAppSignedRegistryBootstrap(t *testing.T) {
 				expectedProxy, err := contracts.PauseAwareProxyRuntime(beacon, center, family)
 				require.NoError(t, err)
 				require.Equal(t, expectedProxy, a.EVMKeeper.GetCode(ctx(), a.EVMKeeper.GetCodeHash(ctx(), collection)), "NFT proxy code must derive from known constructor values")
+				receiptAuth.Collections[collection] = signedNFTCollection{Beacon: beacon, Implementation: tokenImpls[kind.artifact], Artifact: asset, Family: family}
 
 				huge := new(big.Int).Lsh(big.NewInt(1), 200)
 				reserve := big.NewInt(2_000_000_000_000_000_000)
@@ -894,7 +896,8 @@ func TestOwnedAppSignedRegistryBootstrap(t *testing.T) {
 					}
 				}
 				require.NoError(t, err)
-				send(keys[0], &collection, value, mint, true)
+				mintedReceipt := send(keys[0], &collection, value, mint, true)
+				receiptAuth.checkMintAdmissionClosed(t, ctx(), mintedReceipt)
 				if kind.typ == 0 {
 					require.Equal(t, creator, query(asset, collection, "ownerOf", big.NewInt(1))[0])
 				} else {
@@ -1040,13 +1043,20 @@ func TestOwnedAppSignedRegistryBootstrap(t *testing.T) {
 				} else if asset.family == 2 || asset.family == 4 {
 					transfer, err := asset.artifact.ABI.Pack("transferFrom", creator, recipient, big.NewInt(1))
 					require.NoError(t, err)
-					send(keys[0], &asset.address, new(big.Int), transfer, true)
+					transferred := send(keys[0], &asset.address, new(big.Int), transfer, true)
+					receiptAuth.checkTransfer(t, ctx(), transferred, asset.address, creator, recipient, big.NewInt(1))
 					require.Equal(t, recipient, query(asset.artifact, asset.address, "ownerOf", big.NewInt(1))[0])
 				} else {
 					transfer, err := asset.artifact.ABI.Pack("safeTransferFrom", creator, recipient, asset.id, big.NewInt(1), []byte{})
 					require.NoError(t, err)
-					send(keys[0], &asset.address, new(big.Int), transfer, true)
+					transferred := send(keys[0], &asset.address, new(big.Int), transfer, true)
+					receiptAuth.checkTransfer(t, ctx(), transferred, asset.address, creator, recipient, asset.id)
 					require.Equal(t, int64(1), query(asset.artifact, asset.address, "balanceOf", recipient, asset.id)[0].(*big.Int).Int64())
+					batch, err := asset.artifact.ABI.Pack("safeBatchTransferFrom", creator, recipient, []*big.Int{asset.id}, []*big.Int{big.NewInt(1)}, []byte{})
+					require.NoError(t, err)
+					batchReceipt := send(keys[0], &asset.address, new(big.Int), batch, true)
+					receiptAuth.checkTransfer(t, ctx(), batchReceipt, asset.address, creator, recipient, asset.id)
+					require.Equal(t, int64(2), query(asset.artifact, asset.address, "balanceOf", recipient, asset.id)[0].(*big.Int).Int64())
 				}
 			}
 
