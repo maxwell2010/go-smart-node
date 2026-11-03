@@ -59,17 +59,30 @@ go version -m "$work/ibcreference" > "$output/reference-build.log"
 mcnd_sha="$(sha256sum "$work/mcnd" | awk '{print $1}')"
 reference_sha="$(sha256sum "$work/ibcreference" | awk '{print $1}')"
 "$work/mcnd" version --long --output json > "$output/mcnd-version.json"
-"$python" - "$output" "$revision" "$mcnd_sha" "$reference_sha" <<'PY'
+"$python" - "$output" "$revision" "$mcnd_sha" "$reference_sha" "$root" <<'PY'
 import json,sys
 from pathlib import Path
 out=Path(sys.argv[1]);revision=sys.argv[2]
-for name in ('mcnd','reference'):
-    metadata=(out/(name+'-build.log')).read_text()
-    assert 'vcs.revision='+revision in metadata, name+' lacks the expected embedded source revision'
-    assert 'vcs.modified=false' in metadata, name+' was built from modified sources'
-assert json.loads((out/'mcnd-version.json').read_text())['commit']==revision
+root=Path(sys.argv[5]);sys.path.insert(0,str(root/'network/tools'))
+from binary_provenance import parse_build_info,verify_binary_build
 with (out/'manifest.json').open('x') as stream:
     json.dump(dict(sourceCommit=revision,mcndSHA256=sys.argv[3],referenceSHA256=sys.argv[4],
+        provenanceVerified=False),stream,indent=2)
+for name in ('mcnd','reference'):
+    metadata=(out/(name+'-build.log')).read_text()
+    parsed=parse_build_info(metadata)
+    assert parsed['goVersion']=='go1.26.10', name+' toolchain mismatch'
+    assert parsed['settings']['vcs.revision']==revision, name+' embedded source revision mismatch'
+    assert parsed['settings']['vcs.modified']=='false', name+' modified sources'
+    if name=='mcnd':
+        verified=verify_binary_build(metadata,root,revision,'go1.26.10')
+        (out/'mcnd-metadata-verified.json').write_text(json.dumps(verified,indent=2)+'\n')
+    else:
+        assert parsed['path']=='github.com/maxwell2010/go-smart-node/network/internal/ibcreference'
+assert json.loads((out/'mcnd-version.json').read_text())['commit']==revision
+with (out/'manifest.json').open('w') as stream:
+    json.dump(dict(sourceCommit=revision,mcndSHA256=sys.argv[3],referenceSHA256=sys.argv[4],
+        provenanceVerified=True,
         scope='Default production builds; both source inventories checked before/after; Go VCS metadata checked'),stream,indent=2)
 PY
 curl --fail --location --proto '=https' --tlsv1.2 --retry 3 \
