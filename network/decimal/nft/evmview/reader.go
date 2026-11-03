@@ -30,10 +30,21 @@ type Metadata interface {
 	GetCollectionByDRC(sdk.Context, string) (types.Collection, error)
 }
 
+// ProtocolProfile selects one explicitly reviewed implementation family.
+type ProtocolProfile uint8
+
+const (
+	ProfileSharedReference ProtocolProfile = iota
+	ProfileIsolatedPositionsV1
+)
+
 // Config is an explicit current-release manifest. All expected code derives from
 // compiler artifacts and these known constructor/link inputs, never observed code.
 // A different implementation family requires an independently reviewed release.
 type Config struct {
+	Protocol          ProtocolProfile
+	PositionVault     common.Address
+	WrappedDEL        common.Address
 	ChainID           string
 	EVMChainID        uint64
 	Registry          common.Address
@@ -52,6 +63,7 @@ type Reader struct {
 	config                               Config
 	owner                                common.Address
 	registry, factory, delegation, proxy contracts.Artifact
+	vault                                contracts.Artifact
 	children                             map[uint8]contracts.Artifact
 	libraryRuntime                       []byte
 }
@@ -78,8 +90,18 @@ func New(metadata Metadata, evm *evmkeeper.Keeper, config Config) (*Reader, erro
 	if err := types.ValidateExternalDomain(config.ChainID, config.EVMChainID); err != nil {
 		return nil, err
 	}
+	if config.Protocol != ProfileSharedReference && config.Protocol != ProfileIsolatedPositionsV1 {
+		return nil, errors.New("unknown NFT protocol profile")
+	}
+	if config.Protocol == ProfileSharedReference && (config.PositionVault != (common.Address{}) || config.WrappedDEL != (common.Address{})) {
+		return nil, errors.New("shared reference profile cannot carry isolated role bindings")
+	}
+	addresses := []common.Address{config.Registry, config.NFTCenter, config.Delegation, config.DelegationLibrary}
+	if config.Protocol == ProfileIsolatedPositionsV1 {
+		addresses = append(addresses, config.PositionVault, config.WrappedDEL)
+	}
 	seen := make(map[common.Address]bool)
-	for _, address := range []common.Address{config.Registry, config.NFTCenter, config.Delegation, config.DelegationLibrary} {
+	for _, address := range addresses {
 		if address == (common.Address{}) || seen[address] {
 			return nil, errors.New("NFT view requires distinct explicit system and library addresses")
 		}
@@ -99,14 +121,25 @@ func New(metadata Metadata, evm *evmkeeper.Keeper, config Config) (*Reader, erro
 	if r.proxy, err = contracts.Load("DecimalContractCenterProxy"); err != nil {
 		return nil, err
 	}
-	if r.delegation, err = contracts.LoadLinked("MintCandyDelegation", map[string]common.Address{"owned/DecimalDelegation.sol:DelegationNFTLib": config.DelegationLibrary}); err != nil {
+	delegationName := "MintCandyDelegation"
+	if config.Protocol == ProfileIsolatedPositionsV1 {
+		delegationName = "MintCandyIsolatedDelegation"
+		if r.vault, err = contracts.Load("MintCandyNFTPositionVault"); err != nil {
+			return nil, err
+		}
+	}
+	if r.delegation, err = contracts.LoadLinked(delegationName, map[string]common.Address{"owned/DecimalDelegation.sol:DelegationNFTLib": config.DelegationLibrary}); err != nil {
 		return nil, err
 	}
 	r.libraryRuntime, err = contracts.ExpectedRuntime("MintCandyDelegationNFTLib", nil, map[string]common.Hash{"owned/DecimalDelegation.sol:DelegationNFTLib.library_deploy_address": common.BytesToHash(config.DelegationLibrary.Bytes())})
 	if err != nil {
 		return nil, err
 	}
-	for family, name := range map[uint8]string{2: "NewNetworkDRC721", 3: "NewNetworkDRC1155", 4: "DRC721Reserveless", 5: "DRC1155Reserveless"} {
+	families := map[uint8]string{2: "NewNetworkDRC721", 3: "NewNetworkDRC1155", 4: "DRC721Reserveless", 5: "DRC1155Reserveless"}
+	if config.Protocol == ProfileIsolatedPositionsV1 {
+		families[3] = "MintCandyIsolatedDRC1155"
+	}
+	for family, name := range families {
 		artifact, err := contracts.Load(name)
 		if err != nil {
 			return nil, err
@@ -277,39 +310,30 @@ func (r *Reader) authenticate(ctx sdk.Context, target common.Address) (receipts.
 		family = 4 + kind
 	}
 	asset := r.children[family]
-	for _, binding := range []struct {
-		target   common.Address
-		artifact contracts.Artifact
-	}{{r.config.Registry, r.registry}, {r.config.NFTCenter, r.factory}, {r.config.Delegation, r.delegation}} {
-		if err := r.system(ctx, binding.target, binding.artifact); err != nil {
-			return empty, false, err
-		}
-	}
-	if err := r.code(ctx, r.config.DelegationLibrary, r.libraryRuntime); err != nil {
+	if err := r.systems(ctx); err != nil {
 		return empty, false, err
 	}
-	for _, binding := range []struct {
-		label    string
-		expected common.Address
-	}{{"nft-center", r.config.NFTCenter}, {"delegation", r.config.Delegation}, {"delegation-nft", r.config.Delegation}} {
-		actual, err := r.address(ctx, r.config.Registry, r.registry.ABI, "getContractAddress", binding.label)
-		if err != nil {
+	if r.config.Protocol == ProfileIsolatedPositionsV1 && target == r.config.PositionVault {
+		if kind != 0 || collection.ReserveLess {
+			return empty, false, errors.New("isolated vault must be one backed ERC721 collection")
+		}
+		if err := r.authenticateVault(ctx); err != nil {
 			return empty, false, err
 		}
-		if actual != binding.expected {
-			return empty, false, errors.New("NFT registry routing differs from approved unified profile")
-		}
+		return receipts.CollectionProfile{ChainID: r.config.ChainID, EVMChainID: r.config.EVMChainID, Contract: target, Factory: r.config.NFTCenter, NFTType: types.NftType_NFT721, ProxyCodeHash: crypto.Keccak256Hash(r.proxy.Runtime), ImplementationCodeHash: crypto.Keccak256Hash(r.vault.Runtime), Escrows: []common.Address{r.config.Delegation}}, true, nil
 	}
-	center, err := r.address(ctx, r.config.NFTCenter, r.factory.ABI, "getContractCenter")
+	expectedProxy, err := r.checkChild(ctx, target, kind, !collection.ReserveLess, family)
 	if err != nil {
 		return empty, false, err
 	}
-	if center != r.config.Registry {
-		return empty, false, errors.New("NFT factory registry binding differs")
-	}
+	return receipts.CollectionProfile{ChainID: r.config.ChainID, EVMChainID: r.config.EVMChainID, Contract: target, Factory: r.config.NFTCenter, NFTType: collection.TypeNft, ReserveLess: collection.ReserveLess, ProxyCodeHash: crypto.Keccak256Hash(expectedProxy), ImplementationCodeHash: crypto.Keccak256Hash(asset.Runtime), Escrows: []common.Address{r.config.Delegation}}, true, nil
+}
+
+func (r *Reader) checkChild(ctx sdk.Context, target common.Address, kind uint8, withReserve bool, family uint8) ([]byte, error) {
+	asset := r.children[family]
 	state, err := r.read(ctx, r.config.NFTCenter, r.factory.ABI, "getNFTState", 96, target)
 	if err != nil {
-		return empty, false, err
+		return nil, err
 	}
 	type nftState struct {
 		Active      bool
@@ -317,38 +341,73 @@ func (r *Reader) authenticate(ctx sdk.Context, target common.Address) (receipts.
 		WithReserve bool
 	}
 	if len(state) != 1 {
-		return empty, false, errors.New("invalid NFT factory collection state")
+		return nil, errors.New("invalid NFT factory collection state")
 	}
 	registered := abi.ConvertType(state[0], new(nftState)).(*nftState)
-	if !registered.Active || registered.NftType != kind || registered.WithReserve == collection.ReserveLess {
-		return empty, false, errors.New("NFT collection is not active in approved factory family")
+	if !registered.Active || registered.NftType != kind || registered.WithReserve != withReserve {
+		return nil, errors.New("NFT collection is not active in approved factory family")
 	}
 	implementation, err := r.address(ctx, r.config.NFTCenter, r.factory.ABI, "readImplementation", family)
 	if err != nil {
-		return empty, false, err
+		return nil, err
 	}
 	if err := r.code(ctx, implementation, asset.Runtime); err != nil {
-		return empty, false, err
+		return nil, err
 	}
-	beacon, err := r.address(ctx, r.config.NFTCenter, r.factory.ABI, "beacon", kind, !collection.ReserveLess)
+	beacon, err := r.address(ctx, r.config.NFTCenter, r.factory.ABI, "beacon", kind, withReserve)
 	if err != nil {
-		return empty, false, err
+		return nil, err
 	}
-	expectedBeacon, err := contracts.NFTBeaconRuntime(r.config.NFTCenter, kind, !collection.ReserveLess)
+	expectedBeacon, err := contracts.NFTBeaconRuntime(r.config.NFTCenter, kind, withReserve)
 	if err != nil {
-		return empty, false, err
+		return nil, err
 	}
 	if err := r.code(ctx, beacon, expectedBeacon); err != nil {
-		return empty, false, err
+		return nil, err
 	}
 	expectedProxy, err := contracts.PauseAwareProxyRuntime(beacon, r.config.NFTCenter, family)
 	if err != nil {
-		return empty, false, err
+		return nil, err
 	}
 	if err := r.code(ctx, target, expectedProxy); err != nil {
-		return empty, false, err
+		return nil, err
 	}
-	return receipts.CollectionProfile{ChainID: r.config.ChainID, EVMChainID: r.config.EVMChainID, Contract: target, Factory: r.config.NFTCenter, NFTType: collection.TypeNft, ReserveLess: collection.ReserveLess, ProxyCodeHash: crypto.Keccak256Hash(expectedProxy), ImplementationCodeHash: crypto.Keccak256Hash(asset.Runtime), Escrows: []common.Address{r.config.Delegation}}, true, nil
+	return expectedProxy, nil
+}
+
+func (r *Reader) systems(ctx sdk.Context) error {
+	for _, binding := range []struct {
+		target   common.Address
+		artifact contracts.Artifact
+	}{{r.config.Registry, r.registry}, {r.config.NFTCenter, r.factory}, {r.config.Delegation, r.delegation}} {
+		if err := r.system(ctx, binding.target, binding.artifact); err != nil {
+			return err
+		}
+	}
+	if err := r.code(ctx, r.config.DelegationLibrary, r.libraryRuntime); err != nil {
+		return err
+	}
+	for _, binding := range []struct {
+		label    string
+		expected common.Address
+	}{{"nft-center", r.config.NFTCenter}, {"delegation", r.config.Delegation}, {"delegation-nft", r.config.Delegation}} {
+		actual, err := r.address(ctx, r.config.Registry, r.registry.ABI, "getContractAddress", binding.label)
+		if err != nil {
+			return err
+		}
+		if actual != binding.expected {
+			return errors.New("NFT registry routing differs from approved unified profile")
+		}
+	}
+	center, err := r.address(ctx, r.config.NFTCenter, r.factory.ABI, "getContractCenter")
+	if err != nil {
+		return err
+	}
+	if center != r.config.Registry {
+		return errors.New("NFT factory registry binding differs")
+	}
+
+	return nil
 }
 
 func (r *Reader) Ownership(ctx sdk.Context, expected receipts.CollectionProfile, key receipts.AssetKey, owners []common.Address) (values map[common.Address]uint32, err error) {
