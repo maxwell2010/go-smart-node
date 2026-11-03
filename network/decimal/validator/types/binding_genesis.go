@@ -13,7 +13,7 @@ import (
 // NFT ownership. Production controller attestation remains mandatory.
 func (g GenesisState) ValidateEVMReferences() error {
 	if g.BindingDomain == nil {
-		if len(g.EVMStakeBindings) != 0 || len(g.EVMFrozenBindings) != 0 || g.BindingRevision != 0 {
+		if len(g.EVMStakeBindings) != 0 || len(g.EVMFrozenBindings) != 0 || len(g.EVMValidatorHeaders) != 0 || g.BindingRevision != 0 {
 			return errors.New("EVM binding records require a source domain")
 		}
 		return nil
@@ -113,6 +113,9 @@ func (g GenesisState) ValidateEVMReferences() error {
 				return err
 			}
 		}
+	}
+	if err := g.ValidateEVMValidatorHeaders(); err != nil {
+		return err
 	}
 	return g.ValidateEVMNativeCoverage()
 }

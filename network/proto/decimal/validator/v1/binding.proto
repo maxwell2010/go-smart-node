@@ -107,3 +107,18 @@ message EVMFrozenBinding {
   int64 created_height = 17;
   int64 updated_height = 18;
 }
+
+// Authenticated MasterValidator lifecycle header, not a monetary ledger.
+// Source status follows the pinned contract: Deleted=0, Candidate=1, Approved=2.
+message EVMValidatorHeader {
+  bytes master = 1;
+  bytes validator = 2;
+  string native_operator = 3;
+  uint32 status = 4;
+  bool paused = 5;
+  bytes penalty_count = 6;
+  bytes last_meta_hash = 7;
+  int64 created_height = 8;
+  int64 updated_height = 9;
+  int64 last_meta_height = 10;
+}

@@ -40,6 +40,7 @@ message GenesisState {
   repeated EVMStakeBinding evm_stake_bindings = 12 [(gogoproto.customname)="EVMStakeBindings",(gogoproto.nullable)=false];
   repeated EVMFrozenBinding evm_frozen_bindings = 13 [(gogoproto.customname)="EVMFrozenBindings",(gogoproto.nullable)=false];
   uint64 binding_revision = 14;
+  repeated EVMValidatorHeader evm_validator_headers = 15 [(gogoproto.customname)="EVMValidatorHeaders", (gogoproto.nullable)=false];
 }
 
 // ValidatorOfflineSince stores when a validator went offline for auto-unbond tracking.

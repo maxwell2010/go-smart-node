@@ -26,7 +26,7 @@ func (k *StateKeeper) prepareEVMGenesis(ctx sdk.Context, input *types.GenesisSta
 		return nil, err
 	}
 	if k.bindingDomain == nil {
-		if g.BindingDomain != nil || len(g.EVMStakeBindings) != 0 || len(g.EVMFrozenBindings) != 0 || g.BindingRevision != 0 {
+		if g.BindingDomain != nil || len(g.EVMStakeBindings) != 0 || len(g.EVMFrozenBindings) != 0 || len(g.EVMValidatorHeaders) != 0 || g.BindingRevision != 0 {
 			return nil, ErrBindingDomain
 		}
 		return g, nil
@@ -106,7 +106,10 @@ func (k *StateKeeper) initEVMGenesis(ctx sdk.Context, g *types.GenesisState) err
 	}
 	var revision [8]byte
 	binary.BigEndian.PutUint64(revision[:], g.BindingRevision)
-	return state.Set([]byte{bindingRevisionKey}, revision[:])
+	if err = state.Set([]byte{bindingRevisionKey}, revision[:]); err != nil {
+		return err
+	}
+	return k.initValidatorHeaders(ctx, g)
 }
 func (k *StateKeeper) checkEVMExportDomain(ctx sdk.Context) error {
 	if k.bindingDomain != nil {
@@ -120,7 +123,7 @@ func (k *StateKeeper) checkEVMExportDomain(ctx sdk.Context) error {
 		return ErrBindingDomain
 	}
 	found := false
-	for _, prefix := range []byte{bindingRevisionKey, stakeBindingPrefix, frozenBindingPrefix, custodyUnitBindingPrefix, custodyAssetBindingPrefix, nativeQueueBindingPrefix, activePenaltyBindingPrefix} {
+	for _, prefix := range []byte{bindingRevisionKey, stakeBindingPrefix, frozenBindingPrefix, custodyUnitBindingPrefix, custodyAssetBindingPrefix, nativeQueueBindingPrefix, activePenaltyBindingPrefix, validatorHeaderMasterKey, validatorHeaderPrefix, validatorHeaderOperatorPrefix, validatorHeaderEligiblePrefix} {
 		if err := k.scan(ctx, prefix, func(_, _ []byte) error { found = true; return nil }); err != nil {
 			return err
 		}
@@ -192,5 +195,5 @@ func (k *StateKeeper) exportEVMGenesis(ctx sdk.Context, g *types.GenesisState) e
 	if actual != len(expected) {
 		return errors.New("incomplete native binding reverse indexes")
 	}
-	return nil
+	return k.exportValidatorHeaders(ctx, g)
 }
