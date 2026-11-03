@@ -187,3 +187,59 @@ routing alias. Authority admits only the canonical `delegation` administration
 slot; the NFT alias is not a duplicate administrator/ledger. Arbitrary duplicate
 authority targets remain rejected. The alias fixes authentication routing without
 changing the canonical NFT guard or claiming completed native financial parity.
+
+
+## Fresh pause-aware child proxies
+
+Canonical factory implementation getters return zero while paused, which also
+blocks balance/supply/reserve reads through canonical beacon proxies. The fresh
+profile retains those canonical getters and financial pause behavior, while
+its NEW readable child proxies permit only the exact view/pure selectors from
+the pinned compiler ABI. They resolve the current implementation through the
+explicit `readImplementation(uint8 family)` getter when the factory is paused.
+No stored supply cache, fabricated pause state or arbitrary method forwarding
+is used. Family0/1 means reserve/reserveless ERC20;2/3 means reserve721/1155;
+4/5 means reserveless721/1155.
+
+Raw canonical sources remain under `sources/`. The owned source copies and
+`pause-source-patches.json` declare every transformation and original/owned
+hash. Creation/predict helpers become virtual solely to select the fresh child
+proxy. The builder reconstructs the owned bytes and rejects undeclared changes.
+Canonical child/reference artifacts remain distinct from NEW reserve NFT
+implementations. The NEW factories preserve ordinary mint/transfer behavior;
+while paused, financial selectors and native donations through NFT receive
+are rejected, while ordinary metadata reads remain live. Unpause restores
+financial operations. The canonical binding profile must still reject zero
+implementation; only the explicit fresh profile uses the reviewed raw getter.
+
+Compiler immutable references and AST variable identities are recorded in the
+artifacts. `PauseAwareProxyRuntime`, `NFTBeaconRuntime`,
+`ReservelessTokenBeaconRuntime` and generic `ExpectedRuntime` build expected
+runtime bytes from known constructor inputs. Actual chain code is compared
+against that independent template; an observed hash is never its own approval.
+The compiler-defined library deployment-address reference is also supported.
+
+## Explicit native destruction
+
+The user-selected fresh policy destroys real native DEL bank supply rather
+than transferring reserves to the zero address. NEW reserve NFT implementations
+replace penalty and nonrefundable native destruction with zero-value
+`nativeBurn(uint256)` calls to the reserved0900 precompile and require an exact
+acknowledged bool response. No-code or failed backends revert all reserve and
+ownership changes. ERC20 reserve destruction remains the token's explicit burn
+path; the NEW WDEL public `burn(uint256)` invokes the same native primitive.
+Token-creation commission policy is separate and unchanged.
+
+Ordinary signed controls check paused reads/financial rejection/recovery,
+constructor-derived runtime templates and missing-backend rollback. Where the
+application registers the active native primitive, the NFT destruction control
+also reconciles independent bank supply with block mint/burn events and checks
+the native burn receipt and account balances. The test reports which backend
+profile actually ran. The standalone native primitive and complete application
+integration have their own required positive tests; a missing-backend control
+is not proof of those gates. Runtime monetary penalty corrections and full
+native NFT reconciliation remain separate review gates.
+
+`NativeBurnTestTarget` contains only ordinary funding, holder-burn and outer
+financial rollback controls. Deferred security execution-mode scenarios are
+not executed, are not included in that fixture, and are not claimed verified.

@@ -1,0 +1,80 @@
+{
+  "abi": [
+    {
+      "anonymous": false,
+      "inputs": [
+        {
+          "indexed": true,
+          "internalType": "address",
+          "name": "account",
+          "type": "address"
+        },
+        {
+          "indexed": false,
+          "internalType": "uint256",
+          "name": "amount",
+          "type": "uint256"
+        }
+      ],
+      "name": "NativeBurn",
+      "type": "event"
+    },
+    {
+      "inputs": [
+        {
+          "internalType": "uint256",
+          "name": "amount",
+          "type": "uint256"
+        }
+      ],
+      "name": "nativeBurn",
+      "outputs": [
+        {
+          "internalType": "bool",
+          "name": "",
+          "type": "bool"
+        }
+      ],
+      "stateMutability": "nonpayable",
+      "type": "function"
+    }
+  ],
+  "bootstrapSourceSha256": "9f01344149e50afd35a98fd7dad231c3f983603f57acd4d4f1d1433c85065ed0",
+  "compilerSha256": "0479d44fdf9c501c25337fdc540419f1593b884a87b47f023da4f1c700fda782",
+  "compilerVersion": "0.8.20+commit.a1b79de6.Linux.g++",
+  "contractKind": "interface",
+  "contractName": "IMintCandyNativeBurn",
+  "creationBytecode": "",
+  "creationLinks": {},
+  "freshFactorySourcesSha256": {
+    "NativeBurnTestTarget.sol": "6ec0df3642180ac05e3a739d892973a1ac0afbad33a1d113b16ba6d3dfb46e7b",
+    "NewNetworkNFTCenter.sol": "6f606ba0615696a159cf8ad4124b12152caed231893cb03c870b69ecc0a0d0c1",
+    "NewNetworkPausedViews.sol": "b653cce92897a8b3a02d4f781da79ff5145284f4fe99c5ebd68240cc8fdbe92f",
+    "NewNetworkReadableProxies.sol": "96261f83888c5ece6e9eb72dffc9ff472e01d330a9545f87b2c2c647aa2a503d",
+    "NewNetworkReserveNFTs.sol": "033a39be984b2f5271899b93ac054618a66ad84ca4bcc039e02bb9a496d6c894",
+    "NewNetworkTokenCenter.sol": "c2d89afa513c9cb9ad8702c25b2553ac73590d85c47cd7df014f573bb721f593"
+  },
+  "freshValidatorSourceSha256": "6274783a7741bce513a96e53a545fe6af8487957473d4271f2123eae0aa47e17",
+  "immutableReferences": {},
+  "immutableVariables": {},
+  "pauseSourcePatchesSha256": "c2c8a34822d0051c6ef3752e0418f5b606965ce74d472932168dc2f3bc66c352",
+  "runtimeBytecode": "",
+  "runtimeLinks": {},
+  "settings": {
+    "evmVersion": "paris",
+    "libraries": {},
+    "metadata": {
+      "bytecodeHash": "ipfs"
+    },
+    "optimizer": {
+      "enabled": true,
+      "runs": 200
+    },
+    "viaIR": false
+  },
+  "sourceManifestSha256": "092362653c6141e282162da2b91e0517d0de40365bd284d4c8dfebe6f55dcb46",
+  "sourceUnit": "MintCandyWrappedDEL.sol",
+  "testConfigSourceSha256": "77e875024f120625822275b5a78f5b4668e2922a7fab2c5bf0f56a537e772dad",
+  "testReceiverSourceSha256": "03ad3fa8a515ad2a62cf486db3ffeaf7ae89da0df7d7db4e33d63ae241ddf40f",
+  "wrapperSourceSha256": "f414622705f9551416f8ad93bf99364e9097d5b5572dc3420f66641c9f821eb6"
+}

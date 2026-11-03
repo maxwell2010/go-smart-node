@@ -1,7 +1,9 @@
 // SPDX-License-Identifier: MIT
 pragma solidity 0.8.20;
 
-import {DecimalNFTCenter, BeaconNFT, NFTType} from "./sources/DecimalNFTCenter.sol";
+import {DecimalNFTCenter, BeaconNFT, NFTType, NFTState} from "./owned/DecimalNFTCenter.sol";
+
+import {NewNetworkNFTReadableProxy} from "./NewNetworkReadableProxies.sol";
 
 /// @notice Fresh factory initialization, not historical deployment setup.
 contract NewNetworkNFTCenter is DecimalNFTCenter {
@@ -25,4 +27,20 @@ contract NewNetworkNFTCenter is DecimalNFTCenter {
             }
         }
     }
+    function readImplementation(uint8 family) external view returns (address) {
+        if (family < 2 || family > 5) revert InvalidFreshInitialization();
+        NFTType kind = family == 3 || family == 5 ? NFTType.DRC1155 : NFTType.DRC721;
+        return _getNFTCenterStorage()._implementation[kind][family < 4];
+    }
+
+    function _create(NFTType kind, NFT memory nft, bool withReserve) internal override returns (address nftAddress) {
+        NFTCenterStorage storage state = _getNFTCenterStorage();
+        uint8 family = withReserve ? (kind == NFTType.DRC721 ? 2 : 3) : (kind == NFTType.DRC721 ? 4 : 5);
+        nftAddress = address(new NewNetworkNFTReadableProxy(state._beacon[kind][withReserve],
+            _getInitArgs(nft), address(this), family));
+        if (nftAddress == address(0)) revert AlreadyDeployed();
+        state._nfts[nftAddress] = NFTState({active:true,nftType:kind,withReserve:withReserve});
+        emit NFTCreated(nftAddress, kind, nft);
+    }
+
 }

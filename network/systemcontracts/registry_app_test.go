@@ -112,6 +112,7 @@ func TestOwnedAppSignedRegistryBootstrap(t *testing.T) {
 	price := big.NewInt(1_000_000_000_000)
 	nativeCredit := new(big.Int)
 	var lastBlockEvents []abci.Event
+	var lastAllEvents []abci.Event
 	send := func(key *ecdsa.PrivateKey, to *common.Address, value *big.Int, input []byte, success bool) *evmtypes.MsgEthereumTxResponse {
 		t.Helper()
 		from := crypto.PubkeyToAddress(key.PublicKey)
@@ -132,6 +133,7 @@ func TestOwnedAppSignedRegistryBootstrap(t *testing.T) {
 		require.NoError(t, err)
 		lastBlockEvents = result.Events
 		require.Len(t, result.TxResults, 1)
+		lastAllEvents = append(append([]abci.Event(nil), result.Events...), result.TxResults[0].Events...)
 		require.Zero(t, result.TxResults[0].Code, result.TxResults[0].Log)
 		var messages sdk.TxMsgData
 		require.NoError(t, a.AppCodec().Unmarshal(result.TxResults[0].Data, &messages))
@@ -164,6 +166,15 @@ func TestOwnedAppSignedRegistryBootstrap(t *testing.T) {
 		artifact, err := contracts.Load(name)
 		require.NoError(t, err)
 		return artifact
+	}
+	freshAsset := func(name string) contracts.Artifact {
+		if name == "DRC721" {
+			return load("NewNetworkDRC721")
+		}
+		if name == "DRC1155" {
+			return load("NewNetworkDRC1155")
+		}
+		return load(name)
 	}
 	registry, proxy, bootstrap := load("DecimalContractCenter"), load("DecimalContractCenterProxy"), load("NewNetworkProxyBootstrap")
 	deploy := func(artifact contracts.Artifact, args ...interface{}) common.Address {
@@ -308,7 +319,9 @@ func TestOwnedAppSignedRegistryBootstrap(t *testing.T) {
 		code, err := lib.Deployment()
 		require.NoError(t, err)
 		send(keys[0], nil, new(big.Int), code, true)
-		require.NotEmpty(t, a.EVMKeeper.GetCode(ctx(), a.EVMKeeper.GetCodeHash(ctx(), libAddress)))
+		expectedLibrary, err := contracts.ExpectedRuntime("MintCandyDelegationNFTLib", nil, map[string]common.Hash{"owned/DecimalDelegation.sol:DelegationNFTLib.library_deploy_address": common.BytesToHash(libAddress.Bytes())})
+		require.NoError(t, err)
+		require.Equal(t, expectedLibrary, a.EVMKeeper.GetCode(ctx(), a.EVMKeeper.GetCodeHash(ctx(), libAddress)))
 		delegation, err := contracts.LoadLinked("MintCandyDelegation", map[string]common.Address{"owned/DecimalDelegation.sol:DelegationNFTLib": libAddress})
 		require.NoError(t, err)
 		roles := map[string]common.Address{}
@@ -444,6 +457,9 @@ func TestOwnedAppSignedRegistryBootstrap(t *testing.T) {
 		libCode, err := lib.Deployment()
 		require.NoError(t, err)
 		send(keys[0], nil, new(big.Int), libCode, true)
+		expectedLibrary, err := contracts.ExpectedRuntime("MintCandyDelegationNFTLib", nil, map[string]common.Hash{"owned/DecimalDelegation.sol:DelegationNFTLib.library_deploy_address": common.BytesToHash(libAddress.Bytes())})
+		require.NoError(t, err)
+		require.Equal(t, expectedLibrary, a.EVMKeeper.GetCode(ctx(), a.EVMKeeper.GetCodeHash(ctx(), libAddress)))
 		linked, err := contracts.LoadLinked("MintCandyDelegation", map[string]common.Address{"owned/DecimalDelegation.sol:DelegationNFTLib": libAddress})
 		require.NoError(t, err)
 		names := []string{"master-validator", "delegation", "token-center", "nft-center"}
@@ -460,7 +476,7 @@ func TestOwnedAppSignedRegistryBootstrap(t *testing.T) {
 		}
 		tokenImpls := map[string]common.Address{}
 		for _, name := range []string{"DRC20", "DRC20Reserveless", "DRC721", "DRC1155", "DRC721Reserveless", "DRC1155Reserveless"} {
-			tokenImpls[name] = deploy(load(name))
+			tokenImpls[name] = deploy(freshAsset(name))
 		}
 		wrapped := deploy(load("MintCandyWrappedDEL"))
 		registryImpl := deploy(registry)
@@ -570,7 +586,7 @@ func TestOwnedAppSignedRegistryBootstrap(t *testing.T) {
 				"master-validator": {Address: role, ProxyCodeHash: proxyHash, ApprovedImplementations: []common.Hash{crypto.Keccak256Hash(artifact.Runtime)}},
 			}}
 
-			childHash := func(name string) common.Hash { return crypto.Keccak256Hash(load(name).Runtime) }
+			childHash := func(name string) common.Hash { return crypto.Keccak256Hash(freshAsset(name).Runtime) }
 			manifest.Roles["token-center"] = authority.Role{Address: roles["token-center"], ProxyCodeHash: proxyHash, ApprovedImplementations: []common.Hash{crypto.Keccak256Hash(roleABI["token-center"].Runtime)}, ApprovedChildren: map[string][]common.Hash{"upgradeToken": {childHash("DRC20")}, "upgradeTokenReserveless": {childHash("DRC20Reserveless")}}}
 			manifest.Roles["nft-center"] = authority.Role{Address: roles["nft-center"], ProxyCodeHash: proxyHash, ApprovedImplementations: []common.Hash{crypto.Keccak256Hash(roleABI["nft-center"].Runtime)}, ApprovedChildren: map[string][]common.Hash{"upgradeNFT:0:true": {childHash("DRC721")}, "upgradeNFT:1:true": {childHash("DRC1155")}, "upgradeNFT:0:false": {childHash("DRC721Reserveless")}, "upgradeNFT:1:false": {childHash("DRC1155Reserveless")}}}
 			markerAddress := accounts[2].GetAddress()
@@ -760,6 +776,7 @@ func TestOwnedAppSignedRegistryBootstrap(t *testing.T) {
 		})
 
 		t.Run("fresh factory creation and mint", func(t *testing.T) {
+			proxyHash := crypto.Keccak256Hash(proxy.Runtime)
 			creator := crypto.PubkeyToAddress(keys[0].PublicKey)
 			type nftMeta struct {
 				Creator     common.Address
@@ -777,7 +794,14 @@ func TestOwnedAppSignedRegistryBootstrap(t *testing.T) {
 			originalABI := load("DecimalNFTCenter")
 			before, err := originalABI.ABI.Pack("createDRC721", meta)
 			require.NoError(t, err)
-			send(keys[0], &originalCenter, new(big.Int), before, true)
+			send(keys[0], &originalCenter, new(big.Int), before, false)
+			type pausedAsset struct {
+				address  common.Address
+				artifact contracts.Artifact
+				family   uint8
+				id       *big.Int
+			}
+			var assets []pausedAsset
 			for _, kind := range []struct {
 				method, artifact string
 				typ              uint8
@@ -793,7 +817,18 @@ func TestOwnedAppSignedRegistryBootstrap(t *testing.T) {
 				require.NoError(t, err)
 				collection := result[0].(common.Address)
 				require.NotEqual(t, common.Address{}, collection)
-				asset := load(kind.artifact)
+				asset := freshAsset(kind.artifact)
+				family := uint8(2) + kind.typ
+				if !kind.reserve {
+					family = uint8(4) + kind.typ
+				}
+				expectedBeacon, err := contracts.NFTBeaconRuntime(center, kind.typ, kind.reserve)
+				require.NoError(t, err)
+				require.Equal(t, expectedBeacon, a.EVMKeeper.GetCode(ctx(), a.EVMKeeper.GetCodeHash(ctx(), beacon)))
+				expectedProxy, err := contracts.PauseAwareProxyRuntime(beacon, center, family)
+				require.NoError(t, err)
+				require.Equal(t, expectedProxy, a.EVMKeeper.GetCode(ctx(), a.EVMKeeper.GetCodeHash(ctx(), collection)), "NFT proxy code must derive from known constructor values")
+
 				huge := new(big.Int).Lsh(big.NewInt(1), 200)
 				reserve := big.NewInt(2_000_000_000_000_000_000)
 				var mint []byte
@@ -822,6 +857,7 @@ func TestOwnedAppSignedRegistryBootstrap(t *testing.T) {
 				} else {
 					require.Equal(t, int64(2), query(asset, collection, "balanceOf", creator, huge)[0].(*big.Int).Int64())
 				}
+				assets = append(assets, pausedAsset{address: collection, artifact: asset, family: family, id: huge})
 				require.Zero(t, value.Cmp(a.EVMKeeper.GetBalance(ctx(), collection).ToBig()))
 				require.Zero(t, value.Cmp(a.BankKeeper.GetBalance(ctx(), sdk.AccAddress(collection.Bytes()), identity.BaseDenom).Amount.BigInt()))
 			}
@@ -887,6 +923,187 @@ func TestOwnedAppSignedRegistryBootstrap(t *testing.T) {
 			require.NotEqual(t, common.Address{}, coinAddress)
 			require.Zero(t, reserve.Cmp(a.EVMKeeper.GetBalance(ctx(), coinAddress).ToBig()))
 			require.Equal(t, coin.InitialMint, query(load("DRC20"), coinAddress, "totalSupply")[0])
+			freeBeacon := query(tokenFactory, tokenCenter, "reservelessBeacon")[0].(common.Address)
+			expectedFreeBeacon, err := contracts.ReservelessTokenBeaconRuntime(tokenCenter)
+			require.NoError(t, err)
+			require.Equal(t, expectedFreeBeacon, a.EVMKeeper.GetCode(ctx(), a.EVMKeeper.GetCodeHash(ctx(), freeBeacon)))
+			for _, token := range []struct {
+				address, beacon common.Address
+				family          uint8
+				artifact        string
+			}{{coinAddress, tokenCenter, 0, "DRC20"}, {freeToken, freeBeacon, 1, "DRC20Reserveless"}} {
+				expected, err := contracts.PauseAwareProxyRuntime(token.beacon, tokenCenter, token.family)
+				require.NoError(t, err)
+				require.Equal(t, expected, a.EVMKeeper.GetCode(ctx(), a.EVMKeeper.GetCodeHash(ctx(), token.address)))
+				wrong, err := contracts.PauseAwareProxyRuntime(token.beacon, govRegistry, token.family)
+				require.NoError(t, err)
+				require.NotEqual(t, wrong, expected, "wrong factory constructor cannot approve observed proxy code")
+				assets = append(assets, pausedAsset{address: token.address, artifact: load(token.artifact), family: token.family})
+			}
+			// Only the explicit fresh profile keeps reads live during factory pauses.
+			pauseManifest := authority.Manifest{Registry: authority.Role{Address: govRegistry, ProxyCodeHash: proxyHash, ApprovedImplementations: []common.Hash{crypto.Keccak256Hash(registry.Runtime)}}, Roles: map[string]authority.Role{}}
+			for _, role := range []string{"token-center", "nft-center"} {
+				pauseManifest.Roles[role] = authority.Role{Address: roles[role], ProxyCodeHash: proxyHash, ApprovedImplementations: []common.Hash{crypto.Keccak256Hash(roleABI[role].Runtime)}}
+			}
+			noOpHook := authorityReceiptHook(func(sdk.Context, common.Address, core.Message, *ethtypes.Receipt) error { return nil })
+			pauseBridge, err := authority.NewKeeper(a.EVMKeeper, pauseManifest, noOpHook)
+			require.NoError(t, err)
+			govern := func(role, method string) {
+				data, err := roleABI[role].ABI.Pack(method)
+				require.NoError(t, err)
+				message := &authoritytypes.MsgExecuteSystemContract{Authority: authtypes.NewModuleAddress("gov").String(), Calls: []*authoritytypes.SystemCall{{Role: role, Target: roles[role].Bytes(), TargetCodeHash: proxyHash.Bytes(), Implementation: implementations[role].Bytes(), ImplementationCodeHash: crypto.Keccak256Hash(roleABI[role].Runtime).Bytes(), Data: data, GasLimit: 200000}}}
+				require.NoError(t, authority.RunGovernance(ctx(), func(c sdk.Context) error { _, err := pauseBridge.ExecuteSystemContract(c, message); return err }))
+			}
+			govern("token-center", "pause")
+			govern("nft-center", "pause")
+			require.Equal(t, common.Address{}, query(tokenFactory, tokenCenter, "implementation")[0])
+			require.Equal(t, common.Address{}, query(factory, center, "implementation", uint8(0), true)[0])
+			recipient := crypto.PubkeyToAddress(keys[1].PublicKey)
+			for _, asset := range assets {
+				if asset.family < 2 {
+					require.NotZero(t, query(asset.artifact, asset.address, "totalSupply")[0].(*big.Int).Sign())
+					require.NotZero(t, query(asset.artifact, asset.address, "balanceOf", creator)[0].(*big.Int).Sign())
+					transfer, err := asset.artifact.ABI.Pack("transfer", recipient, big.NewInt(1))
+					require.NoError(t, err)
+					send(keys[0], &asset.address, new(big.Int), transfer, false)
+				} else if asset.family == 2 || asset.family == 4 {
+					require.Equal(t, creator, query(asset.artifact, asset.address, "ownerOf", big.NewInt(1))[0])
+					require.Equal(t, "ipfs://fresh-item", query(asset.artifact, asset.address, "tokenURI", big.NewInt(1))[0])
+					transfer, err := asset.artifact.ABI.Pack("transferFrom", creator, recipient, big.NewInt(1))
+					require.NoError(t, err)
+					send(keys[0], &asset.address, new(big.Int), transfer, false)
+					send(keys[0], &asset.address, big.NewInt(1), nil, false)
+				} else {
+					require.Equal(t, int64(2), query(asset.artifact, asset.address, "balanceOf", creator, asset.id)[0].(*big.Int).Int64())
+					transfer, err := asset.artifact.ABI.Pack("safeTransferFrom", creator, recipient, asset.id, big.NewInt(1), []byte{})
+					require.NoError(t, err)
+					send(keys[0], &asset.address, new(big.Int), transfer, false)
+				}
+				// Raw storage resolution is explicit, same-context and never cached supply.
+				target, abiFactory := tokenCenter, tokenFactory
+				if asset.family >= 2 {
+					target, abiFactory = center, factory
+				}
+				require.NotEqual(t, common.Address{}, query(abiFactory, target, "readImplementation", asset.family)[0])
+			}
+			govern("token-center", "unpause")
+			govern("nft-center", "unpause")
+			for _, asset := range assets {
+				if asset.family < 2 {
+					transfer, err := asset.artifact.ABI.Pack("transfer", recipient, big.NewInt(1))
+					require.NoError(t, err)
+					send(keys[0], &asset.address, new(big.Int), transfer, true)
+					require.Equal(t, int64(1), query(asset.artifact, asset.address, "balanceOf", recipient)[0].(*big.Int).Int64())
+				} else if asset.family == 2 || asset.family == 4 {
+					transfer, err := asset.artifact.ABI.Pack("transferFrom", creator, recipient, big.NewInt(1))
+					require.NoError(t, err)
+					send(keys[0], &asset.address, new(big.Int), transfer, true)
+					require.Equal(t, recipient, query(asset.artifact, asset.address, "ownerOf", big.NewInt(1))[0])
+				} else {
+					transfer, err := asset.artifact.ABI.Pack("safeTransferFrom", creator, recipient, asset.id, big.NewInt(1), []byte{})
+					require.NoError(t, err)
+					send(keys[0], &asset.address, new(big.Int), transfer, true)
+					require.Equal(t, int64(1), query(asset.artifact, asset.address, "balanceOf", recipient, asset.id)[0].(*big.Int).Int64())
+				}
+			}
+
+			// Missing nativeBurn must fail closed and restore every reserve/owner write.
+			for _, kind := range []struct {
+				method, artifact string
+				is1155           bool
+			}{{"createDRC721", "NewNetworkDRC721", false}, {"createDRC1155", "NewNetworkDRC1155", true}} {
+				nonrefundable := meta
+				nonrefundable.Refundable = false
+				data, err := factory.ABI.Pack(kind.method, nonrefundable)
+				require.NoError(t, err)
+				response := send(keys[0], &center, new(big.Int), data, true)
+				result, err := factory.ABI.Unpack(kind.method, response.Ret)
+				require.NoError(t, err)
+				target := result[0].(common.Address)
+				asset := load(kind.artifact)
+				value := big.NewInt(2_000_000_000_000_000_000)
+				var mint, burn []byte
+				if kind.is1155 {
+					mint, err = asset.ABI.Pack("mintByDEL", creator, big.NewInt(1), big.NewInt(1), "ipfs://burn-fixture")
+					require.NoError(t, err)
+					burn, err = asset.ABI.Pack("burn", big.NewInt(1), big.NewInt(1))
+				} else {
+					mint, err = asset.ABI.Pack("mintByDEL", creator, "ipfs://burn-fixture")
+					require.NoError(t, err)
+					burn, err = asset.ABI.Pack("burn", big.NewInt(1))
+				}
+				require.NoError(t, err)
+				send(keys[0], &target, value, mint, true)
+				reserveBefore, err := asset.ABI.Methods["getReserve"].Outputs.Pack(query(asset, target, "getReserve", big.NewInt(1))...)
+				require.NoError(t, err)
+
+				primitiveAddress := common.HexToAddress("0x0000000000000000000000000000000000000900")
+				_, active, err := a.EVMKeeper.GetPrecompileInstance(ctx(), primitiveAddress)
+				require.NoError(t, err)
+				supplyBefore := a.BankKeeper.GetSupply(ctx(), identity.BaseDenom).Amount
+				outcome := send(keys[0], &target, new(big.Int), burn, active)
+				if !active {
+					t.Log("ordinary native reserve control: missing backend rejects and restores state")
+					var selector [4]byte
+					require.GreaterOrEqual(t, len(outcome.Ret), 4)
+					copy(selector[:], outcome.Ret[:4])
+					reason, err := asset.ABI.ErrorByID(selector)
+					require.NoError(t, err)
+					require.Equal(t, "NativeReserveBurnFailed", reason.Name)
+					reserveAfter, err := asset.ABI.Methods["getReserve"].Outputs.Pack(query(asset, target, "getReserve", big.NewInt(1))...)
+					require.NoError(t, err)
+					require.Equal(t, reserveBefore, reserveAfter)
+					if kind.is1155 {
+						require.Equal(t, int64(1), query(asset, target, "balanceOf", creator, big.NewInt(1))[0].(*big.Int).Int64())
+					} else {
+						require.Equal(t, creator, query(asset, target, "ownerOf", big.NewInt(1))[0])
+					}
+					require.Zero(t, value.Cmp(a.EVMKeeper.GetBalance(ctx(), target).ToBig()))
+					require.Zero(t, value.Cmp(a.BankKeeper.GetBalance(ctx(), sdk.AccAddress(target.Bytes()), identity.BaseDenom).Amount.BigInt()))
+				} else {
+					t.Log("ordinary native reserve control: active backend burns real bank supply")
+					// Reconcile independent bank supply with every mint/burn event in this
+					// block, including ordinary mint-module or fee activity if configured.
+					minted, burned := math.ZeroInt(), math.ZeroInt()
+					for _, event := range lastAllEvents {
+						if event.Type != banktypes.EventTypeCoinMint && event.Type != banktypes.EventTypeCoinBurn {
+							continue
+						}
+						for _, attribute := range event.Attributes {
+							if attribute.Key != sdk.AttributeKeyAmount {
+								continue
+							}
+							coins, err := sdk.ParseCoinsNormalized(attribute.Value)
+							require.NoError(t, err)
+							amount := coins.AmountOf(identity.BaseDenom)
+							if event.Type == banktypes.EventTypeCoinMint {
+								minted = minted.Add(amount)
+							} else {
+								burned = burned.Add(amount)
+							}
+						}
+					}
+					require.True(t, burned.GTE(math.NewIntFromBigInt(value)), "native NFT destruction must burn at least its reserve")
+					require.Equal(t, supplyBefore.Add(minted).Sub(burned), a.BankKeeper.GetSupply(ctx(), identity.BaseDenom).Amount)
+					primitiveABI, err := contracts.CompiledABI("IMintCandyNativeBurn")
+					require.NoError(t, err)
+					found := false
+					for _, log := range outcome.Logs {
+						if common.HexToAddress(log.Address) != primitiveAddress || len(log.Topics) != 2 || common.HexToHash(log.Topics[0]) != primitiveABI.Events["NativeBurn"].ID {
+							continue
+						}
+						require.Equal(t, target, common.BytesToAddress(common.HexToHash(log.Topics[1]).Bytes()[12:]))
+						values, err := primitiveABI.Events["NativeBurn"].Inputs.NonIndexed().Unpack(log.Data)
+						require.NoError(t, err)
+						require.Zero(t, value.Cmp(values[0].(*big.Int)))
+						found = true
+					}
+					require.True(t, found, "native reserve destruction must carry its acknowledged event")
+					require.True(t, a.BankKeeper.GetBalance(ctx(), sdk.AccAddress(target.Bytes()), identity.BaseDenom).Amount.IsZero())
+					require.True(t, a.EVMKeeper.GetBalance(ctx(), target).IsZero())
+				}
+			}
+
 		})
 		// A previous external registry write must also disappear on a later failure.
 		fixture := load("ConfiguredBootstrapTestTarget")

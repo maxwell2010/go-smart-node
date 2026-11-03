@@ -56,3 +56,24 @@ func TestConstructorConfigurationPolicy(t *testing.T) {
 	_, err = contracts.ConfiguredProxyDeployment(address, address, address, make([]byte, 49152), nil)
 	require.Error(t, err)
 }
+
+func TestCompilerImmutableRuntimeRequiresKnownCompleteArguments(t *testing.T) {
+	address := common.HexToAddress("0x1234567890123456789012345678901234567890")
+	_, err := contracts.ExpectedRuntime("NewNetworkTokenReadableProxy", nil, nil)
+	require.ErrorContains(t, err, "missing constructor immutable")
+	_, err = contracts.PauseAwareProxyRuntime(common.Address{}, address, 0)
+	require.Error(t, err)
+	_, err = contracts.PauseAwareProxyRuntime(address, address, 6)
+	require.Error(t, err)
+	_, err = contracts.NFTBeaconRuntime(address, 2, true)
+	require.Error(t, err)
+	canonical, err := contracts.PauseAwareProxyRuntime(address, address, 0)
+	require.NoError(t, err)
+	crossed, err := contracts.PauseAwareProxyRuntime(address, address, 1)
+	require.NoError(t, err)
+	require.NotEqual(t, canonical, crossed)
+	primitive, err := contracts.CompiledABI("IMintCandyNativeBurn")
+	require.NoError(t, err)
+	require.Equal(t, []byte{0xe6, 0x28, 0x7e, 0x08}, primitive.Methods["nativeBurn"].ID)
+	require.Len(t, primitive.Methods["nativeBurn"].Outputs, 1)
+}

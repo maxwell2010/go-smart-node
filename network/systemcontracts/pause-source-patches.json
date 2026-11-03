@@ -1,0 +1,59 @@
+{
+  "schemaVersion": 1,
+  "purpose": "Fresh pause-aware creation hooks and acknowledged native NFT reserve burn; raw canonical inputs retained",
+  "patches": [
+    {
+      "canonical": "sources/DecimalTokenCenter.sol",
+      "owned": "owned/DecimalTokenCenter.sol",
+      "canonicalSha256": "be1ec89d432cd8b5d2f09164a4e381add11974d1124190434856aca043ec33a5",
+      "ownedSha256": "4ab10c8e929c0bd10c28f3a939605a91c050cb90fa88745d2f43344236f0ef37",
+      "transformations": [
+        {
+          "anchor": "function _createToken(",
+          "before": ") internal returns (address) {",
+          "after": ") internal virtual returns (address) {"
+        },
+        {
+          "anchor": "function createTokenReserveless(",
+          "before": ") external whenNotPaused returns (address) {",
+          "after": ") external virtual whenNotPaused returns (address) {"
+        },
+        {
+          "anchor": "function predict(",
+          "before": ") public view returns (address) {",
+          "after": ") public view virtual returns (address) {"
+        }
+      ]
+    },
+    {
+      "canonical": "sources/DecimalNFTCenter.sol",
+      "owned": "owned/DecimalNFTCenter.sol",
+      "canonicalSha256": "ff066396dd34653cc17053ce8b2884182606222965f8c2a049bb16a225420b76",
+      "ownedSha256": "c4dbb763279fbb2b4f15bdeedb9818caef2f384ed7c29f1eef45134df8b1e945",
+      "transformations": [
+        {
+          "anchor": "function _create(",
+          "before": ") internal returns (address nftAddress) {",
+          "after": ") internal virtual returns (address nftAddress) {"
+        },
+        {
+          "anchor": "abstract contract NFTReserve",
+          "before": "    function _penalty(",
+          "after": "    error NativeReserveBurnFailed();\n\n    function _burnNativeReserve(uint256 amount) internal {\n        if (amount == 0) return;\n        (bool success, bytes memory result) = address(0x0900).call(\n            abi.encodeWithSignature(\"nativeBurn(uint256)\", amount)\n        );\n        if (!success || result.length != 32 || !abi.decode(result, (bool))) {\n            revert NativeReserveBurnFailed();\n        }\n    }\n\n    function _penalty("
+        },
+        {
+          "anchor": "abstract contract NFTReserve",
+          "before": "payable(address(0)).transfer(reserveToBurn);",
+          "after": "_burnNativeReserve(reserveToBurn);",
+          "count": 2
+        },
+        {
+          "anchor": "abstract contract NFTReserve",
+          "before": "payable(address(0)).transfer(reserve.amount);",
+          "after": "_burnNativeReserve(reserve.amount);",
+          "count": 1
+        }
+      ]
+    }
+  ]
+}
