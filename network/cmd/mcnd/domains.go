@@ -18,7 +18,7 @@ import (
 func needsDomain(cmd *cobra.Command) bool {
 	for current := cmd; current != nil; current = current.Parent() {
 		switch current.Name() {
-		case "init", "start", "export", "genesis", "tx", "pruning", "snapshot", "comet", "tendermint", "rollback":
+		case "init", "start", "export", "genesis", "tx", "pruning", "snapshot", "snapshots", "comet", "tendermint", "rollback":
 			return true
 		}
 	}

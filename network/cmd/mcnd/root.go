@@ -71,6 +71,11 @@ func NewRootCmd() *cobra.Command {
 			// set the default command outputs
 			cmd.SetOut(cmd.OutOrStdout())
 			cmd.SetErr(cmd.ErrOrStderr())
+			// Informational commands need no client config, keyring or RPC client.
+			// Return before the SDK flag reader can initialize those resources.
+			if informationalCommand(cmd) {
+				return nil
+			}
 
 			initClientCtx = initClientCtx.WithCmdContext(cmd.Context())
 			initClientCtx, err := client.ReadPersistentCommandFlags(initClientCtx, cmd.Flags())
@@ -130,6 +135,18 @@ func NewRootCmd() *cobra.Command {
 	addDomainFlags(rootCmd)
 
 	return rootCmd
+}
+
+func informationalCommand(cmd *cobra.Command) bool {
+	for cmd.Parent() != nil && cmd.Parent() != cmd.Root() {
+		cmd = cmd.Parent()
+	}
+	switch cmd.Name() {
+	case "version", "completion", "help":
+		return true
+	default:
+		return false
+	}
 }
 
 // initCometConfig helps to override default CometBFT Config values.
