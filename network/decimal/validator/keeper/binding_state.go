@@ -19,12 +19,13 @@ import (
 
 const bindingDomainMarker byte = 0x05
 const (
-	bindingRevisionKey        byte = 0x50
-	stakeBindingPrefix        byte = 0x51
-	frozenBindingPrefix       byte = 0x52
-	custodyUnitBindingPrefix  byte = 0x53
-	custodyAssetBindingPrefix byte = 0x54
-	nativeQueueBindingPrefix  byte = 0x55
+	bindingRevisionKey         byte = 0x50
+	stakeBindingPrefix         byte = 0x51
+	frozenBindingPrefix        byte = 0x52
+	custodyUnitBindingPrefix   byte = 0x53
+	custodyAssetBindingPrefix  byte = 0x54
+	nativeQueueBindingPrefix   byte = 0x55
+	activePenaltyBindingPrefix byte = 0x56
 )
 
 var ErrBindingDomain = errors.New("native bindings require the configured initialized App domain")
@@ -177,6 +178,9 @@ func (r *bindingRecord) allClaimKeys() ([][]byte, error) {
 		return nil, nil
 	}
 	var result [][]byte
+	if r.stake != nil {
+		result = append(result, activePenaltyBindingKey(r.stake.Validator, r.stake.PenaltyCursor, r.key))
+	}
 	if r.frozen != nil {
 		key := append([]byte{nativeQueueBindingPrefix}, r.frozen.NativeEntryHash...)
 		result = append(result, append(key, r.key...))
