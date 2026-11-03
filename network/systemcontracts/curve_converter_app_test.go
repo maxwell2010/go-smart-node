@@ -319,5 +319,27 @@ func runCurveConverterFinancial(t *testing.T, e isolatedBackendEnv) {
 		require.Zero(t, after.ConverterToken.Sign())
 		require.Zero(t, after.Allowance.Sign())
 	})
+	t.Run("same symbol different address is not registered collateral", func(t *testing.T) {
+		// Deploy an ordinary, genuine pinned proxy outside the factory's
+		// creation path. Its code/factory/family/symbol match the real token,
+		// but the authoritative registry still points to a different address.
+		duplicate := deployImmutable(e.load("NewNetworkTokenReadableProxy"), "NewNetworkTokenReadableProxy", map[string]common.Hash{
+			"owned/DecimalTokenCenter.sol:BeaconProxy._beacon":                   common.BytesToHash(centerAddress.Bytes()),
+			"NewNetworkReadableProxies.sol:NewNetworkTokenReadableProxy.FACTORY": common.BytesToHash(centerAddress.Bytes()),
+			"NewNetworkReadableProxies.sol:NewNetworkTokenReadableProxy.FAMILY":  {},
+		}, centerAddress, []byte{}, centerAddress, uint8(0))
+		call(0, coin, duplicate, amount(10), true, "initialize", "Separate unregistered coin", "convertcx", owner, uint8(100), amount(10), amount(5), amount(100), "ordinary-address-admission-control")
+		require.NotEqual(t, currency, duplicate)
+		require.Equal(t, "convertcx", query(coin, duplicate, "symbol")[0])
+		require.Equal(t, centerAddress, query(e.load("NewNetworkTokenReadableProxy"), duplicate, "FACTORY")[0])
+		require.Equal(t, uint8(0), query(e.load("NewNetworkTokenReadableProxy"), duplicate, "FAMILY")[0])
+		require.True(t, query(center, centerAddress, "isTokenExists", duplicate)[0].(bool), "pinned helper checks symbol presence rather than exact address")
+		require.Equal(t, currency, query(center, centerAddress, "tokens", "convertcx")[0])
+		before := snapshot(coin, duplicate, controllers[0])
+		t.Log("the actual center helper accepts this separate address by symbol; converter must reject it by exact registry address")
+		result := call(0, converter, converterAddress, new(big.Int), false, "preview", duplicate, amount(1), amount(1), deadline())
+		requireError(result, "UnapprovedReserveCurve")
+		require.Equal(t, before, snapshot(coin, duplicate, controllers[0]))
+	})
 	t.Log("actual registered curve and WDEL converter: exact deltas, slippage/liquidity/expiry/access guards, receiver rollback and outer rollback passed")
 }
