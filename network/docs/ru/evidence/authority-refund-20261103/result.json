@@ -1,0 +1,45 @@
+{
+  "schemaVersion": 1,
+  "status": "ordinary-regression",
+  "originalSourceRevision": "8cf619da1c77ee5efffc80a678272010fd2263dd",
+  "fixCommit": "8e13e4b",
+  "scope": "Actual owned-App Master SSTORE controls; disposable SDK caches; staging governance resource budget; no production financial activation",
+  "original": {
+    "set": {
+      "evmWork": 37245,
+      "afterRefund": 32445,
+      "sdkCommit": 96915,
+      "totalSdk": 576319,
+      "remainingNative": 442159
+    },
+    "clear": {
+      "evmWork": 39757,
+      "afterRefund": 30157,
+      "sdkCommit": 101465,
+      "totalSdk": 578581,
+      "remainingNative": 437359
+    },
+    "assertion": "FAIL"
+  },
+  "fixed": {
+    "set": {
+      "evmWork": 37245,
+      "afterRefund": 32445,
+      "sdkCommit": 96915,
+      "totalSdk": 581119,
+      "remainingNative": 446959
+    },
+    "clear": {
+      "evmWork": 39757,
+      "afterRefund": 30157,
+      "sdkCommit": 101465,
+      "totalSdk": 588181,
+      "remainingNative": 446959
+    },
+    "assertion": "PASS"
+  },
+  "retainedLocalLogSha256": {
+    "original": "083c8d83dfbb403f8c251e013e2fed937772cc3b2bc02d4da37dd359b2a515d9",
+    "fixed": "a1ac314988867bddb33ca37e90cdc5f76230eca340a02cf443f74406d1e878e4"
+  }
+}

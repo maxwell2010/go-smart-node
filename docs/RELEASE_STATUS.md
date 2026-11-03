@@ -22,9 +22,11 @@ exact gas accounting, financial rollback and signing-domain tests. Its owned
 EVM source correction decodes the validator operator's Bech32 address for the
 actual COINBASE opcode; the canonical source failed that execution regression.
 Owned source manifests are verified separately because Go module verification
-skips local replacements. The selected STUN v2 parser also needed the upstream
-short-attribute guard backported; its actual dependency regression now passes.
-Neither correction closes the final daemon's complete security review.
+skips local replacements. The selected default daemon now uses canonical Pion
+STUN/DTLS v3; the earlier owned STUN v2 backport is historical evidence, not its
+current transport selection. Owned SDK Armor and geth patches have separate
+source manifests and scoped scan evidence. None of these corrections closes
+the final daemon's complete security review.
 
 Official Hermes and an independent SDK53 counterparty passed six phases in
 separate default-build OS processes: handshake, native DEL send, voucher return,
@@ -45,6 +47,22 @@ staging components: long-lived authority wiring, custom-asset valuation,
 financial transitions and full application integration are required. The
 system-contract source/compiler recipe and registry tests are also staging;
 they do not establish a fully reconciled fresh genesis contract set.
+
+The isolated ERC1155 origin/vault contracts now pass ordinary signed owned-App
+tests: penalizing A preserves A=9 and B=10 DEL in both withdrawal orders, with
+exact native bank-supply destruction and late-error rollback. WDEL controls also
+reconcile wrapper supply, native backing and final unwrap. These foundation
+contracts do not yet certify the shared native financial receipt controller.
+Persisted receipt lineage and domain-scoped source-position bindings are merged;
+nonempty financial genesis and native financial message routes remain gated.
+
+The reviewed development commit `8cf619da1c77ee5efffc80a678272010fd2263dd`
+passes all four Linux workflows, including its actual default daemon archive,
+source-input inventory and binary build/module metadata checks. It is a
+development snapshot, not the completed native-financial/IBC release. Ordinary
+CLI regressions verify that information commands leave fresh/existing fixture
+homes untouched and that the registered `snapshots` commands require this
+network's signing domain.
 
 Modern release blockers remain:
 
