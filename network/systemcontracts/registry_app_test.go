@@ -43,12 +43,39 @@ type appOptions map[string]interface{}
 
 func (o appOptions) Get(key string) interface{} { return o[key] }
 
+// A normal application receipt-validation error must discard a completed
+// contract operation and its native bank effects before transaction commit.
+type nativeBurnReceiptControl struct {
+	reject   *bool
+	rejected *uint64
+	topic    common.Hash
+}
+
+func (h nativeBurnReceiptControl) PostTxProcessing(_ sdk.Context, _ common.Address, _ core.Message, receipt *ethtypes.Receipt) error {
+	if !*h.reject {
+		return nil
+	}
+	for _, log := range receipt.Logs {
+		if log.Address == common.HexToAddress("0x0000000000000000000000000000000000000900") && len(log.Topics) > 0 && log.Topics[0] == h.topic {
+			(*h.rejected)++
+			return errors.New("ordinary native burn receipt validation failed")
+		}
+	}
+	return nil
+}
+
 // This test binary owns exactly one production-tag App. It never resets the
 // process-global EVM configuration, patches storage or broadcasts transactions.
 func TestOwnedAppSignedRegistryBootstrap(t *testing.T) {
 	const chainID = "mintcandy_990001-1"
 	a := ownedapp.NewApp(log.NewNopLogger(), dbm.NewMemDB(), true, appOptions{flags.FlagHome: t.TempDir(), flags.FlagChainID: chainID, srvflags.EVMChainID: uint64(990001)})
 	t.Cleanup(func() { require.NoError(t, a.Close()) })
+	primitiveABI, err := contracts.CompiledABI("IMintCandyNativeBurn")
+	require.NoError(t, err)
+	rejectNativeBurn := false
+	var rejectedNativeBurns uint64
+	require.False(t, a.EVMKeeper.HasHooks(), "the control must not overwrite production hooks")
+	a.EVMKeeper.SetHooks(nativeBurnReceiptControl{reject: &rejectNativeBurn, rejected: &rejectedNativeBurns, topic: primitiveABI.Events["NativeBurn"].ID})
 	keys := make([]*ecdsa.PrivateKey, 5)
 	accounts := make([]authtypes.GenesisAccount, 5)
 	balances := make([]banktypes.Balance, 5)
@@ -794,7 +821,7 @@ func TestOwnedAppSignedRegistryBootstrap(t *testing.T) {
 			originalABI := load("DecimalNFTCenter")
 			before, err := originalABI.ABI.Pack("createDRC721", meta)
 			require.NoError(t, err)
-			send(keys[0], &originalCenter, new(big.Int), before, false)
+			send(keys[0], &originalCenter, new(big.Int), before, true)
 			type pausedAsset struct {
 				address  common.Address
 				artifact contracts.Artifact
@@ -1040,6 +1067,47 @@ func TestOwnedAppSignedRegistryBootstrap(t *testing.T) {
 				primitiveAddress := common.HexToAddress("0x0000000000000000000000000000000000000900")
 				_, active, err := a.EVMKeeper.GetPrecompileInstance(ctx(), primitiveAddress)
 				require.NoError(t, err)
+				require.True(t, active, "this application profile must exercise the active native supply primitive")
+				if active {
+					supplyBeforeFailure := a.BankKeeper.GetSupply(ctx(), identity.BaseDenom).Amount
+					rejectedBefore := rejectedNativeBurns
+					rejectNativeBurn = true
+					failed := send(keys[0], &target, new(big.Int), burn, false)
+					rejectNativeBurn = false
+					require.Contains(t, failed.VmError, "ordinary native burn receipt validation failed")
+					require.Equal(t, rejectedBefore+1, rejectedNativeBurns, "the real native burn receipt must reach the rejecting validator")
+					reserveAfterFailure, err := asset.ABI.Methods["getReserve"].Outputs.Pack(query(asset, target, "getReserve", big.NewInt(1))...)
+					require.NoError(t, err)
+					require.Equal(t, reserveBefore, reserveAfterFailure)
+					if kind.is1155 {
+						require.Equal(t, int64(1), query(asset, target, "balanceOf", creator, big.NewInt(1))[0].(*big.Int).Int64())
+					} else {
+						require.Equal(t, creator, query(asset, target, "ownerOf", big.NewInt(1))[0])
+					}
+					require.Zero(t, value.Cmp(a.EVMKeeper.GetBalance(ctx(), target).ToBig()))
+					require.Zero(t, value.Cmp(a.BankKeeper.GetBalance(ctx(), sdk.AccAddress(target.Bytes()), identity.BaseDenom).Amount.BigInt()))
+					minted, burned := math.ZeroInt(), math.ZeroInt()
+					for _, event := range lastAllEvents {
+						require.NotEqual(t, "mintcandy_native_burn", event.Type, "rejected receipt must not publish a native burn event")
+						if event.Type != banktypes.EventTypeCoinMint && event.Type != banktypes.EventTypeCoinBurn {
+							continue
+						}
+						for _, attribute := range event.Attributes {
+							if attribute.Key != sdk.AttributeKeyAmount {
+								continue
+							}
+							coins, err := sdk.ParseCoinsNormalized(attribute.Value)
+							require.NoError(t, err)
+							if event.Type == banktypes.EventTypeCoinMint {
+								minted = minted.Add(coins.AmountOf(identity.BaseDenom))
+							} else {
+								burned = burned.Add(coins.AmountOf(identity.BaseDenom))
+							}
+						}
+					}
+					require.Equal(t, supplyBeforeFailure.Add(minted).Sub(burned), a.BankKeeper.GetSupply(ctx(), identity.BaseDenom).Amount, "rejected NFT burn restores real native supply")
+					t.Logf("ordinary %s receipt rejection restored NFT ownership, reserve, native balances and bank supply", kind.artifact)
+				}
 				supplyBefore := a.BankKeeper.GetSupply(ctx(), identity.BaseDenom).Amount
 				outcome := send(keys[0], &target, new(big.Int), burn, active)
 				if !active {
