@@ -235,8 +235,15 @@ func runCurveConverterFinancial(t *testing.T, e isolatedBackendEnv) {
 	t.Run("paused registered curve", func(t *testing.T) {
 		gov(centerAddress, center, "pause")
 		before := snapshot(coin, currency, controllers[0])
+		preview := call(0, converter, converterAddress, new(big.Int), false, "preview", currency, amount(1), amount(1), deadline())
+		requireError(preview, "UnapprovedReserveCurve")
 		result := call(0, controller, controllers[0], new(big.Int), false, "convert", currency, amount(1), amount(1), deadline())
-		requireError(result, "UnapprovedReserveCurve")
+		// The actual factory proxy rejects the controller's approve before the
+		// converter is reached. Assert that independent financial pause gate.
+		paused := e.load("NewNetworkTokenReadableProxy").ABI.Errors["FactoryPaused"].ID
+		require.NotEqual(t, common.Hash{}, paused)
+		require.Equal(t, paused.Bytes()[:4], result.Ret)
+		require.Empty(t, result.Logs)
 		require.Equal(t, before, snapshot(coin, currency, controllers[0]))
 		gov(centerAddress, center, "unpause")
 	})
