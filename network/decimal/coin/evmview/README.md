@@ -16,7 +16,7 @@ loosens limits following an upgrade or substitutes an RPC quote.
 
 Application configuration must provide an approved `BindingSource`, based on
 authenticated deployment/governance state. `Binding.Kind` must explicitly be
-`DirectRuntime`, `ERC1967Proxy` or `BeaconProxy`; zero is invalid. Each binding
+`DirectRuntime`, `ERC1967Proxy`, `BeaconProxy` or `ReadableBeaconProxy`; zero is invalid. Each binding
 pins the native token address and runtime hash. An EIP1967 implementation proxy
 also pins its current implementation address and code hash. A direct binding
 rejects occupied implementation/beacon slots and proxy-specific approval fields.
@@ -34,11 +34,16 @@ by reading arbitrary code hashes from the same chain.
 
 The canonical factory returns zero from `implementation()` while paused. This
 reader deliberately rejects that state without a stale metadata fallback.
-Therefore governance over positions in such tokens needs an explicit reviewed
-pause/recovery design before activation: a global valuation failure must not
-make an unpause proposal impossible. A future fresh pause-aware proxy/factory
-profile requires its own explicit ABI/code approval and tests; it is not enabled
-by this canonical path. Other proxy/forwarding schemes require separate review.
+The separate fresh backed-token profile uses `NewWithReadableBeacon` and
+`ReadableBeaconProxy`. It authenticates the factory/proxy/logic approvals as
+above, and additionally derives the exact family0 proxy runtime from compiler
+immutable references and requires the pinned `NewNetworkTokenCenter` runtime.
+Only this explicit profile reads `readImplementation(uint8(0))`; canonical
+paused beacons retain their rejection behavior. A reserve-less family cannot
+be admitted as a backed family merely by supplying its observed code hash.
+The normal token getter remains readable while paused, and financial transfers
+remain blocked. Changes to the compiled factory profile require a reviewed
+reader update. Other proxy/forwarding schemes require separate review.
 
 Construct with the compiler-pinned `systemcontracts.CompiledABI("DRC20")`.
 The selector is copied; no mutable ABI map or financial result is cached.
@@ -62,8 +67,8 @@ state fingerprint; the reader does not make a long-lived snapshot immutable.
 The owned-App regression uses one default-production App in its test binary,
 genuine signed deploy/call transactions, the compiler-pinned DRC20 and proxy,
 real FinalizeBlock/Commit and exact fee checks. Metadata/admission records are
-explicit fixtures because native coin storage is not yet mounted in the owned
-App. Same-context SDK bank credits demonstrate stale recorded reserves and
+explicit fixtures; native coin storage is mounted, but financial deployment
+admission is not activated in the owned App. Same-context SDK bank credits demonstrate stale recorded reserves and
 parent/child isolation. Explicitly admitted adversarial fixture bytecode tests
 revert, malformed output, EVM gas exhaustion and discarded state writes; it is
 not a production runtime allowlist. Full application wiring and deployment
@@ -84,3 +89,8 @@ It verifies supply/reserve, wrong-kind/code/binding rejection, canonical pause
 rejection, successful recovery after unpause, and logic-upgrade rejection until
 its binding is explicitly updated. Factory and native metadata admission rows
 remain fixtures, not a completed production bootstrap/receipt pipeline.
+The fresh-profile control additionally verifies compiler-derived actual proxy
+code, authoritative supply/reserve reads during pause, rejected financial
+transfer, recovery after unpause, and explicit approval after logic replacement.
+These reader controls do not establish the still-pending complete native
+validator/delegator governance tally and unpause-proposal integration.

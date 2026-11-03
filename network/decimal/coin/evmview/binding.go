@@ -13,14 +13,16 @@ import (
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core"
 	"github.com/ethereum/go-ethereum/crypto"
+	contracts "github.com/maxwell2010/go-smart-node/network/systemcontracts"
 )
 
 type BindingKind uint8
 
 const (
-	DirectRuntime BindingKind = 1
-	ERC1967Proxy  BindingKind = 2
-	BeaconProxy   BindingKind = 3
+	DirectRuntime       BindingKind = 1
+	ERC1967Proxy        BindingKind = 2
+	BeaconProxy         BindingKind = 3
+	ReadableBeaconProxy BindingKind = 4
 )
 
 // Binding names an explicitly approved deployment, not a self-authenticating
@@ -64,6 +66,29 @@ func NewWithBeacon(metadata Metadata, bank Bank, evm *evmkeeper.Keeper, bindings
 	return r, nil
 }
 
+// NewWithReadableBeacon additionally admits the exact fresh backed-token proxy
+// and factory profile. Legacy paused-beacon behavior is not reinterpreted.
+func NewWithReadableBeacon(metadata Metadata, bank Bank, evm *evmkeeper.Keeper, bindings BindingSource, tokenABI, beaconABI, readableABI abi.ABI, evmGas, sdkGas uint64) (*Reader, error) {
+	r, err := NewWithBeacon(metadata, bank, evm, bindings, tokenABI, beaconABI, evmGas, sdkGas)
+	if err != nil {
+		return nil, err
+	}
+	method, ok := readableABI.Methods["readImplementation"]
+	if !ok || method.Sig != "readImplementation(uint8)" || method.StateMutability != "view" || len(method.Inputs) != 1 || method.Inputs[0].Type.T != abi.UintTy || method.Inputs[0].Type.Size != 8 || len(method.Outputs) != 1 || method.Outputs[0].Type.T != abi.AddressTy || method.Outputs[0].Type.Size != 20 || !bytes.Equal(method.ID, crypto.Keccak256([]byte(method.Sig))[:4]) {
+		return nil, errors.New("unexpected compiled readable beacon ABI")
+	}
+	r.readableBeaconData, err = readableABI.Pack("readImplementation", uint8(0))
+	if err != nil {
+		return nil, err
+	}
+	factory, err := contracts.ExpectedRuntime("NewNetworkTokenCenter", nil, nil)
+	if err != nil {
+		return nil, err
+	}
+	r.readableFactoryHash = crypto.Keccak256Hash(factory)
+	return r, nil
+}
+
 func (r *Reader) readWord(charge, ctx sdk.Context, address common.Address, data []byte) ([]byte, error) {
 	// Each getter gets its own discarded cache, so speculative native-precompile
 	// writes cannot influence a later getter in the same valuation.
@@ -104,8 +129,12 @@ func (r *Reader) verifyBinding(charge, ctx sdk.Context, b Binding, address commo
 			return errors.New("coin implementation is not approved")
 		}
 		return nil
-	case BeaconProxy:
-		if len(r.beaconData) == 0 {
+	case BeaconProxy, ReadableBeaconProxy:
+		data := r.beaconData
+		if b.Kind == ReadableBeaconProxy {
+			data = r.readableBeaconData
+		}
+		if len(data) == 0 {
 			return errors.New("beacon proxy requires explicit compiled beacon ABI")
 		}
 		if implementationWord != (common.Hash{}) || b.Beacon == (common.Address{}) || b.BeaconRuntimeHash == (common.Hash{}) || b.BeaconImplementation == (common.Address{}) || b.BeaconImplementationHash == (common.Hash{}) || b.Implementation == (common.Address{}) || b.ImplementationHash == (common.Hash{}) {
@@ -117,7 +146,16 @@ func (r *Reader) verifyBinding(charge, ctx sdk.Context, b Binding, address commo
 		if r.evm.GetState(ctx, b.Beacon, beaconSlot) != (common.Hash{}) || r.evm.GetState(ctx, b.Beacon, implementationSlot) != common.BytesToHash(b.BeaconImplementation.Bytes()) || r.evm.GetCodeHash(ctx, b.BeaconImplementation) != b.BeaconImplementationHash {
 			return errors.New("beacon factory implementation is not approved")
 		}
-		word, err := r.readWord(charge, ctx, b.Beacon, r.beaconData)
+		if b.Kind == ReadableBeaconProxy {
+			expected, err := contracts.PauseAwareProxyRuntime(b.Beacon, b.Beacon, 0)
+			if err != nil || crypto.Keccak256Hash(expected) != b.RuntimeHash {
+				return errors.New("coin is not the compiler-pinned fresh readable backed proxy")
+			}
+			if r.readableFactoryHash == (common.Hash{}) || r.readableFactoryHash != b.BeaconImplementationHash {
+				return errors.New("coin factory is not the compiler-pinned fresh readable implementation")
+			}
+		}
+		word, err := r.readWord(charge, ctx, b.Beacon, data)
 		if err != nil {
 			return err
 		}

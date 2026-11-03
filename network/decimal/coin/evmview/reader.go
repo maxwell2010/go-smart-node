@@ -32,13 +32,15 @@ type BindingSource interface {
 
 // Reader has no financial or mutable cache. Configuration is pinned by its caller.
 type Reader struct {
-	metadata       Metadata
-	bank           Bank
-	evm            *evmkeeper.Keeper
-	bindings       BindingSource
-	data           []byte
-	beaconData     []byte
-	evmGas, sdkGas uint64
+	metadata            Metadata
+	bank                Bank
+	evm                 *evmkeeper.Keeper
+	bindings            BindingSource
+	data                []byte
+	beaconData          []byte
+	readableBeaconData  []byte
+	readableFactoryHash common.Hash
+	evmGas, sdkGas      uint64
 }
 
 func nilDependency(value interface{}) bool {
