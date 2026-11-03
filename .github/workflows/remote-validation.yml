@@ -1,0 +1,43 @@
+name: Disposable Linux EVM and IBC validation
+on:
+  workflow_dispatch:
+    inputs:
+      profile:
+        description: Validation scope
+        required: true
+        default: modern-smoke
+        type: choice
+        options: [modern-smoke, modern-full, legacy]
+permissions:
+  contents: read
+concurrency:
+  group: remote-validation-${{ github.ref }}
+  cancel-in-progress: false
+jobs:
+  validate:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    env:
+      VALIDATION_PROFILE: ${{ inputs.profile }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - name: Prepare pinned tools and dependencies
+        shell: bash
+        run: |
+          export MCND_REMOTE_BASE="$RUNNER_TEMP/mintcandy-remote"
+          echo "MCND_REMOTE_BASE=$MCND_REMOTE_BASE" >> "$GITHUB_ENV"
+          if [[ "$VALIDATION_PROFILE" == legacy ]]; then family=legacy; else family=modern; fi
+          bash scripts/remote/prepare.sh "$family"
+      - name: Run actual EVM and isolated IBC checks
+        shell: bash
+        run: bash scripts/remote/validate.sh "$VALIDATION_PROFILE"
+      - name: Preserve compact validation evidence
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+        with:
+          name: remote-validation-${{ inputs.profile }}-${{ github.sha }}
+          path: ${{ runner.temp }}/mintcandy-remote/results/
+          retention-days: 7
+          if-no-files-found: warn

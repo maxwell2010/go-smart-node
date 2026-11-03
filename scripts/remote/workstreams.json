@@ -1,0 +1,32 @@
+{
+  "repository": "maxwell2010/go-smart-node",
+  "baseline": "a3f29f9f0561b4aa794cd73dab5236e8be918908",
+  "checkpoints": [
+    {
+      "branch": "wip/remote-reserve-adapter-20261103",
+      "revision": "fb63f1d",
+      "status": "WIP: new reserve adapter fixture fails with invalid coin denomination; do not treat as a release"
+    },
+    {
+      "branch": "wip/remote-consensus-indexes-20261103",
+      "revision": "a11b4f3",
+      "status": "WIP: final uppercase Bech32 index correction awaits a fresh test run"
+    },
+    {
+      "branch": "wip/remote-collateral-converter-20261103",
+      "revision": "d5a3c90",
+      "status": "WIP: Stack too deep; generated artifacts include partial output and must be regenerated and verified"
+    },
+    {
+      "branch": "feature/explicit-del-conversion",
+      "revision": "e56899f1ee924fccb415f58ab106992a12eb0e8b",
+      "status": "Committed source-reader and delegation work; integration and fresh combined validation remain required"
+    }
+  ],
+  "constraints": [
+    "Do not use existing node homes, validator keys, production RPC or node services",
+    "Do not enable financial application routes or change compiler flags to hide compilation failures",
+    "Keep workstreams separate until reviewed and tested",
+    "Preserve closed mainnet replay databases locally; do not upload node state as setup input"
+  ]
+}

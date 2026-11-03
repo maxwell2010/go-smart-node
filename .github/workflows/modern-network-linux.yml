@@ -7,6 +7,12 @@ on:
   pull_request:
     paths: ['network/**', 'scripts/audit/**', '.github/workflows/modern-network-linux.yml']
   workflow_dispatch:
+    inputs:
+      remote_profile:
+        description: Also validate the reusable remote-worker scripts
+        default: 'off'
+        type: choice
+        options: ['off', modern-smoke, modern-full]
 
 permissions:
   contents: read
@@ -37,6 +43,17 @@ jobs:
           go-version: '1.26.10'
           cache: true
           cache-dependency-path: network/go.sum
+      - name: Validate reusable remote-worker setup and checks
+        if: github.event_name == 'workflow_dispatch' && inputs.remote_profile != 'off'
+        working-directory: .
+        env:
+          REMOTE_PROFILE: ${{ inputs.remote_profile }}
+        run: |
+          export MCND_REMOTE_BASE="$RUNNER_TEMP/mintcandy-remote"
+          bash scripts/remote/prepare.sh modern
+          bash scripts/remote/validate.sh "$REMOTE_PROFILE"
+          echo "GOMODCACHE=$MCND_REMOTE_BASE/modules" >> "$GITHUB_ENV"
+          echo "GOCACHE=$MCND_REMOTE_BASE/cache/go1.26.10" >> "$GITHUB_ENV"
       - name: Verify independent dependency graph
         run: |
           mkdir -p validation-logs
@@ -95,6 +112,8 @@ jobs:
         if: always()
         with:
           name: modern-network-validation-${{ github.run_id }}-${{ github.run_attempt }}
-          path: network/validation-logs/
+          path: |
+            network/validation-logs/
+            ${{ runner.temp }}/mintcandy-remote/results/
           retention-days: 30
           if-no-files-found: warn
