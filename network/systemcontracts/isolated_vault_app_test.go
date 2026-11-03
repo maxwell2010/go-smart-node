@@ -32,6 +32,7 @@ type isolatedBackendEnv struct {
 	keys            []*ecdsa.PrivateKey
 	credit          *big.Int
 	events          func() []abci.Event
+	blockEvents     func() []abci.Event
 	setup, govOwner common.Address
 }
 
