@@ -21,10 +21,11 @@ rollback checks. Validator records remain ordinary honest Bech32 strings.
 
 `third_party/cosmos-evm` contains the complete authenticated canonical module
 source with its Apache license. `UPSTREAM.json` records the upstream tag,
-commit, Go module checksum, all 1,236 original file hashes and the one changed
-file. No authenticated module-cache file is changed. Normal Go builds select
+commit, Go module checksum, all 1,236 original file hashes and explicitly changed
+or added files. No authenticated module-cache file is changed. Normal Go builds select
 this correction through the explicit local replacement. The patch identifier
-`v0.6.3-mintcandy.1` is an owned-source label, not a published upstream release.
+`v0.6.3-mintcandy.2` is an owned-source label, not a published upstream release.
+It also includes the separately documented [native work gas policy](ru/NATIVE_WORK_GAS.md).
 
 Run `python3 scripts/verify_owned_evm.py` before builds. The verifier detects
 undeclared changes, missing files and extra files in that local replacement;

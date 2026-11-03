@@ -13,8 +13,8 @@
     "ownedSourceReplacement": {
       "path": "./third_party/cosmos-evm",
       "manifest": "third_party/cosmos-evm/UPSTREAM.json",
-      "patchLabel": "v0.6.3-mintcandy.1",
-      "scope": "Decode Bech32 validator operator for EVM COINBASE; canonical fail/owned pass through actual signed EVM execution."
+      "patchLabel": "v0.6.3-mintcandy.2",
+      "scope": "Decode validator operator for COINBASE; bounded, charged native post-processing with atomic rollback and matching gas estimation. Fresh-network behavior only."
     }
   },
   "goToolchain": "go1.26.10 linux/amd64",

@@ -13,6 +13,7 @@ import (
 	"github.com/ethereum/go-ethereum/core"
 	ethtypes "github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/core/vm"
+	"github.com/ethereum/go-ethereum/crypto"
 	"github.com/ethereum/go-ethereum/eth/tracers"
 	"github.com/ethereum/go-ethereum/eth/tracers/logger"
 	ethparams "github.com/ethereum/go-ethereum/params"
@@ -382,7 +383,8 @@ func (k Keeper) EstimateGasInternal(c context.Context, req *types.EthCallRequest
 		// update the message with the new gas value
 		msg.GasLimit = gas
 
-		tmpCtx := ctx
+		// Each estimation attempt is isolated, including native post-processing.
+		tmpCtx, _ := ctx.CacheContext()
 		if fromType == types.RPC {
 			tmpCtx, _ = ctx.CacheContext()
 
@@ -403,15 +405,40 @@ func (k Keeper) EstimateGasInternal(c context.Context, req *types.EthCallRequest
 			// resetting the gasMeter after increasing the sequence to have an accurate gas estimation on EVM extensions transactions
 			tmpCtx = buildTraceCtx(tmpCtx, msg.GasLimit)
 		}
-		// pass false to not commit StateDB
+		// Hooks need the simulated EVM writes visible in this discarded cache.
+		executionCfg := cfg
+		var minimumGas uint64
+		if k.HasHooks() {
+			executionCfg, minimumGas, err = nativeWorkConfig(cfg, gas)
+			if err != nil {
+				return true, nil, err
+			}
+		}
 		stateDB := statedb.New(tmpCtx, &k, txConfig)
-		rsp, err = k.ApplyMessageWithConfig(tmpCtx, stateDB, *msg, nil, false, false, cfg, txConfig, false, nil)
+		rsp, err = k.ApplyMessageWithConfig(tmpCtx, stateDB, *msg, nil, k.HasHooks(), false, executionCfg, txConfig, false, nil)
 		if err != nil {
 			if errors.Is(err, core.ErrIntrinsicGas) || errors.Is(err, core.ErrFloorDataGas) {
 				return true, nil, nil // Special case, raise gas limit
 			}
 			return true, nil, err // Bail out
 		}
+		if k.HasHooks() && !rsp.Failed() {
+			receipt := &ethtypes.Receipt{Status: ethtypes.ReceiptStatusSuccessful, GasUsed: rsp.GasUsed, Logs: types.LogsToEthereum(rsp.Logs)}
+			if msg.To == nil {
+				receipt.ContractAddress = crypto.CreateAddress(msg.From, msg.Nonce)
+			}
+			nativeGas, hookErr := k.meteredNativeWork(tmpCtx, msg.From, *msg, receipt)
+			rsp.GasUsed += nativeGas
+			rsp.MaxUsedGas += nativeGas
+			if hookErr != nil {
+				if errors.Is(hookErr, vm.ErrOutOfGas) {
+					rsp.VmError = vm.ErrOutOfGas.Error()
+				} else {
+					rsp.VmError = hookErr.Error()
+				}
+			}
+		}
+		rsp.GasUsed = max(rsp.GasUsed, minimumGas)
 		return len(rsp.VmError) > 0, rsp, nil
 	}
 

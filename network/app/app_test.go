@@ -220,4 +220,7 @@ func TestFreshOwnApplicationSignedNativeEVMTransfer(t *testing.T) {
 		checkCoinbaseOpcode(t, a, ethKey, valSet, now)
 	})
 	assertNativeAllocationExport(t, a)
+	t.Run("native_hook_gas_and_rollback", func(t *testing.T) {
+		checkNativeHookGas(t, a, ethKey, valSet, now)
+	})
 }

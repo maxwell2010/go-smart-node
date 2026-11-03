@@ -1,6 +1,7 @@
 package keeper
 
 import (
+	"errors"
 	"fmt"
 	"math/big"
 
@@ -200,6 +201,13 @@ func (k *Keeper) ApplyTransaction(ctx sdk.Context, tx *ethtypes.Transaction) (*t
 		return nil, errorsmod.Wrap(err, "failed to load evm config")
 	}
 	txConfig := k.TxConfig(ctx, tx.Hash())
+	var minimumGas uint64
+	if k.HasHooks() {
+		cfg, minimumGas, err = nativeWorkConfig(cfg, tx.Gas())
+		if err != nil {
+			return nil, err
+		}
+	}
 
 	// get the signer according to the chain rules from the config and block height
 	signer := ethtypes.MakeSigner(types.GetEthChainConfig(), big.NewInt(ctx.BlockHeight()), uint64(ctx.BlockTime().Unix())) //#nosec G115 -- int overflow is not a concern here
@@ -248,8 +256,7 @@ func (k *Keeper) ApplyTransaction(ctx sdk.Context, tx *ethtypes.Transaction) (*t
 	if res.Failed() {
 		receipt.Status = ethtypes.ReceiptStatusFailed
 
-		// If the tx failed we discard the old context and create a new one, so
-		// PostTxProcessing can persist data even if the tx fails.
+		// Discard reverted EVM changes. Financial hooks skip failed execution.
 		tmpCtx, commitFn = ctx.CacheContext()
 	} else {
 		receipt.Status = ethtypes.ReceiptStatusSuccessful
@@ -260,8 +267,6 @@ func (k *Keeper) ApplyTransaction(ctx sdk.Context, tx *ethtypes.Transaction) (*t
 		return nil, errorsmod.Wrap(err, "failed to extract sender address from ethereum transaction")
 	}
 
-	eventsLen := len(tmpCtx.EventManager().Events())
-
 	// Only call PostTxProcessing if there are hooks set, to avoid calling commitFn unnecessarily
 	if !k.HasHooks() {
 		// If there are no hooks, we can commit the state immediately if the tx is successful
@@ -269,13 +274,21 @@ func (k *Keeper) ApplyTransaction(ctx sdk.Context, tx *ethtypes.Transaction) (*t
 			commitFn()
 		}
 	} else {
-		// Note: PostTxProcessing hooks currently do not charge for gas
-		// and function similar to EndBlockers in abci, but for EVM transactions.
-		// It will persist data even if the tx fails.
-		err = k.PostTxProcessing(tmpCtx, signerAddr, *msg, receipt)
+		// Native work shares the signed EVM gas limit and fee accounting.
+		var nativeGas uint64
+		nativeGas, err = k.meteredNativeWork(tmpCtx, signerAddr, *msg, receipt)
+		res.GasUsed += nativeGas
+		res.MaxUsedGas += nativeGas
+		res.GasUsed = max(res.GasUsed, minimumGas)
+		receipt.GasUsed = res.GasUsed
+		receipt.CumulativeGasUsed = calculateCumulativeGasFromEthResponse(ctx.GasMeter(), res)
 		if err != nil {
 			// If hooks returns an error, revert the whole tx.
-			res.VmError = errorsmod.Wrap(err, "failed to execute post transaction processing").Error()
+			if errors.Is(err, vm.ErrOutOfGas) {
+				res.VmError = vm.ErrOutOfGas.Error()
+			} else {
+				res.VmError = errorsmod.Wrap(err, "failed to execute post transaction processing").Error()
+			}
 			k.Logger(ctx).Error("tx post processing failed", "error", err)
 			// If the tx failed in post processing hooks, we should clear all log-related data
 			// to match EVM behavior where transaction reverts clear all effects including logs
@@ -296,10 +309,7 @@ func (k *Keeper) ApplyTransaction(ctx sdk.Context, tx *ethtypes.Transaction) (*t
 				res.Logs = types.NewLogsFromEth(receipt.Logs)
 			}
 
-			events := tmpCtx.EventManager().Events()
-			if len(events) > eventsLen {
-				ctx.EventManager().EmitEvents(events[eventsLen:])
-			}
+			// CacheContext's commitFn already forwards child events once.
 		}
 	}
 

@@ -1,5 +1,7 @@
 {
-  "addedFiles": {},
+  "addedFiles": {
+    "x/vm/keeper/native_work.go": "c16cdd6c273a4d588e0722835f50990a9b13db5b6b8bb01e9b319ea59995f3a6"
+  },
   "canonicalFiles": {
     ".clconfig.json": "68a0b98f6c1ec64f54d3434a3a6d28cfe38daa6a49ad182502bcdb343b2c5b47",
     ".github/ISSUE_TEMPLATE/issue-template.md": "3ba0372ba6fe3c77c7a128b67e1af8626d038aefbf7f48c159618cf90bd0a726",
@@ -1239,11 +1241,13 @@
     "x/vm/wrappers/testutil/mock.go": "08254697a611a729e41d0e3ba5bc94e5f02f06fd35141666612592694aa305b4"
   },
   "modifiedFiles": {
-    "x/vm/keeper/block_proposer.go": "50ea27632ae1910a2de1f78a6a20b848e44acac9b9c96ccef544153c9d9db79a"
+    "x/vm/keeper/block_proposer.go": "50ea27632ae1910a2de1f78a6a20b848e44acac9b9c96ccef544153c9d9db79a",
+    "x/vm/keeper/grpc_query.go": "e010d75efbc5686d35343b74c4d0a6af6751b695dadad50d580aeb0155cdaa10",
+    "x/vm/keeper/state_transition.go": "1fe9d8c27a83318b817e9349ac1edfe4771968b27efe21807d9d59bf1338fdea"
   },
-  "patchVersion": "v0.6.3-mintcandy.1",
+  "patchVersion": "v0.6.3-mintcandy.2",
   "schemaVersion": 1,
-  "scope": "Decode SDK53 validator Bech32 operator bytes for EVM COINBASE; no other canonical source changes",
+  "scope": "Decode SDK53 validator operator bytes for COINBASE; bounded and charged native post-processing, atomic rollback, and isolated matching gas estimation for the fresh network",
   "upstreamCommit": "71c78b5072a248bae5273c34ad2f53d349799ccd",
   "upstreamModule": "github.com/cosmos/evm",
   "upstreamModuleSum": "h1:1G8+iqyQWslZ2g7873h90Fcr3pL6RV24PgOS1wiK2SY=",
