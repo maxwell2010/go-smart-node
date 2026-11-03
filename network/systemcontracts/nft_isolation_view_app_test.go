@@ -16,6 +16,7 @@ import (
 	nftkeeper "github.com/maxwell2010/go-smart-node/network/decimal/nft/keeper"
 	"github.com/maxwell2010/go-smart-node/network/decimal/nft/receipts"
 	nfttypes "github.com/maxwell2010/go-smart-node/network/decimal/nft/types"
+	validatorreceipts "github.com/maxwell2010/go-smart-node/network/decimal/validator/receipts"
 	contracts "github.com/maxwell2010/go-smart-node/network/systemcontracts"
 	"github.com/stretchr/testify/require"
 )
@@ -238,6 +239,15 @@ func runIsolatedPositionReader(t *testing.T, e isolatedBackendEnv) {
 		return source, child.GasMeter().GasConsumed()
 	}
 	source, cost := auth(sourceReader, execution)
+	adapter, err := validatorreceipts.NewNFTViewStakeSourceAdapter(sourceReader)
+	require.NoError(t, err)
+	adapted, err := adapter.AuthenticateStakeSource(e.ctx().WithGasMeter(storetypes.NewGasMeter(15_000_000)), execution)
+	require.NoError(t, err)
+	require.Equal(t, source.ChainID, adapted.Domain.ChainID)
+	require.Equal(t, source.EVMChainID, adapted.Domain.EVMChainID)
+	require.Equal(t, source.Gateway, adapted.Gateway)
+	require.Equal(t, source.Fingerprint, adapted.Fingerprint, "adapter must preserve the ORIGINAL authenticated role fingerprint")
+
 	require.Equal(t, config.ChainID, source.ChainID)
 	require.Equal(t, config.EVMChainID, source.EVMChainID)
 	require.Equal(t, gatewayAddress, source.Gateway)
