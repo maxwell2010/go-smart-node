@@ -1,0 +1,51 @@
+name: Modern network development artifacts
+on:
+  workflow_dispatch:
+  push:
+    branches: ['integration/**', 'release/**']
+    paths: ['network/**', '.github/workflows/modern-network-development.yml']
+permissions:
+  contents: read
+concurrency:
+  group: mcnd-artifact-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  linux-amd64:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 40
+    env:
+      CGO_ENABLED: '1'
+      CC: gcc
+      GOTOOLCHAIN: local
+      GOMAXPROCS: '2'
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e
+        with:
+          go-version: '1.26.10'
+          cache-dependency-path: network/go.sum
+      - name: Verify sources and operator tooling
+        run: |
+          python3 network/scripts/verify_owned_evm.py
+          python3 network/scripts/verify_owned_stun.py
+          python3 -m unittest discover -s network/tools -p 'test_*.py'
+      - name: Build pinned development daemon
+        run: |
+          cd network
+          go mod download
+          go mod verify
+          git diff --exit-code -- go.mod go.sum
+          go build -mod=readonly -p 2 -trimpath -ldflags "-X main.buildCommit=$GITHUB_SHA" -o "$RUNNER_TEMP/mcnd" ./cmd/mcnd
+          "$RUNNER_TEMP/mcnd" version
+      - name: Check actual generated retention configuration
+        run: |
+          "$RUNNER_TEMP/mcnd" init config-check --home "$RUNNER_TEMP/mcnd-config-check" --chain-id mintcandy_990003-1 --evm.evm-chain-id 990003 > /dev/null 2>&1
+          python3 network/tools/configure_history.py --home "$RUNNER_TEMP/mcnd-config-check" --apply --role rpc-ibc
+          python3 network/tools/package_mcnd.py --binary "$RUNNER_TEMP/mcnd" --source "$GITHUB_WORKSPACE" --revision "$GITHUB_SHA" --output "development-artifacts/mcnd-development-linux-amd64.tar.gz"
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+        with:
+          name: mcnd-development-linux-amd64-${{ github.sha }}
+          path: development-artifacts/
+          retention-days: 14

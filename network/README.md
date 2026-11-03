@@ -1,5 +1,7 @@
 # Separate network compatibility candidate
 
+[Русская инструкция: установка, зависимости, сервер, синхронизация, пиры и хранение истории](docs/ru/README.md).
+
 This nested module builds the owned application for a separate, fresh network. The repository root remains the legacy mainnet replay build, with its own dependency graph. Do not import that legacy module here.
 
 The current candidate follows the active [2025.1 release family](https://docs.cosmos.network/sdk/latest/release-family): SDK `0.53.8`, CometBFT `0.38.26`, Cosmos EVM `0.6.3`, and IBC Go `10.7.0`. Its effective Ethereum implementation is the canonical Cosmos replacement `github.com/cosmos/go-ethereum v1.16.2-cosmos-1`. Exact source, checksums, test scope and remaining gates are recorded in `family-maintained53.json`.
@@ -50,7 +52,7 @@ ADDRESS=$("$MCND" keys show operator --home "$NODE_HOME" --keyring-backend test 
 "$MCND" genesis add-genesis-account "$ADDRESS" 1000000000000000000000000del --home "$NODE_HOME"
 "$MCND" genesis gentx operator 1000000000000000000del --home "$NODE_HOME" --chain-id mintcandy_990001-1 --keyring-backend test
 "$MCND" genesis collect-gentxs --home "$NODE_HOME"
-"$MCND" genesis validate --home "$NODE_HOME"
+"$MCND" genesis validate-genesis --home "$NODE_HOME"
 "$MCND" start --home "$NODE_HOME" --chain-id mintcandy_990001-1 --evm.evm-chain-id 990001
 ```
 
