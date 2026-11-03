@@ -15,11 +15,23 @@ for volume in "$root" "$work_parent"; do
   (( $(df -Pk "$volume" | awk 'END {print $4}') >= 20 * 1024 * 1024 )) || { echo 'Less than 20 GiB free on worker volume.' >&2; exit 1; }
 done
 mkdir -- "$output"
+evidence_owner="$(id -u):$(id -g)"
+preserve_public_reports() {
+  local file
+  for file in "$output/daemon.json" "$output/hermes.json"; do
+    if [[ -L "$file" ]]; then echo 'Refuse symbolic report file.' >&2; return 1; fi
+    if [[ -f "$file" ]]; then
+      sudo -n chown -- "$evidence_owner" "$file"
+      sudo -n chmod 600 -- "$file"
+    fi
+  done
+}
 work="$(mktemp -d "$work_parent/mcnd-process.XXXXXXXX")"
 work_identity="$(stat -c '%d:%i' -- "$work")"
 cleanup() {
   local status=$?
   trap - EXIT
+  preserve_public_reports || status=1
   if [[ ! -L "$work" && "$(dirname -- "$work")" == "$work_parent" && "$(basename -- "$work")" == mcnd-process.* && "$(stat -c '%d:%i' -- "$work")" == "$work_identity" ]]; then
     sudo -n rm -rf -- "$work" || status=1
   else
@@ -98,11 +110,13 @@ sudo -n unshare --net -- bash -euc 'ip link set lo up; exec "$@"' _ \
   "$python" "$root/network/tools/mcnd_process_smoke.py" --binary "$work/mcnd" \
   --home-parent "$work/lifecycle" --history-role rpc-ibc --report "$output/daemon.json" \
   |& tee "$output/daemon.log"
+preserve_public_reports
 sudo -n unshare --net -- bash -euc 'ip link set lo up; exec "$@"' _ \
   env TMPDIR="$work" "$python" "$root/network/internal/ibclab/hermes_lab.py" --mode full \
   --reference-binary "$work/ibcreference" --reference-sha256 "$reference_sha" --reference-source-commit "$revision" \
   --mcnd-binary "$work/mcnd" --mcnd-sha256 "$mcnd_sha" --mcnd-source-commit "$revision" \
   --hermes-binary "$work/hermes" --report "$output/hermes.json" |& tee "$output/hermes.log"
+preserve_public_reports
 "$python" - "$output" <<'PY'
 import json,sys
 from pathlib import Path
