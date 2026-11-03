@@ -26,7 +26,7 @@ def main():
             raise RuntimeError("Owned staking source provenance differs: " + path)
     unit = "owned/DecimalDelegation.sol"
     source = (ROOT / unit).read_text(encoding="utf-8")
-    output = ["abi", "evm.bytecode.object", "evm.bytecode.linkReferences", "evm.deployedBytecode.object", "evm.deployedBytecode.linkReferences"]
+    output = ["abi", "evm.bytecode.object", "evm.bytecode.linkReferences", "evm.deployedBytecode.object", "evm.deployedBytecode.linkReferences", "evm.deployedBytecode.immutableReferences"]
     targets = {"DecimalDelegation": "MintCandyDelegation", "DelegationNFTLib": "MintCandyDelegationNFTLib"}
     settings = {"optimizer": {"enabled": True, "runs": 200}, "evmVersion": "paris", "viaIR": True,
                 "metadata": {"bytecodeHash": "ipfs"}, "libraries": {},
@@ -43,10 +43,15 @@ def main():
         evm = contract["evm"]
         creation, runtime = evm["bytecode"]["object"], evm["deployedBytecode"]["object"]
         if not creation or not runtime or len(runtime) // 2 > 24576:
-            raise RuntimeError("Missing or oversized owned staking bytecode: " + contract_name)
+            raise RuntimeError("Missing or oversized owned staking bytecode: " + contract_name + " bytes=" + str(len(runtime) // 2))
+        immutable_refs = evm["deployedBytecode"]["immutableReferences"]
+        if any(key != "library_deploy_address" or contract_name != "DelegationNFTLib" for key in immutable_refs):
+            raise RuntimeError("Unreviewed owned staking constructor immutable")
         artifact = {"contractName": contract_name, "artifactName": artifact_name, "sourceUnit": unit,
                     "abi": contract["abi"], "creationBytecode": creation, "runtimeBytecode": runtime,
                     "creationLinks": evm["bytecode"]["linkReferences"], "runtimeLinks": evm["deployedBytecode"]["linkReferences"],
+                    "immutableReferences": immutable_refs,
+                    "immutableVariables": {key: {"key": unit + ":" + contract_name + ".library_deploy_address", "type": "address", "origin": "solc-library-deploy-address"} for key in immutable_refs},
                     "compilerVersion": COMPILER_VERSION, "compilerSha256": COMPILER_SHA256,
                     "ownedManifestSha256": hashlib.sha256(manifest_bytes).hexdigest(),
                     "settings": {k: v for k, v in settings.items() if k != "outputSelection"}}
