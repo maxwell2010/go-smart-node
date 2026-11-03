@@ -6,3 +6,5 @@ systemcontracts/*.sol text eol=lf
 third_party/pion-stun-v2/** -text -whitespace
 systemcontracts/source-manifest.json text eol=lf
 systemcontracts/artifacts/*.json text eol=lf
+
+systemcontracts/owned/** -text -whitespace

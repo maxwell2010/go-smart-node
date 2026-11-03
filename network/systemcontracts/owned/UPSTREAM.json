@@ -1,0 +1,12 @@
+{
+  "patchLabel": "mintcandy-delegation-nft-penalty-1",
+  "canonicalSource": "sources/DecimalDelegation.sol",
+  "canonicalSha256": "4478ab6d8b4a7feb230d70715c72f3be816fdbfd0efe7743e3572cfd4ce010c2",
+  "ownedSource": "owned/DecimalDelegation.sol",
+  "ownedSha256": "743832a9add772ef04403a717a9191077475a37409b49129b0f9bdd2fdb83516",
+  "changedFunctions": [
+    "DelegationNFTLib._applyPenaltiesToStake",
+    "DecimalDelegation._applyPenaltiesToStake"
+  ],
+  "financialScope": "Apply generic coin penalty only to direct amount; NFT-backed part is penalized by NFT path. No supply-burn or aggregate-validator-reserve policy change."
+}

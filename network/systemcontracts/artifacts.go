@@ -27,7 +27,7 @@ func Load(name string) (Artifact, error) {
 
 func checkName(name string) error {
 	switch name {
-	case "DecimalContractCenter", "DecimalContractCenterProxy", "NewNetworkProxyBootstrap", "NewNetworkNFTCenter", "NewNetworkTokenCenter", "NewNetworkReservelessTokenBeacon", "ConfiguredBootstrapTestTarget", "NewNetworkMasterValidator", "MintCandyWrappedDEL", "WrappedDELTestReceiver", "DecimalMasterValidator", "DecimalDelegation", "DelegationNFTLib", "DecimalDelegationNFT", "DecimalTokenCenter", "DecimalNFTCenter", "DRC20", "DRC20Reserveless", "DRC721", "DRC1155", "DRC721Reserveless", "DRC1155Reserveless":
+	case "DecimalContractCenter", "DecimalContractCenterProxy", "NewNetworkProxyBootstrap", "NewNetworkNFTCenter", "NewNetworkTokenCenter", "NewNetworkReservelessTokenBeacon", "ConfiguredBootstrapTestTarget", "NewNetworkMasterValidator", "MintCandyWrappedDEL", "WrappedDELTestReceiver", "DecimalMasterValidator", "DecimalDelegation", "DelegationNFTLib", "MintCandyDelegation", "MintCandyDelegationNFTLib", "DecimalDelegationNFT", "DecimalTokenCenter", "DecimalNFTCenter", "DRC20", "DRC20Reserveless", "DRC721", "DRC1155", "DRC721Reserveless", "DRC1155Reserveless":
 	default:
 		return fmt.Errorf("unknown pinned system-contract artifact %q", name)
 	}
@@ -70,6 +70,8 @@ func LoadLinked(name string, libraries map[string]common.Address) (Artifact, err
 	}
 	var source struct {
 		ContractName  string          `json:"contractName"`
+		ArtifactName  string          `json:"artifactName"`
+		SourceUnit    string          `json:"sourceUnit"`
 		ABI           json.RawMessage `json:"abi"`
 		Creation      string          `json:"creationBytecode"`
 		Runtime       string          `json:"runtimeBytecode"`
@@ -79,7 +81,14 @@ func LoadLinked(name string, libraries map[string]common.Address) (Artifact, err
 	if err := json.Unmarshal(data, &source); err != nil {
 		return Artifact{}, err
 	}
-	if source.ContractName != name {
+	expected := name
+	if name == "MintCandyDelegation" || name == "MintCandyDelegationNFTLib" {
+		expected = map[string]string{"MintCandyDelegation": "DecimalDelegation", "MintCandyDelegationNFTLib": "DelegationNFTLib"}[name]
+		if source.ArtifactName != name || source.SourceUnit != "owned/DecimalDelegation.sol" {
+			return Artifact{}, fmt.Errorf("owned staking artifact provenance mismatch")
+		}
+	}
+	if source.ContractName != expected {
 		return Artifact{}, fmt.Errorf("system-contract artifact name mismatch")
 	}
 	contractABI, err := abi.JSON(strings.NewReader(string(source.ABI)))

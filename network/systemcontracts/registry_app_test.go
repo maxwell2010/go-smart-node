@@ -49,9 +49,9 @@ func TestOwnedAppSignedRegistryBootstrap(t *testing.T) {
 	const chainID = "mintcandy_990001-1"
 	a := ownedapp.NewApp(log.NewNopLogger(), dbm.NewMemDB(), true, appOptions{flags.FlagHome: t.TempDir(), flags.FlagChainID: chainID, srvflags.EVMChainID: uint64(990001)})
 	t.Cleanup(func() { require.NoError(t, a.Close()) })
-	keys := make([]*ecdsa.PrivateKey, 3)
-	accounts := make([]authtypes.GenesisAccount, 3)
-	balances := make([]banktypes.Balance, 3)
+	keys := make([]*ecdsa.PrivateKey, 5)
+	accounts := make([]authtypes.GenesisAccount, 5)
+	balances := make([]banktypes.Balance, 5)
 	funds := sdk.NewCoins(sdk.NewCoin(identity.BaseDenom, math.NewInt(10000).Mul(math.NewInt(1_000_000_000_000_000_000))))
 	for i := range keys {
 		key, err := ethsecp.GenerateKey()
@@ -302,19 +302,19 @@ func TestOwnedAppSignedRegistryBootstrap(t *testing.T) {
 	})
 
 	t.Run("fresh full system proxy set", func(t *testing.T) {
-		lib := load("DelegationNFTLib")
+		lib := load("MintCandyDelegationNFTLib")
 		from := crypto.PubkeyToAddress(keys[0].PublicKey)
 		libAddress := crypto.CreateAddress(from, a.EVMKeeper.GetNonce(ctx(), from))
 		code, err := lib.Deployment()
 		require.NoError(t, err)
 		send(keys[0], nil, new(big.Int), code, true)
 		require.NotEmpty(t, a.EVMKeeper.GetCode(ctx(), a.EVMKeeper.GetCodeHash(ctx(), libAddress)))
-		delegation, err := contracts.LoadLinked("DecimalDelegation", map[string]common.Address{"sources/DecimalDelegation.sol:DelegationNFTLib": libAddress})
+		delegation, err := contracts.LoadLinked("MintCandyDelegation", map[string]common.Address{"owned/DecimalDelegation.sol:DelegationNFTLib": libAddress})
 		require.NoError(t, err)
 		roles := map[string]common.Address{}
 		artifacts := map[string]contracts.Artifact{}
-		for _, role := range []string{"master-validator", "delegation", "delegation-nft", "token-center", "nft-center"} {
-			name := map[string]string{"master-validator": "NewNetworkMasterValidator", "delegation": "DecimalDelegation", "delegation-nft": "DecimalDelegationNFT", "token-center": "DecimalTokenCenter", "nft-center": "DecimalNFTCenter"}[role]
+		for _, role := range []string{"master-validator", "delegation", "token-center", "nft-center"} {
+			name := map[string]string{"master-validator": "NewNetworkMasterValidator", "delegation": "DecimalDelegation", "delegation-nft": "DecimalDelegationNFT", "token-center": "NewNetworkTokenCenter", "nft-center": "NewNetworkNFTCenter"}[role]
 			artifact := delegation
 			if role != "delegation" {
 				artifact = load(name)
@@ -326,7 +326,7 @@ func TestOwnedAppSignedRegistryBootstrap(t *testing.T) {
 				require.NoError(t, err)
 			}
 			if role == "token-center" || role == "nft-center" {
-				initialization, err = artifact.ABI.Pack("initialize")
+				initialization, err = artifact.ABI.Pack("initializeFresh", address)
 				require.NoError(t, err)
 			}
 			init, err := bootstrap.ABI.Pack("bootstrap", owner, impl, initialization)
@@ -349,6 +349,10 @@ func TestOwnedAppSignedRegistryBootstrap(t *testing.T) {
 			send(keys[1], &address, new(big.Int), register, true)
 			require.Equal(t, instance, read("getContractAddress", role))
 		}
+		roles["delegation-nft"] = roles["delegation"]
+		nftAlias, err := registry.ABI.Pack("setContractAddress", "delegation-nft", roles["delegation"])
+		require.NoError(t, err)
+		send(keys[1], &address, new(big.Int), nftAlias, true)
 		wrapped := deploy(load("MintCandyWrappedDEL"))
 		register, err := registry.ABI.Pack("setContractAddress", "wdel", wrapped)
 		require.NoError(t, err)
@@ -377,18 +381,70 @@ func TestOwnedAppSignedRegistryBootstrap(t *testing.T) {
 			require.NoError(t, err)
 			require.Equal(t, implementation, values[0])
 		}
+		t.Run("mixed coin NFT penalty conservation", func(t *testing.T) {
+			checkSignedMixedPenalty(t, 0, false, true, keys, roles, artifacts, wrapped, address, registry, func() *big.Int { return a.BankKeeper.GetSupply(ctx(), identity.BaseDenom).Amount.BigInt() }, send)
+			checkSignedMixedPenalty(t, 2, true, true, keys, roles, artifacts, wrapped, address, registry, func() *big.Int { return a.BankKeeper.GetSupply(ctx(), identity.BaseDenom).Amount.BigInt() }, send)
+		})
+
+		t.Run("tiny unit global rounding negative control", func(t *testing.T) { checkSignedTinyUnitRounding(t, keys, roles, artifacts, send) })
+		t.Run("canonical NFT penalty negative control", func(t *testing.T) {
+			canonicalLibrary := load("DelegationNFTLib")
+			from := crypto.PubkeyToAddress(keys[0].PublicKey)
+			canonicalLib := crypto.CreateAddress(from, a.EVMKeeper.GetNonce(ctx(), from))
+			creation, err := canonicalLibrary.Deployment()
+			require.NoError(t, err)
+			send(keys[0], nil, new(big.Int), creation, true)
+			expectedLibraryRuntime := append([]byte(nil), canonicalLibrary.Runtime...)
+			require.GreaterOrEqual(t, len(expectedLibraryRuntime), 21)
+			if expectedLibraryRuntime[0] == 0x73 {
+				require.Equal(t, make([]byte, 20), expectedLibraryRuntime[1:21])
+				copy(expectedLibraryRuntime[1:21], canonicalLib.Bytes())
+			} else {
+				// viaIR encodes the same constructor self-address guard as PUSH32.
+				require.Equal(t, []byte{0x60, 0x80, 0x60, 0x40, 0x52, 0x30, 0x7f}, expectedLibraryRuntime[:7])
+				require.Equal(t, make([]byte, 32), expectedLibraryRuntime[7:39])
+				require.Equal(t, byte(0x14), expectedLibraryRuntime[39])
+				copy(expectedLibraryRuntime[19:39], canonicalLib.Bytes())
+			}
+			require.Equal(t, expectedLibraryRuntime, a.EVMKeeper.GetCode(ctx(), a.EVMKeeper.GetCodeHash(ctx(), canonicalLib)))
+			canonical, err := contracts.LoadLinked("DecimalDelegation", map[string]common.Address{"sources/DecimalDelegation.sol:DelegationNFTLib": canonicalLib})
+			require.NoError(t, err)
+			master := load("NewNetworkMasterValidator")
+			masterImpl, canonicalImpl := deploy(master), deploy(canonical)
+			masterArgs, err := master.ABI.Pack("initializeFresh", address)
+			require.NoError(t, err)
+			masterSetup, err := bootstrap.ABI.Pack("bootstrap", owner, masterImpl, masterArgs)
+			require.NoError(t, err)
+			canonicalSetup, err := bootstrap.ABI.Pack("bootstrap", owner, canonicalImpl, []byte{})
+			require.NoError(t, err)
+			masterProxy, canonicalProxy := deploy(proxy, setup, masterSetup), deploy(proxy, setup, canonicalSetup)
+			centerArgs, err := canonical.ABI.Pack("setContractCenter", address)
+			require.NoError(t, err)
+			send(keys[1], &canonicalProxy, new(big.Int), centerArgs, true)
+			controlRoles, controlArtifacts := cloneRoleMap(roles), cloneArtifactMap(artifacts)
+			controlRoles["master-validator"], controlRoles["delegation"], controlRoles["delegation-nft"] = masterProxy, canonicalProxy, canonicalProxy
+			controlArtifacts["master-validator"], controlArtifacts["delegation"] = master, canonical
+			for _, role := range []string{"master-validator", "delegation", "delegation-nft"} {
+				input, err := registry.ABI.Pack("setContractAddress", role, controlRoles[role])
+				require.NoError(t, err)
+				send(keys[1], &address, new(big.Int), input, true)
+			}
+			supply := func() *big.Int { return a.BankKeeper.GetSupply(ctx(), identity.BaseDenom).Amount.BigInt() }
+			checkSignedMixedPenalty(t, 3, false, false, keys, controlRoles, controlArtifacts, wrapped, address, registry, supply, send)
+			checkSignedMixedPenalty(t, 4, true, false, keys, controlRoles, controlArtifacts, wrapped, address, registry, supply, send)
+		})
 	})
 
 	t.Run("atomic constructor handoff to governance", func(t *testing.T) {
 		govOwner := common.BytesToAddress(authtypes.NewModuleAddress("gov"))
 		require.NotEqual(t, crypto.PubkeyToAddress(keys[0].PublicKey), govOwner)
 		from := crypto.PubkeyToAddress(keys[0].PublicKey)
-		lib := load("DelegationNFTLib")
+		lib := load("MintCandyDelegationNFTLib")
 		libAddress := crypto.CreateAddress(from, a.EVMKeeper.GetNonce(ctx(), from))
 		libCode, err := lib.Deployment()
 		require.NoError(t, err)
 		send(keys[0], nil, new(big.Int), libCode, true)
-		linked, err := contracts.LoadLinked("DecimalDelegation", map[string]common.Address{"sources/DecimalDelegation.sol:DelegationNFTLib": libAddress})
+		linked, err := contracts.LoadLinked("MintCandyDelegation", map[string]common.Address{"owned/DecimalDelegation.sol:DelegationNFTLib": libAddress})
 		require.NoError(t, err)
 		names := []string{"master-validator", "delegation", "token-center", "nft-center"}
 		roleABI := map[string]contracts.Artifact{}
@@ -716,12 +772,12 @@ func TestOwnedAppSignedRegistryBootstrap(t *testing.T) {
 			meta := nftMeta{Creator: creator, Symbol: "FRESH", Name: "Fresh collection", ContractURI: "ipfs://collection", Refundable: true, Burnable: true}
 			center := roles["nft-center"]
 			factory := roleABI["nft-center"]
-			// Previously configured canonical factories have no fresh beacon slots.
+			// Both independent fresh profiles now create collections through the canonical ABI.
 			originalCenter := read("getContractAddress", "nft-center")
 			originalABI := load("DecimalNFTCenter")
 			before, err := originalABI.ABI.Pack("createDRC721", meta)
 			require.NoError(t, err)
-			send(keys[0], &originalCenter, new(big.Int), before, false)
+			send(keys[0], &originalCenter, new(big.Int), before, true)
 			for _, kind := range []struct {
 				method, artifact string
 				typ              uint8
@@ -774,7 +830,7 @@ func TestOwnedAppSignedRegistryBootstrap(t *testing.T) {
 			originalTokens := read("getContractAddress", "token-center")
 			freeData, err := tokenFactory.ABI.Pack("createTokenReserveless", "Fresh free token", "freshfree", true, true, big.NewInt(100), big.NewInt(1000), "fixture")
 			require.NoError(t, err)
-			send(keys[0], &originalTokens, new(big.Int), freeData, false)
+			send(keys[0], &originalTokens, new(big.Int), freeData, true)
 			created := send(keys[0], &tokenCenter, new(big.Int), freeData, true)
 			freeResult, err := tokenFactory.ABI.Unpack("createTokenReserveless", created.Ret)
 			require.NoError(t, err)
