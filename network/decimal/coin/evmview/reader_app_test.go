@@ -179,7 +179,7 @@ func TestAuthoritativeCoinViewWithSignedOwnEVM(t *testing.T) {
 	creation, err := proxy.Deployment(implementation, []byte{})
 	require.NoError(t, err)
 	token := deployCode(creation, new(big.Int))
-	send(keys[0], &token, new(big.Int).Mul(unit, big.NewInt(5)), initialization, true)
+	initializationResponse := send(keys[0], &token, new(big.Int).Mul(unit, big.NewInt(5)), initialization, true)
 	metadata := &fixtureMetadata{coin: cointypes.Coin{Denom: "viewcoin", Title: "Coin view fixture", Creator: accounts[0].GetAddress().String(), CRR: 50, Volume: math.NewIntFromBigInt(new(big.Int).Mul(unit, big.NewInt(9))), Reserve: math.NewIntFromBigInt(unit), MinVolume: math.NewIntFromBigInt(unit), LimitVolume: math.NewIntFromBigInt(new(big.Int).Mul(unit, big.NewInt(100))), DRC20Contract: token.Hex()}}
 	binding := &fixtureBinding{binding: evmview.Binding{Kind: evmview.ERC1967Proxy, Address: token, RuntimeHash: a.EVMKeeper.GetCodeHash(ctx(), token), Implementation: implementation, ImplementationHash: a.EVMKeeper.GetCodeHash(ctx(), implementation)}}
 	compiled, err := contracts.CompiledABI("DRC20")
@@ -214,6 +214,10 @@ func TestAuthoritativeCoinViewWithSignedOwnEVM(t *testing.T) {
 	require.Equal(t, hydrated.Reserve, parent.Reserve)
 	t.Run("prepared reserve plan rechecks actual same-height backing", func(t *testing.T) {
 		checkPreparedReservePlan(t, a, ctx(), metadata.coin, binding, compiled, hydrated, accounts[0].GetAddress())
+	})
+	t.Run("reserve adapter uses genuinely signed logs and actual backing", func(t *testing.T) {
+		checkCoordinatedReserveAdapter(t, a, ctx(), metadata.coin, binding, compiled, hydrated,
+			&ethtypes.Receipt{Status: 1, GasUsed: initializationResponse.GasUsed, Logs: evmtypes.LogsToEthereum(initializationResponse.Logs)}, owner)
 	})
 	// An explicitly supplied wrong runtime/implementation policy fails closed.
 	savedBinding := binding.binding

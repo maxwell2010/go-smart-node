@@ -73,3 +73,38 @@ Remaining integration includes production factory/token admission, metadata-chan
 events, reserve-less policy, NFT/validator plans, complete final invariants and
 coherent application entry-point installation. This bridge never mints a bank
 mirror for each ERC20 transfer and creates no alternative financial ledger.
+
+
+## Shared coordinator adapter
+
+`nativeexec.NewReservePreparer` adapts this exact `ReservePlan` API without
+weakening its context, metadata, parameters or fresh backing checks. It supports
+only the reviewed signed-Ethereum and governance coordinator routes. Native SDK
+and IBC entry points reject before native reads. Construction does not itself
+authenticate an arbitrary callback: application wiring must still provide the
+approved runtime/domain reader and authoritative same-context EVM totalSupply
+and bank DEL balance of the token contract.
+
+The composition regression uses the real native coin keeper and proves that
+all stage validations see old metadata, later stage applies see the updated
+reserve, and either a late stage error or final-invariant error discards the
+reserve write and every child event. The fixture symbol is `adaptcoin`, within
+the unchanged native symbol rule `[a-z][a-z0-9]{2,9}`; the former `adaptercoin`
+was an invalid 11-character test input, not a reason to relax admission.
+
+A concurrent shallow-copy regression blocks the winning Apply in the backing
+reader while 32 competitors attempt the same token. Exactly one winner can
+reach SDK state. Atomic consumption does not make Cosmos SDK contexts or stores
+generally safe for concurrent access; callers must serialize native execution.
+A discarded outer cache does not reset a consumed plan.
+
+The actual-App regression also passes genuinely signed DRC20 initialization
+logs through this adapter with the real same-context EVM/bank reader. It checks
+commit, late apply failure, final failure and mismatch after a normal bank
+credit. NFT/validator stages are explicitly composition probes. Native metadata
+admission is installed only in discarded fixture caches, and the receipt is
+passed to the coordinator explicitly after the signed transaction. This proves
+backing-reader and stage composition, not installed production post-tx hooks,
+new-token admission or complete EVM/native transaction rollback. Existing signed
+App atomicity tests remain separate. No financial route is enabled by the
+adapter or its tests.

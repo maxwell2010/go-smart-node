@@ -13,9 +13,11 @@ var _ Prepared = (*coinkeeper.ReservePlan)(nil)
 
 // NewReservePreparer adapts existing registered nonbase coin metadata plans.
 // It does not admit new currencies, update native base supply or mount routes.
+// Wiring must supply the authenticated same-context EVM/bank reader; this
+// adapter does not turn an arbitrary callback into a trusted backing source.
 func NewReservePreparer(hook *coinkeeper.ReserveHook) (Preparer, error) {
 	if hook == nil {
-		return nil, errors.New("native reserve preparer requires an authenticated reserve hook")
+		return nil, errors.New("native reserve preparer requires a configured reserve hook")
 	}
 	return reservePreparer{hook: hook}, nil
 }
