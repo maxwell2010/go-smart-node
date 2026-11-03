@@ -90,15 +90,11 @@ func NewKeeper(evm *evmkeeper.Keeper, manifest Manifest, hooks evmtypes.EvmHooks
 		return nil, err
 	}
 	owned := Manifest{Registry: registry, Roles: map[string]Role{}}
-	seen := map[common.Address]bool{registry.Address: true}
+	seen := map[common.Address]string{registry.Address: "registry"}
 	for role, r := range manifest.Roles {
 		if _, ok := roleABI(role); !ok {
 			return nil, fmt.Errorf("unsupported system role %q", role)
 		}
-		if seen[r.Address] {
-			return nil, errors.New("duplicate authority target address")
-		}
-		seen[r.Address] = true
 		if err := validateChildSlots(role, r.ApprovedChildren); err != nil {
 			return nil, err
 		}
@@ -106,9 +102,54 @@ func NewKeeper(evm *evmkeeper.Keeper, manifest Manifest, hooks evmtypes.EvmHooks
 		if err != nil {
 			return nil, err
 		}
+		// A unified Gateway exposes two registry names for one proxy. Neither
+		// alias may broaden the other's reviewed code or child upgrade policy.
+		if previous, exists := seen[value.Address]; exists {
+			if !gatewayAliases(previous, role) || !sameRolePolicy(owned.Roles[previous], value) {
+				return nil, errors.New("duplicate authority target lacks identical reviewed Gateway policies")
+			}
+		} else {
+			seen[value.Address] = role
+		}
 		owned.Roles[role] = value
 	}
 	return &Keeper{evm: evm, manifest: owned, hooks: hooks, owner: common.BytesToAddress(authtypes.NewModuleAddress("gov"))}, nil
+}
+
+func gatewayAliases(left, right string) bool {
+	return left == "delegation" && right == "delegation-nft" || left == "delegation-nft" && right == "delegation"
+}
+
+func sameHashPolicy(left, right []common.Hash) bool {
+	leftSet, rightSet := make(map[common.Hash]bool), make(map[common.Hash]bool)
+	for _, hash := range left {
+		leftSet[hash] = true
+	}
+	for _, hash := range right {
+		rightSet[hash] = true
+	}
+	if len(leftSet) != len(rightSet) {
+		return false
+	}
+	for hash := range leftSet {
+		if !rightSet[hash] {
+			return false
+		}
+	}
+	return true
+}
+
+func sameRolePolicy(left, right Role) bool {
+	if left.Address != right.Address || left.ProxyCodeHash != right.ProxyCodeHash || !sameHashPolicy(left.ApprovedImplementations, right.ApprovedImplementations) || len(left.ApprovedChildren) != len(right.ApprovedChildren) {
+		return false
+	}
+	for slot, hashes := range left.ApprovedChildren {
+		other, exists := right.ApprovedChildren[slot]
+		if !exists || !sameHashPolicy(hashes, other) {
+			return false
+		}
+	}
+	return true
 }
 
 func validateChildSlots(role string, slots map[string][]common.Hash) error {
@@ -135,7 +176,7 @@ func nilHook(hooks evmtypes.EvmHooks) bool {
 }
 
 func roleABI(role string) (string, bool) {
-	name, ok := map[string]string{"master-validator": "NewNetworkMasterValidator", "delegation": "DecimalDelegation", "delegation-nft": "DecimalDelegationNFT", "token-center": "DecimalTokenCenter", "nft-center": "DecimalNFTCenter"}[role]
+	name, ok := map[string]string{"master-validator": "NewNetworkMasterValidator", "delegation": "DecimalDelegation", "delegation-nft": "DecimalDelegationNFT", "token-center": "DecimalTokenCenter", "nft-center": "DecimalNFTCenter", "nft-position-vault": "MintCandyNFTPositionVault"}[role]
 	return name, ok
 }
 
