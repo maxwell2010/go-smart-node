@@ -860,6 +860,7 @@ func TestOwnedAppSignedRegistryBootstrap(t *testing.T) {
 			center := roles["nft-center"]
 			factory := roleABI["nft-center"]
 			receiptAuth := &signedNFTAuthenticator{App: a, Registry: govRegistry, RegistryImplementation: registryImpl, Factory: center, FactoryImplementation: implementations["nft-center"], Owner: govOwner, Proxy: proxy, RegistryABI: registry, FactoryABI: factory, Collections: make(map[common.Address]signedNFTCollection)}
+			productionView := receiptAuth.productionView(t, roles["delegation"], libAddress, creator)
 			// Both independent fresh profiles now create collections through the canonical ABI.
 			originalCenter := read("getContractAddress", "nft-center")
 			originalABI := load("DecimalNFTCenter")
@@ -1052,6 +1053,15 @@ func TestOwnedAppSignedRegistryBootstrap(t *testing.T) {
 					require.NoError(t, err)
 					send(keys[0], &asset.address, new(big.Int), transfer, false)
 				}
+				if asset.family >= 2 {
+					tokenID := big.NewInt(1)
+					quantity := uint32(1)
+					if asset.family == 3 || asset.family == 5 {
+						tokenID = asset.id
+						quantity = 2
+					}
+					productionView.checkRead(t, ctx(), asset.address, creator, recipient, tokenID, quantity, 0)
+				}
 				// Raw storage resolution is explicit, same-context and never cached supply.
 				target, abiFactory := tokenCenter, tokenFactory
 				if asset.family >= 2 {
@@ -1072,17 +1082,22 @@ func TestOwnedAppSignedRegistryBootstrap(t *testing.T) {
 					require.NoError(t, err)
 					transferred := send(keys[0], &asset.address, new(big.Int), transfer, true)
 					receiptAuth.checkTransfer(t, ctx(), transferred, asset.address, creator, recipient, big.NewInt(1))
+					productionView.checkTransfer(t, ctx(), transferred, asset.address, creator, recipient, big.NewInt(1))
 					require.Equal(t, recipient, query(asset.artifact, asset.address, "ownerOf", big.NewInt(1))[0])
 				} else {
 					transfer, err := asset.artifact.ABI.Pack("safeTransferFrom", creator, recipient, asset.id, big.NewInt(1), []byte{})
 					require.NoError(t, err)
 					transferred := send(keys[0], &asset.address, new(big.Int), transfer, true)
 					receiptAuth.checkTransfer(t, ctx(), transferred, asset.address, creator, recipient, asset.id)
+					productionView.checkTransfer(t, ctx(), transferred, asset.address, creator, recipient, asset.id)
 					require.Equal(t, int64(1), query(asset.artifact, asset.address, "balanceOf", recipient, asset.id)[0].(*big.Int).Int64())
-					batch, err := asset.artifact.ABI.Pack("safeBatchTransferFrom", creator, recipient, []*big.Int{asset.id}, []*big.Int{big.NewInt(1)}, []byte{})
+					// Two entries force an actual TransferBatch in OpenZeppelin; a
+					// one-entry safeBatchTransferFrom emits TransferSingle instead.
+					batch, err := asset.artifact.ABI.Pack("safeBatchTransferFrom", creator, recipient, []*big.Int{asset.id, asset.id}, []*big.Int{new(big.Int), big.NewInt(1)}, []byte{})
 					require.NoError(t, err)
 					batchReceipt := send(keys[0], &asset.address, new(big.Int), batch, true)
 					receiptAuth.checkTransfer(t, ctx(), batchReceipt, asset.address, creator, recipient, asset.id)
+					productionView.checkTransfer(t, ctx(), batchReceipt, asset.address, creator, recipient, asset.id)
 					require.Equal(t, int64(2), query(asset.artifact, asset.address, "balanceOf", recipient, asset.id)[0].(*big.Int).Int64())
 				}
 			}

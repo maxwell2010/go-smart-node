@@ -297,10 +297,16 @@ func (k *StateKeeper) GetCollectionByDRC(ctx sdk.Context, contract string) (type
 	}
 	var record types.Collection
 	if err := k.read(ctx, key, &record); err != nil {
+		if errors.Is(err, ErrNotFound) {
+			return types.Collection{}, errors.New("NFT collection contract index points to missing record")
+		}
 		return types.Collection{}, err
 	}
 	collection, err := k.GetCollection(ctx, record.Creator, record.Denom)
 	if err != nil {
+		if errors.Is(err, ErrNotFound) {
+			return types.Collection{}, errors.New("NFT collection contract index metadata mismatch")
+		}
 		return types.Collection{}, err
 	}
 	creator, err := account(collection.Creator)

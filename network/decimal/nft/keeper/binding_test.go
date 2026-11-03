@@ -80,6 +80,18 @@ func TestExternalNFTCollectionContractLookupChecksNativeIndex(t *testing.T) {
 	require.ErrorContains(t, err, "index mismatch")
 }
 
+func TestExternalNFTDanglingCollectionIndexIsNotUnknownEmitter(t *testing.T) {
+	ctx, k, g, _ := externalFixture(t)
+	require.NoError(t, k.InitGenesis(ctx, g))
+	collection := g.Collections[0]
+	creator, err := account(collection.Creator)
+	require.NoError(t, err)
+	require.NoError(t, k.service.OpenKVStore(ctx).Delete(types.GetCollectionKey(creator, collection.Denom)))
+	_, err = k.GetCollectionByDRC(ctx, collection.AddressDRC)
+	require.ErrorContains(t, err, "index points to missing record")
+	require.NotErrorIs(t, err, ErrNotFound, "a corrupt registered index must abort authentication rather than silently ignore the emitter")
+}
+
 type failBindingIndexService struct{ store.KVStoreService }
 
 func (s failBindingIndexService) OpenKVStore(ctx context.Context) store.KVStore {

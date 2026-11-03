@@ -180,13 +180,23 @@ func (f *signedNFTAuthenticator) checkTransfer(t *testing.T, ctx sdk.Context, re
 	receipt := signedNFTReceipt(response)
 	decoded, err := f.decoder(t).Decode(readCtx, receipts.Execution{EntryPoint: receipts.EntryPointSignedEthereum, Receipt: receipt})
 	require.NoError(t, err)
-	require.Len(t, decoded.Transfers, 1)
-	move := decoded.Transfers[0]
-	require.Equal(t, target, move.Asset.Contract)
-	require.Equal(t, common.BigToHash(id), move.Asset.TokenID)
-	require.Equal(t, from, move.From)
-	require.Equal(t, to, move.To)
-	require.Equal(t, uint32(1), move.Quantity)
+	require.NotEmpty(t, decoded.Transfers)
+	require.LessOrEqual(t, len(decoded.Transfers), 2)
+	var quantity uint32
+	for i, move := range decoded.Transfers {
+		require.Equal(t, target, move.Asset.Contract)
+		require.Equal(t, common.BigToHash(id), move.Asset.TokenID)
+		require.Equal(t, from, move.From)
+		require.Equal(t, to, move.To)
+		require.Equal(t, decoded.Transfers[0].Ref.LogPosition, move.Ref.LogPosition)
+		require.Equal(t, uint32(i), move.Ref.ItemPosition)
+		quantity += move.Quantity
+	}
+	require.Equal(t, uint32(1), quantity)
+	if len(decoded.Transfers) == 2 {
+		require.Zero(t, decoded.Transfers[0].Quantity)
+		require.Equal(t, uint32(1), decoded.Transfers[1].Quantity)
+	}
 	require.Positive(t, readCtx.GasMeter().GasConsumed())
 	// Ordinary stale approval validation changes only fixture policy, no chain state.
 	wrong := *f
@@ -196,5 +206,5 @@ func (f *signedNFTAuthenticator) checkTransfer(t *testing.T, ctx sdk.Context, re
 	partial, err := wrong.decoder(t).Decode(badCtx, receipts.Execution{EntryPoint: receipts.EntryPointSignedEthereum, Receipt: receipt})
 	require.ErrorContains(t, err, "binding is stale")
 	require.Empty(t, partial.Transfers)
-	t.Logf("actual signed %s NFT transfer decoded with approved factory, owner, implementation and constructor runtime", move.NFTType)
+	t.Logf("actual signed %s NFT transfer decoded with approved factory, owner, implementation and constructor runtime; ordered entries=%d", decoded.Transfers[0].NFTType, len(decoded.Transfers))
 }
