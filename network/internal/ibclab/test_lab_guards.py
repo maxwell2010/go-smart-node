@@ -29,12 +29,14 @@ class LabGuards(unittest.TestCase):
         with self.assertRaisesRegex(RuntimeError, "initial network namespace"):
             lab.private_namespace()
 
+    @unittest.skipUnless(lab.os.name == "posix", "Linux namespace API required")
     def test_equal_namespace_identity_is_rejected_before_commands(self):
         with patch.object(lab.os, "readlink", return_value="net:[42]"), patch.object(lab.subprocess, "run") as run:
             with self.assertRaisesRegex(RuntimeError, "initial network namespace"):
                 lab.private_namespace()
             run.assert_not_called()
 
+    @unittest.skipUnless(lab.os.name == "posix", "Linux namespace API required")
     def test_unreadable_namespace_identity_fails_closed(self):
         with patch.object(lab.os, "readlink", side_effect=PermissionError("denied")), patch.object(lab.subprocess, "run") as run:
             with self.assertRaises(PermissionError):
