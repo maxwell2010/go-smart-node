@@ -6,6 +6,7 @@ import (
 
 	storetypes "cosmossdk.io/store/types"
 	sdk "github.com/cosmos/cosmos-sdk/types"
+	banktypes "github.com/cosmos/cosmos-sdk/x/bank/types"
 	"github.com/cosmos/evm/x/vm/statedb"
 	evmtypes "github.com/cosmos/evm/x/vm/types"
 	"github.com/ethereum/go-ethereum/common"
@@ -59,7 +60,32 @@ func runCurveConverterFinancial(t *testing.T, e isolatedBackendEnv) {
 		t.Helper()
 		data, err := artifact.ABI.Pack(method, args...)
 		require.NoError(t, err)
-		return e.send(e.keys[key], &target, value, data, success)
+		// Fees in this App are transfers to the fee collector, not supply burns.
+		// Account only for independently emitted Begin/EndBlock inflation here;
+		// accepting transaction mint/burn events would conceal an entry-time burn.
+		beforeSupply := e.app.BankKeeper.GetSupply(e.ctx(), identity.BaseDenom).Amount
+		response := e.send(e.keys[key], &target, value, data, success)
+		expectedSupply := beforeSupply
+		for _, event := range e.blockEvents() {
+			if event.Type != banktypes.EventTypeCoinMint && event.Type != banktypes.EventTypeCoinBurn {
+				continue
+			}
+			for _, attribute := range event.Attributes {
+				if attribute.Key != sdk.AttributeKeyAmount {
+					continue
+				}
+				coins, err := sdk.ParseCoinsNormalized(attribute.Value)
+				require.NoError(t, err)
+				delta := coins.AmountOf(identity.BaseDenom)
+				if event.Type == banktypes.EventTypeCoinMint {
+					expectedSupply = expectedSupply.Add(delta)
+				} else {
+					expectedSupply = expectedSupply.Sub(delta)
+				}
+			}
+		}
+		require.Equal(t, expectedSupply, e.app.BankKeeper.GetSupply(e.ctx(), identity.BaseDenom).Amount, "conversion, WDEL unwrap and reverted transactions must preserve bank DEL supply apart from block-level issuance")
+		return response
 	}
 	gov := func(target common.Address, artifact contracts.Artifact, method string, args ...interface{}) {
 		t.Helper()
@@ -117,15 +143,15 @@ func runCurveConverterFinancial(t *testing.T, e isolatedBackendEnv) {
 		Crr                                         uint8
 		Identity, Symbol, Name                      string
 	}
-	mintCurve := func(symbol string, reserve, minimum *big.Int) common.Address {
+	mintCurve := func(symbol string, reserve, minimum *big.Int, crr uint8) common.Address {
 		commission := integer(center, centerAddress, "getCommissionSymbol", symbol)
-		call(0, center, centerAddress, new(big.Int).Add(new(big.Int).Set(reserve), commission), true, "createToken", coinMeta{amount(10), minimum, amount(100), owner, 100, "converter-financial-control", symbol, "Converter reserve coin"})
+		call(0, center, centerAddress, new(big.Int).Add(new(big.Int).Set(reserve), commission), true, "createToken", coinMeta{amount(10), minimum, amount(100), owner, crr, "converter-financial-control", symbol, "Converter reserve coin"})
 		target := query(center, centerAddress, "tokens", symbol)[0].(common.Address)
 		require.True(t, query(center, centerAddress, "isTokenExists", target)[0].(bool))
 		require.Equal(t, reserve, native(target))
 		return target
 	}
-	currency := mintCurve("convertcx", amount(10), amount(5))
+	currency := mintCurve("convertcx", amount(10), amount(5), 100)
 	call(0, coin, currency, new(big.Int), true, "transfer", controllers[0], amount(6))
 	// Existing unsolicited balances must remain separate from this conversion.
 	call(0, coin, currency, new(big.Int), true, "transfer", converterAddress, big.NewInt(5))
@@ -229,7 +255,7 @@ func runCurveConverterFinancial(t *testing.T, e isolatedBackendEnv) {
 		require.Equal(t, before, snapshot(coin, currency, controllers[0]))
 	})
 	t.Run("reserve floor", func(t *testing.T) {
-		low := mintCurve("lowliqxx", amount(1), amount(1))
+		low := mintCurve("lowliqxx", amount(1), amount(1), 100)
 		call(0, coin, low, new(big.Int), true, "transfer", controllers[0], amount(1))
 		before := snapshot(coin, low, controllers[0])
 		result := call(0, controller, controllers[0], new(big.Int), false, "convert", low, amount(1), big.NewInt(1), deadline())
@@ -244,6 +270,32 @@ func runCurveConverterFinancial(t *testing.T, e isolatedBackendEnv) {
 		result := call(0, controller, controllers[0], new(big.Int), false, "convert", free, amount(1), amount(1), deadline())
 		requireError(result, "UnapprovedReserveCurve")
 		require.Equal(t, before, snapshot(freeCoin, free, controllers[0]))
+	})
+	t.Run("nonlinear registered CRR50 curve", func(t *testing.T) {
+		curved := mintCurve("curvedcx", amount(10), amount(5), 50)
+		input := amount(1)
+		call(0, coin, curved, new(big.Int), true, "transfer", controllers[0], amount(2))
+		// Expected output comes from the actual registered curve, independently
+		// of the converter preview; it must differ from a linear 1:1 sale.
+		quote := integer(coin, curved, "calculateSellOutput", input)
+		require.Positive(t, quote.Sign())
+		require.NotZero(t, quote.Cmp(input))
+		require.Equal(t, quote, integer(converter, converterAddress, "preview", curved, input, quote, deadline()))
+		before := snapshot(coin, curved, controllers[0])
+		result := call(0, controller, controllers[0], new(big.Int), true, "convert", curved, input, quote, deadline())
+		decoded, err := controller.ABI.Unpack("convert", result.Ret)
+		require.NoError(t, err)
+		require.Equal(t, quote, decoded[0])
+		noNativeBurn(result)
+		after := snapshot(coin, curved, controllers[0])
+		require.Equal(t, new(big.Int).Sub(before.Supply, input), after.Supply)
+		require.Equal(t, new(big.Int).Sub(before.CurveNative, quote), after.CurveNative)
+		require.Equal(t, new(big.Int).Sub(before.CallerToken, input), after.CallerToken)
+		require.Equal(t, new(big.Int).Add(before.CallerNative, quote), after.CallerNative)
+		require.Equal(t, before.ConverterToken, after.ConverterToken)
+		require.Equal(t, before.ConverterNative, after.ConverterNative)
+		require.Zero(t, after.Allowance.Sign())
+		t.Logf("actual CRR50 sell: input=%s DEL output=%s", input, quote)
 	})
 	t.Run("WDEL one to one through vault caller", func(t *testing.T) {
 		call(0, wrapper, wrapped, amount(3), true, "deposit")
