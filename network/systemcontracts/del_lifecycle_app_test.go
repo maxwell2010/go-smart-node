@@ -135,12 +135,17 @@ func (f signedDELFixture) eventOnce(name string, expected map[string]string) {
 }
 
 func (f signedDELFixture) signed(method string, value sdkmath.Int, success bool, args ...interface{}) *evmtypes.MsgEthereumTxResponse {
+	f.t.Helper()
+	return f.signedBy(0, method, value, success, args...)
+}
+
+func (f signedDELFixture) signedBy(key int, method string, value sdkmath.Int, success bool, args ...interface{}) *evmtypes.MsgEthereumTxResponse {
 	t, e := f.t, f.env
 	t.Helper()
 	data, err := f.gateway.ABI.Pack(method, args...)
 	require.NoError(t, err)
 	e.nextGasLimit(24_000_000)
-	return e.send(e.keys[0], &f.target, value.BigInt(), data, success)
+	return e.send(e.keys[key], &f.target, value.BigInt(), data, success)
 }
 
 func (f signedDELFixture) read(artifact contracts.Artifact, contract common.Address, method string, args ...interface{}) interface{} {
@@ -202,6 +207,10 @@ func runSignedDELDelegationLifecycle(t *testing.T, e isolatedBackendEnv, profile
 	gov func(contracts.Artifact, common.Address, string, ...interface{})) {
 	t.Helper()
 	f := newSignedDELFixture(t, e, profile, gateway, master, wrapper, gov)
+	if profile.EnableDELHoldReset {
+		runSignedDELHoldResetLifecycle(t, f)
+		return
+	}
 	if profile.EnableDELHold {
 		runSignedDELHoldLifecycle(t, f)
 		return

@@ -144,6 +144,9 @@ func runSignedDELHoldLifecycle(t *testing.T, f signedDELFixture) {
 	advanceTo(firstBucket.end)
 	require.Equal(t, firstBucket.end, now())
 	rejectWithdrawal(firstBucket, one)
+	beforeReset := f.native()
+	f.signed("resetHolds", zero, false, f.validator, f.user, f.wrapped, []*big.Int{big.NewInt(firstBucket.end)})
+	require.Equal(t, beforeReset, f.native(), "a mature hold can reset only when the profile opts in")
 	assertActive(firstLot, topUp, other)
 	f.backing(seven)
 
