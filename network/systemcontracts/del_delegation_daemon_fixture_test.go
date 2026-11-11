@@ -83,6 +83,9 @@ func exportDELDelegationDaemonFixture(t *testing.T, e isolatedBackendEnv, profil
 	actor := crypto.PubkeyToAddress(key.PublicKey)
 	nonce := e.app.EVMKeeper.GetNonce(ctx, actor)
 	amount := big.NewInt(3_000_000_000_000_000_000)
+	topUp := big.NewInt(2_000_000_000_000_000_000)
+	partial := big.NewInt(1_000_000_000_000_000_000)
+	remainder := new(big.Int).Sub(new(big.Int).Add(amount, topUp), partial)
 	gasPrice := big.NewInt(1_000_000_000_000)
 	const gasLimit = 24_000_000
 	signer := ethtypes.NewEIP155Signer(big.NewInt(990001))
@@ -108,22 +111,29 @@ func exportDELDelegationDaemonFixture(t *testing.T, e isolatedBackendEnv, profil
 		return "0x" + hex.EncodeToString(calldata)
 	}
 	zero := new(big.Int)
+	first, second := big.NewInt(0), big.NewInt(1)
 	var idWord common.Hash
 	stakeID := crypto.Keccak256Hash(validatorAddress.Bytes(), actor.Bytes(), profile.WrappedDEL.Bytes(), idWord.Bytes(), idWord.Bytes())
 	expect, err := json.Marshal(map[string]interface{}{
 		"chainId": ctx.ChainID(), "evmChainId": 990001, "gateway": profile.Gateway.Hex(), "wrapped": profile.WrappedDEL.Hex(),
 		"actor": actor.Hex(), "actorNative": sdk.AccAddress(actor.Bytes()).String(), "wrappedNative": sdk.AccAddress(profile.WrappedDEL.Bytes()).String(),
-		"validator": validatorAddress.Hex(), "amount": amount.String(), "gasPrice": gasPrice.String(), "gasLimit": gasLimit, "nonce": nonce,
-		"stakeId": stakeID.Hex(), "frozenId": idWord.Hex(),
-		"stakeData":      "0x" + hex.EncodeToString(pack("getStake", validatorAddress, actor, profile.WrappedDEL)),
-		"reserveData":    "0x" + hex.EncodeToString(pack("getValidatorReserve", validatorAddress, profile.WrappedDEL)),
-		"frozenData":     "0x" + hex.EncodeToString(pack("getFrozenStake", zero)),
-		"progressData":   "0x" + hex.EncodeToString(pack("frozenStakesMigrationProgress")),
-		"supplyData":     wrappedCall("totalSupply"),
-		"escrowData":     wrappedCall("balanceOf", profile.Gateway),
-		"delegate":       sign(0, amount, pack("delegateDEL", validatorAddress)),
-		"withdraw":       sign(1, zero, pack("withdraw", validatorAddress, profile.WrappedDEL, amount)),
-		"repeatComplete": sign(2, zero, pack("complete", []*big.Int{zero})),
+		"validator": validatorAddress.Hex(), "amount": amount.String(), "topUpAmount": topUp.String(), "partialAmount": partial.String(),
+		"gasPrice": gasPrice.String(), "gasLimit": gasLimit, "nonce": nonce,
+		"stakeId": stakeID.Hex(), "frozenIds": []string{common.BigToHash(first).Hex(), common.BigToHash(second).Hex()},
+		"stakeData":   "0x" + hex.EncodeToString(pack("getStake", validatorAddress, actor, profile.WrappedDEL)),
+		"reserveData": "0x" + hex.EncodeToString(pack("getValidatorReserve", validatorAddress, profile.WrappedDEL)),
+		"frozenData": []string{
+			"0x" + hex.EncodeToString(pack("getFrozenStake", first)),
+			"0x" + hex.EncodeToString(pack("getFrozenStake", second)),
+		},
+		"progressData":    "0x" + hex.EncodeToString(pack("frozenStakesMigrationProgress")),
+		"supplyData":      wrappedCall("totalSupply"),
+		"escrowData":      wrappedCall("balanceOf", profile.Gateway),
+		"delegate":        sign(0, amount, pack("delegateDEL", validatorAddress)),
+		"topUp":           sign(1, topUp, pack("delegateDEL", validatorAddress)),
+		"partialWithdraw": sign(2, zero, pack("withdraw", validatorAddress, profile.WrappedDEL, partial)),
+		"repeatComplete":  sign(3, zero, pack("complete", []*big.Int{first})),
+		"withdraw":        sign(4, zero, pack("withdraw", validatorAddress, profile.WrappedDEL, remainder)),
 	})
 	require.NoError(t, err)
 	write("expectations.json", expect)

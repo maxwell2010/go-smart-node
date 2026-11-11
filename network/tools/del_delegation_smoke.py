@@ -1,4 +1,4 @@
-"""Exercise a fresh signed DEL delegation and real EndBlock payout on a disposable daemon."""
+"""Exercise signed DEL delegation, top-up and withdrawals on a disposable daemon."""
 
 import argparse
 import hashlib
@@ -18,6 +18,9 @@ from withdrawal_genesis_smoke import (
 DELEGATED = 'decimal_del_delegated'
 WITHDRAWAL_REQUESTED = 'decimal_del_withdrawal_requested'
 AMOUNT = 3_000_000_000_000_000_000
+TOP_UP = 2_000_000_000_000_000_000
+PARTIAL = 1_000_000_000_000_000_000
+REMAINDER = AMOUNT + TOP_UP - PARTIAL
 GAS_PRICE = 1_000_000_000_000
 GAS_LIMIT = 24_000_000
 
@@ -31,13 +34,17 @@ def load_expectations(path):
     check(len({expected[name] for name in ('gateway', 'wrapped', 'actor', 'validator')}) == 4, 'fixture roles must be distinct')
     for name in ('actor', 'wrapped'):
         check(bech32_payload(expected[name + 'Native']) == expected[name], 'fixture native address does not match its EVM address')
-    check(expected['amount'] == str(AMOUNT) and expected['gasPrice'] == str(GAS_PRICE) and expected['gasLimit'] == GAS_LIMIT,
+    check((expected['amount'], expected['topUpAmount'], expected['partialAmount']) == (str(AMOUNT), str(TOP_UP), str(PARTIAL)) and
+          expected['gasPrice'] == str(GAS_PRICE) and expected['gasLimit'] == GAS_LIMIT,
           'fixture transaction value or gas differs')
     check(type(expected['nonce']) is int and 0 <= expected['nonce'] < 2**32, 'invalid fixture nonce')
-    check(re.fullmatch(WORD, expected['stakeId']) and expected['frozenId'] == '0x' + '00' * 32, 'fixture must start before its first withdrawal')
-    for name, words in (('stakeData', 3), ('reserveData', 2), ('frozenData', 1), ('progressData', 0), ('supplyData', 0), ('escrowData', 1)):
+    check(re.fullmatch(WORD, expected['stakeId']) and expected['frozenIds'] == [f'0x{index:064x}' for index in (0, 1)],
+          'fixture must start before its first withdrawal')
+    check(len(expected['frozenData']) == 2 and all(re.fullmatch(r'0x[0-9a-f]{72}', data) for data in expected['frozenData']),
+          'invalid frozen claim getter calldata')
+    for name, words in (('stakeData', 3), ('reserveData', 2), ('progressData', 0), ('supplyData', 0), ('escrowData', 1)):
         check(re.fullmatch(fr'0x[0-9a-f]{{{8 + words * 64}}}', expected[name]), f'invalid {name} calldata')
-    for name in ('delegate', 'withdraw', 'repeatComplete'):
+    for name in ('delegate', 'topUp', 'partialWithdraw', 'withdraw', 'repeatComplete'):
         signed = expected[name]
         check(re.fullmatch(WORD, signed['hash']) and re.fullmatch(r'0x(?:[0-9a-f]{2}){100,512}', signed['raw']),
               f'invalid {name} fixture transaction')
@@ -57,34 +64,32 @@ def balance(account, native_account, height):
     return evm
 
 
-def read_state(expected, height, phase, wallet):
-    delegated = phase == 'delegated'
-    frozen = phase == 'frozen'
-    amount = AMOUNT if delegated or frozen else 0
+def read_state(expected, height, *, active, pending, claims, wallet):
     gateway, wrapped, actor = (expected[name] for name in ('gateway', 'wrapped', 'actor'))
     stake = read_words(gateway, expected['stakeData'], height, 8)
-    if delegated:
-        check(stake == [int(expected['validator'], 16), int(actor, 16), int(wrapped, 16), AMOUNT, 0, 4, 0, 0],
+    if active:
+        check(stake == [int(expected['validator'], 16), int(actor, 16), int(wrapped, 16), active, 0, 4, 0, 0],
               'active Gateway DEL stake fields differ')
     else:
         check(stake[3] == 0, 'Gateway retains an unexpected active stake')
     reserve = read_words(gateway, expected['reserveData'], height, 2)[1]
-    check(reserve == (AMOUNT if delegated else 0), 'active Gateway validator reserve differs')
-    check(read_words(gateway, expected['progressData'], height, 2) == [int(phase not in ('genesis', 'delegated')), 0],
+    check(reserve == active, 'active Gateway validator reserve differs')
+    check(read_words(gateway, expected['progressData'], height, 2) == [claims, 0],
           'unexpected Gateway frozen queue length or legacy state')
     supply = read_words(wrapped, expected['supplyData'], height, 1)[0]
     escrow = read_words(wrapped, expected['escrowData'], height, 1)[0]
     backing = balance(wrapped, expected['wrappedNative'], height)
-    check(supply == escrow == backing == amount, 'wrapped supply, Gateway custody and bank backing must reconcile exactly')
+    check(supply == escrow == backing == active + pending, 'wrapped supply, Gateway custody and bank backing must reconcile exactly')
     actor_balance = balance(actor, expected['actorNative'], height)
     check(wallet is None or actor_balance == wallet, 'actor balance differs from exact value, fee and payout accounting')
     return {'height': height, 'walletAtomic': str(actor_balance), 'wrappedSupplyAtomic': str(supply),
-            'gatewayEscrowAtomic': str(escrow), 'wrappedBackingAtomic': str(backing), 'activeReserveAtomic': str(reserve)}
+            'gatewayEscrowAtomic': str(escrow), 'wrappedBackingAtomic': str(backing), 'activeReserveAtomic': str(reserve),
+            'activeStakeAtomic': str(stake[3]), 'pendingAtomic': str(pending)}
 
 
-def read_frozen(expected, height, status):
-    words = read_words(expected['gateway'], expected['frozenData'], height, 11)
-    want = [int(expected[name], 16) for name in ('validator', 'actor', 'wrapped')] + [AMOUNT, 0, 4, 0, 0, status, 1]
+def read_frozen(expected, height, index, amount, status):
+    words = read_words(expected['gateway'], expected['frozenData'][index], height, 11)
+    want = [int(expected[name], 16) for name in ('validator', 'actor', 'wrapped')] + [amount, 0, 4, 0, 0, status, 1]
     check(words[:10] == want and words[10] > 0, 'Gateway frozen DEL claim fields differ')
     return words[10]
 
@@ -132,6 +137,42 @@ def submit(child, log, report, expected, name, success, nonce, event, fields):
     return {'height': height, 'transactionHash': result, 'success': success, 'gasUsed': gas, 'feeAtomic': str(gas * price)}
 
 
+def withdraw_and_payout(child, log, report, expected, *, name, index, amount, active, nonce, wallet):
+    target = expected['gateway'], expected['frozenIds'][index]
+    report['phase'] = 'signed-' + name
+    receipt = submit(child, log, report, expected, name, True, nonce, WITHDRAWAL_REQUESTED,
+                     {'stake_id': expected['stakeId'], 'amount': str(amount), 'frozen_index': target[1]})
+    wallet -= int(receipt['feeAtomic'])
+    height = receipt['height']
+    due = read_frozen(expected, height, index, amount, 1)
+    check(0 < due - int(block_time(height).timestamp()) <= 30, 'unexpected DEL withdrawal freeze period')
+    report[name] = {**receipt, **read_state(expected, height, active=active, pending=amount, claims=index + 1, wallet=wallet),
+                    'dueAt': due, 'frozenIndex': target[1]}
+    check(not scan_blocks(height, height, *target), 'withdrawal completed in the request block')
+
+    report['phase'] = 'automatic-' + name
+    deadline = time.monotonic() + max(0, due - time.time()) + 45
+    completed = []
+    while not completed:
+        last = wait_height(child, height + 1, deadline, log, report)
+        check(last - report['initialHeight'] < MAX_BLOCKS, 'DEL lifecycle exceeded the disposable block budget')
+        completed = scan_blocks(height + 1, last, *target)
+        height = last
+    check(len(completed) == 1 and block_time(completed[0]).timestamp() >= due, 'DEL completion repeated or executed before maturity')
+    check(read_frozen(expected, completed[0], index, amount, 0) == due, 'completed Gateway claim changed its original deadline')
+    wallet += amount
+    payout = read_state(expected, completed[0], active=active, pending=0, claims=index + 1, wallet=wallet)
+    return {**payout, 'amountAtomic': str(amount), 'frozenIndex': target[1]}, wallet
+
+
+def settlement_gas(log):
+    work = log_records(log, 'withdrawal block settlement work')
+    check(len(work) == 1 and work[0].get('settled') == 1 and work[0].get('deferred') == 0, 'unexpected EndBlock settlement work')
+    gas = work[0].get('gas')
+    check(type(gas) is int and 0 < gas <= GAS_LIMIT, 'EndBlock DEL settlement gas outside budget')
+    return gas
+
+
 def run_gate(args, binary, root, expected, genesis, validator, env, owner, report):
     home = root / 'node'
     domain = ['--chain-id', CHAIN, '--evm.evm-chain-id', str(EVM_CHAIN)]
@@ -154,57 +195,48 @@ def run_gate(args, binary, root, expected, genesis, validator, env, owner, repor
     child = owner.spawn([binary, *start, *domain, '--home', str(home)], log, env)
     height = wait_height(child, report['initialHeight'] + 2, time.monotonic() + 45, log, report)
     check(len(log_records(log, 'authenticated withdrawal genesis admitted')) == 1, 'fresh DEL genesis admission not observed')
-    report['before'] = read_state(expected, height, 'genesis', None)
-    initial_wallet = int(report['before']['walletAtomic'])
+    report['before'] = read_state(expected, height, active=0, pending=0, claims=0, wallet=None)
+    wallet = int(report['before']['walletAtomic'])
     nonce = expected['nonce']
-    completion_target = expected['gateway'], expected['frozenId']
-    fields = {'stake_id': expected['stakeId'], 'amount': str(AMOUNT)}
+    active = 0
+    for offset, (name, key, amount) in enumerate((('delegate', 'delegation', AMOUNT), ('topUp', 'topUp', TOP_UP))):
+        report['phase'] = 'signed-' + name
+        receipt = submit(child, log, report, expected, name, True, nonce + offset, DELEGATED,
+                         {'stake_id': expected['stakeId'], 'amount': str(amount)})
+        wallet -= amount + int(receipt['feeAtomic'])
+        active += amount
+        report[key] = {**receipt, **read_state(expected, receipt['height'], active=active, pending=0, claims=0, wallet=wallet)}
 
-    report['phase'] = 'signed-delegate'
-    delegated = submit(child, log, report, expected, 'delegate', True, nonce, DELEGATED, fields)
-    wallet = initial_wallet - AMOUNT - int(delegated['feeAtomic'])
-    report['delegation'] = {**delegated, **read_state(expected, delegated['height'], 'delegated', wallet)}
-
-    report['phase'] = 'signed-withdraw'
-    withdrawn = submit(child, log, report, expected, 'withdraw', True, nonce + 1, WITHDRAWAL_REQUESTED,
-                       {**fields, 'frozen_index': expected['frozenId']})
-    wallet -= int(withdrawn['feeAtomic'])
-    height = withdrawn['height']
-    due = read_frozen(expected, height, 1)
-    check(0 < due - int(block_time(height).timestamp()) <= 30, 'unexpected DEL withdrawal freeze period')
-    report['withdrawal'] = {**withdrawn, **read_state(expected, height, 'frozen', wallet), 'dueAt': due}
-    check(not scan_blocks(report['initialHeight'], height, *completion_target), 'withdrawal completed before maturity')
-
-    report['phase'] = 'automatic-complete'
-    deadline = time.monotonic() + max(0, due - time.time()) + 45
-    completed = []
-    while not completed:
-        last = wait_height(child, height + 1, deadline, log, report)
-        check(last - report['initialHeight'] < MAX_BLOCKS, 'DEL lifecycle exceeded the disposable block budget')
-        completed = scan_blocks(height + 1, last, *completion_target)
-        height = last
-    check(len(completed) == 1 and block_time(completed[0]).timestamp() >= due, 'DEL completion repeated or executed before maturity')
-    check(read_frozen(expected, completed[0], 0) == due, 'completed Gateway claim changed its original deadline')
-    wallet += AMOUNT
-    report['payout'] = {**read_state(expected, completed[0], 'complete', wallet), 'amountAtomic': str(AMOUNT)}
+    report['partialPayout'], wallet = withdraw_and_payout(
+        child, log, report, expected, name='partialWithdraw', index=0, amount=PARTIAL, active=REMAINDER, nonce=nonce + 2, wallet=wallet)
 
     report['phase'] = 'repeat-complete'
-    repeated = submit(child, log, report, expected, 'repeatComplete', False, nonce + 2, 'decimal_withdrawal_completed', {})
+    repeated = submit(child, log, report, expected, 'repeatComplete', False, nonce + 3, 'decimal_withdrawal_completed', {})
     wallet -= int(repeated['feeAtomic'])
-    report['repeatComplete'] = {**repeated, **read_state(expected, repeated['height'], 'complete', wallet)}
+    report['repeatComplete'] = {**repeated, **read_state(expected, repeated['height'], active=REMAINDER, pending=0, claims=1, wallet=wallet)}
     owner.stop(child)
-    work = log_records(log, 'withdrawal block settlement work')
-    check(len(work) == 1 and work[0].get('settled') == 1 and work[0].get('deferred') == 0, 'unexpected EndBlock settlement work')
-    report['payout']['sdkGasCharged'] = work[0]['gas']
+    report['partialPayout']['sdkGasCharged'] = settlement_gas(log)
 
     report['phase'] = 'restart'
     restart_log = root / 'restart.log'
     child = owner.spawn([binary, *start, '--home', str(home)], restart_log, env)
     restarted = wait_height(child, repeated['height'] + 2, time.monotonic() + 45, restart_log, report)
-    check(not scan_blocks(completed[0] + 1, restarted, *completion_target), 'DEL payout repeated before or after restart')
-    check(read_frozen(expected, restarted, 0) == due, 'completed claim differs after restart')
-    report['restart'] = read_state(expected, restarted, 'complete', wallet)
+    check(not scan_blocks(report['partialPayout']['height'] + 1, restarted, expected['gateway'], expected['frozenIds'][0]),
+          'DEL payout repeated before or after restart')
+    due = report['partialWithdraw']['dueAt']
+    check(read_frozen(expected, restarted, 0, PARTIAL, 0) == due, 'completed claim differs after restart')
+    report['restart'] = read_state(expected, restarted, active=REMAINDER, pending=0, claims=1, wallet=wallet)
+
+    report['payout'], wallet = withdraw_and_payout(
+        child, restart_log, report, expected, name='withdraw', index=1, amount=REMAINDER, active=0, nonce=nonce + 4, wallet=wallet)
+    report['phase'] = 'final-state'
+    payout_height = report['payout']['height']
+    final_height = wait_height(child, payout_height + 2, time.monotonic() + 45, restart_log, report)
+    check(not scan_blocks(payout_height + 1, final_height, expected['gateway'], expected['frozenIds'][1]), 'final DEL payout repeated')
+    check(read_frozen(expected, final_height, 0, PARTIAL, 0) == due, 'first claim changed while completing the remainder')
+    report['final'] = read_state(expected, final_height, active=0, pending=0, claims=2, wallet=wallet)
     owner.stop(child)
+    report['payout']['sdkGasCharged'] = settlement_gas(restart_log)
 
 
 def main(argv=None, signals=None):
@@ -212,7 +244,7 @@ def main(argv=None, signals=None):
     for name in ('binary', 'binary-sha256', 'source-commit', 'fixture', 'home-parent', 'report'):
         parser.add_argument('--' + name, required=True)
     args = parser.parse_args(argv)
-    report = {'status': 'FAIL', 'phase': 'fixture-provenance', 'scope': 'disposable new DEL delegation and complete'}
+    report = {'status': 'FAIL', 'phase': 'fixture-provenance', 'scope': 'disposable DEL top-up and partial/full withdrawal'}
     with pathlib.Path(args.report).open('x', encoding='utf8') as stream:
         try:
             private_namespace()
@@ -235,7 +267,7 @@ def main(argv=None, signals=None):
                   'fixture must explicitly admit only DEL plus settlement')
             report.update(sourceCommit=args.source_commit, binarySha256=args.binary_sha256, genesisSha256=hashlib.sha256(genesis).hexdigest(),
                           chainID=CHAIN, evmChainID=EVM_CHAIN, initialHeight=height, gateway=expected['gateway'], stakeID=expected['stakeId'],
-                          frozenIndex=expected['frozenId'])
+                          frozenIndices=expected['frozenIds'])
             with tempfile.TemporaryDirectory(prefix='mcnd-del-delegation-', dir=args.home_parent) as directory:
                 root = pathlib.Path(directory)
                 owner = ProcessOwner(signals)

@@ -220,8 +220,12 @@ from pathlib import Path
 report=json.loads(Path(sys.argv[1]).read_text())
 assert report['status']=='PASS' and 'error' not in report,report
 assert report['sourceCommit']==sys.argv[2] and report['binarySha256']==sys.argv[3],report
-assert report['delegation']['success'] and report['withdrawal']['success'] and not report['repeatComplete']['success'],report
-assert report['payout']['amountAtomic']=='3000000000000000000' and report['payout']['sdkGasCharged']>0,report
-print('Fresh DEL delegation, full withdrawal, EndBlock payout, repeat rejection and restart passed.')
+assert all(report[step]['success'] for step in ('delegation','topUp','partialWithdraw','withdraw')),report
+assert not report['repeatComplete']['success'],report
+assert report['partialPayout']['amountAtomic']=='1000000000000000000' and report['partialPayout']['sdkGasCharged']>0,report
+assert report['restart']['activeStakeAtomic']=='4000000000000000000' and report['restart']['pendingAtomic']=='0',report
+assert report['payout']['amountAtomic']=='4000000000000000000' and report['payout']['sdkGasCharged']>0,report
+assert report['final']['activeStakeAtomic']==report['final']['wrappedSupplyAtomic']=='0',report
+print('Fresh DEL delegation, top-up, partial payout, repeat rejection, restart and remainder payout passed.')
 PY
 fi
