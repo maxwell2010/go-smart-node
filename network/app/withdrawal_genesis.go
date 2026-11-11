@@ -39,6 +39,9 @@ func parseWithdrawalGenesisProfile(raw json.RawMessage) (*WithdrawalProfile, err
 	if decoder.Decode(new(json.RawMessage)) != io.EOF {
 		return nil, errors.New("withdrawal genesis profile has trailing data")
 	}
+	if profile.EnableDELHoldReset && !profile.EnableDELHold {
+		return nil, errors.New("DEL hold reset genesis requires DEL hold admission")
+	}
 	if profile.EnableDELHold && !profile.EnableDELDelegation {
 		return nil, errors.New("DEL hold genesis requires DEL delegation admission")
 	}

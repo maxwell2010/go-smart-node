@@ -79,31 +79,11 @@ func (e *Executor) VerifySignedDEL(ctx sdk.Context, msg core.Message, receipt *e
 	}
 	out.Amount = sdkmath.NewIntFromBigInt(amount)
 	out.StakeID = crypto.Keccak256Hash(out.Validator.Bytes(), out.Beneficiary.Bytes(), e.roles.WrappedDEL.Bytes(), tokenID[:], holdWord[:])
-	markers, err := e.completions(receipt)
-	if err != nil {
+	if err := e.verifyDELStakeReceipt(ctx, receipt, out.Validator, out.Beneficiary, 3); err != nil {
 		return out, err
 	}
-	if len(markers) != 0 || len(receipt.Logs) != 3 {
-		return out, errors.New("unexpected DEL stake receipt logs")
-	}
-	if err := signedMetadata(ctx, receipt); err != nil {
+	if err := e.verifyDELStakeCursor(ctx, out.StakeID); err != nil {
 		return out, err
-	}
-	if _, err := e.auth.AuthenticateStakeProfile(ctx); err != nil {
-		return out, err
-	}
-	if err := e.requireInert(ctx, out.Beneficiary); err != nil {
-		return out, err
-	}
-	if err := e.verifyUnpenalizedValidator(ctx, out.Validator); err != nil {
-		return out, err
-	}
-	cursor, err := e.read(ctx, e.roles.Gateway, e.gateway, "getStakePenaltyIndex", common.HashLength, out.StakeID)
-	if err != nil {
-		return out, err
-	}
-	if common.BytesToHash(cursor) != (common.Hash{}) {
-		return out, errors.New("DEL position has an unsupported penalty cursor")
 	}
 	stake := [8]common.Hash{
 		common.BytesToHash(out.Validator.Bytes()), common.BytesToHash(out.Beneficiary.Bytes()), common.BytesToHash(e.roles.WrappedDEL.Bytes()),
@@ -172,6 +152,37 @@ func (e *Executor) VerifySignedDEL(ctx sdk.Context, msg core.Message, receipt *e
 		return out, nil
 	}
 	return e.verifyDELRequest(ctx, out, last)
+}
+
+func (e *Executor) verifyDELStakeReceipt(ctx sdk.Context, receipt *ethtypes.Receipt, validator, beneficiary common.Address, count int) error {
+	markers, err := e.completions(receipt)
+	if err != nil {
+		return err
+	}
+	if len(markers) != 0 || len(receipt.Logs) != count {
+		return errors.New("unexpected DEL stake receipt logs")
+	}
+	if err := signedMetadata(ctx, receipt); err != nil {
+		return err
+	}
+	if _, err := e.auth.AuthenticateStakeProfile(ctx); err != nil {
+		return err
+	}
+	if err := e.requireInert(ctx, beneficiary); err != nil {
+		return err
+	}
+	return e.verifyUnpenalizedValidator(ctx, validator)
+}
+
+func (e *Executor) verifyDELStakeCursor(ctx sdk.Context, id common.Hash) error {
+	cursor, err := e.read(ctx, e.roles.Gateway, e.gateway, "getStakePenaltyIndex", common.HashLength, id)
+	if err != nil {
+		return err
+	}
+	if common.BytesToHash(cursor) != (common.Hash{}) {
+		return errors.New("DEL position has an unsupported penalty cursor")
+	}
+	return nil
 }
 
 func (e *Executor) checkDELStakeLogs(logs []*ethtypes.Log, id common.Hash, post []byte, delta *big.Int, isNew bool) error {

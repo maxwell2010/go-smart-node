@@ -47,6 +47,7 @@ type WithdrawalProfile struct {
 	SettlementOnly      bool           `json:"settlement_only,omitempty"`
 	EnableDELDelegation bool           `json:"enable_del_delegation,omitempty"`
 	EnableDELHold       bool           `json:"enable_del_hold,omitempty"`
+	EnableDELHoldReset  bool           `json:"enable_del_hold_reset,omitempty"`
 }
 
 type withdrawalController struct {
@@ -92,6 +93,9 @@ func (app *App) LoadWithdrawalSettlement(ctx sdk.Context) error {
 }
 
 func (app *App) newWithdrawalController(profile WithdrawalProfile) (*withdrawalController, error) {
+	if profile.EnableDELHoldReset && !profile.EnableDELHold {
+		return nil, errors.New("DEL hold reset requires DEL hold admission")
+	}
 	if profile.EnableDELHold && !profile.EnableDELDelegation {
 		return nil, errors.New("DEL hold requires DEL delegation admission")
 	}
@@ -192,6 +196,8 @@ func (c *withdrawalController) isDELStakeCall(msg core.Message) bool {
 		return true
 	case "delegateHoldDEL(address,uint256)", "withdrawHold(address,address,uint256,uint256)":
 		return c.profile.EnableDELHold
+	case "resetHolds(address,address,address,uint256[])":
+		return c.profile.EnableDELHoldReset
 	default:
 		return false
 	}
@@ -233,19 +239,30 @@ func (c *withdrawalController) PostTxProcessing(ctx sdk.Context, sender common.A
 }
 
 func (c *withdrawalController) projectSignedDEL(ctx sdk.Context, msg core.Message, receipt *ethtypes.Receipt) error {
+	if bytes.Equal(msg.Data[:4], c.abi.Methods["resetHolds"].ID) {
+		held, ordinary, err := c.executor.VerifySignedDELHoldReset(ctx, msg, receipt)
+		if err != nil {
+			return fmt.Errorf("verify signed DEL hold reset: %w", err)
+		}
+		return c.keeper.ApplyGatewayDELHoldReset(ctx, c.delStakePosition(held), c.delStakePosition(ordinary), held.Amount)
+	}
 	result, err := c.executor.VerifySignedDEL(ctx, msg, receipt)
 	if err != nil {
 		return fmt.Errorf("verify signed DEL stake: %w", err)
 	}
-	position := validatorkeeper.GatewayDELStake{
-		Gateway: c.profile.Gateway, WrappedDEL: c.profile.WrappedDEL, Validator: result.Validator, Beneficiary: result.Beneficiary,
-		StakeID: result.StakeID, Amount: result.Remaining,
-		HoldDeadline: result.HoldDeadline, HoldStartTime: result.HoldStartTime,
-	}
+	position := c.delStakePosition(result)
 	if result.Deadline.IsZero() {
 		return c.keeper.ApplyGatewayDELDelegation(ctx, position, result.Amount)
 	}
 	return c.keeper.ApplyGatewayDELWithdrawal(ctx, position, result.FrozenIndex, result.Amount, result.Deadline)
+}
+
+func (c *withdrawalController) delStakePosition(result settlement.DELTransition) validatorkeeper.GatewayDELStake {
+	return validatorkeeper.GatewayDELStake{
+		Gateway: c.profile.Gateway, WrappedDEL: c.profile.WrappedDEL, Validator: result.Validator, Beneficiary: result.Beneficiary,
+		StakeID: result.StakeID, Amount: result.Remaining,
+		HoldDeadline: result.HoldDeadline, HoldStartTime: result.HoldStartTime,
+	}
 }
 
 type automaticWithdrawalKey struct{}
