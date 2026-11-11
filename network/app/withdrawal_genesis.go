@@ -39,6 +39,9 @@ func parseWithdrawalGenesisProfile(raw json.RawMessage) (*WithdrawalProfile, err
 	if decoder.Decode(new(json.RawMessage)) != io.EOF {
 		return nil, errors.New("withdrawal genesis profile has trailing data")
 	}
+	if profile.EnableDELHold && !profile.EnableDELDelegation {
+		return nil, errors.New("DEL hold genesis requires DEL delegation admission")
+	}
 	seen := make(map[common.Address]bool)
 	for _, addr := range []common.Address{profile.Registry, profile.Gateway, profile.Library, profile.NFTCenter,
 		profile.PositionVault, profile.MasterValidator, profile.WrappedDEL} {
