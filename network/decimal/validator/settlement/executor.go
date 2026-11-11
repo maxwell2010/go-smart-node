@@ -208,6 +208,13 @@ func (e *Executor) ValidateSigned(ctx sdk.Context, row validatortypes.EVMFrozenB
 	if err != nil {
 		return Proof{}, err
 	}
+	// A direct completion cannot create its existing beneficiary. Cancun
+	// rules keep an existing callback contract's code visible after execution,
+	// so an inert poststate can be used by the signed receipt validator.
+	chain := evmtypes.GetEthChainConfig()
+	if chain == nil || !chain.IsCancun(big.NewInt(ctx.BlockHeight()), uint64(ctx.BlockTime().Unix())) {
+		return Proof{}, errors.New("signed Gateway completion requires Cancun recipient semantics")
+	}
 	if err = e.requireInert(ctx, beneficiary); err != nil {
 		return Proof{}, err
 	}
