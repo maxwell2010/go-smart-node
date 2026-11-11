@@ -39,6 +39,9 @@ func runSharedWithdrawalNFT(t *testing.T, e isolatedBackendEnv, profile ownedapp
 func runSharedWithdrawalNFTQuantity(t *testing.T, e isolatedBackendEnv, profile ownedapp.WithdrawalProfile, gateway, origin, vault contracts.Artifact, originAddress, validator common.Address, quantity uint32) {
 	t.Helper()
 	require.NotNil(t, e.advance)
+	if quantity == nfttypes.MaxIsolatedOriginUnits {
+		prepareWithdrawalGenesisFixtureClock(t, e)
+	}
 	beneficiary := crypto.PubkeyToAddress(e.keys[0].PublicKey)
 	beneficiaryNative := sdk.AccAddress(beneficiary.Bytes()).String()
 	escrowNative := sdk.AccAddress(profile.Gateway.Bytes()).String()
@@ -135,7 +138,8 @@ func runSharedWithdrawalNFTQuantity(t *testing.T, e isolatedBackendEnv, profile 
 	require.Equal(t, beneficiary, freeze.Stake.Delegator)
 	require.True(t, freeze.UnfreezeTimestamp.IsInt64())
 	deadline := time.Unix(freeze.UnfreezeTimestamp.Int64(), 0).UTC()
-	require.Equal(t, created.BlockTime().Add(20*time.Second), deadline)
+	frozenFor := deadline.Sub(created.BlockTime())
+	require.Contains(t, []time.Duration{20 * time.Second, 75 * time.Second}, frozenFor)
 	position := common.BigToHash(positionID)
 	originWord := common.BigToHash(originID)
 	index := common.BigToHash(frozenID)
@@ -217,6 +221,9 @@ func runSharedWithdrawalNFTQuantity(t *testing.T, e isolatedBackendEnv, profile 
 	validators.Undelegations = []validatortypes.Undelegation{{Delegator: beneficiaryNative, Validator: operator, Entries: []validatortypes.UndelegationEntry{entry}}}
 	validators.EVMFrozenBindings = append(validators.EVMFrozenBindings, binding)
 	replaceWithdrawalFixtureStore(t, e, validatortypes.StoreKey, func(ctx sdk.Context) error { return e.app.NativeValidatorKeeper.InitGenesis(ctx, validators) })
+	if quantity == nfttypes.MaxIsolatedOriginUnits {
+		exportWithdrawalGenesisFixture(t, e, profile, binding, beneficiary, deadline)
+	}
 
 	backing := vaultBank()
 	assertEVM := func(owner common.Address, status uint8) {
@@ -244,7 +251,7 @@ func runSharedWithdrawalNFTQuantity(t *testing.T, e isolatedBackendEnv, profile 
 		return count
 	}
 	for i := 0; e.ctx().BlockTime().Before(deadline); i++ {
-		require.Less(t, i, 20, "the fixture clock must advance one second per block")
+		require.Less(t, i, int(frozenFor/time.Second), "the fixture clock must advance one second per block")
 		e.advance()
 		require.Zero(t, completions())
 	}
