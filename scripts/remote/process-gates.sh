@@ -6,6 +6,8 @@ umask 077
 root="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../.." && pwd -P)"
 output="$(realpath -m -- "${1:?Pass a new output directory}")"
 [[ ! -e "$output" && ! -L "$output" ]] || { echo 'Refuse existing output directory.' >&2; exit 2; }
+withdrawal_genesis="${2:-off}"
+[[ "$withdrawal_genesis" == off || "$withdrawal_genesis" == withdrawal-genesis ]] || { echo 'Unsupported process gate option.' >&2; exit 2; }
 for tool in sudo unshare ip gcc python3 go; do command -v "$tool" >/dev/null; done
 python="$(command -v python3)"
 "$python" -c 'import sys,tomllib; assert sys.version_info >= (3,11), "Python >=3.11 required"'
@@ -18,7 +20,7 @@ mkdir -- "$output"
 evidence_owner="$(id -u):$(id -g)"
 preserve_public_reports() {
   local file
-  for file in "$output/daemon.json" "$output/hermes.json"; do
+  for file in "$output/daemon.json" "$output/hermes.json" "$output/withdrawal-genesis.json"; do
     if [[ -L "$file" ]]; then echo 'Refuse symbolic report file.' >&2; return 1; fi
     if [[ -f "$file" ]]; then
       sudo -n chown -- "$evidence_owner" "$file" || return 1
@@ -148,3 +150,40 @@ assert set(hermes['phases'])==required,hermes['phases']
 assert all(phase['status']=='PASS' for phase in hermes['phases'].values()),hermes['phases']
 print('Default daemon lifecycle and all six genuine Hermes phases passed.')
 PY
+
+if [[ "$withdrawal_genesis" == withdrawal-genesis ]]; then
+  # No fixture document, key or raw generator/daemon log is uploaded. The
+  # generator runs on the same verified checkout immediately before the lab.
+  mkdir -m 700 -- "$work/withdrawal-fixture"
+  if ! MCND_WITHDRAWAL_GENESIS_FIXTURE_DIR="$work/withdrawal-fixture" \
+      go test -mod=readonly -tags= -p 2 -count=1 -timeout 8m -json -run '^TestOwnedAppSignedRegistryBootstrap$' ./systemcontracts \
+      > "$work/withdrawal-fixture-build.log" 2>&1; then
+    "$python" - "$work/withdrawal-fixture-build.log" <<'PY'
+import json,sys
+with open(sys.argv[1], encoding='utf8') as stream:
+    for line in stream:
+        try:
+            event = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        if event.get('Action') == 'fail':
+            print('Private fixture generator failed:', event.get('Package'), event.get('Test', '(build or package)'))
+PY
+    exit 1
+  fi
+  sudo -n unshare --net -- bash -euc 'ip link set lo up; exec "$@"' _ \
+    env TMPDIR="$work" "$python" "$root/network/tools/withdrawal_genesis_smoke.py" \
+    --binary "$work/mcnd" --binary-sha256 "$mcnd_sha" --source-commit "$revision" \
+    --fixture "$work/withdrawal-fixture" --home-parent "$work" --report "$output/withdrawal-genesis.json" \
+    |& tee "$output/withdrawal-genesis.log"
+  preserve_public_reports
+  "$python" - "$output/withdrawal-genesis.json" "$revision" "$mcnd_sha" <<'PY'
+import json,sys
+from pathlib import Path
+report=json.loads(Path(sys.argv[1]).read_text())
+assert report['status']=='PASS' and 'error' not in report,report
+assert report['sourceCommit']==sys.argv[2] and report['binarySha256']==sys.argv[3],report
+assert report['invalidGenesis']['status']=='REJECTED',report
+print('Authenticated withdrawal genesis, completion, rejection and restart passed.')
+PY
+fi
