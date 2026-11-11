@@ -2148,9 +2148,10 @@
   "modifiedFiles": {
     "crypto/armor.go": "74868016ad52264acf5588d385d9a1fd89f45bd82f99c42141e94ca8987fcb1c",
     "go.mod": "6e6d6412e58aa8e85de84f8b6dbacdd31e2fff95eb0f272db576a6f3ae17903b",
-    "go.sum": "f07226f63d0f575d713ac9686c369b660fd05f54bef1768f4c765a7305337808"
+    "go.sum": "f07226f63d0f575d713ac9686c369b660fd05f54bef1768f4c765a7305337808",
+    "x/staking/keeper/val_state_change.go": "bec06d5a7bdfc001b21ea6647e6d1778c7f5d637ceafa69e1307f3aefe334198"
   },
-  "patchLabel": "v0.53.8-mintcandy.1",
+  "patchLabel": "v0.53.8-mintcandy.2",
   "schemaVersion": 1,
   "upstreamCommit": "102db7cd8c9ade54b770e0f2eea1ca597fa97ed3",
   "upstreamGoModSum": "h1:b/De6uhCfooGEy4kE5G4C0A+MxK9aPr0nZNMyR+PmY0=",
