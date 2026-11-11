@@ -19,6 +19,7 @@ import (
 	"github.com/ethereum/go-ethereum/core"
 	"github.com/ethereum/go-ethereum/crypto"
 	ownedapp "github.com/maxwell2010/go-smart-node/network/app"
+	nfttypes "github.com/maxwell2010/go-smart-node/network/decimal/nft/types"
 	"github.com/maxwell2010/go-smart-node/network/decimal/validator/settlement"
 	validatortypes "github.com/maxwell2010/go-smart-node/network/decimal/validator/types"
 	"github.com/maxwell2010/go-smart-node/network/identity"
@@ -32,13 +33,20 @@ func replaceWithdrawalFixtureStore(t *testing.T, e isolatedBackendEnv, module st
 	t.Helper()
 	ctx, commit := e.ctx().CacheContext()
 	store := ctx.KVStore(e.app.GetKey(module))
+	maxRows := 256
+	if module == nfttypes.StoreKey {
+		// The automatic max-size fixture leaves its archived origin index
+		// in the store while the signed fixture appends a separate claim.
+		maxRows += int(nfttypes.MaxIsolatedOriginUnits)
+	}
 	var keys [][]byte
 	it := store.Iterator(nil, nil)
-	for ; it.Valid(); it.Next() {
-		require.Less(t, len(keys), 256, "fixture store must remain small")
+	for ; it.Valid() && len(keys) < maxRows; it.Next() {
 		keys = append(keys, bytes.Clone(it.Key()))
 	}
+	tooMany := it.Valid()
 	require.NoError(t, it.Close())
+	require.False(t, tooMany, "fixture store exceeds its %d-row limit", maxRows)
 	var profile []byte
 	if module == validatortypes.StoreKey {
 		profile = bytes.Clone(store.Get([]byte{ownedapp.WithdrawalProfileKey}))
