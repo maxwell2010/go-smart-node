@@ -118,7 +118,7 @@ func validateWithdrawalGenesisSnapshot(profile WithdrawalProfile, nft *nfttypes.
 }
 
 func (app *App) initWithdrawalGenesis(ctx sdk.Context, req *abci.RequestInitChain, genesis GenesisState, raw json.RawMessage) (*abci.ResponseInitChain, error) {
-	if app.withdrawals != nil || req.Time.Unix() <= 0 {
+	if req.Time.Unix() <= 0 {
 		return nil, errors.New("invalid initial context for withdrawal genesis")
 	}
 	profile, err := parseWithdrawalGenesisProfile(raw)
@@ -126,9 +126,19 @@ func (app *App) initWithdrawalGenesis(ctx sdk.Context, req *abci.RequestInitChai
 		return nil, errors.New("missing or invalid withdrawal genesis profile")
 	}
 	profile.SettlementOnly = true
-	controller, err := app.newWithdrawalController(*profile)
-	if err != nil {
-		return nil, err
+	controller := app.withdrawals
+	if app.stateSync.prepared {
+		if controller == nil || controller.profile != *profile {
+			return nil, errors.New("withdrawal genesis profile differs from the prepared state sync profile")
+		}
+	} else {
+		if controller != nil {
+			return nil, errors.New("withdrawal genesis profile is already installed")
+		}
+		controller, err = app.newWithdrawalController(*profile)
+		if err != nil {
+			return nil, err
+		}
 	}
 	var validators validatortypes.GenesisState
 	if err := app.appCodec.UnmarshalJSON(genesis[validatortypes.ModuleName], &validators); err != nil {
@@ -193,7 +203,9 @@ func (app *App) initWithdrawalGenesis(ctx sdk.Context, req *abci.RequestInitChai
 	}
 	child.KVStore(app.keys[validatortypes.StoreKey]).Set([]byte{WithdrawalProfileKey}, encoded)
 	commit()
-	app.installWithdrawalController(controller)
+	if app.withdrawals == nil {
+		app.installWithdrawalController(controller)
+	}
 	ctx.Logger().Info("authenticated withdrawal genesis admitted", "pending", len(validators.EVMFrozenBindings),
 		"gas", read.GasMeter().GasConsumed()-gasBefore)
 	return response, nil

@@ -195,6 +195,7 @@ type App struct {
 	NativeNFTKeeper       *nativenftkeeper.StateKeeper
 	NativeValidatorKeeper *nativevalidatorkeeper.StateKeeper
 	withdrawals           *withdrawalController
+	stateSync             withdrawalStateSync
 	AccountKeeper         authkeeper.AccountKeeper
 	BankKeeper            bankkeeper.Keeper
 	StakingKeeper         *stakingkeeper.Keeper
@@ -903,6 +904,9 @@ func (app *App) InitChainer(ctx sdk.Context, req *abci.RequestInitChain) (*abci.
 	}
 	if raw, ok := genesisState[WithdrawalGenesisKey]; ok {
 		return app.initWithdrawalGenesis(ctx, req, genesisState, raw)
+	}
+	if app.stateSync.prepared && app.withdrawals != nil {
+		return nil, fmt.Errorf("withdrawal genesis profile differs from the prepared state sync profile")
 	}
 	if err := app.UpgradeKeeper.SetModuleVersionMap(ctx, app.ModuleManager.GetVersionMap()); err != nil {
 		panic(err)
