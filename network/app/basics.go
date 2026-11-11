@@ -24,6 +24,7 @@ import (
 	transfer "github.com/cosmos/ibc-go/v10/modules/apps/transfer"
 	ibc "github.com/cosmos/ibc-go/v10/modules/core"
 	ibctm "github.com/cosmos/ibc-go/v10/modules/light-clients/07-tendermint"
+	authoritytypes "github.com/maxwell2010/go-smart-node/network/authority/types"
 	nativecoin "github.com/maxwell2010/go-smart-node/network/decimal/coin/module"
 	nativenft "github.com/maxwell2010/go-smart-node/network/decimal/nft/module"
 	nativevalidator "github.com/maxwell2010/go-smart-node/network/decimal/validator/module"
@@ -51,5 +52,7 @@ func MakeEncodingConfig(evmChainID uint64) evmencoding.Config {
 	basics := NewBasicModuleManager()
 	basics.RegisterLegacyAminoCodec(config.Amino)
 	basics.RegisterInterfaces(config.InterfaceRegistry)
+	// Governance genesis can retain this message in a completed proposal.
+	authoritytypes.RegisterInterfaces(config.InterfaceRegistry)
 	return config
 }
