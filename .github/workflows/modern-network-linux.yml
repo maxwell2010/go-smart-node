@@ -22,6 +22,10 @@ on:
         description: Also boot the private authenticated NFT withdrawal and DEL delegation genesis fixtures
         default: false
         type: boolean
+      del_state_sync:
+        description: Also restore the DEL fixture over isolated P2P and verify replay
+        default: false
+        type: boolean
 
 permissions:
   contents: read
@@ -173,9 +177,14 @@ jobs:
         shell: bash
         env:
           WITHDRAWAL_GENESIS: ${{ inputs.withdrawal_genesis }}
+          DEL_STATE_SYNC: ${{ inputs.del_state_sync }}
         run: |
           args=("$RUNNER_TEMP/process-evidence")
-          if [[ "$WITHDRAWAL_GENESIS" == true ]]; then args+=(withdrawal-genesis); fi
+          if [[ "$DEL_STATE_SYNC" == true ]]; then
+            args+=(withdrawal-genesis del-state-sync)
+          elif [[ "$WITHDRAWAL_GENESIS" == true ]]; then
+            args+=(withdrawal-genesis)
+          fi
           bash scripts/remote/process-gates.sh "${args[@]}"
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
         if: always()

@@ -9,10 +9,12 @@ import re
 import stat
 import tempfile
 import time
+from functools import partial
 
+from configure_history import render, validate_fresh_home
 from mcnd_process_smoke import ProcessOwner, SignalGuard, private_environment, private_namespace, run_command
 from withdrawal_genesis_smoke import (
-    ADDRESS, CHAIN, EVM_CHAIN, EVM, MAX_BLOCKS, SHA256, WORD, bech32_payload, block_time, check, comet,
+    ADDRESS, CHAIN, COMET, EVM_CHAIN, EVM, MAX_BLOCKS, REST, SHA256, WORD, bech32_payload, block_time, check, comet,
     ethereum, log_records, native, private_bytes, private_write, safe_diagnostic, scan_blocks, wait_height,
 )
 
@@ -24,6 +26,10 @@ PARTIAL = 1_000_000_000_000_000_000
 REMAINDER = AMOUNT + TOP_UP - PARTIAL
 GAS_PRICE = 1_000_000_000_000
 GAS_LIMIT = 24_000_000
+SYNC_COMET = 'http://127.0.0.1:29657'
+SYNC_REST = 'http://127.0.0.1:1327'
+SYNC_EVM = 'http://127.0.0.1:8745'
+SNAPSHOT_INTERVAL = 3
 
 
 def load_expectations(path):
@@ -53,17 +59,17 @@ def load_expectations(path):
     return expected
 
 
-def read_words(address, data, height, count):
-    response = ethereum('eth_call', [{'to': address, 'data': data, 'gas': '0x7a120'}, hex(height)])
+def read_words(address, data, height, count, evm):
+    response = ethereum('eth_call', [{'to': address, 'data': data, 'gas': '0x7a120'}, hex(height)], base=evm)
     check(re.fullmatch(fr'0x[0-9a-f]{{{count * 64}}}', response), 'unexpected fixed-size EVM return')
     return [int(response[i:i + 64], 16) for i in range(2, len(response), 64)]
 
 
-def balance(account, native_account, height):
-    evm = int(ethereum('eth_getBalance', [account, hex(height)]), 16)
-    native_balance = native(f'/cosmos/bank/v1beta1/balances/{native_account}/by_denom?denom=del', height)['balance']
-    check(native_balance['denom'] == 'del' and evm == int(native_balance['amount']), 'EVM and native bank DEL balances differ')
-    return evm
+def balance(account, native_account, height, evm, rest):
+    value = int(ethereum('eth_getBalance', [account, hex(height)], base=evm), 16)
+    native_balance = native(f'/cosmos/bank/v1beta1/balances/{native_account}/by_denom?denom=del', height, base=rest)['balance']
+    check(native_balance['denom'] == 'del' and value == int(native_balance['amount']), 'EVM and native bank DEL balances differ')
+    return value
 
 
 def check_native_del_stake(stake, amount):
@@ -71,10 +77,10 @@ def check_native_del_stake(stake, amount):
           not stake.get('holds') and not stake.get('sub_token_ids'), 'native position does not match the exact ordinary DEL amount')
 
 
-def native_positions(expected, height, active, pending, due):
+def native_positions(expected, height, active, pending, due, rest):
     operator, actor = expected['validatorNative'], expected['actorNative']
     pair = f'/decimal/validator/v1/validators/{operator}/delegations/{actor}'
-    rows = native(pair, height).get('delegations') or []
+    rows = native(pair, height, base=rest).get('delegations') or []
     check(len(rows) == int(active > 0), 'unexpected active native delegation count')
     if rows:
         check((rows[0]['validator'], rows[0]['delegator']) == (operator, actor), 'unexpected native delegation pair')
@@ -82,13 +88,13 @@ def native_positions(expected, height, active, pending, due):
     queue = pair + '/undelegation'
     if not pending:
         try:
-            native(queue, height)
+            native(queue, height, base=rest)
         except OSError as error:
             check(str(error).startswith('HTTP 404 '), 'expected missing native queue, received another query error')
         else:
             raise ValueError('unexpected native undelegation after completion')
         return
-    row = native(queue, height)['undelegation']
+    row = native(queue, height, base=rest)['undelegation']
     check((row['validator'], row['delegator']) == (operator, actor) and len(row['entries']) == 1, 'unexpected native undelegation pair or entry count')
     entry = row['entries'][0]
     check_native_del_stake(entry['stake'], pending)
@@ -96,32 +102,32 @@ def native_positions(expected, height, active, pending, due):
     check(stamp.tzinfo is not None and stamp.timestamp() == due, 'native and EVM withdrawal deadlines differ')
 
 
-def read_state(expected, height, *, active, pending, claims, wallet, due=None):
+def read_state(expected, height, *, active, pending, claims, wallet, due=None, evm=EVM, rest=REST):
     gateway, wrapped, actor = (expected[name] for name in ('gateway', 'wrapped', 'actor'))
-    stake = read_words(gateway, expected['stakeData'], height, 8)
+    stake = read_words(gateway, expected['stakeData'], height, 8, evm)
     if active:
         check(stake == [int(expected['validator'], 16), int(actor, 16), int(wrapped, 16), active, 0, 4, 0, 0],
               'active Gateway DEL stake fields differ')
     else:
         check(stake[3] == 0, 'Gateway retains an unexpected active stake')
-    reserve = read_words(gateway, expected['reserveData'], height, 2)[1]
+    reserve = read_words(gateway, expected['reserveData'], height, 2, evm)[1]
     check(reserve == active, 'active Gateway validator reserve differs')
-    check(read_words(gateway, expected['progressData'], height, 2) == [claims, 0],
+    check(read_words(gateway, expected['progressData'], height, 2, evm) == [claims, 0],
           'unexpected Gateway frozen queue length or legacy state')
-    supply = read_words(wrapped, expected['supplyData'], height, 1)[0]
-    escrow = read_words(wrapped, expected['escrowData'], height, 1)[0]
-    backing = balance(wrapped, expected['wrappedNative'], height)
+    supply = read_words(wrapped, expected['supplyData'], height, 1, evm)[0]
+    escrow = read_words(wrapped, expected['escrowData'], height, 1, evm)[0]
+    backing = balance(wrapped, expected['wrappedNative'], height, evm, rest)
     check(supply == escrow == backing == active + pending, 'wrapped supply, Gateway custody and bank backing must reconcile exactly')
-    actor_balance = balance(actor, expected['actorNative'], height)
+    actor_balance = balance(actor, expected['actorNative'], height, evm, rest)
     check(wallet is None or actor_balance == wallet, 'actor balance differs from exact value, fee and payout accounting')
-    native_positions(expected, height, active, pending, due)
+    native_positions(expected, height, active, pending, due, rest)
     return {'height': height, 'walletAtomic': str(actor_balance), 'wrappedSupplyAtomic': str(supply),
             'gatewayEscrowAtomic': str(escrow), 'wrappedBackingAtomic': str(backing), 'activeReserveAtomic': str(reserve),
             'activeStakeAtomic': str(stake[3]), 'pendingAtomic': str(pending), 'nativePositionsVerified': True}
 
 
-def read_frozen(expected, height, index, amount, status):
-    words = read_words(expected['gateway'], expected['frozenData'][index], height, 11)
+def read_frozen(expected, height, index, amount, status, evm=EVM):
+    words = read_words(expected['gateway'], expected['frozenData'][index], height, 11, evm)
     want = [int(expected[name], 16) for name in ('validator', 'actor', 'wrapped')] + [amount, 0, 4, 0, 0, status, 1]
     check(words[:10] == want and words[10] > 0, 'Gateway frozen DEL claim fields differ')
     return words[10]
@@ -206,6 +212,76 @@ def settlement_gas(log):
     return gas
 
 
+def committed_hash(height, observer_comet):
+    # Block H+1 contains the application hash committed by block H.
+    method = f'block?height={height + 1}'
+    source, observer = (read(method) for read in (comet, observer_comet))
+    source_hash, observed_hash = (block['block']['header']['app_hash'] for block in (source, observer))
+    check(re.fullmatch(r'[0-9A-Fa-f]{64}', source_hash) and source_hash == observed_hash and
+          source['block_id']['hash'] == observer['block_id']['hash'], 'source and state-sync consumer committed hashes differ')
+    return source_hash
+
+
+def start_state_sync(binary, root, genesis, env, owner, source_child, source_log, minimum_height, report):
+    report['phase'] = 'snapshot-source'
+    deadline = time.monotonic() + 45
+    while time.monotonic() < deadline:
+        snapshots = [int(row['height']) for row in log_records(source_log, 'completed state snapshot')]
+        if snapshots and max(snapshots) >= minimum_height:
+            break
+        check(source_child.poll() is None, 'source stopped before producing the financial snapshot')
+        time.sleep(0.5)
+    else:
+        raise TimeoutError('source did not produce an active DEL snapshot')
+    trust_height = wait_height(source_child, max(snapshots) + 2, deadline, source_log, report)
+    trust_hash = comet(f'block?height={trust_height}')['block_id']['hash']
+    source_id = comet('status')['node_info']['id']
+    check(re.fullmatch(r'[0-9A-Fa-f]{64}', trust_hash) and re.fullmatch(r'[0-9a-f]{40}', source_id), 'invalid source trust hash or peer identity')
+
+    report['phase'] = 'snapshot-restore'
+    home = root / 'observer'
+    domain = ['--chain-id', CHAIN, '--evm.evm-chain-id', str(EVM_CHAIN)]
+    run_command(binary, home, ['init', 'del-state-sync-observer', *domain], env)
+    validate_fresh_home(home)
+    private_write(home / 'config/genesis.json', genesis)
+    # Comet requires two RPC entries. Both aliases reach the same isolated
+    # source process. This checks restore and replay, not witness independence.
+    for name, changes in (
+        ('config.toml', {
+            ('p2p', 'persistent_peers'): json.dumps(f'{source_id}@127.0.0.1:28656'),
+            ('statesync', 'enable'): 'true',
+            ('statesync', 'rpc_servers'): json.dumps(COMET + ',http://localhost:28657'),
+            ('statesync', 'trust_height'): str(trust_height),
+            ('statesync', 'trust_hash'): json.dumps(trust_hash),
+            ('statesync', 'trust_period'): '"1h"',
+            ('statesync', 'discovery_time'): '"5s"',
+        }),
+        ('app.toml', {('api', 'address'): '"tcp://127.0.0.1:1327"'}),
+    ):
+        path = home / 'config' / name
+        private_write(path, render(path.read_text(encoding='utf8'), changes).encode())
+    start = ['start', '--rpc.laddr', 'tcp://127.0.0.1:29657', '--p2p.laddr', 'tcp://127.0.0.1:29656',
+             '--grpc.address', '127.0.0.1:9290', '--api.enable=true', '--grpc-web.enable=false',
+             '--json-rpc.enable=true', '--json-rpc.address', '127.0.0.1:8745', '--json-rpc.ws-address', '127.0.0.1:8746',
+             '--log_format', 'json', '--log_level', 'info']
+    log = root / 'observer.log'
+    observer = owner.spawn([binary, *start, *domain, '--home', str(home)], log, env)
+    observer_comet = partial(comet, base=SYNC_COMET)
+    wait_height(observer, trust_height + 1, time.monotonic() + 120, log, report, read_comet=observer_comet)
+    restored = log_records(log, 'Snapshot restored')
+    check(len(restored) == 1 and int(restored[0]['height']) >= minimum_height, 'observer did not restore the active DEL snapshot')
+    check(int(ethereum('eth_chainId', [], base=SYNC_EVM), 16) == EVM_CHAIN, 'observer EVM signing domain mismatch')
+    snapshot_height = int(restored[0]['height'])
+    height = wait_height(observer, snapshot_height + 2, time.monotonic() + 45, log, report, read_comet=observer_comet)
+    wait_height(observer, height + 1, time.monotonic() + 45, log, report, read_comet=observer_comet)
+    check(int(observer_comet('status')['sync_info']['earliest_block_height']) >= snapshot_height,
+          'observer retained block history older than the restored snapshot')
+    report['stateSync'] = {'trustHeight': trust_height, 'trustHash': trust_hash, 'snapshotHeight': snapshot_height,
+                           'activeStateHeight': height, 'activeStateAppHash': committed_hash(height, observer_comet),
+                           'witnessesIndependent': False}
+    return observer, log, observer_comet
+
+
 def run_gate(args, binary, root, expected, genesis, validator, env, owner, report):
     home = root / 'node'
     domain = ['--chain-id', CHAIN, '--evm.evm-chain-id', str(EVM_CHAIN)]
@@ -252,13 +328,20 @@ def run_gate(args, binary, root, expected, genesis, validator, env, owner, repor
 
     report['phase'] = 'restart'
     restart_log = root / 'restart.log'
-    child = owner.spawn([binary, *start, '--home', str(home)], restart_log, env)
+    snapshots = ['--state-sync.snapshot-interval', str(SNAPSHOT_INTERVAL), '--state-sync.snapshot-keep-recent', '4'] if args.state_sync else []
+    child = owner.spawn([binary, *start, *snapshots, '--home', str(home)], restart_log, env)
     restarted = wait_height(child, repeated['height'] + 2, time.monotonic() + 45, restart_log, report)
     check(not scan_blocks(report['partialPayout']['height'] + 1, restarted, expected['gateway'], expected['frozenIds'][0]),
           'DEL payout repeated before or after restart')
     due = report['partialWithdraw']['dueAt']
     check(read_frozen(expected, restarted, 0, PARTIAL, 0) == due, 'completed claim differs after restart')
     report['restart'] = read_state(expected, restarted, active=REMAINDER, pending=0, claims=1, wallet=wallet)
+
+    if args.state_sync:
+        observer, observer_log, observer_comet = start_state_sync(binary, root, genesis, env, owner, child, restart_log, restarted, report)
+        active_height = report['stateSync']['activeStateHeight']
+        report['stateSync']['restored'] = read_state(expected, active_height, active=REMAINDER, pending=0, claims=1, wallet=wallet,
+                                                     evm=SYNC_EVM, rest=SYNC_REST)
 
     report['payout'], wallet = withdraw_and_payout(
         child, restart_log, report, expected, name='withdraw', index=1, amount=REMAINDER, active=0, nonce=nonce + 4, wallet=wallet)
@@ -268,6 +351,19 @@ def run_gate(args, binary, root, expected, genesis, validator, env, owner, repor
     check(not scan_blocks(payout_height + 1, final_height, expected['gateway'], expected['frozenIds'][1]), 'final DEL payout repeated')
     check(read_frozen(expected, final_height, 0, PARTIAL, 0) == due, 'first claim changed while completing the remainder')
     report['final'] = read_state(expected, final_height, active=0, pending=0, claims=2, wallet=wallet)
+    if args.state_sync:
+        report['phase'] = 'snapshot-replay'
+        pending_height = report['withdraw']['height']
+        wait_height(observer, final_height + 1, time.monotonic() + 90, observer_log, report, read_comet=observer_comet)
+        report['stateSync']['pending'] = read_state(expected, pending_height, active=0, pending=REMAINDER, claims=2,
+                                                   wallet=int(report['withdraw']['walletAtomic']), due=report['withdraw']['dueAt'],
+                                                   evm=SYNC_EVM, rest=SYNC_REST)
+        report['stateSync']['replayed'] = read_state(expected, final_height, active=0, pending=0, claims=2, wallet=wallet,
+                                                    evm=SYNC_EVM, rest=SYNC_REST)
+        check(read_frozen(expected, final_height, 1, REMAINDER, 0, SYNC_EVM) == report['withdraw']['dueAt'],
+              'consumer did not replay final DEL completion')
+        report['stateSync']['finalAppHash'] = committed_hash(final_height, observer_comet)
+        owner.stop(observer)
     owner.stop(child)
     report['payout']['sdkGasCharged'] = settlement_gas(restart_log)
 
@@ -276,6 +372,7 @@ def main(argv=None, signals=None):
     parser = argparse.ArgumentParser(description=__doc__)
     for name in ('binary', 'binary-sha256', 'source-commit', 'fixture', 'home-parent', 'report'):
         parser.add_argument('--' + name, required=True)
+    parser.add_argument('--state-sync', action='store_true')
     args = parser.parse_args(argv)
     report = {'status': 'FAIL', 'phase': 'fixture-provenance', 'scope': 'disposable DEL top-up and partial/full withdrawal'}
     with pathlib.Path(args.report).open('x', encoding='utf8') as stream:

@@ -8,6 +8,8 @@ output="$(realpath -m -- "${1:?Pass a new output directory}")"
 [[ ! -e "$output" && ! -L "$output" ]] || { echo 'Refuse existing output directory.' >&2; exit 2; }
 withdrawal_genesis="${2:-off}"
 [[ "$withdrawal_genesis" == off || "$withdrawal_genesis" == withdrawal-genesis ]] || { echo 'Unsupported process gate option.' >&2; exit 2; }
+del_state_sync="${3:-off}"
+[[ "$del_state_sync" == off || ( "$del_state_sync" == del-state-sync && "$withdrawal_genesis" == withdrawal-genesis ) ]] || { echo 'Unsupported DEL state sync option.' >&2; exit 2; }
 for tool in sudo unshare ip gcc python3 go; do command -v "$tool" >/dev/null; done
 python="$(command -v python3)"
 "$python" -c 'import sys,tomllib; assert sys.version_info >= (3,11), "Python >=3.11 required"'
@@ -208,13 +210,16 @@ assert report['sourceCommit']==sys.argv[2] and report['binarySha256']==sys.argv[
 assert report['invalidGenesis']['status']=='REJECTED',report
 print('Authenticated withdrawal genesis, completion, rejection and restart passed.')
 PY
+  sync_args=()
+  if [[ "$del_state_sync" == del-state-sync ]]; then sync_args+=(--state-sync); fi
   sudo -n unshare --net -- bash -euc 'ip link set lo up; exec "$@"' _ \
     env TMPDIR="$work" "$python" "$root/network/tools/del_delegation_smoke.py" \
     --binary "$work/mcnd" --binary-sha256 "$mcnd_sha" --source-commit "$revision" \
     --fixture "$work/del-fixture" --home-parent "$work" --report "$output/del-delegation.json" \
+    "${sync_args[@]}" \
     |& tee "$output/del-delegation.log"
   preserve_public_reports
-  "$python" - "$output/del-delegation.json" "$revision" "$mcnd_sha" <<'PY'
+  "$python" - "$output/del-delegation.json" "$revision" "$mcnd_sha" "$del_state_sync" <<'PY'
 import json,sys
 from pathlib import Path
 report=json.loads(Path(sys.argv[1]).read_text())
@@ -227,6 +232,13 @@ assert all(report[step]['nativePositionsVerified'] for step in ('before','delega
 assert report['restart']['activeStakeAtomic']=='4000000000000000000' and report['restart']['pendingAtomic']=='0',report
 assert report['payout']['amountAtomic']=='4000000000000000000' and report['payout']['sdkGasCharged']>0,report
 assert report['final']['activeStakeAtomic']==report['final']['wrappedSupplyAtomic']=='0',report
+if sys.argv[4]=='del-state-sync':
+    sync=report['stateSync']
+    assert sync['snapshotHeight']>report['initialHeight'] and sync['witnessesIndependent'] is False,report
+    assert sync['restored']['activeStakeAtomic']=='4000000000000000000',report
+    assert sync['pending']['pendingAtomic']=='4000000000000000000',report
+    assert sync['replayed']==report['final'] and len(sync['finalAppHash'])==64,report
+    print('Isolated P2P snapshot restore, financial replay and committed AppHash checks passed.')
 print('Fresh DEL delegation, top-up, partial payout, repeat rejection, restart and remainder payout passed.')
 PY
 fi

@@ -131,24 +131,24 @@ def request(url, payload=None, headers=None):
         raise OSError(f'{rpc_context(url, payload, headers)}: {type(error).__name__}') from None
 
 
-def comet(method):
-    url = COMET + '/' + method
+def comet(method, *, base=COMET):
+    url = base + '/' + method
     response, _ = request(url)
     check('error' not in response and 'result' in response,
           f'Comet RPC {rpc_context(url)} failed: ' + rpc_reason(str(response.get('error', ''))))
     return response['result']
 
 
-def ethereum(method, params):
+def ethereum(method, params, *, base=EVM):
     payload = {'jsonrpc': '2.0', 'id': 1, 'method': method, 'params': params}
-    response, _ = request(EVM, payload)
+    response, _ = request(base, payload)
     check('error' not in response and 'result' in response,
-          f'EVM RPC {rpc_context(EVM, payload)} failed: ' + rpc_reason(str(response.get('error', ''))))
+          f'EVM RPC {rpc_context(base, payload)} failed: ' + rpc_reason(str(response.get('error', ''))))
     return response['result']
 
 
-def native(path, height):
-    body, headers = request(REST + path, headers={HEIGHT_HEADER: str(height)})
+def native(path, height, *, base=REST):
+    body, headers = request(base + path, headers={HEIGHT_HEADER: str(height)})
     check(headers.get(HEIGHT_HEADER) == str(height), 'native query did not use the requested committed height')
     return body
 
@@ -211,17 +211,18 @@ def readiness_diagnostic(path, report):
     return safe_diagnostic(text)
 
 
-def wait_height(child, minimum, deadline, log_path, report):
+def wait_height(child, minimum, deadline, log_path, report, *, read_comet=None):
+    read_comet = comet if read_comet is None else read_comet
     last_heights = ''
     while time.monotonic() < deadline:
         code = child.poll()
         if code is not None:
             raise RuntimeError(f'daemon exited ({code}) before committed height {minimum}: ' + readiness_diagnostic(log_path, report))
         try:
-            status = comet('status')
+            status = read_comet('status')
             check(status['node_info']['network'] == CHAIN, 'Comet RPC chain mismatch')
             advertised = int(status['sync_info']['latest_block_height'])
-            committed = int(comet('abci_info')['response'].get('last_block_height', '0'))
+            committed = int(read_comet('abci_info')['response'].get('last_block_height', '0'))
         except (OSError, json.JSONDecodeError):
             time.sleep(0.25)
             continue
