@@ -54,7 +54,31 @@ exact native bank-supply destruction and late-error rollback. WDEL controls also
 reconcile wrapper supply, native backing and final unwrap. These foundation
 contracts do not yet certify the shared native financial receipt controller.
 Persisted receipt lineage and domain-scoped source-position bindings are merged;
-nonempty financial genesis and native financial message routes remain gated.
+the restricted financial genesis admits explicitly attested pending claims and
+can enable the direct DEL message routes described below.
+
+The separate DEL lifecycle now has signed EVM delegation, top-up, partial and
+full withdrawals and a common manual/automatic `complete` path. Native REST
+pair queries reconcile the active and queued records at committed heights.
+The [Linux process check](https://github.com/maxwell2010/go-smart-node/actions/runs/43031167097)
+covered 3 + 2 DEL, payout of 1 DEL, rejection of a repeat and payout of the
+remaining 4 DEL after restart. It also checked a previously admitted 1024-unit
+isolated NFT withdrawal under the 24-million SDK gas ceiling and repeated the
+six Hermes phases.
+
+The [isolated snapshot check](https://github.com/maxwell2010/go-smart-node/actions/runs/43033802795)
+restored the active 4 DEL position at snapshot height 1914 and replayed the
+withdrawal through the same final application hash. Its two RPC URLs were
+aliases of the source process. A separate replayed witness on the same runner
+is being tested independently of the source database. Production trust
+still requires independently operated RPCs and a trusted block header.
+
+Held DEL uses a separate genesis option, verified expiry and an exact set of
+native lots, including the original contribution time for each top-up.
+The [Linux module run](https://github.com/maxwell2010/go-smart-node/actions/runs/43033478597)
+tested signed held deposits and partial withdrawals in the application EVM.
+See the [operator description](../network/docs/ru/STAKE_WITHDRAWAL_SETTLEMENT.md)
+for the profile, supported calls and query semantics.
 
 The reviewed development commit `8cf619da1c77ee5efffc80a678272010fd2263dd`
 passes all four Linux workflows, including its actual default daemon archive,
