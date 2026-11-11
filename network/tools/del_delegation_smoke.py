@@ -26,10 +26,13 @@ PARTIAL = 1_000_000_000_000_000_000
 REMAINDER = AMOUNT + TOP_UP - PARTIAL
 GAS_PRICE = 1_000_000_000_000
 GAS_LIMIT = 24_000_000
+SOURCE_P2P = '127.0.0.1:28656'
+WITNESS_COMET = 'http://127.0.0.1:30657'
 SYNC_COMET = 'http://127.0.0.1:29657'
 SYNC_REST = 'http://127.0.0.1:1327'
 SYNC_EVM = 'http://127.0.0.1:8745'
-SNAPSHOT_INTERVAL = 3
+# Leave time for the witness to reach H+2 before the next snapshot is advertised.
+SNAPSHOT_INTERVAL = 20
 
 
 def load_expectations(path):
@@ -212,13 +215,13 @@ def settlement_gas(log):
     return gas
 
 
-def committed_hash(height, observer_comet):
+def committed_hash(height, follower_comet):
     # Block H+1 contains the application hash committed by block H.
     method = f'block?height={height + 1}'
-    source, observer = (read(method) for read in (comet, observer_comet))
-    source_hash, observed_hash = (block['block']['header']['app_hash'] for block in (source, observer))
+    source, follower = (read(method) for read in (comet, follower_comet))
+    source_hash, observed_hash = (block['block']['header']['app_hash'] for block in (source, follower))
     check(re.fullmatch(r'[0-9A-Fa-f]{64}', source_hash) and source_hash == observed_hash and
-          source['block_id']['hash'] == observer['block_id']['hash'], 'source and state-sync consumer committed hashes differ')
+          source['block_id']['hash'] == follower['block_id']['hash'], 'source and follower committed hashes differ')
     return source_hash
 
 
@@ -283,9 +286,48 @@ def observe_state_sync(log, observer_comet):
     return result
 
 
-def start_state_sync(binary, root, genesis, env, owner, source_child, source_log, minimum_height, report):
+def write_config(home, name, changes):
+    path = home / 'config' / name
+    private_write(path, render(path.read_text(encoding='utf8'), changes).encode())
+
+
+def new_follower_home(binary, root, genesis, env, label, domain):
+    home = root / label
+    run_command(binary, home, ['init', 'del-state-sync-' + label, *domain], env)
+    validate_fresh_home(home)
+    private_write(home / 'config/genesis.json', genesis)
+    return home
+
+
+def consensus_identity(read_comet, *, votes):
+    status = read_comet('status')
+    node_id = status['node_info']['id']
+    power = int(status['validator_info']['voting_power'])
+    check(re.fullmatch(r'[0-9a-f]{40}', node_id) and (power > 0 if votes else power == 0),
+          'unexpected Comet peer identity or voting power')
+    return node_id, power
+
+
+def start_witness(binary, root, genesis, env, owner, domain):
+    home = new_follower_home(binary, root, genesis, env, 'witness', domain)
+    source_id, _ = consensus_identity(comet, votes=True)
+    write_config(home, 'config.toml', {
+        ('p2p', 'persistent_peers'): json.dumps(f'{source_id}@{SOURCE_P2P}'),
+        ('p2p', 'pex'): 'false',
+        ('statesync', 'enable'): 'false',
+    })
+    start = ['start', '--rpc.laddr', 'tcp://127.0.0.1:30657', '--p2p.laddr', 'tcp://127.0.0.1:30656',
+             '--api.enable=false', '--grpc.enable=false', '--grpc-web.enable=false', '--json-rpc.enable=false',
+             '--log_format', 'json', '--log_level', 'info']
+    log = root / 'witness.log'
+    return owner.spawn([binary, *start, *domain, '--home', str(home)], log, env), log, partial(comet, base=WITNESS_COMET)
+
+
+def start_state_sync(binary, root, genesis, env, owner, source_child, source_log, minimum_height, witness, report):
     report['phase'] = 'snapshot-source'
-    deadline = time.monotonic() + 45
+    domain = ['--chain-id', CHAIN, '--evm.evm-chain-id', str(EVM_CHAIN)]
+    home = new_follower_home(binary, root, genesis, env, 'observer', domain)
+    deadline = time.monotonic() + 70
     while time.monotonic() < deadline:
         snapshots = [int(row['height']) for row in log_records(source_log, 'completed state snapshot')]
         if snapshots and max(snapshots) >= minimum_height:
@@ -294,33 +336,44 @@ def start_state_sync(binary, root, genesis, env, owner, source_child, source_log
         time.sleep(0.5)
     else:
         raise TimeoutError('source did not produce an active DEL snapshot')
-    trust_height = wait_height(source_child, max(snapshots) + 2, deadline, source_log, report)
-    trust_hash = comet(f'block?height={trust_height}')['block_id']['hash']
-    source_id = comet('status')['node_info']['id']
-    check(re.fullmatch(r'[0-9A-Fa-f]{64}', trust_hash) and re.fullmatch(r'[0-9a-f]{40}', source_id), 'invalid source trust hash or peer identity')
+    source_snapshot_height = max(snapshots)
+    # Comet verifies the snapshot, the next header carrying its AppHash and
+    # the subsequent validator set. Let the separate witness catch up first.
+    trust_height = source_snapshot_height + 2
+    wait_height(source_child, trust_height, deadline, source_log, report)
+    witness_child, witness_log, witness_comet = witness
+    report['phase'] = 'snapshot-witness'
+    wait_height(witness_child, trust_height, time.monotonic() + 45, witness_log, report, read_comet=witness_comet)
+    source_id, source_power = consensus_identity(comet, votes=True)
+    witness_id, witness_power = consensus_identity(witness_comet, votes=False)
+    check(source_id != witness_id and int(witness_comet('status')['sync_info']['earliest_block_height']) == report['initialHeight'],
+          'witness must replay from genesis as a separate peer')
+    trust_hash = ''
+    for height in range(source_snapshot_height, trust_height + 1):
+        method = f'block?height={height}'
+        trust_hash = comet(method)['block_id']['hash']
+        check(re.fullmatch(r'[0-9A-Fa-f]{64}', trust_hash) and trust_hash == witness_comet(method)['block_id']['hash'],
+              'source and witness trust-window block hashes differ')
+    report['stateSync'] = {
+        'sourceSnapshotHeight': source_snapshot_height, 'sourceSnapshotAppHash': committed_hash(source_snapshot_height, witness_comet),
+        'trustHeight': trust_height, 'trustHash': trust_hash,
+        'witnessVerifiedThrough': trust_height, 'sourceNodeID': source_id, 'sourceVotingPower': source_power,
+        'witnessNodeID': witness_id, 'witnessVotingPower': witness_power,
+        'witnessIsSeparateProcess': True, 'independentFailureDomains': False,
+    }
 
     report['phase'] = 'snapshot-restore'
-    home = root / 'observer'
-    domain = ['--chain-id', CHAIN, '--evm.evm-chain-id', str(EVM_CHAIN)]
-    run_command(binary, home, ['init', 'del-state-sync-observer', *domain], env)
-    validate_fresh_home(home)
-    private_write(home / 'config/genesis.json', genesis)
-    # Comet requires two RPC entries. Both aliases reach the same isolated
-    # source process. This checks restore and replay, not witness independence.
-    for name, changes in (
-        ('config.toml', {
-            ('p2p', 'persistent_peers'): json.dumps(f'{source_id}@127.0.0.1:28656'),
-            ('statesync', 'enable'): 'true',
-            ('statesync', 'rpc_servers'): json.dumps(COMET + ',http://localhost:28657'),
-            ('statesync', 'trust_height'): str(trust_height),
-            ('statesync', 'trust_hash'): json.dumps(trust_hash),
-            ('statesync', 'trust_period'): '"1h"',
-            ('statesync', 'discovery_time'): '"5s"',
-        }),
-        ('app.toml', {('api', 'address'): '"tcp://127.0.0.1:1327"'}),
-    ):
-        path = home / 'config' / name
-        private_write(path, render(path.read_text(encoding='utf8'), changes).encode())
+    write_config(home, 'config.toml', {
+        ('p2p', 'persistent_peers'): json.dumps(f'{source_id}@{SOURCE_P2P}'),
+        ('p2p', 'pex'): 'false',
+        ('statesync', 'enable'): 'true',
+        ('statesync', 'rpc_servers'): json.dumps(COMET + ',' + WITNESS_COMET),
+        ('statesync', 'trust_height'): str(trust_height),
+        ('statesync', 'trust_hash'): json.dumps(trust_hash),
+        ('statesync', 'trust_period'): '"1h"',
+        ('statesync', 'discovery_time'): '"5s"',
+    })
+    write_config(home, 'app.toml', {('api', 'address'): '"tcp://127.0.0.1:1327"'})
     start = ['start', '--rpc.laddr', 'tcp://127.0.0.1:29657', '--p2p.laddr', 'tcp://127.0.0.1:29656',
              '--grpc.address', '127.0.0.1:9290', '--api.enable=true', '--grpc-web.enable=false',
              '--json-rpc.enable=true', '--json-rpc.address', '127.0.0.1:8745', '--json-rpc.ws-address', '127.0.0.1:8746',
@@ -328,14 +381,16 @@ def start_state_sync(binary, root, genesis, env, owner, source_child, source_log
     log = root / 'observer.log'
     observer = owner.spawn([binary, *start, *domain, '--home', str(home)], log, env)
     observer_comet = partial(comet, base=SYNC_COMET)
-    report['stateSync'] = {'trustHeight': trust_height, 'trustHash': trust_hash, 'witnessesIndependent': False}
     try:
         wait_height(observer, trust_height + 1, time.monotonic() + 120, log, report, read_comet=observer_comet)
     except (TimeoutError, RuntimeError):
         report['stateSync']['observerDiagnostics'] = observe_state_sync(log, observer_comet)
         raise
     restored = log_records(log, 'Snapshot restored')
-    check(len(restored) == 1 and int(restored[0]['height']) >= minimum_height, 'observer did not restore the active DEL snapshot')
+    check(len(restored) == 1 and int(restored[0]['height']) == source_snapshot_height,
+          'observer did not restore the witnessed active DEL snapshot')
+    observer_id, observer_power = consensus_identity(observer_comet, votes=False)
+    check(observer_id not in (source_id, witness_id), 'observer must use its own peer identity')
     check(int(ethereum('eth_chainId', [], base=SYNC_EVM), 16) == EVM_CHAIN, 'observer EVM signing domain mismatch')
     snapshot_height = int(restored[0]['height'])
     height = wait_height(observer, snapshot_height + 2, time.monotonic() + 45, log, report, read_comet=observer_comet)
@@ -343,6 +398,7 @@ def start_state_sync(binary, root, genesis, env, owner, source_child, source_log
     check(int(observer_comet('status')['sync_info']['earliest_block_height']) >= snapshot_height,
           'observer retained block history older than the restored snapshot')
     report['stateSync'].update(snapshotHeight=snapshot_height, activeStateHeight=height,
+                               observerNodeID=observer_id, observerVotingPower=observer_power,
                                activeStateAppHash=committed_hash(height, observer_comet))
     return observer, log, observer_comet
 
@@ -355,6 +411,9 @@ def run_gate(args, binary, root, expected, genesis, validator, env, owner, repor
              '--json-rpc.enable=true', '--json-rpc.address', '127.0.0.1:8645', '--json-rpc.ws-address', '127.0.0.1:8646',
              '--log_format', 'json', '--log_level', 'info']
     run_command(binary, home, ['init', 'del-delegation-fixture', *domain], env)
+    if args.state_sync:
+        # All disposable peers are loopback processes in one network namespace.
+        write_config(home, 'config.toml', {('p2p', 'allow_duplicate_ip'): 'true', ('p2p', 'pex'): 'false'})
     private_write(home / 'config/genesis.json', genesis)
     private_write(home / 'config/priv_validator_key.json', validator)
     version = json.loads(run_command(binary, home, ['version', '--long', '--output', 'json'], env))
@@ -369,6 +428,8 @@ def run_gate(args, binary, root, expected, genesis, validator, env, owner, repor
     child = owner.spawn([binary, *start, *domain, '--home', str(home)], log, env)
     height = wait_height(child, report['initialHeight'] + 2, time.monotonic() + 45, log, report)
     check(len(log_records(log, 'authenticated withdrawal genesis admitted')) == 1, 'fresh DEL genesis admission not observed')
+    if args.state_sync:
+        witness = start_witness(binary, root, genesis, env, owner, domain)
     report['before'] = read_state(expected, height, active=0, pending=0, claims=0, wallet=None)
     wallet = int(report['before']['walletAtomic'])
     nonce = expected['nonce']
@@ -403,7 +464,8 @@ def run_gate(args, binary, root, expected, genesis, validator, env, owner, repor
     report['restart'] = read_state(expected, restarted, active=REMAINDER, pending=0, claims=1, wallet=wallet)
 
     if args.state_sync:
-        observer, observer_log, observer_comet = start_state_sync(binary, root, genesis, env, owner, child, restart_log, restarted, report)
+        observer, observer_log, observer_comet = start_state_sync(
+            binary, root, genesis, env, owner, child, restart_log, restarted, witness, report)
         active_height = report['stateSync']['activeStateHeight']
         report['stateSync']['restored'] = read_state(expected, active_height, active=REMAINDER, pending=0, claims=1, wallet=wallet,
                                                      evm=SYNC_EVM, rest=SYNC_REST)
@@ -428,7 +490,11 @@ def run_gate(args, binary, root, expected, genesis, validator, env, owner, repor
         check(read_frozen(expected, final_height, 1, REMAINDER, 0, SYNC_EVM) == report['withdraw']['dueAt'],
               'consumer did not replay final DEL completion')
         report['stateSync']['finalAppHash'] = committed_hash(final_height, observer_comet)
+        witness_child, witness_log, witness_comet = witness
+        wait_height(witness_child, final_height + 1, time.monotonic() + 45, witness_log, report, read_comet=witness_comet)
+        report['stateSync']['witnessFinalAppHash'] = committed_hash(final_height, witness_comet)
         owner.stop(observer)
+        owner.stop(witness_child)
     owner.stop(child)
     report['payout']['sdkGasCharged'] = settlement_gas(restart_log)
 

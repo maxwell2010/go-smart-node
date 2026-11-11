@@ -234,11 +234,15 @@ assert report['payout']['amountAtomic']=='4000000000000000000' and report['payou
 assert report['final']['activeStakeAtomic']==report['final']['wrappedSupplyAtomic']=='0',report
 if sys.argv[4]=='del-state-sync':
     sync=report['stateSync']
-    assert sync['snapshotHeight']>report['initialHeight'] and sync['witnessesIndependent'] is False,report
+    assert sync['snapshotHeight']==sync['sourceSnapshotHeight']>report['initialHeight'],report
+    assert sync['trustHeight']==sync['witnessVerifiedThrough']==sync['snapshotHeight']+2 and len(sync['trustHash'])==64,report
+    assert len(sync['sourceSnapshotAppHash'])==64 and sync['witnessIsSeparateProcess'] is True and sync['independentFailureDomains'] is False,report
+    assert len({sync['sourceNodeID'],sync['witnessNodeID'],sync['observerNodeID']})==3,report
+    assert sync['sourceVotingPower']>0 and sync['witnessVotingPower']==sync['observerVotingPower']==0,report
     assert sync['restored']['activeStakeAtomic']=='4000000000000000000',report
     assert sync['pending']['pendingAtomic']=='4000000000000000000',report
-    assert sync['replayed']==report['final'] and len(sync['finalAppHash'])==64,report
-    print('Isolated P2P snapshot restore, financial replay and committed AppHash checks passed.')
+    assert sync['replayed']==report['final'] and sync['finalAppHash']==sync['witnessFinalAppHash'] and len(sync['finalAppHash'])==64,report
+    print('Isolated P2P snapshot restore, separate RPC witness, financial replay and committed AppHash checks passed.')
 print('Fresh DEL delegation, top-up, partial payout, repeat rejection, restart and remainder payout passed.')
 PY
 fi
