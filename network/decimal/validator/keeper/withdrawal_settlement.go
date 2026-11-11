@@ -219,8 +219,13 @@ func (k *StateKeeper) removeSettledUndelegation(ctx sdk.Context, binding *types.
 			continue
 		}
 		deadline := entry.CompletionTime.Unix()
-		if deadline <= 0 || !bytes.Equal(binding.CompletionTimestamp[24:], sdk.Uint64ToBigEndian(uint64(deadline))) {
+		var expectedTimestamp [32]byte
+		copy(expectedTimestamp[24:], sdk.Uint64ToBigEndian(uint64(deadline)))
+		if deadline <= 0 || !bytes.Equal(binding.CompletionTimestamp, expectedTimestamp[:]) {
 			return errors.New("native undelegation deadline differs from settled binding")
+		}
+		if entry.CompletionTime.After(ctx.BlockTime()) {
+			return errors.New("native undelegation has not matured")
 		}
 		// Two requests may have byte-identical entries. Remove one copy.
 		pending.Entries = append(pending.Entries[:i], pending.Entries[i+1:]...)

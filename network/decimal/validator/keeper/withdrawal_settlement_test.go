@@ -148,6 +148,10 @@ func TestWithdrawalSettlementRequiresMatchingCompletedBinding(t *testing.T) {
 	require.NoError(t, err)
 	g := bindingGenesisState(t, false)
 	b := withdrawalGenesis(t, g, stateWord(0), 2000)
+	pair := &g.Undelegations[0]
+	pair.Entries[0].CompletionTime = time.Unix(2000, 500)
+	g.EVMFrozenBindings[0].NativeEntryHash, err = types.NativeQueueEntryHash(1, pair.Delegator, pair.Validator, "", &pair.Entries[0])
+	require.NoError(t, err)
 	require.NoError(t, k.InitGenesis(ctx, g))
 	before, err := k.SettleMatureWithdrawals(ctx, 1_000_000, func(sdk.Context, types.EVMFrozenBinding) error {
 		t.Fatal("settlement must not run before the deadline")
@@ -168,4 +172,14 @@ func TestWithdrawalSettlementRequiresMatchingCompletedBinding(t *testing.T) {
 	current, err := k.GetEVMFrozenBinding(ctx, b.Gateway, b.FrozenIndex)
 	require.NoError(t, err)
 	require.True(t, current.Active)
+	execute := func(child sdk.Context, row types.EVMFrozenBinding) error {
+		return markWithdrawalSettled(child, k, row)
+	}
+	result, err = k.SettleMatureWithdrawals(ctx, 1_000_000, execute)
+	require.NoError(t, err)
+	require.Equal(t, WithdrawalSettlementResult{Retried: 1}, result, "the full native deadline must have passed")
+	ctx = ctx.WithBlockHeight(11).WithBlockTime(pair.Entries[0].CompletionTime)
+	result, err = k.SettleMatureWithdrawals(ctx, 1_000_000, execute)
+	require.NoError(t, err)
+	require.Equal(t, WithdrawalSettlementResult{Settled: 1}, result)
 }
