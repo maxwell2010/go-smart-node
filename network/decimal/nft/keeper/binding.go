@@ -25,9 +25,8 @@ func (k *StateKeeper) checkBindingDomain(ctx sdk.Context, binding types.External
 	return nil
 }
 
-// storeNewBinding is deliberately internal. It is used only after complete
-// genesis validation; a future receipt planner must authenticate factory/code
-// identity before calling its own atomic admission transition.
+// storeNewBinding writes a validated binding and its reverse index for genesis
+// or an authenticated admission in a child cache.
 func (k *StateKeeper) storeNewBinding(ctx sdk.Context, binding types.ExternalNFTBinding) error {
 	if err := k.checkBindingDomain(ctx, binding); err != nil {
 		return err

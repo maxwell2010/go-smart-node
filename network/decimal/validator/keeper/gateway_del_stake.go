@@ -127,16 +127,13 @@ func (k *StateKeeper) checkGatewayDELPrestate(ctx sdk.Context, next GatewayDELSt
 		delegation, err := k.checkGatewayDELHoldPrestate(ctx, next, amount, owner, operator)
 		return active, delegation, err
 	}
-	if active == nil {
-		return nil, nil, nil
-	}
 	delegation, err := k.GetDelegation(ctx, owner, operator, types.StakeType_Coin, identity.BaseDenom)
 	if amount.IsZero() {
 		if errors.Is(err, ErrNotFound) {
 			return active, nil, nil
 		}
 		if err == nil {
-			return nil, nil, errors.New("NFT-only Gateway DEL binding has an unexpected native coin delegation")
+			return nil, nil, errors.New("Gateway DEL position with no direct amount has an unexpected native coin delegation")
 		}
 	}
 	if err != nil {
@@ -267,7 +264,7 @@ func (k *StateKeeper) ApplyGatewayDELWithdrawal(ctx sdk.Context, next GatewayDEL
 	if err := k.ApplyBindingPlan(child, plan); err != nil {
 		return err
 	}
-	if err := k.appendGatewayDELUndelegation(child, owner, operator, entry); err != nil {
+	if err := k.appendGatewayUndelegation(child, owner, operator, entry); err != nil {
 		return err
 	}
 	child.EventManager().EmitEvent(sdk.NewEvent("decimal_del_withdrawal_requested",
@@ -276,7 +273,7 @@ func (k *StateKeeper) ApplyGatewayDELWithdrawal(ctx sdk.Context, next GatewayDEL
 	return nil
 }
 
-func (k *StateKeeper) appendGatewayDELUndelegation(ctx sdk.Context, owner, operator string, entry types.UndelegationEntry) error {
+func (k *StateKeeper) appendGatewayUndelegation(ctx sdk.Context, owner, operator string, entry types.UndelegationEntry) error {
 	key := composite(undelegationPrefix, owner, operator)
 	pending := types.Undelegation{Delegator: owner, Validator: operator}
 	if err := k.read(ctx, key, &pending); err != nil && !errors.Is(err, ErrNotFound) {
