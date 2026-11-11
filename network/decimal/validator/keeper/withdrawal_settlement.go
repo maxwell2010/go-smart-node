@@ -89,9 +89,6 @@ func (k *StateKeeper) SettleMatureWithdrawals(ctx sdk.Context, attemptGas uint64
 		if row.frozen == nil || !row.active() || row.frozen.FreezeType != 1 || !bytes.Equal(key, withdrawalDueKey(row)) {
 			return WithdrawalSettlementResult{}, errors.New("invalid due withdrawal index entry")
 		}
-		if err = k.checkBindingIndexes(batch, row); err != nil {
-			return WithdrawalSettlementResult{}, err
-		}
 		if err = k.attemptWithdrawal(batch, attemptGas, row, execute); err != nil {
 			result.Retried++
 			ctx.Logger().Error("withdrawal settlement deferred", "gateway", fmt.Sprintf("%x", row.frozen.Gateway), "id", fmt.Sprintf("%x", row.frozen.FrozenIndex), "error", err)
@@ -155,6 +152,9 @@ func (k *StateKeeper) attemptWithdrawal(ctx sdk.Context, gas uint64, row *bindin
 	if err != nil {
 		return err
 	}
+	if err = k.checkBindingIndexes(child, input); err != nil {
+		return err
+	}
 	if err = execute(child, *input.frozen); err != nil {
 		return err
 	}
@@ -212,6 +212,10 @@ func (k *StateKeeper) removeSettledUndelegation(ctx sdk.Context, binding *types.
 		}
 		if !bytes.Equal(hash, binding.NativeEntryHash) {
 			continue
+		}
+		deadline := entry.CompletionTime.Unix()
+		if deadline <= 0 || !bytes.Equal(binding.CompletionTimestamp[24:], sdk.Uint64ToBigEndian(uint64(deadline))) {
+			return errors.New("native undelegation deadline differs from settled binding")
 		}
 		// Two requests may have byte-identical entries. Remove one copy.
 		pending.Entries = append(pending.Entries[:i], pending.Entries[i+1:]...)
