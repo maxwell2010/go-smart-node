@@ -21,7 +21,7 @@ trap cleanup EXIT
 install_go() {
   local family="$1" version digest destination
   case "$family" in
-    modern) version=1.26.10; digest=ccfe7ae822d2c2f41f4fe7c956199967a4dac22d0ee0d2b2bfdb440aab3b20c5 ;;
+    modern) version=1.26.11; digest=9849f4e04ee35303714e34fbc3ac8ab44ea3e448a95aa182f91e3b9b79c710ec ;;
     legacy) version=1.24.4; digest=77e5da33bb72aeaef1ba4418b6fe511bc4d041873cbf82e5aa6318740df98717 ;;
   esac
   destination="$remote_base/toolchains/go$version"

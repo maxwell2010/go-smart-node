@@ -2,7 +2,12 @@
 import argparse, pathlib, platform, re, shutil, subprocess, tempfile
 from source_inventory import production_environment, verify_build_inputs
 REPOSITORY="https://github.com/maxwell2010/go-smart-node.git"
-GO_VERSION="go1.26.10"
+
+def pinned_go_version(module_text):
+    versions = re.findall(r"^go[ \t]+(1\.[0-9]+\.[0-9]+)[ \t]*$", module_text, re.MULTILINE)
+    if len(versions) != 1:
+        raise ValueError("network/go.mod must declare one exact Go patch version")
+    return "go" + versions[0]
 
 def validate_revision(revision):
  if not re.fullmatch(r"[0-9a-f]{40}",revision):raise ValueError("full lowercase 40-character Git revision required")
@@ -16,7 +21,6 @@ def install(revision, destination, source=None):
  if destination.exists() or destination.is_symlink():raise ValueError("destination already exists; choose a new versioned path")
  if platform.system()!="Linux" or platform.machine()!="x86_64":raise ValueError("only Linux amd64 is validated")
  environment=production_environment()
- if run(["go","version"],env=environment).split()[2]!=GO_VERSION:raise ValueError("install exact Go 1.26.10 first")
  for executable in ("git","gcc","python3"):
   if not shutil.which(executable):raise ValueError("missing dependency: "+executable)
  with tempfile.TemporaryDirectory(prefix="mcnd-build-") as temporary:
@@ -29,6 +33,8 @@ def install(revision, destination, source=None):
   if run(["git","-C",str(source),"rev-parse","HEAD"])!=revision:raise ValueError("source revision mismatch")
   if run(["git","-C",str(source),"status","--porcelain","--untracked-files=no"]):raise ValueError("source has tracked modifications")
   module=source/"network"
+  expected_go=pinned_go_version((module/"go.mod").read_text(encoding="utf8"))
+  if run(["go","version"],env=environment).split()[:3]!=["go","version",expected_go]:raise ValueError("install exact "+expected_go+" for the selected revision")
   for verifier in ("verify_owned_evm.py","verify_owned_geth.py","verify_owned_sdk.py"):
    subprocess.run(["python3",str(module/"scripts"/verifier)],check=True)
   for command in (["go","mod","download"],["go","mod","verify"]):subprocess.run(command,cwd=module,env=environment,check=True)

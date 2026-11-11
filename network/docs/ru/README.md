@@ -18,7 +18,7 @@
 
 ## Сервер и зависимости
 
-Проверенная сборочная среда: Linux amd64, Go 1.26.10, GCC, CGO_ENABLED=1.
+Для текущей development-сборки нужны Linux amd64, Go 1.26.11, GCC и CGO_ENABLED=1.
 Операторским скриптам нужен Python >=3.11, Git, curl и CA certificates.
 Команды ниже рассчитаны на Ubuntu 24.04 LTS.
 
@@ -36,9 +36,9 @@ set -eu
 sudo apt-get update
 sudo apt-get install -y build-essential git curl ca-certificates python3
 TASK_TMP=$(mktemp -d)
-curl -fL --proto '=https' --tlsv1.2 https://go.dev/dl/go1.26.10.linux-amd64.tar.gz -o "$TASK_TMP/go.tar.gz"
-echo 'ccfe7ae822d2c2f41f4fe7c956199967a4dac22d0ee0d2b2bfdb440aab3b20c5  '"$TASK_TMP/go.tar.gz" | sha256sum -c -
-GO_INSTALL_DIR="$HOME/.local/opt/go1.26.10"
+curl -fL --proto '=https' --tlsv1.2 https://go.dev/dl/go1.26.11.linux-amd64.tar.gz -o "$TASK_TMP/go.tar.gz"
+echo '9849f4e04ee35303714e34fbc3ac8ab44ea3e448a95aa182f91e3b9b79c710ec  '"$TASK_TMP/go.tar.gz" | sha256sum -c -
+GO_INSTALL_DIR="$HOME/.local/opt/go1.26.11"
 mkdir -p "$HOME/.local/opt"
 test ! -e "$GO_INSTALL_DIR"
 mkdir "$GO_INSTALL_DIR"
@@ -52,22 +52,12 @@ go version
 
 ## Быстрая сборка точной development-ревизии
 
-Утверждённого production pin нет. Проверенный development snapshot:
-`8cf619da1c77ee5efffc80a678272010fd2263dd`. Он прошёл четыре CI, включая
-[сборку и упаковку](https://github.com/maxwell2010/go-smart-node/actions/runs/41608914841)
-и [candidate-проверки](https://github.com/maxwell2010/go-smart-node/actions/runs/41608914982).
-В него входят SDK/source-inventory/binary-metadata checks, guard нового
-retention-home и исправления version/completion/snapshots CLI.
-[Проверка готового артефакта](evidence/published-cli-8cf619d-20261103/README.md)
-подтверждает конкретные обычные CLI-регрессии, не финансовую активацию.
-
-Это не stable и не полноценный финансовый релиз. Более поздние исправления
-не приписываются этому pin: следующей ревизии нужны собственные CI/gates.
-Не заменяйте полный commit на `master`, `HEAD`, tag или случайный SHA.
-После установки зависимостей выполните из любого каталога:
+Выберите полный SHA коммита, прошедшего CI для нужной development-сборки,
+и задайте его в `MCND_REVISION`. Для текущего исходника используется Go 1.26.11.
+После установки зависимостей выполните команду из любого каталога.
 
 ```sh
-MCND_REVISION=8cf619da1c77ee5efffc80a678272010fd2263dd && export MCND_REVISION && python3 -c 'import os,re,sys; sys.exit(0 if re.fullmatch(r"[0-9a-f]{40}", os.environ.get("MCND_REVISION", "")) else "Нужен утверждённый полный MCND_REVISION")' && TASK_SRC=$(mktemp -d) && git -C "$TASK_SRC" init -q && git -C "$TASK_SRC" fetch --depth 1 https://github.com/maxwell2010/go-smart-node.git "$MCND_REVISION" && git -C "$TASK_SRC" checkout --detach FETCH_HEAD && test "$(git -C "$TASK_SRC" rev-parse HEAD)" = "$MCND_REVISION" && env -u GOFLAGS -u GOEXPERIMENT -u CGO_CFLAGS -u CGO_CPPFLAGS -u CGO_CXXFLAGS -u CGO_FFLAGS -u CGO_LDFLAGS GOENV=off GOWORK=off GOTOOLCHAIN=local python3 "$TASK_SRC/network/tools/install_mcnd.py" --source "$TASK_SRC" --revision "$MCND_REVISION" --destination "$HOME/.local/bin/mcnd-development-$MCND_REVISION"
+: "${MCND_REVISION:?Укажите проверенный полный commit}" && export MCND_REVISION && python3 -c 'import os,re,sys; sys.exit(0 if re.fullmatch(r"[0-9a-f]{40}", os.environ.get("MCND_REVISION", "")) else "Нужен утверждённый полный MCND_REVISION")' && TASK_SRC=$(mktemp -d) && git -C "$TASK_SRC" init -q && git -C "$TASK_SRC" fetch --depth 1 https://github.com/maxwell2010/go-smart-node.git "$MCND_REVISION" && git -C "$TASK_SRC" checkout --detach FETCH_HEAD && test "$(git -C "$TASK_SRC" rev-parse HEAD)" = "$MCND_REVISION" && env -u GOFLAGS -u GOEXPERIMENT -u CGO_CFLAGS -u CGO_CPPFLAGS -u CGO_CXXFLAGS -u CGO_FFLAGS -u CGO_LDFLAGS GOENV=off GOWORK=off GOTOOLCHAIN=local python3 "$TASK_SRC/network/tools/install_mcnd.py" --source "$TASK_SRC" --revision "$MCND_REVISION" --destination "$HOME/.local/bin/mcnd-development-$MCND_REVISION"
 ```
 
 SHA идентифицирует исходники, но сам по себе не удостоверяет издателя.
@@ -85,8 +75,9 @@ CI-архивы имеют ограниченный срок хранения и
 env -u GOFLAGS -u GOEXPERIMENT -u CGO_CFLAGS -u CGO_CPPFLAGS -u CGO_CXXFLAGS -u CGO_FFLAGS -u CGO_LDFLAGS GOENV=off GOWORK=off GOTOOLCHAIN=local python3 network/tools/install_mcnd.py --source "$PWD" --revision "${MCND_REVISION:?Укажите утверждённый полный commit}" --destination "$HOME/.local/bin/mcnd-development-$MCND_REVISION"
 ```
 
-Политика сборки: точная Go 1.26.10, Linux amd64/v1, CGO=1/GCC, default
-build tags; пользовательские GOFLAGS/GOEXPERIMENT/CGO flags не поддерживаются.
+Для сборки нужны точная версия Go из `network/go.mod`, Linux amd64/v1,
+CGO=1/GCC и стандартные build tags. Сборщик отклоняет пользовательские
+GOFLAGS, GOEXPERIMENT и CGO flags.
 GOENV и workspace отключаются для этой команды. Это не меняет глобальное
 окружение пользователя. Проверяются три owned-source дерева EVM/geth/SDK,
 канонический Pion v3, h1 зависимостей и фактические tracked Go/embed inputs
@@ -112,6 +103,28 @@ Go metadata этой trimpath-сборки не содержит `-ldflags`: VER
 состояния требует отдельного проверенного плана; замены бинарника может
 быть недостаточно. Неиспользуемый временный checkout можно сохранить для
 проверки происхождения - команда не удаляет другие каталоги.
+
+### Исторический development snapshot
+
+Отдельно проверен development snapshot
+`8cf619da1c77ee5efffc80a678272010fd2263dd`. Он прошёл четыре CI, включая
+[сборку и упаковку](https://github.com/maxwell2010/go-smart-node/actions/runs/41608914841)
+и [candidate-проверки](https://github.com/maxwell2010/go-smart-node/actions/runs/41608914982).
+В него входят SDK/source-inventory/binary-metadata checks, guard нового
+retention-home и исправления version/completion/snapshots CLI.
+[Проверка готового артефакта](evidence/published-cli-8cf619d-20261103/README.md)
+подтверждает исправления команд version, completion и snapshots.
+
+Для повторной сборки этой ревизии нужна Go 1.26.10. При установке Go из
+первого блока выберите версию 1.26.10 и проверьте SHA256 Linux amd64
+`ccfe7ae822d2c2f41f4fe7c956199967a4dac22d0ee0d2b2bfdb440aab3b20c5`.
+Установите её в `$HOME/.local/opt/go1.26.10`. Перед однострочником выберите
+эту версию и исторический исходник.
+
+```sh
+export PATH="$HOME/.local/opt/go1.26.10/bin:$PATH"
+export MCND_REVISION=8cf619da1c77ee5efffc80a678272010fd2263dd
+```
 
 Историческая ревизия `245f13bf2baf04c617baefe1b87ee7e37c68383d`
 сохранена только как provenance прежнего compatibility-стенда. Она содержит

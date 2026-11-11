@@ -17,6 +17,8 @@ import tarfile
 import unittest
 import zipfile
 
+from install_mcnd import pinned_go_version
+
 
 COMMIT = os.environ.get("MCND_ACCEPTANCE_COMMIT", "88ed5365340a6cf22bb757b27a9a9e5eef3dbe28")
 ARCHIVE = "mcnd-development-linux-amd64.tar.gz"
@@ -111,7 +113,11 @@ class PublishedDevelopmentArtifactAcceptance(unittest.TestCase):
         actual = subprocess.check_output(["go", "version", "-m", str(target)], text=True)
         # The leading filename varies; all embedded module/settings lines must match.
         self.assertEqual(self.build_info.splitlines()[1:], actual.splitlines()[1:])
-        self.assertTrue(actual.splitlines()[0].endswith(": go1.26.10"))
+        go_mod = subprocess.check_output(
+            ["git", "-C", str(self.source), "show", COMMIT + ":network/go.mod"], text=True)
+        expected_go = pinned_go_version(go_mod)
+        self.assertTrue(actual.splitlines()[0].endswith(": " + expected_go))
+        self.assertTrue(self.build_info.splitlines()[0].endswith(": " + expected_go))
         for setting in ["-buildmode=exe", "-compiler=gc", "-trimpath=true", "CGO_ENABLED=1", "GOARCH=amd64", "GOOS=linux", "GOAMD64=v1", "vcs.revision=" + COMMIT, "vcs.modified=false"]:
             self.assertIn("\tbuild\t" + setting, actual.splitlines())
         self.assertFalse(any(line.startswith("\tbuild\t-tags=") for line in actual.splitlines()))

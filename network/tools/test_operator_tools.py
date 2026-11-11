@@ -1,7 +1,7 @@
 import hashlib, json, os, pathlib, subprocess, tarfile, tempfile, unittest
 from unittest.mock import patch
 from configure_history import PROFILE, configure, render
-from install_mcnd import validate_revision, install
+from install_mcnd import install, pinned_go_version, validate_revision
 from package_mcnd import package
 
 
@@ -17,6 +17,21 @@ class OperatorToolsTest(unittest.TestCase):
         for value in ('master', '123', '../file', 'a'*39, 'F'*40, 'a'*40+';command'):
             with self.assertRaises(ValueError): validate_revision(value)
         self.assertEqual('a'*40, validate_revision('a'*40))
+
+    def test_source_pin_selects_current_or_historical_go(self):
+        for version in ('1.26.10', '1.26.11'):
+            with self.subTest(version=version):
+                self.assertEqual('go' + version, pinned_go_version('module fixture\ngo ' + version + '\n'))
+        for text in ('go 1.26\n', 'toolchain go1.26.11\n', 'go 1.26.10\ngo 1.26.11\n'):
+            with self.subTest(text=text), self.assertRaises(ValueError):
+                pinned_go_version(text)
+
+    def source_fixture(self, root):
+        source = pathlib.Path(root)
+        module = source / 'network'
+        module.mkdir()
+        (module / 'go.mod').write_text('go 1.26.11\n')
+        return source
 
     def fixture(self, root):
         home=pathlib.Path(root); (home/'config').mkdir();(home/'data').mkdir()
@@ -68,7 +83,7 @@ class OperatorToolsTest(unittest.TestCase):
 
     def test_packager_rejects_binary_from_different_revision(self):
         with tempfile.TemporaryDirectory() as root:
-            source=pathlib.Path(root);binary=source/'mcnd'
+            source=self.source_fixture(root);binary=source/'mcnd'
             header=bytearray(20);header[:5]=b'\x7fELF\x02';header[18:20]=b'\x3e\x00';binary.write_bytes(header)
             def output(command,**kwargs):
                 if 'rev-parse' in command:return 'a'*40+'\n'
@@ -93,7 +108,7 @@ class OperatorToolsTest(unittest.TestCase):
 
     def test_packager_rejects_build_metadata_mismatch_before_archive_creation(self):
         with tempfile.TemporaryDirectory() as root:
-            source=pathlib.Path(root);binary=source/'mcnd'
+            source=self.source_fixture(root);binary=source/'mcnd'
             header=bytearray(20);header[:5]=b'\x7fELF\x02';header[18:20]=b'\x3e\x00';binary.write_bytes(header)
             def output(command,**kwargs):
                 if 'rev-parse' in command:return 'a'*40+'\n'
@@ -111,7 +126,7 @@ class OperatorToolsTest(unittest.TestCase):
     def test_trimpath_requires_matching_native_cli_commit(self):
         for matches in (True, False):
             with self.subTest(matches=matches), tempfile.TemporaryDirectory() as root:
-                source=pathlib.Path(root);binary=source/'mcnd'
+                source=self.source_fixture(root);binary=source/'mcnd'
                 header=bytearray(20);header[:5]=b'\x7fELF\x02';header[18:20]=b'\x3e\x00';binary.write_bytes(header)
                 def output(command, **kwargs):
                     if 'rev-parse' in command:return 'a'*40+'\n'
@@ -130,7 +145,7 @@ class OperatorToolsTest(unittest.TestCase):
 
     def test_packager_preserves_distinct_owned_licenses_and_notices(self):
         with tempfile.TemporaryDirectory() as root:
-            source=pathlib.Path(root);binary=source/'mcnd'
+            source=self.source_fixture(root);binary=source/'mcnd'
             header=bytearray(20);header[:5]=b'\x7fELF\x02';header[18:20]=b'\x3e\x00';binary.write_bytes(header)
             notices={'COPYING':b'GPL notice\n','COPYING.LESSER':b'LGPL notice\n','crypto/library/NOTICE':b'Library notice\n'}
             for name,content in notices.items():
@@ -152,7 +167,7 @@ class OperatorToolsTest(unittest.TestCase):
 
     def test_packager_rejects_untracked_or_changed_production_inputs(self):
         with tempfile.TemporaryDirectory() as root:
-            source=pathlib.Path(root);binary=source/'mcnd'
+            source=self.source_fixture(root);binary=source/'mcnd'
             header=bytearray(20);header[:5]=b'\x7fELF\x02';header[18:20]=b'\x3e\x00';binary.write_bytes(header)
             def output(command,**kwargs):
                 if 'rev-parse' in command:return 'a'*40+'\n'

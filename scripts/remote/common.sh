@@ -22,7 +22,7 @@ export GOMODCACHE="$remote_base/modules"
 export SOLC="$remote_base/tools/solc-0.8.20"
 
 remote_select_go() {
-  case "$1" in modern) remote_go_version=1.26.10 ;; legacy) remote_go_version=1.24.4 ;; *) return 2 ;; esac
+  case "$1" in modern) remote_go_version=1.26.11 ;; legacy) remote_go_version=1.24.4 ;; *) return 2 ;; esac
   export PATH="$remote_base/toolchains/go$remote_go_version/bin:$PATH"
   export GOCACHE="$remote_base/cache/go$remote_go_version"
   mkdir -p "$GOCACHE"

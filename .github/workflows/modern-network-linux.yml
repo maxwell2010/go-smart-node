@@ -54,7 +54,7 @@ jobs:
           persist-credentials: false
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
-          go-version: '1.26.10'
+          go-version: '1.26.11'
           cache: true
           cache-dependency-path: network/go.sum
       - name: Validate reusable remote-worker setup and checks
@@ -67,7 +67,7 @@ jobs:
           bash scripts/remote/prepare.sh modern
           bash scripts/remote/validate.sh "$REMOTE_PROFILE"
           echo "GOMODCACHE=$MCND_REMOTE_BASE/modules" >> "$GITHUB_ENV"
-          echo "GOCACHE=$MCND_REMOTE_BASE/cache/go1.26.10" >> "$GITHUB_ENV"
+          echo "GOCACHE=$MCND_REMOTE_BASE/cache/go1.26.11" >> "$GITHUB_ENV"
       - name: Verify independent dependency graph
         run: |
           mkdir -p validation-logs
@@ -170,7 +170,7 @@ jobs:
           persist-credentials: false
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e
         with:
-          go-version: '1.26.10'
+          go-version: '1.26.11'
           cache: true
           cache-dependency-path: network/go.sum
       - name: Build default binaries and run isolated process gates

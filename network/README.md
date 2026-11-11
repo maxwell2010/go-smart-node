@@ -8,7 +8,7 @@ The current candidate retains the selected [2025.1 release family](https://docs.
 
 `family-check` constructs the owned application in an empty in-memory database, checks the EVM, IBC and transfer wiring, and exits. It opens no listeners or external connections. It is not a daemon or a completed native feature port.
 
-Run ordinary compatibility checks from this directory with the pinned Go `1.26.10` toolchain:
+Run ordinary compatibility checks from this directory with the pinned Go `1.26.11` toolchain:
 
 ```sh
 GOTOOLCHAIN=local go mod download
@@ -32,7 +32,7 @@ The older `family-manifest.json` preserves the SDK `0.54` / EVM `0.7` bootstrap 
 
 The `mcnd` command uses stateless codecs and genesis defaults, then constructs one application when starting. It validates the actual home's genesis signing domains before configuration writes and application creation, including restarts. Its separate default home is `~/.mcnd`; listeners default to loopback and peer discovery is disabled.
 
-Build with Go `1.26.10`, GCC and CGO enabled. Use the default production build, without the `test` tag:
+Build with Go `1.26.11`, GCC and CGO enabled. Use the default production build, without the `test` tag:
 
 ```sh
 go mod download

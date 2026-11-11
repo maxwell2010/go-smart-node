@@ -13,7 +13,7 @@ del_state_sync="${3:-off}"
 for tool in sudo unshare ip gcc python3 go; do command -v "$tool" >/dev/null; done
 python="$(command -v python3)"
 "$python" -c 'import sys,tomllib; assert sys.version_info >= (3,11), "Python >=3.11 required"'
-[[ "$(go version)" == 'go version go1.26.10 linux/amd64' ]] || { echo 'Wrong Go toolchain.' >&2; exit 2; }
+[[ "$(go version)" == 'go version go1.26.11 linux/amd64' ]] || { echo 'Wrong Go toolchain.' >&2; exit 2; }
 work_parent="$(realpath -e -- "${RUNNER_TEMP:-${TMPDIR:-/tmp}}")"
 for volume in "$root" "$work_parent"; do
   (( $(df -Pk "$volume" | awk 'END {print $4}') >= 20 * 1024 * 1024 )) || { echo 'Less than 20 GiB free on worker volume.' >&2; exit 1; }
@@ -92,11 +92,11 @@ from source_inventory import json_records,production_environment
 for name in ('mcnd','reference'):
     metadata=(out/(name+'-build.log')).read_text()
     parsed=parse_build_info(metadata)
-    assert parsed['goVersion']=='go1.26.10', name+' toolchain mismatch'
+    assert parsed['goVersion']=='go1.26.11', name+' toolchain mismatch'
     assert parsed['settings']['vcs.revision']==revision, name+' embedded source revision mismatch'
     assert parsed['settings']['vcs.modified']=='false', name+' modified sources'
     if name=='mcnd':
-        verified=verify_binary_build(metadata,root,revision,'go1.26.10')
+        verified=verify_binary_build(metadata,root,revision,'go1.26.11')
         (out/'mcnd-metadata-verified.json').write_text(json.dumps(verified,indent=2)+'\n')
     else:
         assert parsed['path']=='github.com/maxwell2010/go-smart-node/network/internal/ibcreference'

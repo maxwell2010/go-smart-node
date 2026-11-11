@@ -5,7 +5,7 @@ from binary_provenance import MAIN_MODULE, parse_build_info, verify_binary_build
 
 
 REVISION = "a" * 40
-VERSION = "go1.26.10"
+VERSION = "go1.26.11"
 
 
 class BinaryProvenanceTest(unittest.TestCase):
@@ -43,7 +43,7 @@ class BinaryProvenanceTest(unittest.TestCase):
     def test_recorded_toolchain_target_instrumentation_and_vcs_mismatches_reject(self):
         info, packages = self.fixture()
         for before, after in [
-            (VERSION, "go1.26.9"), ("/cmd/mcnd", "/cmd/other"), ("-buildmode=exe", "-buildmode=pie"),
+            (VERSION, "go1.26.10"), ("/cmd/mcnd", "/cmd/other"), ("-buildmode=exe", "-buildmode=pie"),
             ("-trimpath=true", "-trimpath=false"), ("CGO_ENABLED=1", "CGO_ENABLED=0"),
             ("GOAMD64=v1", "GOAMD64=v3"), ("vcs.modified=false", "vcs.modified=true"),
             ("vcs.revision=" + REVISION, "vcs.revision=" + "b" * 40),
