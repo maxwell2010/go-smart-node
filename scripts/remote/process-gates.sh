@@ -223,6 +223,7 @@ assert report['sourceCommit']==sys.argv[2] and report['binarySha256']==sys.argv[
 assert all(report[step]['success'] for step in ('delegation','topUp','partialWithdraw','withdraw')),report
 assert not report['repeatComplete']['success'],report
 assert report['partialPayout']['amountAtomic']=='1000000000000000000' and report['partialPayout']['sdkGasCharged']>0,report
+assert all(report[step]['nativePositionsVerified'] for step in ('before','delegation','topUp','partialWithdraw','partialPayout','restart','withdraw','payout','final')),report
 assert report['restart']['activeStakeAtomic']=='4000000000000000000' and report['restart']['pendingAtomic']=='0',report
 assert report['payout']['amountAtomic']=='4000000000000000000' and report['payout']['sdkGasCharged']>0,report
 assert report['final']['activeStakeAtomic']==report['final']['wrappedSupplyAtomic']=='0',report

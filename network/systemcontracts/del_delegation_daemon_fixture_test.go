@@ -117,7 +117,8 @@ func exportDELDelegationDaemonFixture(t *testing.T, e isolatedBackendEnv, profil
 	expect, err := json.Marshal(map[string]interface{}{
 		"chainId": ctx.ChainID(), "evmChainId": 990001, "gateway": profile.Gateway.Hex(), "wrapped": profile.WrappedDEL.Hex(),
 		"actor": actor.Hex(), "actorNative": sdk.AccAddress(actor.Bytes()).String(), "wrappedNative": sdk.AccAddress(profile.WrappedDEL.Bytes()).String(),
-		"validator": validatorAddress.Hex(), "amount": amount.String(), "topUpAmount": topUp.String(), "partialAmount": partial.String(),
+		"validator": validatorAddress.Hex(), "validatorNative": validator.OperatorAddress,
+		"amount": amount.String(), "topUpAmount": topUp.String(), "partialAmount": partial.String(),
 		"gasPrice": gasPrice.String(), "gasLimit": gasLimit, "nonce": nonce,
 		"stakeId": stakeID.Hex(), "frozenIds": []string{common.BigToHash(first).Hex(), common.BigToHash(second).Hex()},
 		"stakeData":   "0x" + hex.EncodeToString(pack("getStake", validatorAddress, actor, profile.WrappedDEL)),

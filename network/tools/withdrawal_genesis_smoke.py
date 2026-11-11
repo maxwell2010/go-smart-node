@@ -80,9 +80,9 @@ def private_write(path, data):
         stream.write(data)
 
 
-def bech32_payload(owner):
+def bech32_payload(owner, prefix='d0'):
     hrp, payload = owner.rsplit('1', 1)
-    check(hrp == 'd0' and len(payload) == 38 and set(payload) <= set(ALPHABET), 'invalid native NFT owner encoding')
+    check(hrp == prefix and len(payload) == 38 and set(payload) <= set(ALPHABET), 'invalid native address encoding')
     # The SDK query returns an already validated address. Decode its complete
     # 160-bit account payload to compare it to the actual EVM address.
     address = 0

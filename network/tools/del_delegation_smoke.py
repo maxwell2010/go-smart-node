@@ -1,6 +1,7 @@
 """Exercise signed DEL delegation, top-up and withdrawals on a disposable daemon."""
 
 import argparse
+import datetime
 import hashlib
 import json
 import pathlib
@@ -34,6 +35,7 @@ def load_expectations(path):
     check(len({expected[name] for name in ('gateway', 'wrapped', 'actor', 'validator')}) == 4, 'fixture roles must be distinct')
     for name in ('actor', 'wrapped'):
         check(bech32_payload(expected[name + 'Native']) == expected[name], 'fixture native address does not match its EVM address')
+    check(bech32_payload(expected['validatorNative'], 'd0valoper') == expected['validator'], 'fixture operator address differs from its EVM address')
     check((expected['amount'], expected['topUpAmount'], expected['partialAmount']) == (str(AMOUNT), str(TOP_UP), str(PARTIAL)) and
           expected['gasPrice'] == str(GAS_PRICE) and expected['gasLimit'] == GAS_LIMIT,
           'fixture transaction value or gas differs')
@@ -64,7 +66,37 @@ def balance(account, native_account, height):
     return evm
 
 
-def read_state(expected, height, *, active, pending, claims, wallet):
+def check_native_del_stake(stake, amount):
+    check(stake['id'] == 'del' and stake['stake'] == {'denom': 'del', 'amount': str(amount)} and
+          not stake.get('holds') and not stake.get('sub_token_ids'), 'native position does not match the exact ordinary DEL amount')
+
+
+def native_positions(expected, height, active, pending, due):
+    operator, actor = expected['validatorNative'], expected['actorNative']
+    pair = f'/decimal/validator/v1/validators/{operator}/delegations/{actor}'
+    rows = native(pair, height).get('delegations') or []
+    check(len(rows) == int(active > 0), 'unexpected active native delegation count')
+    if rows:
+        check((rows[0]['validator'], rows[0]['delegator']) == (operator, actor), 'unexpected native delegation pair')
+        check_native_del_stake(rows[0]['stake'], active)
+    queue = pair + '/undelegation'
+    if not pending:
+        try:
+            native(queue, height)
+        except OSError as error:
+            check(str(error).startswith('HTTP 404 '), 'expected missing native queue, received another query error')
+        else:
+            raise ValueError('unexpected native undelegation after completion')
+        return
+    row = native(queue, height)['undelegation']
+    check((row['validator'], row['delegator']) == (operator, actor) and len(row['entries']) == 1, 'unexpected native undelegation pair or entry count')
+    entry = row['entries'][0]
+    check_native_del_stake(entry['stake'], pending)
+    stamp = datetime.datetime.fromisoformat(entry['completion_time'].replace('Z', '+00:00'))
+    check(stamp.tzinfo is not None and stamp.timestamp() == due, 'native and EVM withdrawal deadlines differ')
+
+
+def read_state(expected, height, *, active, pending, claims, wallet, due=None):
     gateway, wrapped, actor = (expected[name] for name in ('gateway', 'wrapped', 'actor'))
     stake = read_words(gateway, expected['stakeData'], height, 8)
     if active:
@@ -82,9 +114,10 @@ def read_state(expected, height, *, active, pending, claims, wallet):
     check(supply == escrow == backing == active + pending, 'wrapped supply, Gateway custody and bank backing must reconcile exactly')
     actor_balance = balance(actor, expected['actorNative'], height)
     check(wallet is None or actor_balance == wallet, 'actor balance differs from exact value, fee and payout accounting')
+    native_positions(expected, height, active, pending, due)
     return {'height': height, 'walletAtomic': str(actor_balance), 'wrappedSupplyAtomic': str(supply),
             'gatewayEscrowAtomic': str(escrow), 'wrappedBackingAtomic': str(backing), 'activeReserveAtomic': str(reserve),
-            'activeStakeAtomic': str(stake[3]), 'pendingAtomic': str(pending)}
+            'activeStakeAtomic': str(stake[3]), 'pendingAtomic': str(pending), 'nativePositionsVerified': True}
 
 
 def read_frozen(expected, height, index, amount, status):
@@ -146,7 +179,7 @@ def withdraw_and_payout(child, log, report, expected, *, name, index, amount, ac
     height = receipt['height']
     due = read_frozen(expected, height, index, amount, 1)
     check(0 < due - int(block_time(height).timestamp()) <= 30, 'unexpected DEL withdrawal freeze period')
-    report[name] = {**receipt, **read_state(expected, height, active=active, pending=amount, claims=index + 1, wallet=wallet),
+    report[name] = {**receipt, **read_state(expected, height, active=active, pending=amount, claims=index + 1, wallet=wallet, due=due),
                     'dueAt': due, 'frozenIndex': target[1]}
     check(not scan_blocks(height, height, *target), 'withdrawal completed in the request block')
 
