@@ -127,6 +127,9 @@ func (c *withdrawalController) checkNFTAdmission(ctx sdk.Context, msg core.Messa
 }
 
 func (c *withdrawalController) isManagedNFT(ctx sdk.Context, addr common.Address) (bool, error) {
+	if addr == (common.Address{}) {
+		return false, nil
+	}
 	if addr == c.profile.PositionVault {
 		return true, nil
 	}
@@ -138,7 +141,7 @@ func (c *withdrawalController) isManagedNFT(ctx sdk.Context, addr common.Address
 }
 
 func isDirectNFTApproval(msg core.Message, logs []*ethtypes.Log) bool {
-	if msg.Value == nil || msg.Value.Sign() != 0 || len(msg.SetCodeAuthorizations) != 0 || len(msg.Data) != 4+2*common.HashLength ||
+	if msg.To == nil || msg.Value == nil || msg.Value.Sign() != 0 || len(msg.SetCodeAuthorizations) != 0 || len(msg.Data) != 4+2*common.HashLength ||
 		!bytes.Equal(msg.Data[:4], nftApprovalSelector) || len(logs) != 1 || logs[0] == nil {
 		return false
 	}
