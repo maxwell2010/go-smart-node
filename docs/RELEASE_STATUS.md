@@ -70,15 +70,28 @@ The [isolated snapshot check](https://github.com/maxwell2010/go-smart-node/actio
 restored the active 4 DEL position at snapshot height 1914 and replayed the
 withdrawal through the same final application hash. Its two RPC URLs were
 aliases of the source process. A separate replayed witness on the same runner
-is being tested independently of the source database. Production trust
-still requires independently operated RPCs and a trusted block header.
+then confirmed snapshot height 1920, replay of the withdrawal and the same
+AppHash on all three processes at height 1931. Production trust still requires
+independently operated RPCs and a trusted block header. See the
+[three-process evidence](../network/docs/ru/evidence/del-state-sync-c83a193-20261111/README.md).
 
 Held DEL uses a separate genesis option, verified expiry and an exact set of
 native lots, including the original contribution time for each top-up.
 The [Linux module run](https://github.com/maxwell2010/go-smart-node/actions/runs/43033478597)
 tested signed held deposits and partial withdrawals in the application EVM.
+The [combined module run](https://github.com/maxwell2010/go-smart-node/actions/runs/43035085805)
+also proved a beneficiary-signed reset at the exact expiry, preservation of
+other hold lots and a subsequent ordinary DEL withdrawal and payout.
 See the [operator description](../network/docs/ru/STAKE_WITHDRAWAL_SETTLEMENT.md)
 for the profile, supported calls and query semantics.
+
+An [application IBC upgrade test](https://github.com/maxwell2010/go-smart-node/actions/runs/43036744774)
+executed a signed governance proposal, a scheduled SDK `x/upgrade` handler and
+a signed `MsgUpgradeClient` verified against both IAVL proofs. A pending packet
+was relayed and acknowledged on the existing channel, then the voucher was
+returned for its original DEL principal. The test uses the current SDK/IBC
+family in two application instances. Binary replacement with Hermes and a
+major-version upgrade require separate evidence.
 
 The reviewed development commit `8cf619da1c77ee5efffc80a678272010fd2263dd`
 passes all four Linux workflows, including its actual default daemon archive,
@@ -99,7 +112,8 @@ Modern release blockers remain:
   supply and reserve reconciliation and failure rollback.
 - Repeat the established guarded CLI and independent Hermes process gates on
   the final integrated daemon, test clean installation, and exercise actual
-  client/module upgrade with packets pending. Same-binary restart has passed.
+  client/module upgrade with packets pending in separate daemon processes.
+  Same-binary restart and the application-level proof test have passed.
 - Validator-set and consensus-parameter transitions, full event reconciliation,
   bounded auto-unbond work, operator authority and asset policy, independent
   review and a tested rollback procedure.

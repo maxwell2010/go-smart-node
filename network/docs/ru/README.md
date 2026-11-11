@@ -9,6 +9,8 @@
 [газ нативной обработки](NATIVE_WORK_GAS.md),
 [проверка зависимостей отдельной сборки](../security/mcnd-sdkarmor-264303b-20261103/README.md).
 [Подробно о синхронизации и хранении](SYNCHRONIZATION_AND_STORAGE.md).
+[Проверка восстановления DEL-стейка на трёх процессах](evidence/del-state-sync-c83a193-20261111/README.md).
+[Ручное и автоматическое завершение возврата стейков](STAKE_WITHDRAWAL_SETTLEMENT.md).
 [Удалённая проверка индексов и следующие process gates](REMOTE_CONSENSUS_VERIFICATION_20261103.md).
 [Проверка объединённой сборки 33920c6 и запуск Hermes](MILESTONE_VALIDATION_33920C6.md).
 [Выбранная модель изолированных NFT-позиций](ISOLATED_1155_MODEL.md).
