@@ -184,6 +184,9 @@ func (r *bindingRecord) allClaimKeys() ([][]byte, error) {
 	if r.frozen != nil {
 		key := append([]byte{nativeQueueBindingPrefix}, r.frozen.NativeEntryHash...)
 		result = append(result, append(key, r.key...))
+		if r.frozen.FreezeType == 1 {
+			result = append(result, withdrawalDueKey(r))
+		}
 	}
 	p := r.nft()
 	if p == nil {

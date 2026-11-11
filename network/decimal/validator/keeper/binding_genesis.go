@@ -120,7 +120,7 @@ func (k *StateKeeper) checkEVMExportDomain(ctx sdk.Context) error {
 		return ErrBindingDomain
 	}
 	found := false
-	for _, prefix := range []byte{bindingRevisionKey, stakeBindingPrefix, frozenBindingPrefix, custodyUnitBindingPrefix, custodyAssetBindingPrefix, nativeQueueBindingPrefix, activePenaltyBindingPrefix} {
+	for _, prefix := range []byte{bindingRevisionKey, stakeBindingPrefix, frozenBindingPrefix, custodyUnitBindingPrefix, custodyAssetBindingPrefix, nativeQueueBindingPrefix, activePenaltyBindingPrefix, withdrawalDuePrefix, withdrawalCursorKey} {
 		if err := k.scan(ctx, prefix, func(_, _ []byte) error { found = true; return nil }); err != nil {
 			return err
 		}
@@ -177,7 +177,7 @@ func (k *StateKeeper) exportEVMGenesis(ctx sdk.Context, g *types.GenesisState) e
 		}
 	}
 	actual := 0
-	for _, prefix := range []byte{custodyUnitBindingPrefix, custodyAssetBindingPrefix, nativeQueueBindingPrefix, activePenaltyBindingPrefix} {
+	for _, prefix := range []byte{custodyUnitBindingPrefix, custodyAssetBindingPrefix, nativeQueueBindingPrefix, activePenaltyBindingPrefix, withdrawalDuePrefix} {
 		if err := k.scan(ctx, prefix, func(key, data []byte) error {
 			want, exists := expected[string(key)]
 			if !exists || !bytes.Equal(want, data) {
