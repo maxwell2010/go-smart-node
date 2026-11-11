@@ -4,6 +4,7 @@ package main
 
 import (
 	"errors"
+	"fmt"
 	"io"
 	"os"
 
@@ -44,6 +45,11 @@ import (
 	authtypes "github.com/cosmos/cosmos-sdk/x/auth/types"
 	genutilcli "github.com/cosmos/cosmos-sdk/x/genutil/client/cli"
 )
+
+// Only the start command may pass this typed option to the app constructor.
+type stateSyncGenesisPath string
+
+const stateSyncGenesisOption = "mcnd-internal-state-sync-genesis"
 
 // NewRootCmd creates a stateless root command. It is called once in the
 // main function.
@@ -123,6 +129,19 @@ func NewRootCmd() *cobra.Command {
 				serverCtx := sdkserver.GetServerContextFromCmd(cmd)
 				serverCtx.Viper.Set(flags.FlagChainID, chainID)
 				serverCtx.Viper.Set(srvflags.EVMChainID, evmID)
+				if cmd.Name() == "start" && serverCtx.Config.StateSync.Enable {
+					withComet, err := cmd.Flags().GetBool(srvflags.WithCometBFT)
+					if err != nil {
+						return err
+					}
+					queryOnly, err := cmd.Flags().GetBool(srvflags.GRPCOnly)
+					if err != nil {
+						return err
+					}
+					if withComet && !queryOnly {
+						serverCtx.Viper.Set(stateSyncGenesisOption, stateSyncGenesisPath(serverCtx.Config.GenesisFile()))
+					}
+				}
 			}
 			return nil
 		},
@@ -312,6 +331,18 @@ func newApp(
 	}
 
 	app := ownedapp.NewApp(logger, db, true, appOpts, baseappOptions...)
+	if path, ok := appOpts.Get(stateSyncGenesisOption).(stateSyncGenesisPath); ok && app.LastBlockHeight() == 0 {
+		doc, state, err := readNativeGenesisAt(string(path))
+		if err != nil {
+			panic(fmt.Errorf("read state sync genesis: %w", err))
+		}
+		if doc.ChainID != chainID {
+			panic(errors.New("state sync genesis differs from the application chain"))
+		}
+		if err := app.PrepareStateSyncGenesis(state); err != nil {
+			panic(fmt.Errorf("prepare state sync genesis: %w", err))
+		}
+	}
 	app.SetCommitMultiStoreTracer(traceStore)
 	return app
 }
