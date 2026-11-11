@@ -2,6 +2,7 @@ package keeper
 
 import (
 	"bytes"
+	"encoding/binary"
 	"errors"
 	"time"
 
@@ -14,24 +15,30 @@ import (
 	"github.com/maxwell2010/go-smart-node/network/identity"
 )
 
-// GatewayDELStake is the authenticated post-EVM state of one unheld, direct
+// GatewayDELStake is the authenticated post-EVM state of one direct
 // DEL position. The caller must authenticate the Gateway, its escrow and the
 // receipt before projecting in the same transaction cache.
 type GatewayDELStake struct {
 	Gateway, WrappedDEL, Beneficiary, Validator common.Address
 	StakeID, PenaltyCursor                      common.Hash
 	Amount                                      sdkmath.Int
+	HoldDeadline, HoldStartTime                 int64 // EVM bucket times in Unix seconds, both zero for unheld DEL.
 }
 
 const gatewayDELCoinBinding = types.EVMStakeBindingKind_EVM_STAKE_BINDING_COIN
 
 func (s GatewayDELStake) nativePair() (string, string, error) {
-	var zeroWords [64]byte // token ID and hold timestamp in Gateway getStakeId.
+	var words [64]byte // token ID and hold timestamp in Gateway getStakeId.
+	if s.HoldDeadline < 0 || (s.HoldDeadline == 0 && s.HoldStartTime != 0) ||
+		(s.HoldDeadline > 0 && (s.HoldStartTime <= 0 || s.HoldStartTime >= s.HoldDeadline)) {
+		return "", "", errors.New("invalid Gateway DEL hold timing")
+	}
+	binary.BigEndian.PutUint64(words[56:], uint64(s.HoldDeadline))
 	if s.Gateway == (common.Address{}) || s.WrappedDEL == (common.Address{}) ||
 		s.Beneficiary == (common.Address{}) || s.Validator == (common.Address{}) ||
 		s.PenaltyCursor != (common.Hash{}) || s.Amount.IsNil() || s.Amount.IsNegative() ||
-		s.StakeID != crypto.Keccak256Hash(s.Validator[:], s.Beneficiary[:], s.WrappedDEL[:], zeroWords[:]) {
-		return "", "", errors.New("invalid unheld Gateway DEL position or unsupported penalty cursor")
+		s.StakeID != crypto.Keccak256Hash(s.Validator[:], s.Beneficiary[:], s.WrappedDEL[:], words[:]) {
+		return "", "", errors.New("invalid Gateway DEL position or unsupported penalty cursor")
 	}
 	owner, err := address.NewBech32Codec(identity.Bech32PrefixAccAddr).BytesToString(s.Beneficiary[:])
 	if err != nil {
@@ -42,7 +49,7 @@ func (s GatewayDELStake) nativePair() (string, string, error) {
 }
 
 func (s GatewayDELStake) binding(amount sdkmath.Int, created, updated int64) types.EVMStakeBinding {
-	return types.EVMStakeBinding{
+	row := types.EVMStakeBinding{
 		Gateway: s.Gateway.Bytes(), Kind: gatewayDELCoinBinding, StakeID: s.StakeID.Bytes(),
 		Validator: s.Validator.Bytes(), Beneficiary: s.Beneficiary.Bytes(), TokenContract: s.WrappedDEL.Bytes(),
 		TokenID: make([]byte, 32), HoldTimestamp: make([]byte, 32), RawHoldStartTime: make([]byte, 32),
@@ -51,33 +58,55 @@ func (s GatewayDELStake) binding(amount sdkmath.Int, created, updated int64) typ
 		ReserveAsset: &types.EVMReserveAsset{ReserveKind: 1, Token: make([]byte, 20), NativeDenom: identity.BaseDenom},
 		NativeTarget: &types.NativeStakeTarget{StakeType: types.StakeType_Coin, ID: identity.BaseDenom},
 	}
+	if s.HoldDeadline != 0 {
+		binary.BigEndian.PutUint64(row.HoldTimestamp[24:], uint64(s.HoldDeadline))
+		binary.BigEndian.PutUint64(row.RawHoldStartTime[24:], uint64(s.HoldStartTime))
+		row.NativeHoldStartTime = s.HoldStartTime
+		row.NativeTarget.StakeType = types.StakeType_CoinHold
+	}
+	return row
 }
 
-func (k *StateKeeper) checkGatewayDELPrestate(ctx sdk.Context, next GatewayDELStake, amount sdkmath.Int, owner, operator string) (*types.EVMStakeBinding, *types.Delegation, error) {
+func (k *StateKeeper) checkGatewayDELBinding(ctx sdk.Context, next GatewayDELStake, amount sdkmath.Int) (*types.EVMStakeBinding, error) {
 	active, err := k.GetEVMStakeBinding(ctx, gatewayDELCoinBinding, next.Gateway[:], next.StakeID[:])
 	if amount.IsZero() {
 		if errors.Is(err, ErrNotFound) {
-			return nil, nil, nil
+			return nil, nil
 		}
 		if err == nil {
 			err = errors.New("Gateway DEL position already has a native binding")
 		}
-		return nil, nil, err
+		return nil, err
 	}
 	if err != nil {
-		return nil, nil, err
+		return nil, err
 	}
 	expected := next.binding(amount, active.CreatedHeight, active.UpdatedHeight)
 	actualBytes, err := types.CanonicalBindingBytes(&active)
 	if err != nil {
-		return nil, nil, err
+		return nil, err
 	}
 	expectedBytes, err := types.CanonicalBindingBytes(&expected)
 	if err != nil {
-		return nil, nil, err
+		return nil, err
 	}
 	if active.UpdatedHeight > ctx.BlockHeight() || !bytes.Equal(actualBytes, expectedBytes) {
-		return nil, nil, errors.New("Gateway DEL transition differs from the active native binding")
+		return nil, errors.New("Gateway DEL transition differs from the active native binding")
+	}
+	return &active, nil
+}
+
+func (k *StateKeeper) checkGatewayDELPrestate(ctx sdk.Context, next GatewayDELStake, amount sdkmath.Int, owner, operator string) (*types.EVMStakeBinding, *types.Delegation, error) {
+	active, err := k.checkGatewayDELBinding(ctx, next, amount)
+	if err != nil {
+		return nil, nil, err
+	}
+	if next.HoldDeadline != 0 {
+		delegation, err := k.checkGatewayDELHoldPrestate(ctx, next, amount, owner, operator)
+		return active, delegation, err
+	}
+	if active == nil {
+		return nil, nil, nil
 	}
 	delegation, err := k.GetDelegation(ctx, owner, operator, types.StakeType_Coin, identity.BaseDenom)
 	if err != nil {
@@ -86,7 +115,7 @@ func (k *StateKeeper) checkGatewayDELPrestate(ctx sdk.Context, next GatewayDELSt
 	if !delegation.Stake.Equal(types.NewStakeCoin(sdk.NewCoin(identity.BaseDenom, amount))) {
 		return nil, nil, errors.New("Gateway DEL transition differs from the native delegation")
 	}
-	return &active, &delegation, nil
+	return active, &delegation, nil
 }
 
 // ApplyGatewayDELDelegation creates or increases one DEL position in the native ledger.
@@ -114,6 +143,12 @@ func (k *StateKeeper) ApplyGatewayDELDelegation(ctx sdk.Context, next GatewayDEL
 		return err
 	}
 	delegation := types.Delegation{Delegator: owner, Validator: operator, Stake: types.NewStakeCoin(sdk.NewCoin(identity.BaseDenom, next.Amount))}
+	if next.HoldDeadline != 0 {
+		delegation.Stake, err = next.depositHold(previous, deposited, ctx.BlockTime().Unix(), active == nil)
+		if err != nil {
+			return err
+		}
+	}
 	if err := k.ApplyDelegationBatch(child, []DelegationChange{{Expected: previous, Next: &delegation}}); err != nil {
 		return err
 	}
@@ -148,6 +183,17 @@ func (k *StateKeeper) ApplyGatewayDELWithdrawal(ctx sdk.Context, next GatewayDEL
 		return err
 	}
 	stake := types.NewStakeCoin(sdk.NewCoin(identity.BaseDenom, amount))
+	change := DelegationChange{Expected: delegation}
+	if next.HoldDeadline != 0 {
+		stake, change.Next, err = next.takeHold(delegation, amount, ctx.BlockTime().Unix())
+		if err != nil {
+			return err
+		}
+	} else if next.Amount.IsPositive() {
+		remaining := *delegation
+		remaining.Stake = types.NewStakeCoin(sdk.NewCoin(identity.BaseDenom, next.Amount))
+		change.Next = &remaining
+	}
 	if _, err := k.GetEVMFrozenBinding(child, next.Gateway[:], index[:]); err == nil {
 		return errors.New("Gateway frozen ID already has a native binding")
 	} else if !errors.Is(err, ErrNotFound) {
@@ -165,16 +211,12 @@ func (k *StateKeeper) ApplyGatewayDELWithdrawal(ctx sdk.Context, next GatewayDEL
 		ReportedReserveAmount: active.ReportedReserveAmount, ReserveAsset: active.ReserveAsset, NativeTarget: active.NativeTarget,
 		NativeEntryHash: entryHash, Active: true, CreatedHeight: ctx.BlockHeight(), UpdatedHeight: ctx.BlockHeight(),
 	}
-	change := DelegationChange{Expected: delegation}
 	var mutation BindingMutation
 	if next.Amount.IsZero() {
 		mutation.Remove = &BindingReference{Kind: active.Kind, Gateway: active.Gateway, ID: active.StakeID}
 	} else {
 		row := next.binding(next.Amount, active.CreatedHeight, ctx.BlockHeight())
 		mutation.Stake = &row
-		remaining := *delegation
-		remaining.Stake = types.NewStakeCoin(sdk.NewCoin(identity.BaseDenom, next.Amount))
-		change.Next = &remaining
 	}
 	plan, err := k.PrepareBindingPlan(child, []BindingMutation{mutation, {Frozen: &frozen}})
 	if err != nil {
