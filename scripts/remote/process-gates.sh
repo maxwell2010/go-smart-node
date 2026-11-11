@@ -159,15 +159,27 @@ if [[ "$withdrawal_genesis" == withdrawal-genesis ]]; then
       go test -mod=readonly -tags= -p 2 -count=1 -timeout 8m -json -run '^TestOwnedAppSignedRegistryBootstrap$' ./systemcontracts \
       > "$work/withdrawal-fixture-build.log" 2>&1; then
     "$python" - "$work/withdrawal-fixture-build.log" <<'PY'
-import json,sys
+import json,re,sys
+location=re.compile(r'\b[A-Za-z0-9_-]+\.go:\d+(?::\d+)?')
+diagnostics=[]
 with open(sys.argv[1], encoding='utf8') as stream:
     for line in stream:
         try:
             event = json.loads(line)
         except json.JSONDecodeError:
-            continue
+            event={'Action':'build-output','Output':line}
         if event.get('Action') == 'fail':
             print('Private fixture generator failed:', event.get('Package'), event.get('Test', '(build or package)'))
+        output=event.get('Output','')
+        if event.get('Action')=='build-output' or 'Error Trace:' in output:
+            for match in location.findall(output):
+                if match not in diagnostics and len(diagnostics)<12:
+                    diagnostics.append(match)
+        for label in ('Received unexpected error', 'Should be true', 'Not equal', 'Should be empty'):
+            if 'Error:' in output and label in output and label not in diagnostics and len(diagnostics)<12:
+                diagnostics.append(label)
+if diagnostics:
+    print('Private fixture failure locations or assertions:', ', '.join(diagnostics))
 PY
     exit 1
   fi
