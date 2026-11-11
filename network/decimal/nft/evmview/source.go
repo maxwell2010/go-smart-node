@@ -5,6 +5,7 @@ import (
 	"errors"
 
 	sdk "github.com/cosmos/cosmos-sdk/types"
+	evmkeeper "github.com/cosmos/evm/x/vm/keeper"
 	"github.com/ethereum/go-ethereum/common"
 	ethtypes "github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/crypto"
@@ -21,15 +22,35 @@ type StakeSource struct {
 	Fingerprint common.Hash
 }
 
-func (r *Reader) AuthenticateStakeSource(ctx sdk.Context, execution receipts.Execution) (source StakeSource, err error) {
-	if r == nil || r.config.Protocol != ProfileIsolatedPositionsV1 || r.config.MasterValidator == (common.Address{}) {
-		return source, errors.New("stake source requires explicit isolated profile and approved MasterValidator")
+// StakeRoles are configured addresses, pending authentication in the caller's
+// current SDK context. The keeper check prevents matching one EVM and executing
+// against a different one.
+type StakeRoles struct {
+	Gateway, PositionVault, WrappedDEL common.Address
+}
+
+func (r *Reader) ConfiguredStakeRoles(evm *evmkeeper.Keeper) (StakeRoles, error) {
+	if r == nil || evm == nil || r.evm != evm || r.config.Protocol != ProfileIsolatedPositionsV1 || r.config.MasterValidator == (common.Address{}) {
+		return StakeRoles{}, errors.New("stake roles require the same EVM, isolated profile and approved MasterValidator")
 	}
+	return StakeRoles{Gateway: r.config.Delegation, PositionVault: r.config.PositionVault, WrappedDEL: r.config.WrappedDEL}, nil
+}
+
+func (r *Reader) AuthenticateStakeSource(ctx sdk.Context, execution receipts.Execution) (StakeSource, error) {
 	if err := execution.EntryPoint.Validate(); err != nil {
-		return source, err
+		return StakeSource{}, err
 	}
 	if execution.Receipt == nil || execution.Receipt.Status != ethtypes.ReceiptStatusSuccessful {
-		return source, errors.New("stake source requires an actual successful execution receipt")
+		return StakeSource{}, errors.New("stake source requires an actual successful execution receipt")
+	}
+	return r.AuthenticateStakeProfile(ctx)
+}
+
+// AuthenticateStakeProfile verifies the current approval independently of any
+// receipt, so a caller can authenticate its target before executing a message.
+func (r *Reader) AuthenticateStakeProfile(ctx sdk.Context) (source StakeSource, err error) {
+	if r == nil || r.config.Protocol != ProfileIsolatedPositionsV1 || r.config.MasterValidator == (common.Address{}) {
+		return source, errors.New("stake source requires explicit isolated profile and approved MasterValidator")
 	}
 	err = r.bounded(ctx, func(child sdk.Context) error {
 		if e := r.domain(child); e != nil {
