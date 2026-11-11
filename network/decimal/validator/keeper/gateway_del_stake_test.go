@@ -114,6 +114,14 @@ func TestGatewayDELTopUpAndPartialWithdrawals(t *testing.T) {
 	require.Equal(t, part, pending.EVMFrozenBindings[1].RawAmount)
 	require.Equal(t, pending.EVMFrozenBindings[0].NativeEntryHash, pending.EVMFrozenBindings[1].NativeEntryHash,
 		"equal-amount withdrawals in one block must retain distinct frozen IDs and one queue entry each")
+	owner, operator, err := position.nativePair()
+	require.NoError(t, err)
+	queried, err := k.GetPairDelegations(ctx, owner, operator)
+	require.NoError(t, err)
+	require.Equal(t, pending.Delegations, queried)
+	queued, err := k.GetUndelegation(ctx, owner, operator)
+	require.NoError(t, err)
+	require.Equal(t, pending.Undelegations[0], queued)
 
 	ctx = ctx.WithBlockHeight(12).WithBlockTime(deadline)
 	result, err := k.SettleMatureWithdrawalsLimit(ctx, 1, 1_000_000, k.ApplyWithdrawalCompletion)
@@ -133,6 +141,8 @@ func TestGatewayDELTopUpAndPartialWithdrawals(t *testing.T) {
 	require.Equal(t, pending.EVMStakeBindings, afterSecond.EVMStakeBindings)
 	require.Equal(t, pending.Delegations, afterSecond.Delegations)
 	require.Empty(t, afterSecond.Undelegations)
+	_, err = k.GetUndelegation(ctx, owner, operator)
+	require.ErrorIs(t, err, ErrNotFound)
 
 	large := sdkmath.NewIntFromBigInt(new(big.Int).Lsh(big.NewInt(1), 255))
 	position.Amount = large

@@ -71,11 +71,13 @@ func (AppModuleBasic) AutoCLIOptions() *autocliv1.ModuleOptions {
 	commands := []*autocliv1.RpcCommandOptions{
 		{RpcMethod: "Params", Use: "params"},
 		{RpcMethod: "Validator", Use: "validator [operator]", PositionalArgs: []*autocliv1.PositionalArgDescriptor{{ProtoField: "validator"}}},
+		{RpcMethod: "Delegations", Use: "delegations [operator] [delegator]", PositionalArgs: []*autocliv1.PositionalArgDescriptor{{ProtoField: "validator"}, {ProtoField: "delegator"}}},
+		{RpcMethod: "Undelegation", Use: "undelegation [operator] [delegator]", PositionalArgs: []*autocliv1.PositionalArgDescriptor{{ProtoField: "validator"}, {ProtoField: "delegator"}}},
 		// The record's height is positional; --height remains the SDK query-state
 		// flag. The default generator would define that flag twice and panic.
 		{RpcMethod: "HistoricalInfo", Use: "historical-info [record-height]", PositionalArgs: []*autocliv1.PositionalArgDescriptor{{ProtoField: "height"}}},
 	}
-	for _, method := range []string{"Validators", "ValidatorDelegations", "ValidatorRedelegations", "ValidatorUndelegations", "Delegations", "Redelegations", "Undelegation", "DelegatorDelegations", "DelegatorRedelegations", "DelegatorUndelegations", "DelegatorValidators", "DelegatorValidator", "Pool", "CustomCoinPrice", "TotalCustomCoin", "EmergencyStatus"} {
+	for _, method := range []string{"Validators", "ValidatorDelegations", "ValidatorRedelegations", "ValidatorUndelegations", "Redelegations", "DelegatorDelegations", "DelegatorRedelegations", "DelegatorUndelegations", "DelegatorValidators", "DelegatorValidator", "Pool", "CustomCoinPrice", "TotalCustomCoin", "EmergencyStatus"} {
 		commands = append(commands, &autocliv1.RpcCommandOptions{RpcMethod: method, Skip: true})
 	}
 	return &autocliv1.ModuleOptions{Query: &autocliv1.ServiceCommandDescriptor{Service: "decimal.validator.v1.Query", RpcCommandOptions: commands}}
