@@ -87,7 +87,7 @@ func TestWithdrawalMovementUsesExactPersistedUnitAndRecipient(t *testing.T) {
 
 func TestWithdrawalBackingRemainsExactForUnchangedOrZeroReserve(t *testing.T) {
 	row, lineage, vault, actual := positionFixture()
-	require.NoError(t, requireExactBacking(row, lineage, vault, actual))
+	require.NoError(t, requireExactBacking(row, lineage, vault, actual, common.BytesToAddress(row.Beneficiary)))
 	require.True(t, matchesNativeReserve(sdk.NewCoin(identity.BaseDenom, row.ReportedReserveAmount), row))
 	require.False(t, matchesNativeReserve(sdk.NewInt64Coin(identity.BaseDenom, 12), row))
 	require.False(t, matchesNativeReserve(sdk.NewCoin("other", row.ReportedReserveAmount), row))
@@ -110,20 +110,28 @@ func TestWithdrawalBackingRemainsExactForUnchangedOrZeroReserve(t *testing.T) {
 		t.Run(test.name, func(t *testing.T) {
 			candidate := actual
 			test.change(&candidate)
-			require.Error(t, requireExactBacking(row, lineage, vault, candidate))
+			require.Error(t, requireExactBacking(row, lineage, vault, candidate, common.BytesToAddress(row.Beneficiary)))
 		})
 	}
 	lineage.OriginSubTokenIDs = []uint32{2, 4}
-	require.Error(t, requireExactBacking(row, lineage, vault, actual))
+	require.Error(t, requireExactBacking(row, lineage, vault, actual, common.BytesToAddress(row.Beneficiary)))
 	lineage.OriginSubTokenIDs = []uint32{2, 3}
 	lineage.Reserve.Amount, actual.ReserveAmount = make([]byte, 32), common.Hash{}
 	row.ReportedReserveAmount = sdkmath.ZeroInt()
-	require.NoError(t, requireExactBacking(row, lineage, vault, actual))
+	require.NoError(t, requireExactBacking(row, lineage, vault, actual, common.BytesToAddress(row.Beneficiary)))
 	require.True(t, matchesNativeReserve(sdk.NewInt64Coin(identity.BaseDenom, 0), row))
 
 	// An unchanged native zero is not evidence for an undeclared currency.
 	actual.ReserveKind = 0
-	require.Error(t, requireExactBacking(row, lineage, vault, actual))
+	require.Error(t, requireExactBacking(row, lineage, vault, actual, common.BytesToAddress(row.Beneficiary)))
+}
+
+func TestGenesisNFTBackingRequiresGatewayCustody(t *testing.T) {
+	row, lineage, vault, actual := positionFixture()
+	escrow := common.BytesToAddress(row.Gateway)
+	require.Error(t, requireExactBacking(row, lineage, vault, actual, escrow))
+	actual.Owner = escrow
+	require.NoError(t, requireExactBacking(row, lineage, vault, actual, escrow))
 }
 
 func TestWithdrawalProjectionRejectsStaleFrozenPrestate(t *testing.T) {
