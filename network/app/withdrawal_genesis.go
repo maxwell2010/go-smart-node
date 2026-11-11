@@ -146,6 +146,9 @@ func (app *App) initWithdrawalGenesis(ctx sdk.Context, req *abci.RequestInitChai
 			return nil, fmt.Errorf("decode withdrawal genesis proposer: %w", err)
 		}
 		addr := key.Address()
+		if _, err := app.SlashingKeeper.GetValidatorSigningInfo(child, sdk.ConsAddress(addr)); err != nil {
+			return nil, fmt.Errorf("withdrawal genesis consensus validator signing state: %w", err)
+		}
 		if len(proposer) == 0 || bytes.Compare(addr, proposer) < 0 {
 			proposer = bytes.Clone(addr)
 		}

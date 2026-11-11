@@ -28,6 +28,7 @@ import (
 	"github.com/cosmos/cosmos-sdk/x/gov"
 	govtypes "github.com/cosmos/cosmos-sdk/x/gov/types"
 	govv1 "github.com/cosmos/cosmos-sdk/x/gov/types/v1"
+	slashingtypes "github.com/cosmos/cosmos-sdk/x/slashing/types"
 	stakingtypes "github.com/cosmos/cosmos-sdk/x/staking/types"
 	ethsecp "github.com/cosmos/evm/crypto/ethsecp256k1"
 	srvflags "github.com/cosmos/evm/server/flags"
@@ -139,6 +140,18 @@ func TestOwnedAppSignedRegistryBootstrap(t *testing.T) {
 	}
 	genesis[banktypes.ModuleName] = a.AppCodec().MustMarshalJSON(&bankFunded)
 	genesis[stakingtypes.ModuleName] = a.AppCodec().MustMarshalJSON(&stakeFunded)
+	if os.Getenv(withdrawalGenesisFixtureEnv) != "" {
+		// The SDK fixture starts with an already bonded validator. Populate
+		// the signing state normally created by the staking bond hook.
+		var slashingGenesis slashingtypes.GenesisState
+		a.AppCodec().MustUnmarshalJSON(genesis[slashingtypes.ModuleName], &slashingGenesis)
+		addr := sdk.ConsAddress(validator.Address)
+		info := slashingtypes.NewValidatorSigningInfo(addr, 0, 0, time.Unix(0, 0).UTC(), false, 0)
+		slashingGenesis.SigningInfos = append(slashingGenesis.SigningInfos, slashingtypes.SigningInfo{
+			Address: info.Address, ValidatorSigningInfo: info,
+		})
+		genesis[slashingtypes.ModuleName] = a.AppCodec().MustMarshalJSON(&slashingGenesis)
+	}
 	require.NoError(t, ownedapp.ReconcileNativeGenesisAllocation(a.AppCodec(), genesis))
 	data, err := json.Marshal(genesis)
 	require.NoError(t, err)
