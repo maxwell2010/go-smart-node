@@ -31,7 +31,7 @@ import (
 
 const (
 	delLifecycleFixtureEnv = "MCND_SIGNED_DEL_LIFECYCLE_FIXTURE"
-	delLifecyclePassed     = "signed DEL delegate, native freeze, and exactly-once completion passed"
+	delLifecyclePassed     = "signed DEL delegation, top-up, partial and full withdrawals, and exactly-once payouts passed"
 )
 
 // The SDK's EVM configuration belongs to one App per process. Reuse the
@@ -84,8 +84,10 @@ func runSignedDELDelegationLifecycle(t *testing.T, e isolatedBackendEnv, profile
 	e.ctx().KVStore(e.app.GetKey(validatortypes.StoreKey)).Set([]byte{ownedapp.WithdrawalProfileKey}, config)
 	require.NoError(t, e.app.LoadWithdrawalSettlement(e.ctx()))
 
-	amount := sdkmath.NewIntWithDecimal(3, 18)
-	partial := sdkmath.NewIntWithDecimal(1, 18)
+	one := sdkmath.NewIntWithDecimal(1, 18)
+	two := sdkmath.NewIntWithDecimal(2, 18)
+	three := sdkmath.NewIntWithDecimal(3, 18)
+	five := three.Add(two)
 	zero := sdkmath.ZeroInt()
 	eventOnce := func(name string, expected map[string]string) {
 		t.Helper()
@@ -136,22 +138,43 @@ func runSignedDELDelegationLifecycle(t *testing.T, e isolatedBackendEnv, profile
 		require.True(t, want.Equal(e.app.BankKeeper.GetBalance(e.ctx(), sdk.AccAddress(wrapped.Bytes()), identity.BaseDenom).Amount))
 		require.Zero(t, want.BigInt().Cmp(e.app.EVMKeeper.GetBalance(e.ctx(), wrapped).ToBig()))
 	}
+	k := e.app.NativeValidatorKeeper
+	stakeID := read(gateway, target, "getStakeId", validator, user, wrapped).([32]byte)
+	require.NotEqual(t, [32]byte{}, stakeID)
+	stakeHash := common.Hash(stakeID)
+	kind := validatortypes.EVMStakeBindingKind_EVM_STAKE_BINDING_COIN
+	coinStake := func(amount sdkmath.Int) validatortypes.Stake {
+		return validatortypes.NewStakeCoin(sdk.NewCoin(identity.BaseDenom, amount))
+	}
+	var createdHeight int64
 	activeStake := func(want sdkmath.Int) {
 		t.Helper()
 		raw := read(gateway, target, "getStake", validator, user, wrapped)
 		row := abi.ConvertType(raw, new(gatewayDELStake)).(*gatewayDELStake)
 		require.Zero(t, want.BigInt().Cmp(row.Amount))
-		if want.IsPositive() {
-			require.Equal(t, validator, row.Validator)
-			require.Equal(t, user, row.Delegator)
-			require.Equal(t, wrapped, row.Token)
-			require.Equal(t, uint8(4), row.TokenType)
-			require.Zero(t, row.TokenId.Sign())
-			require.Zero(t, row.HoldTimestamp.Sign())
-			require.Zero(t, row.HoldStartTime.Sign())
+		binding, bindingErr := k.GetEVMStakeBinding(e.ctx(), kind, target.Bytes(), stakeID[:])
+		delegation, delegationErr := k.GetDelegation(e.ctx(), beneficiary, operator, validatortypes.StakeType_Coin, identity.BaseDenom)
+		if want.IsZero() {
+			require.ErrorIs(t, bindingErr, validatorkeeper.ErrNotFound)
+			require.ErrorIs(t, delegationErr, validatorkeeper.ErrNotFound)
+			return
 		}
+		require.Equal(t, validator, row.Validator)
+		require.Equal(t, user, row.Delegator)
+		require.Equal(t, wrapped, row.Token)
+		require.Equal(t, uint8(4), row.TokenType)
+		require.Zero(t, row.TokenId.Sign())
+		require.Zero(t, row.HoldTimestamp.Sign())
+		require.Zero(t, row.HoldStartTime.Sign())
+		require.NoError(t, bindingErr)
+		require.True(t, binding.Active)
+		require.True(t, want.Equal(binding.RawAmount))
+		require.Equal(t, createdHeight, binding.CreatedHeight)
+		require.Equal(t, user.Bytes(), binding.Beneficiary)
+		require.Equal(t, validator.Bytes(), binding.Validator)
+		require.NoError(t, delegationErr)
+		require.True(t, delegation.Stake.Equal(coinStake(want)))
 	}
-	k := e.app.NativeValidatorKeeper
 	native := func() *validatortypes.GenesisState {
 		t.Helper()
 		state, err := k.ExportGenesis(e.ctx())
@@ -165,7 +188,7 @@ func runSignedDELDelegationLifecycle(t *testing.T, e isolatedBackendEnv, profile
 
 	// Master allows this source, but the app must roll back the signed deposit
 	// and wrapper mint until the native operator has been declared.
-	signed("delegateDEL", amount, false, validator)
+	signed("delegateDEL", three, false, validator)
 	activeStake(zero)
 	backing(zero)
 	require.Empty(t, native().Delegations)
@@ -175,95 +198,136 @@ func runSignedDELDelegationLifecycle(t *testing.T, e isolatedBackendEnv, profile
 		validatortypes.Description{Moniker: "del-lifecycle"}, sdkmath.LegacyZeroDec())
 	require.NoError(t, err)
 	require.NoError(t, k.SetValidator(e.ctx(), v))
-	signed("delegateDEL", amount, true, validator)
-	stakeID := read(gateway, target, "getStakeId", validator, user, wrapped).([32]byte)
-	require.NotEqual(t, [32]byte{}, stakeID)
-	eventOnce("decimal_del_delegated", map[string]string{"stake_id": common.Hash(stakeID).Hex(), "amount": amount.String()})
-	kind := validatortypes.EVMStakeBindingKind_EVM_STAKE_BINDING_COIN
-	binding, err := k.GetEVMStakeBinding(e.ctx(), kind, target.Bytes(), stakeID[:])
-	require.NoError(t, err)
-	require.True(t, binding.Active)
-	require.Equal(t, amount, binding.RawAmount)
-	require.Equal(t, user.Bytes(), binding.Beneficiary)
-	require.Equal(t, validator.Bytes(), binding.Validator)
-	delegation, err := k.GetDelegation(e.ctx(), beneficiary, operator, validatortypes.StakeType_Coin, identity.BaseDenom)
-	require.NoError(t, err)
-	require.Equal(t, validatortypes.NewStakeCoin(sdk.NewCoin(identity.BaseDenom, amount)), delegation.Stake)
-	activeStake(amount)
-	backing(amount)
+	createdHeight = e.ctx().BlockHeight()
+	signed("delegateDEL", three, true, validator)
+	eventOnce("decimal_del_delegated", map[string]string{"stake_id": stakeHash.Hex(), "amount": three.String()})
+	activeStake(three)
+	backing(three)
+	signed("delegateDEL", two, true, validator)
+	eventOnce("decimal_del_delegated", map[string]string{"stake_id": stakeHash.Hex(), "amount": two.String()})
+	activeStake(five)
+	backing(five)
 
-	beforePartial := native()
-	signed("delegateDEL", partial, false, validator)
-	signed("withdraw", zero, false, validator, wrapped, partial.BigInt())
-	require.Equal(t, beforePartial, native())
-	activeStake(amount)
-	backing(amount)
+	beforeInvalid := native()
+	signed("delegateHoldDEL", one, false, validator, big.NewInt(e.ctx().BlockTime().Add(time.Minute).Unix()))
+	signed("withdraw", zero, false, validator, wrapped, five.Add(one).BigInt())
+	require.Equal(t, beforeInvalid, native())
+	activeStake(five)
+	backing(five)
 
-	requestTime := e.ctx().BlockTime()
-	response := signed("withdraw", zero, true, validator, wrapped, amount.BigInt())
-	event := gateway.ABI.Events["WithdrawRequest"]
-	var index *big.Int
-	for _, log := range response.Logs {
-		if common.HexToAddress(log.Address) != target || len(log.Topics) == 0 || common.HexToHash(log.Topics[0]) != event.ID {
-			continue
-		}
-		require.Nil(t, index)
-		values, err := event.Inputs.NonIndexed().Unpack(log.Data)
-		require.NoError(t, err)
-		require.Len(t, values, 3)
-		require.Equal(t, stakeID, values[0])
-		index = values[1].(*big.Int)
+	type claim struct {
+		index    *big.Int
+		deadline time.Time
+		amount   sdkmath.Int
 	}
-	require.NotNil(t, index)
-	frozenID := common.BigToHash(index)
-	eventOnce("decimal_del_withdrawal_requested", map[string]string{
-		"stake_id": common.Hash(stakeID).Hex(), "frozen_index": frozenID.Hex(), "amount": amount.String(),
-	})
-	frozen, err := k.GetEVMFrozenBinding(e.ctx(), target.Bytes(), frozenID.Bytes())
-	require.NoError(t, err)
-	require.True(t, frozen.Active)
-	require.Equal(t, stakeID[:], frozen.SourceStakeID)
-	require.Equal(t, amount, frozen.RawAmount)
-	deadline := requestTime.Add(freezeSeconds * time.Second)
-	require.Equal(t, common.BigToHash(big.NewInt(deadline.Unix())).Bytes(), frozen.CompletionTimestamp)
-	_, err = k.GetDelegation(e.ctx(), beneficiary, operator, validatortypes.StakeType_Coin, identity.BaseDenom)
-	require.ErrorIs(t, err, validatorkeeper.ErrNotFound)
-	pending := native()
-	require.Len(t, pending.Undelegations, 1)
-	pair := pending.Undelegations[0]
-	require.Equal(t, beneficiary, pair.Delegator)
-	require.Equal(t, operator, pair.Validator)
-	require.Len(t, pair.Entries, 1)
-	require.True(t, deadline.Equal(pair.Entries[0].CompletionTime))
-	require.Equal(t, delegation.Stake, pair.Entries[0].Stake)
-	activeStake(zero)
-	backing(amount)
-	frozenStatus := func() uint8 {
+	checkClaim := func(item claim, pending bool) {
 		t.Helper()
-		raw := read(gateway, target, "getFrozenStake", index)
-		return abi.ConvertType(raw, new(gatewayFrozenWithdrawal)).(*gatewayFrozenWithdrawal).FreezeStatus
+		frozenID := common.BigToHash(item.index)
+		frozen, err := k.GetEVMFrozenBinding(e.ctx(), target.Bytes(), frozenID.Bytes())
+		require.NoError(t, err)
+		require.Equal(t, pending, frozen.Active)
+		require.Equal(t, stakeID[:], frozen.SourceStakeID)
+		require.True(t, item.amount.Equal(frozen.RawAmount))
+		require.Equal(t, common.BigToHash(big.NewInt(item.deadline.Unix())).Bytes(), frozen.CompletionTimestamp)
+		raw := read(gateway, target, "getFrozenStake", item.index)
+		evm := abi.ConvertType(raw, new(gatewayFrozenWithdrawal)).(*gatewayFrozenWithdrawal)
+		var status uint8
+		if pending {
+			status = 1
+		}
+		require.Equal(t, status, evm.FreezeStatus)
+		require.Zero(t, item.amount.BigInt().Cmp(evm.Stake.Amount))
 	}
-	require.Equal(t, uint8(1), frozenStatus())
-	signed("complete", zero, false, []*big.Int{index})
-	require.Equal(t, pending, native())
-	backing(amount)
-	for e.ctx().BlockTime().Before(deadline) {
-		e.advance()
+	request := func(amount sdkmath.Int) claim {
+		t.Helper()
+		item := claim{deadline: e.ctx().BlockTime().Add(freezeSeconds * time.Second), amount: amount}
+		response := signed("withdraw", zero, true, validator, wrapped, amount.BigInt())
+		event := gateway.ABI.Events["WithdrawRequest"]
+		for _, log := range response.Logs {
+			if common.HexToAddress(log.Address) != target || len(log.Topics) == 0 || common.HexToHash(log.Topics[0]) != event.ID {
+				continue
+			}
+			require.Nil(t, item.index)
+			values, err := event.Inputs.NonIndexed().Unpack(log.Data)
+			require.NoError(t, err)
+			require.Len(t, values, 3)
+			require.Equal(t, stakeID, values[0])
+			item.index = values[1].(*big.Int)
+		}
+		require.NotNil(t, item.index)
+		eventOnce("decimal_del_withdrawal_requested", map[string]string{
+			"stake_id": stakeHash.Hex(), "frozen_index": common.BigToHash(item.index).Hex(), "amount": amount.String(),
+		})
+		checkClaim(item, true)
+		return item
+	}
+	checkQueue := func(claims ...claim) {
+		t.Helper()
+		queue := native().Undelegations
+		if len(claims) == 0 {
+			require.Empty(t, queue)
+			return
+		}
+		require.Len(t, queue, 1)
+		pair := queue[0]
+		require.Equal(t, beneficiary, pair.Delegator)
+		require.Equal(t, operator, pair.Validator)
+		require.Len(t, pair.Entries, len(claims))
+		for i, item := range claims {
+			require.True(t, item.deadline.Equal(pair.Entries[i].CompletionTime))
+			require.True(t, pair.Entries[i].Stake.Equal(coinStake(item.amount)))
+			checkClaim(item, true)
+		}
+	}
+	rejectComplete := func(item claim) {
+		t.Helper()
+		before := native()
+		signed("complete", zero, false, []*big.Int{item.index})
+		require.Equal(t, before, native())
+	}
+	settle := func(item claim, remainingBacking sdkmath.Int) {
+		t.Helper()
+		for e.ctx().BlockTime().Before(item.deadline) {
+			e.advance()
+		}
+		e.credit.Set(item.amount.BigInt())
+		signed("complete", zero, true, []*big.Int{item.index})
+		checkClaim(item, false)
+		backing(remainingBacking)
+		eventOnce("decimal_withdrawal_completed", map[string]string{
+			"frozen_index": common.BigToHash(item.index).Hex(),
+		})
+		rejectComplete(item)
+		backing(remainingBacking)
 	}
 
-	e.credit.Set(amount.BigInt())
-	signed("complete", zero, true, []*big.Int{index})
-	require.Equal(t, uint8(0), frozenStatus())
-	settled, err := k.GetEVMFrozenBinding(e.ctx(), target.Bytes(), frozenID.Bytes())
-	require.NoError(t, err)
-	require.False(t, settled.Active)
-	require.Empty(t, native().Undelegations)
-	backing(zero)
-	eventOnce("decimal_withdrawal_completed", nil)
+	first := request(one)
+	activeStake(five.Sub(one))
+	backing(five)
+	rejectComplete(first)
+	e.advance()
+	e.advance()
+	second := request(two)
+	require.NotEqual(t, common.BigToHash(first.index), common.BigToHash(second.index))
+	activeStake(two)
+	backing(five)
+	checkQueue(first, second)
+	settle(first, five.Sub(one))
+	activeStake(two)
+	checkQueue(second)
+	rejectComplete(second)
+	settle(second, two)
+	activeStake(two)
+	checkQueue()
 
-	signed("complete", zero, false, []*big.Int{index})
+	last := request(two)
+	activeStake(zero)
+	backing(two)
+	checkQueue(last)
+	settle(last, zero)
+	checkQueue()
+	activeStake(zero)
 	backing(zero)
-	require.Empty(t, native().Undelegations)
 	require.Equal(t, bankSupply, e.app.BankKeeper.GetSupply(e.ctx(), identity.BaseDenom))
 	t.Log(delLifecyclePassed)
 }
