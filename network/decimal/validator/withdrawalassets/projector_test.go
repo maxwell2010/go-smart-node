@@ -132,6 +132,15 @@ func TestGenesisNFTBackingRequiresGatewayCustody(t *testing.T) {
 	require.Error(t, requireExactBacking(row, lineage, vault, actual, escrow))
 	actual.Owner = escrow
 	require.NoError(t, requireExactBacking(row, lineage, vault, actual, escrow))
+
+	row.NFTPosition.Origin.NativeSubTokenIDs = []uint32{2}
+	row.NFTPosition.OriginQuantity = sdkmath.OneInt()
+	lineage.OriginSubTokenIDs = []uint32{2}
+	actual.OriginQuantity = 1
+	require.NoError(t, requireExactBacking(row, lineage, vault, actual, escrow))
+	row.NFTPosition.Origin.Standard = 721
+	require.NoError(t, row.Validate())
+	require.ErrorContains(t, requireExactBacking(row, lineage, vault, actual, escrow), "origin standard")
 }
 
 func TestWithdrawalProjectionRejectsStaleFrozenPrestate(t *testing.T) {

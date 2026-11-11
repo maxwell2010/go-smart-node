@@ -245,6 +245,9 @@ func matchesNativeReserve(coin sdk.Coin, row validatortypes.EVMFrozenBinding) bo
 
 func requireExactBacking(row validatortypes.EVMFrozenBinding, lineage nfttypes.IsolatedPositionLineage, vault nfttypes.IsolatedVaultState, actual nftview.PositionSnapshot, expectedOwner common.Address) error {
 	position := row.NFTPosition
+	if position.Origin.Standard != 1155 {
+		return errors.New("isolated position origin standard differs from the approved ERC1155 profile")
+	}
 	if actual.Status != nftview.PositionActive || actual.Owner != expectedOwner ||
 		actual.Asset.Contract != common.BytesToAddress(position.Vault) || actual.Asset.TokenID != common.BytesToHash(position.PositionID) ||
 		actual.Origin.Contract != common.BytesToAddress(position.Origin.Contract) || actual.Origin.TokenID != common.BytesToHash(position.Origin.TokenID) ||
