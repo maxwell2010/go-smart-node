@@ -44,6 +44,7 @@ type WithdrawalProfile struct {
 	PositionVault   common.Address `json:"position_vault"`
 	MasterValidator common.Address `json:"master_validator"`
 	WrappedDEL      common.Address `json:"wrapped_del"`
+	SettlementOnly  bool           `json:"settlement_only,omitempty"`
 }
 
 type withdrawalController struct {
@@ -139,14 +140,18 @@ func (app *App) installWithdrawalController(controller *withdrawalController) {
 	app.withdrawals = controller
 }
 
-func (c *withdrawalController) hasCompletion(ctx sdk.Context, logs []*ethtypes.Log) bool {
+func (c *withdrawalController) withdrawalActivity(ctx sdk.Context, msg core.Message, logs []*ethtypes.Log) (managed, completion bool) {
 	ctx.GasMeter().ConsumeGas(uint64(len(logs))*5, "withdrawal receipt routing")
+	managed = msg.To != nil && *msg.To == c.profile.Gateway
+	completion = c.isCompletionCall(msg)
 	for _, log := range logs {
-		if log != nil && log.Address == c.profile.Gateway && len(log.Topics) != 0 && log.Topics[0] == c.topic {
-			return true
+		if log == nil || log.Address != c.profile.Gateway {
+			continue
 		}
+		managed = true
+		completion = completion || (len(log.Topics) != 0 && log.Topics[0] == c.topic)
 	}
-	return false
+	return managed, completion
 }
 
 func (c *withdrawalController) checkMessage(msg core.Message, index common.Hash) error {
@@ -167,9 +172,12 @@ func (c *withdrawalController) isCompletionCall(msg core.Message) bool {
 }
 
 func (c *withdrawalController) PostTxProcessing(ctx sdk.Context, sender common.Address, msg core.Message, receipt *ethtypes.Receipt) error {
-	if receipt == nil || receipt.Status != ethtypes.ReceiptStatusSuccessful ||
-		(!c.hasCompletion(ctx, receipt.Logs) && !c.isCompletionCall(msg)) {
+	if receipt == nil || receipt.Status != ethtypes.ReceiptStatusSuccessful {
 		return nil
+	}
+	managed, completion := c.withdrawalActivity(ctx, msg, receipt.Logs)
+	if !completion {
+		return c.checkColdAdmission(managed)
 	}
 	ids, err := c.executor.CompletionIDs(receipt)
 	if err != nil {
@@ -195,8 +203,9 @@ func (c *withdrawalController) PostTxProcessing(ctx sdk.Context, sender common.A
 type automaticWithdrawalKey struct{}
 
 func (c *withdrawalController) guardInternalCommit(ctx sdk.Context, msg core.Message, logs []*ethtypes.Log) error {
-	if !c.hasCompletion(ctx, logs) && !c.isCompletionCall(msg) {
-		return nil
+	managed, completion := c.withdrawalActivity(ctx, msg, logs)
+	if !completion {
+		return c.checkColdAdmission(managed)
 	}
 	id, ok := ctx.Value(automaticWithdrawalKey{}).(common.Hash)
 	if !ok || msg.From != settlement.Sender() {
@@ -210,6 +219,13 @@ func (c *withdrawalController) guardInternalCommit(ctx sdk.Context, msg core.Mes
 		return errors.New("internal withdrawal receipt differs from the scheduled ID")
 	}
 	return c.checkMessage(msg, id)
+}
+
+func (c *withdrawalController) checkColdAdmission(managed bool) error {
+	if managed && c.profile.SettlementOnly {
+		return errors.New("withdrawal genesis Gateway admits only completion of existing claims")
+	}
+	return nil
 }
 
 func (c *withdrawalController) settle(ctx sdk.Context) error {

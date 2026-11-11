@@ -115,6 +115,7 @@ func (app *App) initWithdrawalGenesis(ctx sdk.Context, req *abci.RequestInitChai
 	if err != nil || profile == nil {
 		return nil, errors.New("missing or invalid withdrawal genesis profile")
 	}
+	profile.SettlementOnly = true
 	controller, err := app.newWithdrawalController(*profile)
 	if err != nil {
 		return nil, err
@@ -122,6 +123,11 @@ func (app *App) initWithdrawalGenesis(ctx sdk.Context, req *abci.RequestInitChai
 	var validators validatortypes.GenesisState
 	if err := app.appCodec.UnmarshalJSON(genesis[validatortypes.ModuleName], &validators); err != nil {
 		return nil, err
+	}
+	for _, row := range validators.EVMFrozenBindings {
+		if row.UpdatedHeight > max(req.InitialHeight, 1) {
+			return nil, errors.New("withdrawal genesis binding height exceeds the initial height")
+		}
 	}
 	child, commit := ctx.CacheContext()
 	if err := app.UpgradeKeeper.SetModuleVersionMap(child, app.ModuleManager.GetVersionMap()); err != nil {

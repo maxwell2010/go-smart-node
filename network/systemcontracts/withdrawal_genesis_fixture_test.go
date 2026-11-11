@@ -136,9 +136,13 @@ func exportWithdrawalGenesisFixture(t *testing.T, e isolatedBackendEnv, profile 
 	require.NoError(t, err)
 	callData, err := vault.Pack("getPosition", common.BytesToHash(position.PositionID).Big())
 	require.NoError(t, err)
+	gateway, err := contracts.CompiledABI("MintCandyIsolatedDelegation")
+	require.NoError(t, err)
+	delegateData, err := gateway.Pack("delegateDEL", common.BytesToAddress(binding.SourceValidator))
+	require.NoError(t, err)
 	expectations, err := json.Marshal(map[string]interface{}{
 		"chainId": ctx.ChainID(), "evmChainId": 990001, "gateway": profile.Gateway.Hex(),
-		"dueAt": deadline.Unix(), "invalidError": "authenticate withdrawal genesis",
+		"dueAt": deadline.Unix(), "invalidError": "authenticate withdrawal genesis", "delegateCallData": "0x" + hex.EncodeToString(delegateData),
 		"nft": map[string]interface{}{
 			"id": common.BytesToHash(binding.FrozenIndex).Hex(), "vault": profile.PositionVault.Hex(), "tokenId": common.BytesToHash(position.PositionID).Hex(),
 			"beneficiary": beneficiary.Hex(), "nativeTokenId": position.Custody.NativeTokenID, "nativeSubTokenId": position.Custody.NativeSubTokenIDs[0],
