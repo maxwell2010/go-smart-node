@@ -49,7 +49,10 @@ func (k *StateKeeper) ApplyGatewayDELHoldReset(ctx sdk.Context, held, ordinary G
 	}
 	nextPlain := types.Delegation{Delegator: owner, Validator: operator, Stake: types.NewStakeCoin(sdk.NewCoin(identity.BaseDenom, ordinary.Amount))}
 	remove := BindingReference{Kind: activeHeld.Kind, Gateway: activeHeld.Gateway, ID: activeHeld.StakeID}
-	row := ordinary.binding(ordinary.Amount, created, ctx.BlockHeight())
+	row, err := ordinary.binding(ordinary.Amount, created, ctx.BlockHeight())
+	if err != nil {
+		return err
+	}
 	plan, err := k.PrepareBindingPlan(child, []BindingMutation{{Remove: &remove}, {Stake: &row}})
 	if err != nil {
 		return err

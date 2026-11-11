@@ -18,7 +18,8 @@ import (
 type DELTransition struct {
 	Validator, Beneficiary      common.Address
 	StakeID, FrozenIndex        common.Hash
-	Amount, Remaining           sdkmath.Int // Call delta and active position after the call.
+	Amount, Remaining           sdkmath.Int // Call delta and direct DEL remaining after the call.
+	NFTBacked                   sdkmath.Int // Unchanged reserve included in the Gateway's gross coin position.
 	HoldDeadline, HoldStartTime int64       // Unix seconds, or zero for ordinary DEL.
 	Deadline                    time.Time   // Zero for a deposit.
 }
@@ -115,15 +116,20 @@ func (e *Executor) VerifySignedDEL(ctx sdk.Context, msg core.Message, receipt *e
 			return out, errors.New("Gateway position differs from the direct DEL call")
 		}
 	}
-	remaining := new(big.Int).SetBytes(post[3*common.HashLength : 4*common.HashLength])
+	gross := new(big.Int).SetBytes(post[3*common.HashLength : 4*common.HashLength])
+	remaining, backed, err := e.directDELPoststate(ctx, out.Validator, out.Beneficiary, out.HoldDeadline, gross)
+	if err != nil {
+		return out, err
+	}
 	if deposit && remaining.Cmp(amount) < 0 {
 		return out, errors.New("Gateway position is smaller than the DEL deposit")
 	}
-	isNew := deposit && remaining.Cmp(amount) == 0
+	isNew := deposit && gross.Cmp(amount) == 0
 	if isNew && holdArg >= 0 && out.HoldStartTime != ctx.BlockTime().Unix() {
 		return out, errors.New("new DEL hold must start in the deposit block")
 	}
 	out.Remaining = sdkmath.NewIntFromBigInt(remaining)
+	out.NFTBacked = sdkmath.NewIntFromBigInt(backed)
 	state, err := e.payoutState(ctx, payout{asset: e.roles.WrappedDEL, beneficiary: out.Beneficiary}, common.Address{})
 	if err != nil {
 		return out, err
@@ -152,6 +158,19 @@ func (e *Executor) VerifySignedDEL(ctx sdk.Context, msg core.Message, receipt *e
 		return out, nil
 	}
 	return e.verifyDELRequest(ctx, out, last)
+}
+
+func (e *Executor) directDELPoststate(ctx sdk.Context, validator, beneficiary common.Address, deadline int64, gross *big.Int) (direct, backed *big.Int, err error) {
+	raw, err := e.read(ctx, e.roles.Gateway, e.gateway, "getNFTBackedAmount", common.HashLength,
+		validator, beneficiary, e.roles.WrappedDEL, big.NewInt(deadline))
+	if err != nil {
+		return nil, nil, err
+	}
+	backed = new(big.Int).SetBytes(raw)
+	if backed.Cmp(gross) > 0 || (deadline != 0 && backed.Sign() != 0) {
+		return nil, nil, errors.New("Gateway reports an unsupported NFT reserve for the DEL position")
+	}
+	return new(big.Int).Sub(gross, backed), backed, nil
 }
 
 func (e *Executor) verifyDELStakeReceipt(ctx sdk.Context, receipt *ethtypes.Receipt, validator, beneficiary common.Address, count int) error {

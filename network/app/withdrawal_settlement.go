@@ -260,7 +260,7 @@ func (c *withdrawalController) projectSignedDEL(ctx sdk.Context, msg core.Messag
 func (c *withdrawalController) delStakePosition(result settlement.DELTransition) validatorkeeper.GatewayDELStake {
 	return validatorkeeper.GatewayDELStake{
 		Gateway: c.profile.Gateway, WrappedDEL: c.profile.WrappedDEL, Validator: result.Validator, Beneficiary: result.Beneficiary,
-		StakeID: result.StakeID, Amount: result.Remaining,
+		StakeID: result.StakeID, Amount: result.Remaining, NFTBacked: result.NFTBacked,
 		HoldDeadline: result.HoldDeadline, HoldStartTime: result.HoldStartTime,
 	}
 }
