@@ -22,6 +22,17 @@ def fixture():
 
 
 class WithdrawalGenesisSmokeTests(unittest.TestCase):
+    def test_1024_settlement_gas_keeps_headroom(self):
+        report = {}
+        smoke.check_settlement_gas(report, 23_000_000)
+        self.assertEqual(report, {
+            'sdkGasCharged': 23_000_000, 'sdkGasLimit': 24_000_000,
+            'sdkGasHeadroom': 1_000_000, 'sdkGasRegressionLimit': 23_000_000,
+        })
+        with self.assertRaisesRegex(ValueError, 'above the 23000000 regression limit'):
+            smoke.check_settlement_gas(report, 23_000_001)
+        self.assertEqual(report['sdkGasHeadroom'], 999_999)
+
     def test_fixture_retains_full_word_and_requires_bounded_deadline(self):
         expected = fixture()
         path = pathlib.Path('expectations.json')
