@@ -20,7 +20,7 @@ HERMES_SHA256 = "ed8d57781f57a93e74259c12c8feee661b9633c882307f3a6236e41dbf5ffe3
 A_ID, B_ID, EVM_ID = "mintcandy_990001-1", "ibc-reference-1", 990001
 UPGRADE_NAME = "ibc-client-proof-rehearsal"
 UPGRADE_UNBONDING = 21 * 24 * 60 * 60 + 60 * 60
-UPGRADE_DEPOSIT = 10**15
+UPGRADE_DEPOSIT = 10**7
 HTTP = urllib.request.build_opener(urllib.request.ProxyHandler({}))
 
 
