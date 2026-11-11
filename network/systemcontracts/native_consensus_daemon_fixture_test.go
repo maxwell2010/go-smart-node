@@ -28,7 +28,6 @@ import (
 	"github.com/ethereum/go-ethereum/crypto"
 	ownedapp "github.com/maxwell2010/go-smart-node/network/app"
 	validatortypes "github.com/maxwell2010/go-smart-node/network/decimal/validator/types"
-	"github.com/maxwell2010/go-smart-node/network/identity"
 	contracts "github.com/maxwell2010/go-smart-node/network/systemcontracts"
 	"github.com/stretchr/testify/require"
 )
