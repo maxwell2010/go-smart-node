@@ -133,7 +133,7 @@ func (k *StateKeeper) GetIsolatedLineage(ctx sdk.Context, vault, id []byte) (typ
 	return p, nil
 }
 
-// These writers are intentionally internal and only used by validated genesis.
+// These writers are internal to validated genesis and authenticated admission.
 // A production event alone is never permission to admit a new receipt.
 func (k *StateKeeper) storeIsolatedVault(ctx sdk.Context, v types.IsolatedVaultState) error {
 	if err := k.checkVaultDomain(ctx, v); err != nil {
