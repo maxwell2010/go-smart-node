@@ -117,6 +117,26 @@ func runIsolatedPositionReader(t *testing.T, e isolatedBackendEnv) {
 	collection := metadata[vaultAddress]
 	collection.Creator = sdk.AccAddress(e.govOwner.Bytes()).String()
 	metadata[vaultAddress] = collection
+	deployMaster := func() (contracts.Artifact, common.Address) {
+		master := e.load("NewNetworkMasterValidator")
+		masterImpl := e.deploy(master)
+		masterInit, err := master.ABI.Pack("initializeFresh", registryAddress)
+		require.NoError(t, err)
+		masterConfig, err := bootstrap.ABI.Pack("bootstrapConfigured", e.govOwner, masterImpl, masterInit, [][]byte{})
+		require.NoError(t, err)
+		return master, e.deploy(proxy, e.setup, masterConfig)
+	}
+	if os.Getenv(signedNFTAdmissionPhaseEnv) == "seed" {
+		master, masterAddress := deployMaster()
+		govSetup(registry, registryAddress, "setContractAddress", "master-validator", masterAddress)
+		profile := ownedapp.WithdrawalProfile{
+			Registry: registryAddress, Gateway: gatewayAddress, Library: libraryAddress, NFTCenter: factoryAddress,
+			PositionVault: vaultAddress, MasterValidator: masterAddress, WrappedDEL: wrapped,
+			SettlementOnly: true, EnableDELDelegation: true, EnableNFTDelegation: true,
+		}
+		seedSignedNFTAdmissionGenesis(t, e, profile, gateway, master, wrapper, origin, originAddress, govSetup)
+		return
+	}
 	config := nftview.Config{Protocol: nftview.ProfileIsolatedPositionsV1, PositionVault: vaultAddress, WrappedDEL: wrapped, ChainID: e.ctx().ChainID(), EVMChainID: 990001, Registry: registryAddress, NFTCenter: factoryAddress, Delegation: gatewayAddress, DelegationLibrary: libraryAddress, EVMGas: 100000, SDKGas: 5_000_000, MaxOwners: 8, MaxQuantity: 10000}
 	reader, err := nftview.New(metadata, e.app.EVMKeeper, config)
 	require.NoError(t, err)
@@ -217,13 +237,7 @@ func runIsolatedPositionReader(t *testing.T, e isolatedBackendEnv) {
 	call(0, wrapper, wrapped, new(big.Int), true, "withdraw", unit)
 
 	// Source authentication has no dependency on native NFT metadata or balances.
-	master := e.load("NewNetworkMasterValidator")
-	masterImpl := e.deploy(master)
-	masterInit, err := master.ABI.Pack("initializeFresh", registryAddress)
-	require.NoError(t, err)
-	masterConfig, err := bootstrap.ABI.Pack("bootstrapConfigured", e.govOwner, masterImpl, masterInit, [][]byte{})
-	require.NoError(t, err)
-	masterAddress := e.deploy(proxy, e.setup, masterConfig)
+	master, masterAddress := deployMaster()
 	govSetup(registry, registryAddress, "setContractAddress", "master-validator", masterAddress)
 	missingMaster := receipts.Execution{EntryPoint: receipts.EntryPointSignedEthereum, Receipt: &ethtypes.Receipt{Status: ethtypes.ReceiptStatusSuccessful}}
 	_, err = reader.AuthenticateStakeSource(e.ctx(), missingMaster)
