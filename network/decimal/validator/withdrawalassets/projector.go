@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 
+	"github.com/cosmos/cosmos-sdk/codec/address"
 	sdk "github.com/cosmos/cosmos-sdk/types"
 	"github.com/ethereum/go-ethereum/common"
 	ethtypes "github.com/ethereum/go-ethereum/core/types"
@@ -105,7 +106,7 @@ func (p *Projector) Project(ctx sdk.Context, row validatortypes.EVMFrozenBinding
 		if err = requireExactMovement(row, nftPlan.Movements()); err != nil {
 			return err
 		}
-		if err = p.checkIsolatedBacking(child, row); err != nil {
+		if err = p.checkIsolatedBacking(child, row, common.BytesToAddress(row.Beneficiary), false); err != nil {
 			return err
 		}
 	default:
@@ -175,7 +176,30 @@ func requireExactMovement(row validatortypes.EVMFrozenBinding, movements []nftre
 	return nil
 }
 
-func (p *Projector) checkIsolatedBacking(ctx sdk.Context, row validatortypes.EVMFrozenBinding) error {
+// AttestGenesisNFT verifies the existing native NFT unit and lineage against
+// the same authenticated EVM position while it is still held by the Gateway.
+// It performs only reads and shares the genesis attestation gas meter.
+func (p *Projector) AttestGenesisNFT(ctx sdk.Context, row validatortypes.EVMFrozenBinding) error {
+	if p == nil || p.nft == nil || p.reader == nil || p.bindings == nil {
+		return errors.New("missing native genesis NFT attestor")
+	}
+	if err := row.Validate(); err != nil {
+		return err
+	}
+	if !row.Active || row.FreezeType != 1 || row.SourceKind != validatortypes.EVMStakeBindingKind_EVM_STAKE_BINDING_NFT || row.NFTPosition.Mode != validatortypes.NFTPositionMode_NFT_POSITION_ISOLATED_RECEIPT || row.ReserveAsset.NativeDenom != identity.BaseDenom {
+		return errors.New("genesis NFT attestation requires an active isolated DEL-denominated withdrawal")
+	}
+	stored, err := p.bindings.GetEVMFrozenBinding(ctx, row.Gateway, row.FrozenIndex)
+	if err != nil {
+		return err
+	}
+	if err = requireSameFrozenRow(&stored, &row); err != nil {
+		return err
+	}
+	return p.checkIsolatedBacking(ctx, row, common.BytesToAddress(row.Gateway), true)
+}
+
+func (p *Projector) checkIsolatedBacking(ctx sdk.Context, row validatortypes.EVMFrozenBinding, expectedOwner common.Address, checkNativeEscrow bool) error {
 	position := row.NFTPosition
 	lineage, err := p.nft.GetIsolatedLineage(ctx, position.Vault, position.PositionID)
 	if err != nil {
@@ -189,7 +213,7 @@ func (p *Projector) checkIsolatedBacking(ctx sdk.Context, row validatortypes.EVM
 	if err != nil {
 		return err
 	}
-	if err = requireExactBacking(row, lineage, vault, actual); err != nil {
+	if err = requireExactBacking(row, lineage, vault, actual, expectedOwner); err != nil {
 		return err
 	}
 	token, err := p.nft.GetToken(ctx, lineage.ReceiptNativeTokenID)
@@ -203,6 +227,15 @@ func (p *Projector) checkIsolatedBacking(ctx sdk.Context, row validatortypes.EVM
 	if !matchesNativeReserve(token.Reserve, row) || (unit.Reserve != nil && !matchesNativeReserve(*unit.Reserve, row)) {
 		return errors.New("native isolated receipt reserve differs from authenticated backing")
 	}
+	if checkNativeEscrow {
+		gateway, err := address.NewBech32Codec(identity.Bech32PrefixAccAddr).BytesToString(row.Gateway)
+		if err != nil {
+			return err
+		}
+		if unit.Owner != gateway {
+			return errors.New("native genesis NFT unit is not in Gateway escrow")
+		}
+	}
 	return nil
 }
 
@@ -210,14 +243,14 @@ func matchesNativeReserve(coin sdk.Coin, row validatortypes.EVMFrozenBinding) bo
 	return coin.Denom == row.ReserveAsset.NativeDenom && !coin.Amount.IsNil() && coin.Amount.Equal(row.ReportedReserveAmount)
 }
 
-func requireExactBacking(row validatortypes.EVMFrozenBinding, lineage nfttypes.IsolatedPositionLineage, vault nfttypes.IsolatedVaultState, actual nftview.PositionSnapshot) error {
+func requireExactBacking(row validatortypes.EVMFrozenBinding, lineage nfttypes.IsolatedPositionLineage, vault nfttypes.IsolatedVaultState, actual nftview.PositionSnapshot, expectedOwner common.Address) error {
 	position := row.NFTPosition
-	if actual.Status != nftview.PositionActive || actual.Owner != common.BytesToAddress(row.Beneficiary) ||
+	if actual.Status != nftview.PositionActive || actual.Owner != expectedOwner ||
 		actual.Asset.Contract != common.BytesToAddress(position.Vault) || actual.Asset.TokenID != common.BytesToHash(position.PositionID) ||
 		actual.Origin.Contract != common.BytesToAddress(position.Origin.Contract) || actual.Origin.TokenID != common.BytesToHash(position.Origin.TokenID) ||
 		actual.OriginQuantity != uint32(len(position.Origin.NativeSubTokenIDs)) || actual.ParentPositionID != common.BytesToHash(position.ParentPositionID) ||
 		actual.NextPositionID != common.BytesToHash(vault.NextPositionID) {
-		return errors.New("final isolated position differs from approved vault, lineage or beneficiary")
+		return errors.New("isolated position differs from approved vault, lineage or expected owner")
 	}
 	if !bytes.Equal(lineage.Vault, position.Vault) || !bytes.Equal(lineage.PositionID, position.PositionID) || !bytes.Equal(lineage.ParentPositionID, position.ParentPositionID) ||
 		lineage.ReceiptNativeTokenID != position.Custody.NativeTokenID || lineage.ReceiptSubTokenID != position.Custody.NativeSubTokenIDs[0] ||

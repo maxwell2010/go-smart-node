@@ -234,7 +234,7 @@ func (e *Executor) ValidateSigned(ctx sdk.Context, row validatortypes.EVMFrozenB
 	return Proof{Source: source, Index: index, Receipt: cloneReceipt(receipt)}, nil
 }
 
-func (e *Executor) binding(ctx sdk.Context, row validatortypes.EVMFrozenBinding) (common.Hash, common.Address, error) {
+func (e *Executor) withdrawalIdentity(row validatortypes.EVMFrozenBinding) (common.Hash, common.Address, error) {
 	if e == nil || e.evm == nil {
 		return common.Hash{}, common.Address{}, errors.New("Gateway completion executor is missing")
 	}
@@ -243,8 +243,19 @@ func (e *Executor) binding(ctx sdk.Context, row validatortypes.EVMFrozenBinding)
 	}
 	index := common.BytesToHash(row.FrozenIndex)
 	beneficiary := common.BytesToAddress(row.Beneficiary)
+	if row.FreezeType != freezeWithdraw || index == common.MaxHash || common.BytesToAddress(row.Gateway) != e.roles.Gateway || beneficiary == Sender() || !row.RawAmount.IsPositive() {
+		return common.Hash{}, common.Address{}, errors.New("binding does not identify an approved Gateway withdrawal")
+	}
+	return index, beneficiary, nil
+}
+
+func (e *Executor) binding(ctx sdk.Context, row validatortypes.EVMFrozenBinding) (common.Hash, common.Address, error) {
+	index, beneficiary, err := e.withdrawalIdentity(row)
+	if err != nil {
+		return common.Hash{}, common.Address{}, err
+	}
 	now := ctx.BlockTime().Unix()
-	if !row.Active || row.FreezeType != freezeWithdraw || index == common.MaxHash || common.BytesToAddress(row.Gateway) != e.roles.Gateway || beneficiary == Sender() || !row.RawAmount.IsPositive() || ctx.BlockHeight() <= 0 || row.UpdatedHeight > ctx.BlockHeight() || now <= 0 || new(big.Int).SetBytes(row.CompletionTimestamp).Cmp(big.NewInt(now)) > 0 {
+	if !row.Active || ctx.BlockHeight() <= 0 || row.UpdatedHeight > ctx.BlockHeight() || now <= 0 || new(big.Int).SetBytes(row.CompletionTimestamp).Cmp(big.NewInt(now)) > 0 {
 		return common.Hash{}, common.Address{}, errors.New("binding is not an active mature approved Gateway withdrawal")
 	}
 	return index, beneficiary, nil
