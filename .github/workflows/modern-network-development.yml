@@ -52,11 +52,20 @@ jobs:
           python3 tools/source_inventory.py --source "$GITHUB_WORKSPACE" --output "$RUNNER_TEMP/mcnd-source-inputs.json"
           go build -mod=readonly -tags= -p 2 -trimpath -ldflags "-X main.buildCommit=$GITHUB_SHA" -o "$RUNNER_TEMP/mcnd" ./cmd/mcnd
           "$RUNNER_TEMP/mcnd" version
-      - name: Check actual generated retention configuration
+      - name: Check installation and generated retention from the packaged daemon
         run: |
-          "$RUNNER_TEMP/mcnd" init config-check --home "$RUNNER_TEMP/mcnd-config-check" --chain-id mintcandy_990003-1 --evm.evm-chain-id 990003 > /dev/null 2>&1
-          python3 network/tools/configure_history.py --home "$RUNNER_TEMP/mcnd-config-check" --apply --role rpc-ibc
           python3 network/tools/package_mcnd.py --binary "$RUNNER_TEMP/mcnd" --source "$GITHUB_WORKSPACE" --revision "$GITHUB_SHA" --source-inputs "$RUNNER_TEMP/mcnd-source-inputs.json" --output "development-artifacts/mcnd-development-linux-amd64.tar.gz"
+          install_dir=$(mktemp -d "$RUNNER_TEMP/mcnd-install.XXXXXXXX")
+          (
+            cd development-artifacts
+            sha256sum --check --strict mcnd-development-linux-amd64.tar.gz.sha256
+            tar -xOzf mcnd-development-linux-amd64.tar.gz bin/mcnd > "$install_dir/mcnd"
+          )
+          cmp "$RUNNER_TEMP/mcnd" "$install_dir/mcnd"
+          chmod 0755 "$install_dir/mcnd"
+          "$install_dir/mcnd" version
+          "$install_dir/mcnd" init config-check --home "$install_dir/home" --chain-id mintcandy_990003-1 --evm.evm-chain-id 990003 > /dev/null 2>&1
+          python3 network/tools/configure_history.py --home "$install_dir/home" --apply --role rpc-ibc
       - name: Audit default daemon source and compiled binary
         if: inputs.security_audit
         working-directory: network
