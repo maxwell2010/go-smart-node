@@ -1,7 +1,7 @@
 import json
 import pathlib
 import unittest
-from unittest.mock import call, patch
+from unittest.mock import MagicMock, call, patch
 
 import withdrawal_genesis_smoke as smoke
 
@@ -123,6 +123,26 @@ class WithdrawalGenesisSmokeTests(unittest.TestCase):
         self.assertNotIn('DO_NOT_PUBLISH_TEST_MARKER', public)
         public = smoke.safe_diagnostic('Error: unknown flag: --api.address DO_NOT_PUBLISH_TEST_MARKER')
         self.assertEqual(public, 'unknown flag --api.address')
+
+    def test_consensus_failure_reason_and_admission_status_are_safe(self):
+        address = 'd01' + 'a' * 38
+        long_hex = '0x' + 'b' * 64
+        encoded = 'AAAAAAAAAAAAAA+BBBBBBBBBB/CCCCCCCCCCCCCC='
+        private_path = '/home/private/fixture/genesis.json'
+        error = json.dumps({'message': 'CONSENSUS FAILURE!!!', 'err':
+                            f'failed to apply block; error state mismatch for {address}, {long_hex}, {encoded}, {private_path}'})
+        public = smoke.safe_diagnostic(error)
+        self.assertIn('consensus block application: state mismatch', public)
+        for private in (address, long_hex, encoded, private_path):
+            self.assertNotIn(private, public)
+        self.assertEqual(smoke.consensus_reason('panic: failed to apply block; error private key DO_NOT_PUBLISH'), 'sensitive reason suppressed')
+        report = {'phase': 'positive-start'}
+        logfile = MagicMock()
+        logfile.open.return_value.__enter__.return_value.read.return_value = (
+            json.dumps({'message': 'authenticated withdrawal genesis admitted'}) + '\n' + error).encode()
+        logfile.stat.return_value.st_size = 100
+        self.assertEqual(smoke.readiness_diagnostic(logfile, report), public)
+        self.assertTrue(report['genesisAdmissionObserved'])
 
 
 if __name__ == '__main__':

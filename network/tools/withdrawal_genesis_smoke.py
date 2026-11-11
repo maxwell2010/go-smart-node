@@ -119,11 +119,42 @@ def safe_diagnostic(text):
     categories = ('authenticate withdrawal genesis', 'genesis signing domain', 'failed to unmarshal',
                   'failed to initialize', 'validator set', 'priv-validator', 'no space left on device')
     notes = [category for category in categories if category in text.lower()]
+    reason = consensus_reason(text)
+    if reason:
+        notes.insert(0, 'consensus block application: ' + reason)
     flags = re.findall(r'unknown (?:shorthand )?flag: ([-A-Za-z0-9._]{2,80})', text, re.IGNORECASE)
     notes += ['unknown flag ' + flag for flag in list(dict.fromkeys(flags))[:4]]
     notes += list(dict.fromkeys(re.findall(r'unable to resolve type URL (/[A-Za-z0-9_.]{1,140})', text)))[:4]
     notes += list(dict.fromkeys(re.findall(r'\b[A-Za-z0-9_-]+\.go:\d{1,6}(?::\d{1,5})?', text)))[:8]
     return ', '.join(notes) if notes else 'no allowlisted diagnostic'
+
+
+def consensus_reason(text):
+    marker = 'failed to apply block; error'
+    for line in text.splitlines():
+        if marker not in line.lower():
+            continue
+        try:
+            record = json.loads(line)
+        except json.JSONDecodeError:
+            values = (line,)
+        else:
+            values = (record.get('err'), record.get('error'), record.get('message'), record.get('msg')) if isinstance(record, dict) else ()
+        for value in values:
+            if not isinstance(value, str) or marker not in value.lower():
+                continue
+            reason = value[value.lower().index(marker) + len(marker):].lstrip(' :')
+            if re.search(r'mnemonic|private[ _-]?key|seed[ _-]?phrase|password|authorization|bearer|api[ _-]?token', reason, re.IGNORECASE):
+                return 'sensitive reason suppressed'
+            reason = re.sub(r'\x1b\[[0-?]*[ -/]*[@-~]', '', reason)
+            reason = re.sub(r'(?<![A-Za-z0-9_.])(?:[A-Za-z]:)?[/\\][^\s"\'<>]+', '[path]', reason)
+            reason = re.sub(r'(?<![A-Za-z0-9])(?:0[xX])?[A-Fa-f0-9]{24,}(?![A-Za-z0-9])', '[hex]', reason)
+            reason = re.sub(r'[A-Za-z0-9_+/=-]{24,}', '[identifier]', reason)
+            reason = re.sub(r'\[(?:\s*\d{1,3}\s*,?){8,}\]', '[byte array]', reason)
+            reason = ' '.join(re.sub(r'[^\x20-\x7e]', ' ', reason).split())
+            if reason:
+                return reason[:240]
+    return None
 
 
 def log_tail(path):
@@ -132,11 +163,21 @@ def log_tail(path):
         return stream.read(65536).decode('utf8', errors='replace')
 
 
-def wait_height(child, minimum, deadline, log_path):
+def readiness_diagnostic(path, report):
+    with path.open('rb') as stream:
+        text = stream.read(65536).decode('utf8', errors='replace')
+    if path.stat().st_size > 65536:
+        text += '\n' + log_tail(path)
+    if report['phase'] == 'positive-start':
+        report['genesisAdmissionObserved'] = 'authenticated withdrawal genesis admitted' in text
+    return safe_diagnostic(text)
+
+
+def wait_height(child, minimum, deadline, log_path, report):
     while time.monotonic() < deadline:
         code = child.poll()
         if code is not None:
-            raise RuntimeError(f'daemon exited ({code}) before committed height {minimum}: ' + safe_diagnostic(log_tail(log_path)))
+            raise RuntimeError(f'daemon exited ({code}) before committed height {minimum}: ' + readiness_diagnostic(log_path, report))
         try:
             status = comet('status')
         except (OSError, json.JSONDecodeError):
@@ -147,7 +188,7 @@ def wait_height(child, minimum, deadline, log_path):
         if height >= minimum:
             return height
         time.sleep(0.25)
-    raise TimeoutError(f'daemon did not reach committed height {minimum}: ' + safe_diagnostic(log_tail(log_path)))
+    raise TimeoutError(f'daemon did not reach committed height {minimum}: ' + readiness_diagnostic(log_path, report))
 
 
 def block_time(height):
@@ -250,6 +291,7 @@ def run_gate(args, binary, root, expected, genesis, invalid, validator, env, own
         return child, log_path
 
     good = root / 'good'
+    report['phase'] = 'positive-cli-validation'
     prepare(good, genesis)
     version = json.loads(run_command(binary, good, ['version', '--long', '--output', 'json'], env))
     check(version['server_name'] == 'mcnd' and version['commit'] == args.source_commit, 'daemon version differs from checked source')
@@ -258,9 +300,12 @@ def run_gate(args, binary, root, expected, genesis, invalid, validator, env, own
     except RuntimeError as error:
         raise RuntimeError('genesis validation rejected the positive fixture: ' + safe_diagnostic(str(error))) from None
 
+    report['phase'] = 'positive-start'
     child, log_path = launch(good, 'start', domain)
     initial_height = report['initialHeight']
-    start_height = wait_height(child, initial_height + 2, time.monotonic() + 45, log_path)
+    start_height = wait_height(child, initial_height + 2, time.monotonic() + 45, log_path, report)
+    report['genesisAdmissionObserved'] = bool(log_records(log_path, 'authenticated withdrawal genesis admitted'))
+    report['phase'] = 'pre-deadline-state'
     check(int(ethereum('eth_chainId', []), 16) == EVM_CHAIN, 'EVM RPC chain mismatch')
     start_time = block_time(start_height)
     check(start_time.timestamp() < expected['dueAt'], 'first committed state did not precede the deadline')
@@ -270,11 +315,12 @@ def run_gate(args, binary, root, expected, genesis, invalid, validator, env, own
     check_admission(start_height, expected)
     report['newDelegationEstimate'] = 'REJECTED'
 
+    report['phase'] = 'automatic-settlement'
     until = time.monotonic() + max(0, expected['dueAt'] - time.time()) + 45
     height = start_height
     completed = []
     while not completed:
-        last = wait_height(child, height + 1, until, log_path)
+        last = wait_height(child, height + 1, until, log_path, report)
         check(last - initial_height < MAX_BLOCKS, 'withdrawal exceeded the disposable block budget')
         completed = scan_blocks(height + 1, last, expected)
         height = last
@@ -296,8 +342,9 @@ def run_gate(args, binary, root, expected, genesis, invalid, validator, env, own
     check(type(admissions[0].get('gas')) is int and admissions[0]['gas'] > 0, 'missing authenticated genesis work gas')
     report['genesisSDKGasCharged'] = admissions[0]['gas']
 
+    report['phase'] = 'restart'
     child, restart_log = launch(good, 'restart', [])
-    restarted_height = wait_height(child, height + 2, time.monotonic() + 45, restart_log)
+    restarted_height = wait_height(child, height + 2, time.monotonic() + 45, restart_log, report)
     check(restarted_height - initial_height < MAX_BLOCKS, 'restart exceeded the disposable block budget')
     check(int(ethereum('eth_chainId', []), 16) == EVM_CHAIN, 'restarted EVM RPC chain mismatch')
     check(not scan_blocks(completed_at + 1, restarted_height, expected), 'withdrawal repeated before or after disk restart')
@@ -307,6 +354,7 @@ def run_gate(args, binary, root, expected, genesis, invalid, validator, env, own
     check(not log_records(restart_log, 'authenticated withdrawal genesis admitted'), 'restart unexpectedly reinitialized genesis')
     check(not log_records(restart_log, 'withdrawal block settlement work'), 'restart attempted to settle an already completed withdrawal')
 
+    report['phase'] = 'negative-genesis'
     bad = root / 'invalid'
     prepare(bad, invalid)
     child, invalid_log = launch(bad, 'invalid', domain)
@@ -337,7 +385,7 @@ def main(argv=None, signals=None):
     parser.add_argument('--home-parent', required=True)
     parser.add_argument('--report', required=True)
     args = parser.parse_args(argv)
-    report = {'status': 'FAIL', 'scope': 'disposable authenticated withdrawal genesis only'}
+    report = {'status': 'FAIL', 'phase': 'fixture-provenance', 'scope': 'disposable authenticated withdrawal genesis only'}
     with pathlib.Path(args.report).open('x', encoding='utf8') as stream:
         try:
             private_namespace()
@@ -365,11 +413,13 @@ def main(argv=None, signals=None):
                 owner = ProcessOwner(signals)
                 try:
                     run_gate(args, binary, root, expected, genesis, invalid, validator, env, owner, report)
+                    report['phase'] = 'cleanup'
                 finally:
                     owner.close()
             report['status'] = 'PASS'
+            report['phase'] = 'complete'
         except Exception as error:
-            report['error'] = str(error)
+            report['error'] = ' '.join(str(error).split())[:520]
         finally:
             json.dump(report, stream, indent=2)
     print(json.dumps(report, indent=2))
