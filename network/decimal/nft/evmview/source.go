@@ -26,14 +26,14 @@ type StakeSource struct {
 // current SDK context. The keeper check prevents matching one EVM and executing
 // against a different one.
 type StakeRoles struct {
-	Gateway, PositionVault, WrappedDEL common.Address
+	Gateway, PositionVault, WrappedDEL, MasterValidator common.Address
 }
 
 func (r *Reader) ConfiguredStakeRoles(evm *evmkeeper.Keeper) (StakeRoles, error) {
 	if r == nil || evm == nil || r.evm != evm || r.config.Protocol != ProfileIsolatedPositionsV1 || r.config.MasterValidator == (common.Address{}) {
 		return StakeRoles{}, errors.New("stake roles require the same EVM, isolated profile and approved MasterValidator")
 	}
-	return StakeRoles{Gateway: r.config.Delegation, PositionVault: r.config.PositionVault, WrappedDEL: r.config.WrappedDEL}, nil
+	return StakeRoles{Gateway: r.config.Delegation, PositionVault: r.config.PositionVault, WrappedDEL: r.config.WrappedDEL, MasterValidator: r.config.MasterValidator}, nil
 }
 
 func (r *Reader) AuthenticateStakeSource(ctx sdk.Context, execution receipts.Execution) (StakeSource, error) {

@@ -15,8 +15,9 @@ import (
 // GenesisLimits bound the entire cold attestation, including the deployed
 // frozen array's completed history and the native NFT custody checks.
 type GenesisLimits struct {
-	MaxRows uint32
-	SDKGas  uint64
+	MaxRows       uint32
+	SDKGas        uint64
+	DELValidators []common.Address
 }
 
 // AttestGenesis verifies a bounded settlement snapshot against the entire
@@ -29,7 +30,8 @@ type GenesisLimits struct {
 // staking proposer for the EVM getters. A concrete NFT attestor is required for
 // each active NFT row. It runs in a discarded cache under the same work meter.
 func (e *Executor) AttestGenesis(ctx sdk.Context, rows []validatortypes.EVMFrozenBinding, limits GenesisLimits, attestNFT func(sdk.Context, validatortypes.EVMFrozenBinding) error) (err error) {
-	if e == nil || e.evm == nil || limits.MaxRows == 0 || limits.MaxRows > validatortypes.MaxBindingPageSize || limits.SDKGas == 0 || uint64(len(rows)) > uint64(limits.MaxRows) {
+	if e == nil || e.evm == nil || limits.MaxRows == 0 || limits.MaxRows > validatortypes.MaxBindingPageSize || limits.SDKGas == 0 ||
+		len(rows) > int(limits.MaxRows) || len(limits.DELValidators) > int(limits.MaxRows) || (len(limits.DELValidators) != 0 && len(rows) != 0) {
 		return errors.New("invalid Gateway genesis attestation limits or row count")
 	}
 	if ctx.BlockHeight() < 0 || ctx.BlockTime().Unix() <= 0 || len(ctx.BlockHeader().ProposerAddress) != common.AddressLength {
@@ -126,7 +128,48 @@ func (e *Executor) AttestGenesis(ctx sdk.Context, rows []validatortypes.EVMFroze
 			return fmt.Errorf("genesis withdrawal %d native custody: %w", i, err)
 		}
 	}
+	if len(limits.DELValidators) != 0 {
+		return e.attestEmptyDELGenesis(child, limits.DELValidators)
+	}
 	return e.verifyGenesisBacking(child, claims)
+}
+
+func (e *Executor) attestEmptyDELGenesis(ctx sdk.Context, validators []common.Address) error {
+	state, err := e.payoutState(ctx, payout{asset: e.roles.WrappedDEL, beneficiary: Sender()}, common.Address{})
+	if err != nil {
+		return err
+	}
+	if state.wrapped.Sign() != 0 {
+		return errors.New("DEL delegation genesis requires empty Gateway WDEL custody")
+	}
+	queue, err := e.read(ctx, e.roles.Gateway, e.gateway, "autoUnbondQueueLength", common.HashLength)
+	if err != nil {
+		return err
+	}
+	if common.BytesToHash(queue) != (common.Hash{}) {
+		return errors.New("DEL delegation genesis requires an empty automatic unbond queue")
+	}
+	freeze, err := e.read(ctx, e.roles.Gateway, e.gateway, "getFreezeTime", common.HashLength, uint8(freezeWithdraw))
+	if err != nil {
+		return err
+	}
+	delay := new(big.Int).SetBytes(freeze)
+	if !delay.IsInt64() || delay.Sign() == 0 {
+		return errors.New("DEL delegation genesis requires a positive withdrawal freeze time")
+	}
+	for _, validator := range validators {
+		if err := e.verifyUnpenalizedValidator(ctx, validator); err != nil {
+			return err
+		}
+		reserve, err := e.read(ctx, e.roles.Gateway, e.gateway, "getValidatorReserve", 2*common.HashLength, validator, e.roles.WrappedDEL)
+		if err != nil {
+			return err
+		}
+		if common.BytesToHash(reserve[:common.HashLength]) != (common.Hash{}) || common.BytesToHash(reserve[common.HashLength:]) != (common.Hash{}) {
+			return errors.New("DEL delegation genesis requires zero existing validator WDEL reserves")
+		}
+	}
+	return nil
 }
 
 func (e *Executor) genesisFrozenCount(ctx sdk.Context, limit uint32) (*big.Int, error) {

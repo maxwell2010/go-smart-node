@@ -54,7 +54,7 @@ func parseWithdrawalGenesisProfile(raw json.RawMessage) (*WithdrawalProfile, err
 // It does not admit active staking power or register unrelated native assets.
 func validateWithdrawalGenesisSnapshot(profile WithdrawalProfile, nft *nfttypes.GenesisState, validators *validatortypes.GenesisState) error {
 	if validators.BindingDomain == nil || validators.BindingRevision != 0 || len(validators.Validators) > maxWithdrawalGenesisRows ||
-		len(validators.EVMFrozenBindings) == 0 || len(validators.EVMFrozenBindings) > maxWithdrawalGenesisRows ||
+		len(validators.EVMFrozenBindings) > maxWithdrawalGenesisRows ||
 		len(validators.Undelegations) > maxWithdrawalGenesisRows || len(validators.Delegations) != 0 || len(validators.Redelegations) != 0 ||
 		len(validators.EVMStakeBindings) != 0 || len(validators.ScheduledValidatorSets) != 0 ||
 		len(validators.ValidatorOfflineSince) != 0 || len(validators.LastValidatorPowers) != 0 || validators.LastTotalPower != 0 {
@@ -64,6 +64,16 @@ func validateWithdrawalGenesisSnapshot(profile WithdrawalProfile, nft *nfttypes.
 		if val.Stake != 0 || val.Status != validatortypes.BondStatus_Unbonded || val.Online {
 			return errors.New("withdrawal genesis cannot activate native validator power")
 		}
+	}
+	if profile.EnableDELDelegation {
+		if len(validators.Validators) == 0 || len(validators.EVMFrozenBindings) != 0 || len(validators.Undelegations) != 0 ||
+			len(nft.Collections) != 0 || len(nft.ExternalBindings) != 0 || len(nft.IsolatedVaults) != 0 || len(nft.IsolatedPositions) != 0 {
+			return errors.New("DEL delegation genesis requires declared source validators and empty native positions and queues")
+		}
+		return nil
+	}
+	if len(validators.EVMFrozenBindings) == 0 {
+		return errors.New("withdrawal genesis requires pending settlement claims")
 	}
 	tokenIDs := make(map[string]bool)
 	nftRows := 0
@@ -162,9 +172,19 @@ func (app *App) initWithdrawalGenesis(ctx sdk.Context, req *abci.RequestInitChai
 	read, _ := child.CacheContext()
 	read = read.WithBlockHeader(header)
 	gasBefore := read.GasMeter().GasConsumed()
-	if err := controller.executor.AttestGenesis(read, validators.EVMFrozenBindings, settlement.GenesisLimits{
+	limits := settlement.GenesisLimits{
 		MaxRows: maxWithdrawalGenesisRows, SDKGas: withdrawalGenesisGas,
-	}, controller.assets.AttestGenesisNFT); err != nil {
+	}
+	if profile.EnableDELDelegation {
+		for _, val := range validators.Validators {
+			operator, err := app.NativeValidatorKeeper.ValidatorAddressCodec().StringToBytes(val.OperatorAddress)
+			if err != nil || len(operator) != common.AddressLength {
+				return nil, errors.New("invalid DEL genesis source validator address")
+			}
+			limits.DELValidators = append(limits.DELValidators, common.BytesToAddress(operator))
+		}
+	}
+	if err := controller.executor.AttestGenesis(read, validators.EVMFrozenBindings, limits, controller.assets.AttestGenesisNFT); err != nil {
 		return nil, fmt.Errorf("authenticate withdrawal genesis: %w", err)
 	}
 	encoded, err := json.Marshal(profile)

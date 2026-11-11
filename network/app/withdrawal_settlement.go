@@ -37,14 +37,15 @@ const (
 // WithdrawalProfile pins the system addresses for the isolated-position profile.
 // It is read from consensus state, never from node-local operator settings.
 type WithdrawalProfile struct {
-	Registry        common.Address `json:"registry"`
-	Gateway         common.Address `json:"gateway"`
-	Library         common.Address `json:"library"`
-	NFTCenter       common.Address `json:"nft_center"`
-	PositionVault   common.Address `json:"position_vault"`
-	MasterValidator common.Address `json:"master_validator"`
-	WrappedDEL      common.Address `json:"wrapped_del"`
-	SettlementOnly  bool           `json:"settlement_only,omitempty"`
+	Registry            common.Address `json:"registry"`
+	Gateway             common.Address `json:"gateway"`
+	Library             common.Address `json:"library"`
+	NFTCenter           common.Address `json:"nft_center"`
+	PositionVault       common.Address `json:"position_vault"`
+	MasterValidator     common.Address `json:"master_validator"`
+	WrappedDEL          common.Address `json:"wrapped_del"`
+	SettlementOnly      bool           `json:"settlement_only,omitempty"`
+	EnableDELDelegation bool           `json:"enable_del_delegation,omitempty"`
 }
 
 type withdrawalController struct {
@@ -90,6 +91,9 @@ func (app *App) LoadWithdrawalSettlement(ctx sdk.Context) error {
 }
 
 func (app *App) newWithdrawalController(profile WithdrawalProfile) (*withdrawalController, error) {
+	if profile.EnableDELDelegation && !profile.SettlementOnly {
+		return nil, errors.New("DEL delegation requires restricted Gateway admission")
+	}
 	reader, err := nftview.New(app.NativeNFTKeeper, app.EVMKeeper, nftview.Config{
 		Protocol: nftview.ProfileIsolatedPositionsV1, ChainID: app.chainID, EVMChainID: app.evmChainID,
 		Registry: profile.Registry, Delegation: profile.Gateway, DelegationLibrary: profile.Library,
@@ -177,6 +181,13 @@ func (c *withdrawalController) PostTxProcessing(ctx sdk.Context, sender common.A
 	}
 	managed, completion := c.withdrawalActivity(ctx, msg, receipt.Logs)
 	if !completion {
+		if managed && c.profile.EnableDELDelegation && msg.To != nil && *msg.To == c.profile.Gateway && len(msg.Data) >= 4 &&
+			(bytes.Equal(msg.Data[:4], c.abi.Methods["delegateDEL"].ID) || bytes.Equal(msg.Data[:4], c.abi.Methods["withdraw"].ID)) {
+			if sender != msg.From {
+				return errors.New("DEL stake requires the authenticated transaction sender")
+			}
+			return c.projectSignedDEL(ctx, msg, receipt)
+		}
 		return c.checkColdAdmission(managed)
 	}
 	ids, err := c.executor.CompletionIDs(receipt)
@@ -198,6 +209,22 @@ func (c *withdrawalController) PostTxProcessing(ctx sdk.Context, sender common.A
 		return err
 	}
 	return c.project(ctx, row, proof)
+}
+
+func (c *withdrawalController) projectSignedDEL(ctx sdk.Context, msg core.Message, receipt *ethtypes.Receipt) error {
+	result, err := c.executor.VerifySignedDEL(ctx, msg, receipt)
+	if err != nil {
+		return fmt.Errorf("verify signed DEL stake: %w", err)
+	}
+	position := validatorkeeper.GatewayDELStake{
+		Gateway: c.profile.Gateway, WrappedDEL: c.profile.WrappedDEL, Validator: result.Validator, Beneficiary: result.Beneficiary,
+		StakeID: result.StakeID, Amount: result.Amount,
+	}
+	if result.Deadline.IsZero() {
+		return c.keeper.ApplyGatewayDELDelegation(ctx, position, result.Amount)
+	}
+	position.Amount = sdkmath.ZeroInt()
+	return c.keeper.ApplyGatewayDELWithdrawal(ctx, position, result.FrozenIndex, result.Amount, result.Deadline)
 }
 
 type automaticWithdrawalKey struct{}

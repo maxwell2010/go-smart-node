@@ -50,11 +50,11 @@ type Proof struct {
 }
 
 type Executor struct {
-	evm                     *evmkeeper.Keeper
-	auth                    *evmview.Reader
-	roles                   evmview.StakeRoles
-	config                  Config
-	gateway, wrapper, vault abi.ABI
+	evm                             *evmkeeper.Keeper
+	auth                            *evmview.Reader
+	roles                           evmview.StakeRoles
+	config                          Config
+	gateway, wrapper, vault, master abi.ABI
 }
 
 // Sender is reserved for the internal settlement call. It has no owner role
@@ -79,7 +79,7 @@ func NewExecutor(evm *evmkeeper.Keeper, auth *evmview.Reader, config Config) (*E
 	for _, contract := range []struct {
 		name string
 		abi  *abi.ABI
-	}{{"MintCandyIsolatedDelegation", &e.gateway}, {"MintCandyWrappedDEL", &e.wrapper}, {"MintCandyNFTPositionVault", &e.vault}} {
+	}{{"MintCandyIsolatedDelegation", &e.gateway}, {"MintCandyWrappedDEL", &e.wrapper}, {"MintCandyNFTPositionVault", &e.vault}, {"NewNetworkMasterValidator", &e.master}} {
 		*contract.abi, err = contracts.CompiledABI(contract.name)
 		if err != nil {
 			return nil, err
