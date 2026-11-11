@@ -214,6 +214,9 @@ func (k *StateKeeper) InitGenesis(ctx sdk.Context, genesis *types.GenesisState) 
 			return err
 		}
 	}
+	if err := k.initActiveSubTokenCounts(child, genesis.Collections); err != nil {
+		return err
+	}
 	commit()
 	return nil
 }
@@ -528,6 +531,9 @@ func (k *StateKeeper) ExportGenesis(ctx sdk.Context) (*types.GenesisState, error
 	if err := genesis.Validate(); err != nil {
 		return nil, err
 	}
+	if err := k.validateActiveSubTokenCounts(ctx, genesis.Collections); err != nil {
+		return nil, err
+	}
 	return genesis, nil
 }
 
@@ -559,6 +565,10 @@ func (k *StateKeeper) TransferSubTokens(ctx sdk.Context, id string, indexes []ui
 	if err != nil {
 		return err
 	}
+	indexed, err := k.hasActiveSubTokenCounts(child)
+	if err != nil {
+		return err
+	}
 	seen := make(map[uint32]bool, len(indexes))
 	for _, index := range indexes {
 		if seen[index] {
@@ -584,6 +594,15 @@ func (k *StateKeeper) TransferSubTokens(ctx sdk.Context, id string, indexes []ui
 			return err
 		}
 		if err := state.Set(types.GetSubTokenByOwnerKey(to, id, index), []byte(id)); err != nil {
+			return err
+		}
+	}
+	if indexed {
+		supply := token.Minted - token.Burnt
+		if err := k.adjustActiveSubTokenCount(child, id, from, -int64(len(indexes)), supply, supply); err != nil {
+			return err
+		}
+		if err := k.adjustActiveSubTokenCount(child, id, to, int64(len(indexes)), supply, supply); err != nil {
 			return err
 		}
 	}

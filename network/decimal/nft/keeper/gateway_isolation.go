@@ -42,6 +42,10 @@ func (k *StateKeeper) AdmitGatewayIsolation(ctx sdk.Context, proof GatewayIsolat
 		return empty, errors.New("Gateway isolation does not advance the vault cursor by one")
 	}
 	child, commit := ctx.CacheContext()
+	indexed, err := k.hasActiveSubTokenCounts(child)
+	if err != nil {
+		return empty, err
+	}
 	vault, err := k.GetIsolatedVaultState(child, proof.Vault[:])
 	if err != nil {
 		return empty, err
@@ -176,6 +180,14 @@ func (k *StateKeeper) AdmitGatewayIsolation(ctx sdk.Context, proof GatewayIsolat
 	vault.NextPositionID = proof.NextPositionID.Bytes()
 	if err := k.storeIsolatedVault(child, vault); err != nil {
 		return empty, err
+	}
+	if indexed {
+		if err := k.adjustActiveSubTokenCount(child, origin.ID, owner, -int64(proof.Quantity), supply, proof.OriginSupplyAfter); err != nil {
+			return empty, err
+		}
+		if err := k.adjustActiveSubTokenCount(child, receiptID, gateway, 1, 0, 1); err != nil {
+			return empty, err
+		}
 	}
 	child.EventManager().EmitEvent(sdk.NewEvent("decimal_nft_isolated",
 		sdk.NewAttribute("position_id", proof.PositionID.Hex()),
