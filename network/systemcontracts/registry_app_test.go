@@ -30,7 +30,6 @@ import (
 	govv1 "github.com/cosmos/cosmos-sdk/x/gov/types/v1"
 	slashingtypes "github.com/cosmos/cosmos-sdk/x/slashing/types"
 	stakingtypes "github.com/cosmos/cosmos-sdk/x/staking/types"
-	ethsecp "github.com/cosmos/evm/crypto/ethsecp256k1"
 	srvflags "github.com/cosmos/evm/server/flags"
 	"github.com/cosmos/evm/x/vm/statedb"
 	evmtypes "github.com/cosmos/evm/x/vm/types"
@@ -92,6 +91,7 @@ func (h nativeBurnReceiptControl) PostTxProcessing(_ sdk.Context, _ common.Addre
 // process-global EVM configuration, patches storage or broadcasts transactions.
 func TestOwnedAppSignedRegistryBootstrap(t *testing.T) {
 	const chainID = "mintcandy_990001-1"
+	nftFixturePhase := os.Getenv(signedNFTAdmissionPhaseEnv)
 	var withdrawalDeferrals []string
 	a := ownedapp.NewApp(log.NewLogger(withdrawalFixtureLog{t: t, deferrals: &withdrawalDeferrals}), dbm.NewMemDB(), true, appOptions{flags.FlagHome: t.TempDir(), flags.FlagChainID: chainID, srvflags.EVMChainID: uint64(990001)})
 	t.Cleanup(func() { require.NoError(t, a.Close()) })
@@ -106,7 +106,7 @@ func TestOwnedAppSignedRegistryBootstrap(t *testing.T) {
 	balances := make([]banktypes.Balance, 5)
 	funds := sdk.NewCoins(sdk.NewCoin(identity.BaseDenom, math.NewInt(10000).Mul(math.NewInt(1_000_000_000_000_000_000))))
 	for i := range keys {
-		key, err := ethsecp.GenerateKey()
+		key, err := registryFixtureKey(i, nftFixturePhase != "")
 		require.NoError(t, err)
 		keys[i], err = crypto.ToECDSA(key.Bytes())
 		require.NoError(t, err)
@@ -115,6 +115,9 @@ func TestOwnedAppSignedRegistryBootstrap(t *testing.T) {
 		balances[i] = banktypes.Balance{Address: accounts[i].GetAddress().String(), Coins: funds}
 	}
 	signer := cmted25519.GenPrivKey()
+	if nftFixturePhase != "" {
+		signer = cmted25519.GenPrivKeyFromSecret([]byte("MintCandy isolated NFT fixture consensus signer"))
+	}
 	validator := cmttypes.NewValidator(signer.PubKey(), 1)
 	vals := cmttypes.NewValidatorSet([]*cmttypes.Validator{validator})
 	defaults := a.DefaultGenesis()
@@ -147,7 +150,7 @@ func TestOwnedAppSignedRegistryBootstrap(t *testing.T) {
 	}
 	genesis[banktypes.ModuleName] = a.AppCodec().MustMarshalJSON(&bankFunded)
 	genesis[stakingtypes.ModuleName] = a.AppCodec().MustMarshalJSON(&stakeFunded)
-	if os.Getenv(withdrawalGenesisFixtureEnv) != "" {
+	if os.Getenv(withdrawalGenesisFixtureEnv) != "" || nftFixturePhase == "seed" {
 		// The SDK fixture starts with an already bonded validator. Populate
 		// the signing state normally created by the staking bond hook.
 		var slashingGenesis slashingtypes.GenesisState
@@ -166,11 +169,18 @@ func TestOwnedAppSignedRegistryBootstrap(t *testing.T) {
 	if os.Getenv(withdrawalGenesisFixtureEnv) != "" {
 		now = time.Now().UTC().Truncate(time.Second).Add(-time.Hour)
 	}
-	_, err = a.InitChain(&abci.RequestInitChain{ChainId: chainID, Time: now, AppStateBytes: data, ConsensusParams: simtestutil.DefaultConsensusParams})
+	var nftFixture signedNFTAdmissionGenesis
+	genesisTime, initialHeight := now, int64(0)
+	if nftFixturePhase == "verify" {
+		nftFixture = readSignedNFTAdmissionGenesis(t)
+		data, genesisTime, initialHeight = nftFixture.AppState, nftFixture.Time, nftFixture.Height
+		now = genesisTime.Add(-time.Duration(initialHeight-1) * time.Second)
+	}
+	_, err = a.InitChain(&abci.RequestInitChain{ChainId: chainID, Time: genesisTime, InitialHeight: initialHeight, AppStateBytes: data, ConsensusParams: simtestutil.DefaultConsensusParams})
 	require.NoError(t, err)
 	// Materialize fresh genesis before comparing balances through the committed
 	// root store. InitChain alone only populates the pending finalize state.
-	_, err = a.FinalizeBlock(&abci.RequestFinalizeBlock{Height: 1, Time: now.Add(time.Second), NextValidatorsHash: vals.Hash(), ProposerAddress: vals.Proposer.Address})
+	_, err = a.FinalizeBlock(&abci.RequestFinalizeBlock{Height: max(initialHeight, 1), Time: genesisTime.Add(time.Second), NextValidatorsHash: vals.Hash(), ProposerAddress: vals.Proposer.Address})
 	require.NoError(t, err)
 	_, err = a.Commit()
 	require.NoError(t, err)
@@ -247,6 +257,15 @@ func TestOwnedAppSignedRegistryBootstrap(t *testing.T) {
 		artifact, err := contracts.Load(name)
 		require.NoError(t, err)
 		return artifact
+	}
+	if nftFixturePhase == "verify" {
+		runSignedNFTAdmissionLifecycle(t, isolatedBackendEnv{
+			app: a, ctx: ctx, advance: advance, nextGasLimit: func(limit uint64) { nextGasLimit = limit },
+			send: send, load: load, keys: keys, credit: nativeCredit, events: func() []abci.Event { return lastAllEvents },
+			blockEvents: func() []abci.Event { return lastBlockEvents }, deferrals: func() []string { return withdrawalDeferrals },
+			govOwner: common.BytesToAddress(authtypes.NewModuleAddress(govtypes.ModuleName)),
+		}, nftFixture)
+		return
 	}
 	freshAsset := func(name string) contracts.Artifact {
 		if name == "DRC721" {

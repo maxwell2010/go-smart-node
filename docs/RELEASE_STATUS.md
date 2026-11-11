@@ -85,6 +85,15 @@ other hold lots and a subsequent ordinary DEL withdrawal and payout.
 See the [operator description](../network/docs/ru/STAKE_WITHDRAWAL_SETTLEMENT.md)
 for the profile, supported calls and query semantics.
 
+A [signed owned-App test](https://github.com/maxwell2010/go-smart-node/actions/runs/43039725259)
+started from a verified cold genesis, converted 1024 origin ERC1155 units into
+one independently backed ERC721 receipt and returned it through `complete`.
+The 2048 DEL reserve stayed with the receipt and the owner's direct 5 DEL stake
+survived. Late failure, scheduled deferral and one successful signed retry were
+verified. Peak gas was 18,171,007 for admission and 19,373,196 for completion.
+This profile starts with approved native DEL origins. Wallet lifecycle routes,
+new NFT holds, custom conversion and slashing still need integration tests.
+
 An [application IBC upgrade test](https://github.com/maxwell2010/go-smart-node/actions/runs/43036744774)
 executed a signed governance proposal, a scheduled SDK `x/upgrade` handler and
 a signed `MsgUpgradeClient` verified against both IAVL proofs. A pending packet

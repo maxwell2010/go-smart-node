@@ -75,6 +75,17 @@ type signedDELFixture struct {
 func newSignedDELFixture(t *testing.T, e isolatedBackendEnv, profile ownedapp.WithdrawalProfile, gateway, master, wrapper contracts.Artifact,
 	gov func(contracts.Artifact, common.Address, string, ...interface{})) signedDELFixture {
 	t.Helper()
+	f := prepareSignedDELFixture(t, e, profile, gateway, master, wrapper, gov)
+	config, err := json.Marshal(profile)
+	require.NoError(t, err)
+	e.ctx().KVStore(e.app.GetKey(validatortypes.StoreKey)).Set([]byte{ownedapp.WithdrawalProfileKey}, config)
+	require.NoError(t, e.app.LoadWithdrawalSettlement(e.ctx()))
+	return f
+}
+
+func prepareSignedDELFixture(t *testing.T, e isolatedBackendEnv, profile ownedapp.WithdrawalProfile, gateway, master, wrapper contracts.Artifact,
+	gov func(contracts.Artifact, common.Address, string, ...interface{})) signedDELFixture {
+	t.Helper()
 	require.NotNil(t, e.nextGasLimit)
 	require.NotNil(t, e.advance)
 	user := crypto.PubkeyToAddress(e.keys[0].PublicKey)
@@ -95,10 +106,6 @@ func newSignedDELFixture(t *testing.T, e isolatedBackendEnv, profile ownedapp.Wi
 	}{{validator, string(meta)}})
 	gov(gateway, profile.Gateway, "setFreezeTime", big.NewInt(signedDELFreezeSeconds), new(big.Int))
 
-	config, err := json.Marshal(profile)
-	require.NoError(t, err)
-	e.ctx().KVStore(e.app.GetKey(validatortypes.StoreKey)).Set([]byte{ownedapp.WithdrawalProfileKey}, config)
-	require.NoError(t, e.app.LoadWithdrawalSettlement(e.ctx()))
 	return signedDELFixture{
 		t: t, env: e, gateway: gateway, wrapper: wrapper, target: profile.Gateway, wrapped: profile.WrappedDEL,
 		user: user, validator: validator, beneficiary: beneficiary, operator: operator, validatorKey: key,

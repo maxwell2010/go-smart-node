@@ -15,6 +15,7 @@ import (
 	ethtypes "github.com/ethereum/go-ethereum/core/types"
 	coinkeeper "github.com/maxwell2010/go-smart-node/network/decimal/coin/keeper"
 	nftview "github.com/maxwell2010/go-smart-node/network/decimal/nft/evmview"
+	nftkeeper "github.com/maxwell2010/go-smart-node/network/decimal/nft/keeper"
 	nftreceipts "github.com/maxwell2010/go-smart-node/network/decimal/nft/receipts"
 	validatorkeeper "github.com/maxwell2010/go-smart-node/network/decimal/validator/keeper"
 	"github.com/maxwell2010/go-smart-node/network/decimal/validator/settlement"
@@ -48,6 +49,7 @@ type WithdrawalProfile struct {
 	EnableDELDelegation bool           `json:"enable_del_delegation,omitempty"`
 	EnableDELHold       bool           `json:"enable_del_hold,omitempty"`
 	EnableDELHoldReset  bool           `json:"enable_del_hold_reset,omitempty"`
+	EnableNFTDelegation bool           `json:"enable_nft_delegation,omitempty"`
 }
 
 type withdrawalController struct {
@@ -55,6 +57,7 @@ type withdrawalController struct {
 	abi      abi.ABI
 	topic    common.Hash
 	keeper   *validatorkeeper.StateKeeper
+	nft      *nftkeeper.StateKeeper
 	executor *settlement.Executor
 	assets   *withdrawalassets.Projector
 }
@@ -93,6 +96,9 @@ func (app *App) LoadWithdrawalSettlement(ctx sdk.Context) error {
 }
 
 func (app *App) newWithdrawalController(profile WithdrawalProfile) (*withdrawalController, error) {
+	if profile.EnableNFTDelegation && !profile.EnableDELDelegation {
+		return nil, errors.New("NFT delegation requires the fresh DEL delegation profile")
+	}
 	if profile.EnableDELHoldReset && !profile.EnableDELHold {
 		return nil, errors.New("DEL hold reset requires DEL hold admission")
 	}
@@ -142,7 +148,7 @@ func (app *App) newWithdrawalController(profile WithdrawalProfile) (*withdrawalC
 	}
 	return &withdrawalController{
 		profile: profile, abi: gatewayABI, topic: gatewayABI.Events["WithdrawCompleted"].ID,
-		keeper: app.NativeValidatorKeeper, executor: executor, assets: projector,
+		keeper: app.NativeValidatorKeeper, nft: app.NativeNFTKeeper, executor: executor, assets: projector,
 	}, nil
 }
 
@@ -215,6 +221,15 @@ func (c *withdrawalController) PostTxProcessing(ctx sdk.Context, sender common.A
 			}
 			return c.projectSignedDEL(ctx, msg, receipt)
 		}
+		if c.isNFTStakeCall(msg) {
+			if sender != msg.From {
+				return errors.New("NFT stake requires the authenticated transaction sender")
+			}
+			return c.projectSignedNFT(ctx, msg, receipt)
+		}
+		if err := c.checkNFTAdmission(ctx, msg, receipt.Logs, sender == msg.From); err != nil {
+			return err
+		}
 		return c.checkColdAdmission(managed)
 	}
 	ids, err := c.executor.CompletionIDs(receipt)
@@ -270,6 +285,9 @@ type automaticWithdrawalKey struct{}
 func (c *withdrawalController) guardInternalCommit(ctx sdk.Context, msg core.Message, logs []*ethtypes.Log) error {
 	managed, completion := c.withdrawalActivity(ctx, msg, logs)
 	if !completion {
+		if err := c.checkNFTAdmission(ctx, msg, logs, false); err != nil {
+			return err
+		}
 		return c.checkColdAdmission(managed)
 	}
 	id, ok := ctx.Value(automaticWithdrawalKey{}).(common.Hash)
