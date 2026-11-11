@@ -27,6 +27,7 @@ ALPHABET = 'qpzry9x8gf2tvdw0s3jn54khce6mua7l'
 HEIGHT_HEADER = 'x-cosmos-block-height'
 COMPLETION = 'decimal_withdrawal_completed'
 MAX_BLOCKS = 240
+RESERVE_ATOMIC = '2048000000000000000000'
 
 
 def check(condition, reason):
@@ -59,7 +60,7 @@ def expectations(path):
     check(len({expected['gateway'], nft['vault'], nft['beneficiary']}) == 3, 'fixture Gateway, vault and recipient must differ')
     check(re.fullmatch(r'[A-Za-z0-9_-]{1,128}', nft['nativeTokenId']), 'invalid native NFT ID')
     check(type(nft['nativeSubTokenId']) is int and 0 < nft['nativeSubTokenId'] < 2**32, 'invalid native NFT unit ID')
-    check(nft['originQuantity'] == 1024 and nft['reserveAtomic'] == '2000000000000000000', 'fixture must exercise the 1024-unit backed receipt')
+    check(nft['originQuantity'] == 1024 and nft['reserveAtomic'] == RESERVE_ATOMIC, 'fixture must exercise the 1024-unit backed receipt')
     data = nft['positionCallData']
     check(re.fullmatch(r'0x[0-9a-f]{72}', data) and data[10:] == nft['tokenId'][2:], 'invalid position getter calldata')
     return expected
@@ -140,8 +141,9 @@ def block_time(height):
 
 def completion_count(result, height, gateway, frozen_id):
     check(int(result['height']) == height, 'block results height mismatch')
+    check('finalize_block_events' in result, 'block results lack committed EndBlock events')
     count = 0
-    for event in result.get('finalize_block_events') or []:
+    for event in result['finalize_block_events'] or []:
         if event['type'] != COMPLETION:
             continue
         attributes = event['attributes']
