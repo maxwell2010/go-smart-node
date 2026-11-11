@@ -156,12 +156,16 @@ if [[ "$withdrawal_genesis" == withdrawal-genesis ]]; then
   # generator runs on the same verified checkout immediately before the lab.
   mkdir -m 700 -- "$work/withdrawal-fixture"
   if ! MCND_WITHDRAWAL_GENESIS_FIXTURE_DIR="$work/withdrawal-fixture" \
-      go test -mod=readonly -tags= -p 2 -count=1 -timeout 8m -json -run '^TestOwnedAppSignedRegistryBootstrap$' ./systemcontracts \
+      go test -mod=readonly -tags= -trimpath -p 2 -count=1 -timeout 8m -json -run '^TestOwnedAppSignedRegistryBootstrap$' ./systemcontracts \
       > "$work/withdrawal-fixture-build.log" 2>&1; then
+    checkout_free="$(df -Pk "$root" | awk 'END {print $4}')" || checkout_free=unknown
+    fixture_free="$(df -Pk "$work_parent" | awk 'END {print $4}')" || fixture_free=unknown
+    printf 'Available worker space after fixture failure (KiB): checkout=%s fixture=%s\n' "$checkout_free" "$fixture_free"
     "$python" - "$work/withdrawal-fixture-build.log" <<'PY'
 import json,re,sys
 location=re.compile(r'\b[A-Za-z0-9_-]+\.go:\d+(?::\d+)?')
 diagnostics=[]
+categories=set()
 with open(sys.argv[1], encoding='utf8') as stream:
     for line in stream:
         try:
@@ -171,6 +175,9 @@ with open(sys.argv[1], encoding='utf8') as stream:
         if event.get('Action') == 'fail':
             print('Private fixture generator failed:', event.get('Package'), event.get('Test', '(build or package)'))
         output=event.get('Output','')
+        for category in ('no space left on device', 'signal: killed', 'test timed out'):
+            if category in output.lower():
+                categories.add(category)
         if event.get('Action')=='build-output' or 'Error Trace:' in output:
             for match in location.findall(output):
                 if match not in diagnostics and len(diagnostics)<12:
@@ -180,6 +187,8 @@ with open(sys.argv[1], encoding='utf8') as stream:
                 diagnostics.append(label)
 if diagnostics:
     print('Private fixture failure locations or assertions:', ', '.join(diagnostics))
+if categories:
+    print('Private fixture failure categories:', ', '.join(sorted(categories)))
 PY
     exit 1
   fi
