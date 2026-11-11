@@ -28,8 +28,8 @@ import (
 const WithdrawalProfileKey byte = 0x6f
 
 const (
-	withdrawalAttempts   = 2
-	withdrawalAttemptGas = 15_000_000
+	withdrawalAttempts   = 1
+	withdrawalAttemptGas = 24_000_000
 	withdrawalMaxLogs    = 32
 	withdrawalLogBytes   = 16384
 )
@@ -202,13 +202,18 @@ func (c *withdrawalController) guardInternalCommit(ctx sdk.Context, msg core.Mes
 }
 
 func (c *withdrawalController) settle(ctx sdk.Context) error {
-	_, err := c.keeper.SettleMatureWithdrawalsLimit(ctx, withdrawalAttempts, withdrawalAttemptGas,
+	gasBefore := ctx.GasMeter().GasConsumed()
+	result, err := c.keeper.SettleMatureWithdrawalsLimit(ctx, withdrawalAttempts, withdrawalAttemptGas,
 		func(child sdk.Context, row validatortypes.EVMFrozenBinding) error {
 			child = child.WithValue(automaticWithdrawalKey{}, common.BytesToHash(row.FrozenIndex))
 			return c.executor.Complete(child, row, func(projectCtx sdk.Context, proof settlement.Proof) error {
 				return c.project(projectCtx, row, proof)
 			})
 		})
+	if err == nil && (result.Settled != 0 || result.Retried != 0) {
+		ctx.Logger().Info("withdrawal block settlement work", "settled", result.Settled,
+			"deferred", result.Retried, "gas", ctx.GasMeter().GasConsumed()-gasBefore)
+	}
 	return err
 }
 

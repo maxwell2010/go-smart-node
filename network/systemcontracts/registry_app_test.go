@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"math/big"
+	"strings"
 	"testing"
 	"time"
 
@@ -45,6 +46,16 @@ type appOptions map[string]interface{}
 
 func (o appOptions) Get(key string) interface{} { return o[key] }
 
+type withdrawalFixtureLog struct{ t *testing.T }
+
+func (w withdrawalFixtureLog) Write(data []byte) (int, error) {
+	line := string(data)
+	if strings.Contains(line, "withdrawal settlement deferred") || strings.Contains(line, "withdrawal block settlement work") {
+		w.t.Log(strings.TrimSpace(line))
+	}
+	return len(data), nil
+}
+
 // A normal application receipt-validation error must discard a completed
 // contract operation and its native bank effects before transaction commit.
 type nativeBurnReceiptControl struct {
@@ -70,7 +81,7 @@ func (h nativeBurnReceiptControl) PostTxProcessing(_ sdk.Context, _ common.Addre
 // process-global EVM configuration, patches storage or broadcasts transactions.
 func TestOwnedAppSignedRegistryBootstrap(t *testing.T) {
 	const chainID = "mintcandy_990001-1"
-	a := ownedapp.NewApp(log.NewNopLogger(), dbm.NewMemDB(), true, appOptions{flags.FlagHome: t.TempDir(), flags.FlagChainID: chainID, srvflags.EVMChainID: uint64(990001)})
+	a := ownedapp.NewApp(log.NewLogger(withdrawalFixtureLog{t}), dbm.NewMemDB(), true, appOptions{flags.FlagHome: t.TempDir(), flags.FlagChainID: chainID, srvflags.EVMChainID: uint64(990001)})
 	t.Cleanup(func() { require.NoError(t, a.Close()) })
 	primitiveABI, err := contracts.CompiledABI("IMintCandyNativeBurn")
 	require.NoError(t, err)
