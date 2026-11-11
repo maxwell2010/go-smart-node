@@ -108,8 +108,8 @@ jobs:
           git diff --exit-code -- systemcontracts/artifacts
       - name: Test native ownership against actual SDK governance tally
         run: go test -mod=readonly -p 2 -count=1 -v -timeout 10m -tags sdk53 ./decimal/validator/governance |& tee validation-logs/native-governance-tally.log
-      - name: Test owned application ICS20 with test-only configuration isolation
-        run: go test -mod=readonly -p 2 -count=1 -v -timeout 10m -tags test -run '^TestOwnApplicationICS20TwoChains$' ./app |& tee validation-logs/ics20-unit.log
+      - name: Test owned ICS20 and the IBC client upgrade with a pending packet
+        run: go test -mod=readonly -p 2 -count=1 -v -timeout 10m -tags test -run '^TestOwnApplication(ICS20TwoChains|IBCClientUpgradePendingPacket)$' ./app |& tee validation-logs/ics20-unit.log
       - name: Build and execute memory-only family probe
         run: |
           go build -mod=readonly -p 2 -trimpath -o "$RUNNER_TEMP/family-check" ./cmd/family-check
