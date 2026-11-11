@@ -1004,8 +1004,8 @@
       "selectedRequireVersion": "v0.53.8",
       "replacement": "./third_party/cosmos-sdk",
       "manifest": "third_party/cosmos-sdk/UPSTREAM.json",
-      "patchLabel": "v0.53.8-mintcandy.1",
-      "scope": "Maintained armor import with strict legacy CRC compatibility; canonical SDK crypto/encryption/signature algorithms preserved. Full source inventory, ordinary crypto/keyring/format/App tests and source-bound snapshot evidence recorded; canonical advisory coverage review remains mandatory."
+      "patchLabel": "v0.53.8-mintcandy.2",
+      "scope": "Maintained armor import with strict legacy CRC compatibility; canonical SDK crypto/encryption/signature algorithms preserved. Mature staking completion retries failed pairs and trios atomically once per existing queue pass. Full source inventory, ordinary crypto/keyring/format/App tests and source-bound snapshot evidence recorded; canonical advisory coverage review remains mandatory."
     }
   ],
   "selectedModulesSourceRevision": "264303bd5ca8bd8107ba219c77b60c9c14818f1c",

@@ -40,14 +40,24 @@ func (k Keeper) BlockValidatorUpdates(ctx context.Context) ([]abci.ValidatorUpda
 		return nil, err
 	}
 
-	sdkCtx := sdk.UnwrapSDKContext(ctx)
-	// Remove all mature unbonding delegations from the ubd queue.
-	matureUnbonds, err := k.DequeueAllMatureUBDQueue(ctx, sdkCtx.BlockHeader().Time)
+	// Dequeue and requeue in the same cache. Each distinct pair or trio gets
+	// one attempt in the existing mature-queue pass. Retry rows do not add
+	// an extra scan or increase the number of outstanding distinct entries.
+	queueCtx, commitQueues := sdk.UnwrapSDKContext(ctx).CacheContext()
+	now := queueCtx.BlockHeader().Time
+	matureUnbonds, err := k.DequeueAllMatureUBDQueue(queueCtx, now)
 	if err != nil {
 		return nil, err
 	}
 
+	var retryUnbonds []types.DVPair
+	seenUnbonds := make(map[[2]string]struct{})
 	for _, dvPair := range matureUnbonds {
+		key := [2]string{dvPair.DelegatorAddress, dvPair.ValidatorAddress}
+		if _, seen := seenUnbonds[key]; seen {
+			continue
+		}
+		seenUnbonds[key] = struct{}{}
 		addr, err := k.validatorAddressCodec.StringToBytes(dvPair.ValidatorAddress)
 		if err != nil {
 			return nil, err
@@ -57,12 +67,20 @@ func (k Keeper) BlockValidatorUpdates(ctx context.Context) ([]abci.ValidatorUpda
 			return nil, err
 		}
 
-		balances, err := k.CompleteUnbonding(ctx, delegatorAddress, addr)
+		// Completion may delete indexes and pay earlier entries before a later
+		// payment fails. Discard all of that pair's writes on failure.
+		attempt, commit := queueCtx.CacheContext()
+		balances, err := k.CompleteUnbonding(attempt, delegatorAddress, addr)
+		if errors.Is(err, types.ErrNoUnbondingDelegation) {
+			continue // Stale reference to an already completed or canceled row.
+		}
 		if err != nil {
+			k.Logger(queueCtx).Error("mature unbonding will retry", "delegator", dvPair.DelegatorAddress, "validator", dvPair.ValidatorAddress, "error", err)
+			retryUnbonds = append(retryUnbonds, dvPair)
 			continue
 		}
 
-		sdkCtx.EventManager().EmitEvent(
+		attempt.EventManager().EmitEvent(
 			sdk.NewEvent(
 				types.EventTypeCompleteUnbonding,
 				sdk.NewAttribute(sdk.AttributeKeyAmount, balances.String()),
@@ -70,15 +88,27 @@ func (k Keeper) BlockValidatorUpdates(ctx context.Context) ([]abci.ValidatorUpda
 				sdk.NewAttribute(types.AttributeKeyDelegator, dvPair.DelegatorAddress),
 			),
 		)
+		commit()
+	}
+	if len(retryUnbonds) > 0 {
+		if err := k.SetUBDQueueTimeSlice(queueCtx, now, retryUnbonds); err != nil {
+			return nil, err
+		}
 	}
 
-	// Remove all mature redelegations from the red queue.
-	matureRedelegations, err := k.DequeueAllMatureRedelegationQueue(ctx, sdkCtx.BlockHeader().Time)
+	matureRedelegations, err := k.DequeueAllMatureRedelegationQueue(queueCtx, now)
 	if err != nil {
 		return nil, err
 	}
 
+	var retryRedelegations []types.DVVTriplet
+	seenRedelegations := make(map[[3]string]struct{})
 	for _, dvvTriplet := range matureRedelegations {
+		key := [3]string{dvvTriplet.DelegatorAddress, dvvTriplet.ValidatorSrcAddress, dvvTriplet.ValidatorDstAddress}
+		if _, seen := seenRedelegations[key]; seen {
+			continue
+		}
+		seenRedelegations[key] = struct{}{}
 		valSrcAddr, err := k.validatorAddressCodec.StringToBytes(dvvTriplet.ValidatorSrcAddress)
 		if err != nil {
 			return nil, err
@@ -92,17 +122,23 @@ func (k Keeper) BlockValidatorUpdates(ctx context.Context) ([]abci.ValidatorUpda
 			return nil, err
 		}
 
+		attempt, commit := queueCtx.CacheContext()
 		balances, err := k.CompleteRedelegation(
-			ctx,
+			attempt,
 			delegatorAddress,
 			valSrcAddr,
 			valDstAddr,
 		)
+		if errors.Is(err, types.ErrNoRedelegation) {
+			continue
+		}
 		if err != nil {
+			k.Logger(queueCtx).Error("mature redelegation will retry", "delegator", dvvTriplet.DelegatorAddress, "source", dvvTriplet.ValidatorSrcAddress, "destination", dvvTriplet.ValidatorDstAddress, "error", err)
+			retryRedelegations = append(retryRedelegations, dvvTriplet)
 			continue
 		}
 
-		sdkCtx.EventManager().EmitEvent(
+		attempt.EventManager().EmitEvent(
 			sdk.NewEvent(
 				types.EventTypeCompleteRedelegation,
 				sdk.NewAttribute(sdk.AttributeKeyAmount, balances.String()),
@@ -111,7 +147,14 @@ func (k Keeper) BlockValidatorUpdates(ctx context.Context) ([]abci.ValidatorUpda
 				sdk.NewAttribute(types.AttributeKeyDstValidator, dvvTriplet.ValidatorDstAddress),
 			),
 		)
+		commit()
 	}
+	if len(retryRedelegations) > 0 {
+		if err := k.SetRedelegationQueueTimeSlice(queueCtx, now, retryRedelegations); err != nil {
+			return nil, err
+		}
+	}
+	commitQueues()
 
 	return validatorUpdates, nil
 }

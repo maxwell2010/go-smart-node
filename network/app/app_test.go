@@ -224,4 +224,7 @@ func TestFreshOwnApplicationSignedNativeEVMTransfer(t *testing.T) {
 	t.Run("native_hook_gas_and_rollback", func(t *testing.T) {
 		checkNativeHookGas(t, a, ethKey, valSet, now)
 	})
+	t.Run("mature_sdk_unbond_retries_without_partial_payment", func(t *testing.T) {
+		checkMatureSDKUnbondRetry(t, a, sdk.AccAddress(from.Bytes()), valSet, now)
+	})
 }
