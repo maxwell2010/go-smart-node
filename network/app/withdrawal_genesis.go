@@ -243,8 +243,8 @@ func (app *App) initWithdrawalGenesis(ctx sdk.Context, req *abci.RequestInitChai
 	}
 	child, commit := ctx.CacheContext()
 	if profile.EnableNativeConsensus {
-		if max(req.InitialHeight, 1) != 1 || len(req.Validators) != 0 {
-			return nil, errors.New("native consensus requires fresh height-one genesis with application-derived validators")
+		if req.InitialHeight < 0 || len(req.Validators) != 0 {
+			return nil, errors.New("native consensus requires fresh genesis with application-derived validators")
 		}
 		child = child.WithValue(nativeConsensusInitKey{}, true)
 	}
@@ -253,7 +253,7 @@ func (app *App) initWithdrawalGenesis(ctx sdk.Context, req *abci.RequestInitChai
 	}
 	var response *abci.ResponseInitChain
 	if profile.EnableNativeConsensus {
-		response, err = app.initNativeConsensusModules(child, genesis, &validators, 1)
+		response, err = app.initNativeConsensusModules(child, genesis, &validators, max(req.InitialHeight, 1))
 	} else {
 		response, err = app.ModuleManager.InitGenesis(child, app.appCodec, genesis)
 	}

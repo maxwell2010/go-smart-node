@@ -123,7 +123,7 @@ func (app *App) verifyRestoredWithdrawalProfile(offer *withdrawalSnapshotOffer) 
 		if raw != nil {
 			return errors.New("restored withdrawal profile was not prepared before state sync")
 		}
-		return nil
+		return app.verifyNativeConsensusState(ctx, false)
 	}
 	expected, err := json.Marshal(app.withdrawals.profile)
 	if err != nil {
@@ -132,5 +132,5 @@ func (app *App) verifyRestoredWithdrawalProfile(offer *withdrawalSnapshotOffer) 
 	if !bytes.Equal(raw, expected) {
 		return errors.New("restored withdrawal profile differs from the configured withdrawal profile")
 	}
-	return app.verifyNativeConsensusState(ctx)
+	return app.verifyNativeConsensusState(ctx, app.withdrawals.profile.EnableNativeConsensus)
 }

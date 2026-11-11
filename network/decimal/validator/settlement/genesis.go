@@ -214,6 +214,9 @@ func (e *Executor) attestDELGenesis(ctx sdk.Context, validators []common.Address
 	if state.wrapped.Cmp(&total) != 0 {
 		return errors.New("DEL genesis Gateway WDEL custody differs from attested active positions")
 	}
+	if len(positions) != 0 && (state.supply.Cmp(&total) != 0 || state.backing.Cmp(&total) != 0) {
+		return errors.New("native consensus genesis requires exact WDEL supply and DEL backing for its active positions")
+	}
 	for _, validator := range validators {
 		if err := e.verifyUnpenalizedValidator(ctx, validator); err != nil {
 			return err

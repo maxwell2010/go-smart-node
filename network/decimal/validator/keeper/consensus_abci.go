@@ -156,6 +156,12 @@ func (k *StateKeeper) VerifyABCIConsensusStartup(ctx sdk.Context, committedHeigh
 	return nil
 }
 
+// HasABCIConsensusAnchor lets startup reject a consensus/profile mismatch
+// before making transaction hooks available.
+func (k *StateKeeper) HasABCIConsensusAnchor(ctx sdk.Context) (bool, error) {
+	return k.service.OpenKVStore(ctx).Has([]byte{abciConsensusAnchorKey})
+}
+
 // ScheduledABCIEndBlock uses the actual SDK53 FinalizeBlock context. At H, the
 // prior commitment authenticates H and NextValidatorsHash authenticates H+1.
 // DecidedLastCommit contains H-1 address/power metadata, not H or signatures.

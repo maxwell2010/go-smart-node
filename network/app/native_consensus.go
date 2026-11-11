@@ -152,7 +152,9 @@ func (app *App) initNativeConsensusModules(ctx sdk.Context, genesis GenesisState
 	if err != nil {
 		return nil, err
 	}
-	updates, err := app.NativeValidatorKeeper.BootstrapStakeABCIConsensus(ctx, initialHeight, eligible)
+	// SDK 0.53 supplies InitialHeight itself to InitChain for a non-one
+	// initial height. The schedule is seeded before that first block.
+	updates, err := app.NativeValidatorKeeper.BootstrapStakeABCIConsensus(ctx.WithBlockHeight(initialHeight-1), initialHeight, eligible)
 	if err != nil {
 		return nil, err
 	}
@@ -199,8 +201,15 @@ func (c *withdrawalController) projectAndCheckConsensus(ctx sdk.Context, project
 	return nil
 }
 
-func (app *App) verifyNativeConsensusState(ctx sdk.Context) error {
-	if !app.usesNativeConsensus(ctx) || ctx.BlockHeight() == 0 {
+func (app *App) verifyNativeConsensusState(ctx sdk.Context, enabled bool) error {
+	anchor, err := app.NativeValidatorKeeper.HasABCIConsensusAnchor(ctx)
+	if err != nil {
+		return err
+	}
+	if anchor != enabled {
+		return errors.New("stored native consensus anchor differs from the authenticated profile")
+	}
+	if !enabled {
 		return nil
 	}
 	return app.NativeValidatorKeeper.VerifyABCIConsensusStartup(ctx, ctx.BlockHeight())

@@ -72,7 +72,7 @@ func (app *App) LoadWithdrawalSettlement(ctx sdk.Context) error {
 	}
 	raw := ctx.KVStore(app.keys[validatortypes.StoreKey]).Get([]byte{WithdrawalProfileKey})
 	if raw == nil && app.withdrawals == nil {
-		return nil
+		return app.verifyNativeConsensusState(ctx, false)
 	}
 	var profile WithdrawalProfile
 	if len(raw) > 1024 || json.Unmarshal(raw, &profile) != nil {
@@ -82,18 +82,21 @@ func (app *App) LoadWithdrawalSettlement(ctx sdk.Context) error {
 	if err != nil || !bytes.Equal(canonical, raw) {
 		return errors.New("noncanonical stored withdrawal profile")
 	}
+	if err := app.verifyNativeConsensusState(ctx, profile.EnableNativeConsensus); err != nil {
+		return err
+	}
 	if app.withdrawals != nil {
 		if app.withdrawals.profile != profile {
 			return errors.New("withdrawal profile changed without a coordinated restart")
 		}
-		return app.verifyNativeConsensusState(ctx)
+		return nil
 	}
 	controller, err := app.newWithdrawalController(profile)
 	if err != nil {
 		return err
 	}
 	app.installWithdrawalController(controller)
-	return app.verifyNativeConsensusState(ctx)
+	return nil
 }
 
 func (app *App) newWithdrawalController(profile WithdrawalProfile) (*withdrawalController, error) {
