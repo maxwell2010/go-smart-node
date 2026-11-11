@@ -21,7 +21,6 @@ import (
 	"github.com/ethereum/go-ethereum/core/vm"
 	"github.com/maxwell2010/go-smart-node/network/decimal/nft/evmview"
 	validatortypes "github.com/maxwell2010/go-smart-node/network/decimal/validator/types"
-	"github.com/maxwell2010/go-smart-node/network/identity"
 	contracts "github.com/maxwell2010/go-smart-node/network/systemcontracts"
 )
 
