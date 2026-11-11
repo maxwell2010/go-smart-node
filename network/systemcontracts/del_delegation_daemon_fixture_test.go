@@ -13,6 +13,7 @@ import (
 	cmttypes "github.com/cometbft/cometbft/types"
 	"github.com/cosmos/cosmos-sdk/codec/address"
 	sdk "github.com/cosmos/cosmos-sdk/types"
+	"github.com/ethereum/go-ethereum/accounts/abi"
 	"github.com/ethereum/go-ethereum/common"
 	ethtypes "github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/crypto"
@@ -26,7 +27,7 @@ const delDelegationDaemonFixtureEnv = "MCND_DEL_DELEGATION_FIXTURE_DIR"
 
 // Export the deployed, unstaked Gateway before the signed fixture delegates.
 // The live-process harness receives signed, chain-bound test transactions only.
-func exportDELDelegationDaemonFixture(t *testing.T, e isolatedBackendEnv, profile ownedapp.WithdrawalProfile, validator nativevalidator.Validator) {
+func exportDELDelegationDaemonFixture(t *testing.T, e isolatedBackendEnv, profile ownedapp.WithdrawalProfile, validator nativevalidator.Validator, gateway abi.ABI) {
 	t.Helper()
 	dir := os.Getenv(delDelegationDaemonFixtureEnv)
 	if dir == "" {
@@ -74,7 +75,7 @@ func exportDELDelegationDaemonFixture(t *testing.T, e isolatedBackendEnv, profil
 	write("genesis.json", body)
 	e.saveGenesisKey(dir)
 
-	gateway, wrapped := e.load("MintCandyIsolatedDelegation"), e.load("MintCandyWrappedDEL")
+	wrapped := e.load("MintCandyWrappedDEL")
 	operator, err := address.NewBech32Codec(identity.Bech32PrefixValAddr).StringToBytes(validator.OperatorAddress)
 	require.NoError(t, err)
 	validatorAddress := common.BytesToAddress(operator)
@@ -87,7 +88,7 @@ func exportDELDelegationDaemonFixture(t *testing.T, e isolatedBackendEnv, profil
 	signer := ethtypes.NewEIP155Signer(big.NewInt(990001))
 	pack := func(method string, values ...interface{}) []byte {
 		t.Helper()
-		calldata, err := gateway.ABI.Pack(method, values...)
+		calldata, err := gateway.Pack(method, values...)
 		require.NoError(t, err)
 		return calldata
 	}

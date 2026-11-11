@@ -84,7 +84,7 @@ func runSharedWithdrawalDEL(t *testing.T, e isolatedBackendEnv, profile ownedapp
 	gov(gateway, target, "setFreezeTime", big.NewInt(20), new(big.Int))
 	v, err := validatortypes.NewValidator(operator, beneficiary, &ed25519.PubKey{Key: key}, validatortypes.Description{Moniker: "shared-withdrawal"}, sdkmath.LegacyZeroDec())
 	require.NoError(t, err)
-	exportDELDelegationDaemonFixture(t, e, profile, v)
+	exportDELDelegationDaemonFixture(t, e, profile, v, gateway.ABI)
 
 	pack := func(method string, args ...interface{}) []byte {
 		t.Helper()
