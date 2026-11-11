@@ -138,7 +138,7 @@ func (app *App) newWithdrawalController(profile WithdrawalProfile) (*withdrawalC
 	}
 	projector, err := withdrawalassets.New(reserve, app.NativeNFTKeeper, reader, app.NativeValidatorKeeper, nftreceipts.Limits{
 		MaxLogs: withdrawalMaxLogs, MaxBytes: withdrawalLogBytes, MaxAssets: 1, MaxIDs: 1, MaxUnits: 1,
-	})
+	}, profile.EnableNFTDelegation)
 	if err != nil {
 		return nil, err
 	}
@@ -227,7 +227,11 @@ func (c *withdrawalController) PostTxProcessing(ctx sdk.Context, sender common.A
 			}
 			return c.projectSignedNFT(ctx, msg, receipt)
 		}
-		if err := c.checkNFTAdmission(ctx, msg, receipt.Logs, sender == msg.From); err != nil {
+		var signed *ethtypes.Receipt
+		if sender == msg.From {
+			signed = receipt
+		}
+		if err := c.checkNFTAdmission(ctx, msg, receipt.Logs, signed); err != nil {
 			return err
 		}
 		return c.checkColdAdmission(managed)
@@ -285,7 +289,7 @@ type automaticWithdrawalKey struct{}
 func (c *withdrawalController) guardInternalCommit(ctx sdk.Context, msg core.Message, logs []*ethtypes.Log) error {
 	managed, completion := c.withdrawalActivity(ctx, msg, logs)
 	if !completion {
-		if err := c.checkNFTAdmission(ctx, msg, logs, false); err != nil {
+		if err := c.checkNFTAdmission(ctx, msg, logs, nil); err != nil {
 			return err
 		}
 		return c.checkColdAdmission(managed)

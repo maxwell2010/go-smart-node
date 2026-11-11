@@ -29,9 +29,10 @@ type Projector struct {
 	reader   *nftview.Reader
 	bindings *validatorkeeper.StateKeeper
 	decoder  *nftreceipts.Decoder
+	wallet   *nftreceipts.Decoder
 }
 
-func New(reserve *coinkeeper.ReserveHook, nft *nftkeeper.StateKeeper, reader *nftview.Reader, bindings *validatorkeeper.StateKeeper, limits nftreceipts.Limits) (*Projector, error) {
+func New(reserve *coinkeeper.ReserveHook, nft *nftkeeper.StateKeeper, reader *nftview.Reader, bindings *validatorkeeper.StateKeeper, limits nftreceipts.Limits, enableWallet bool) (*Projector, error) {
 	if reserve == nil || nft == nil || reader == nil || bindings == nil {
 		return nil, errors.New("withdrawal projection requires native reserve, NFT and binding keepers and the authenticated EVM reader")
 	}
@@ -47,7 +48,52 @@ func New(reserve *coinkeeper.ReserveHook, nft *nftkeeper.StateKeeper, reader *nf
 	if err != nil {
 		return nil, err
 	}
-	return &Projector{reserve: reserve, nft: nft, reader: reader, bindings: bindings, decoder: decoder}, nil
+	p := &Projector{reserve: reserve, nft: nft, reader: reader, bindings: bindings, decoder: decoder}
+	if enableWallet {
+		p.wallet, err = nftreceipts.NewDecoder(reader, contract721, contract1155, nftreceipts.Limits{
+			MaxLogs: limits.MaxLogs, MaxBytes: limits.MaxBytes, MaxAssets: 32, MaxIDs: 32, MaxUnits: nfttypes.MaxIsolatedOriginUnits,
+		})
+		if err != nil {
+			return nil, err
+		}
+	}
+	return p, nil
+}
+
+// ProjectWalletTransfer uses the same authenticated ownership planner as
+// settlement, without allowing an ordinary transfer to affect escrow.
+func (p *Projector) ProjectWalletTransfer(ctx sdk.Context, receipt *ethtypes.Receipt, collection, gateway, vault common.Address) error {
+	if p.wallet == nil {
+		return errors.New("wallet NFT transfer projection is disabled")
+	}
+	// Each supported direct transfer emits one collection log, including an
+	// ERC1155 batch. Extra logs could include changes from a receiver callback.
+	if receipt == nil || len(receipt.Logs) != 1 || receipt.Logs[0] == nil || receipt.Logs[0].Address != collection {
+		return errors.New("wallet NFT transfer requires one direct collection log")
+	}
+	capture, err := validatorreceipts.NewStakeCaptureSession(p.bindings, stakeSource{reader: p.reader})
+	if err != nil {
+		return err
+	}
+	planner, err := nftreceipts.NewPlanner(p.wallet, p.nft, p.reader, capture)
+	if err != nil {
+		return err
+	}
+	plan, err := planner.Plan(ctx, nftreceipts.Execution{EntryPoint: nftreceipts.EntryPointSignedEthereum, Receipt: receipt})
+	if err != nil {
+		return err
+	}
+	movements := plan.Movements()
+	if len(movements) == 0 {
+		return errors.New("wallet NFT transfer must identify the authenticated movement")
+	}
+	for _, move := range movements {
+		transfer := move.Transfer
+		if transfer.Asset.Contract != collection || transfer.From == gateway || transfer.To == gateway || transfer.From == vault || transfer.To == vault {
+			return errors.New("wallet NFT transfer cannot move Gateway or vault custody or another collection")
+		}
+	}
+	return planner.Apply(ctx, plan)
 }
 
 // Project applies only the asset effects of one already authenticated Gateway

@@ -16,8 +16,15 @@ import (
 )
 
 var (
-	nftApprovalSelector = crypto.Keccak256([]byte("setApprovalForAll(address,bool)"))[:4]
-	nftApprovalTopic    = crypto.Keccak256Hash([]byte("ApprovalForAll(address,address,bool)"))
+	nftApprovalSelector  = crypto.Keccak256([]byte("setApprovalForAll(address,bool)"))[:4]
+	nftApprovalTopic     = crypto.Keccak256Hash([]byte("ApprovalForAll(address,address,bool)"))
+	nftTransferSelectors = [][]byte{
+		crypto.Keccak256([]byte("transferFrom(address,address,uint256)"))[:4],
+		crypto.Keccak256([]byte("safeTransferFrom(address,address,uint256)"))[:4],
+		crypto.Keccak256([]byte("safeTransferFrom(address,address,uint256,bytes)"))[:4],
+		crypto.Keccak256([]byte("safeTransferFrom(address,address,uint256,uint256,bytes)"))[:4],
+		crypto.Keccak256([]byte("safeBatchTransferFrom(address,address,uint256[],uint256[],bytes)"))[:4],
+	}
 )
 
 func (c *withdrawalController) isNFTStakeCall(msg core.Message) bool {
@@ -93,7 +100,7 @@ func (c *withdrawalController) projectSignedNFT(ctx sdk.Context, msg core.Messag
 // checkNFTAdmission prevents an unrelated EVM operation from changing a known
 // origin or the vault without its native projection. Direct ERC1155/721
 // operator approvals carry no ownership or reserve delta.
-func (c *withdrawalController) checkNFTAdmission(ctx sdk.Context, msg core.Message, logs []*ethtypes.Log, signed bool) error {
+func (c *withdrawalController) checkNFTAdmission(ctx sdk.Context, msg core.Message, logs []*ethtypes.Log, signed *ethtypes.Receipt) error {
 	if !c.profile.EnableNFTDelegation {
 		return nil
 	}
@@ -103,8 +110,13 @@ func (c *withdrawalController) checkNFTAdmission(ctx sdk.Context, msg core.Messa
 			return err
 		}
 		if managed {
-			if signed && isDirectNFTApproval(msg, logs) {
-				return nil
+			if signed != nil {
+				if isDirectNFTApproval(msg, logs) {
+					return nil
+				}
+				if isDirectNFTTransfer(msg) {
+					return c.assets.ProjectWalletTransfer(ctx, signed, *msg.To, c.profile.Gateway, c.profile.PositionVault)
+				}
 			}
 			return errors.New("NFT operation requires a supported native projection")
 		}
@@ -124,6 +136,18 @@ func (c *withdrawalController) checkNFTAdmission(ctx sdk.Context, msg core.Messa
 		}
 	}
 	return nil
+}
+
+func isDirectNFTTransfer(msg core.Message) bool {
+	if msg.Value == nil || msg.Value.Sign() != 0 || len(msg.SetCodeAuthorizations) != 0 || len(msg.Data) < 4 {
+		return false
+	}
+	for _, selector := range nftTransferSelectors {
+		if bytes.Equal(msg.Data[:4], selector) {
+			return true
+		}
+	}
+	return false
 }
 
 func (c *withdrawalController) isManagedNFT(ctx sdk.Context, addr common.Address) (bool, error) {
