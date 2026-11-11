@@ -640,7 +640,15 @@ func (k Keeper) CheckDelegations(ctx sdk.Context, validator types.Validator) {
 		return baseAmounts[i].BaseAmount.GT(baseAmounts[j].BaseAmount)
 	})
 
+	atomicEnqueue := k.reliabilityFixesEnabled(ctx)
 	for i := int(k.MaxDelegations(ctx)); i < len(baseAmounts); i++ {
+		// A failed EVM enqueue must leave the delegation eligible for the next
+		// cap check. Keep the historical behavior below the activation height.
+		workCtx := ctx
+		var commit func()
+		if atomicEnqueue {
+			workCtx, commit = ctx.CacheContext()
+		}
 		delegation := baseAmounts[i].Delegation
 		stake := delegation.Stake
 		delegator := delegation.GetDelegator()
@@ -679,19 +687,19 @@ func (k Keeper) CheckDelegations(ctx sdk.Context, validator types.Validator) {
 		//	}
 		//}
 
-		remainStake, err := k.CalculateRemainStake(ctx, delegation.Stake, delegation.Stake)
+		remainStake, err := k.CalculateRemainStake(workCtx, delegation.Stake, delegation.Stake)
 		if err != nil {
 			panic(err)
 		}
 
-		err = k.Unbond(ctx, delegator, validator.GetOperator(), delegation.Stake, remainStake)
+		err = k.Unbond(workCtx, delegator, validator.GetOperator(), delegation.Stake, remainStake)
 		if err != nil {
 			panic(err)
 		}
 
-		k.SubCustomCoinStaked(ctx, delegation.Stake.GetStake())
+		k.SubCustomCoinStaked(workCtx, delegation.Stake.GetStake())
 
-		err = events.EmitTypedEvent(ctx, &types.EventForceUndelegate{
+		err = events.EmitTypedEvent(workCtx, &types.EventForceUndelegate{
 			Delegator: delegation.Delegator,
 			Validator: delegation.Validator,
 			Stake:     stake,
@@ -700,12 +708,17 @@ func (k Keeper) CheckDelegations(ctx sdk.Context, validator types.Validator) {
 			panic(errors.Internal.Wrapf("err: %s", err.Error()))
 		}
 
-		err = k.ExecuteAutoUnbondEnqueue(ctx, delegation)
+		err = k.ExecuteAutoUnbondEnqueue(workCtx, delegation)
 		if err != nil {
 			ctx.Logger().Error("force-withdraw: enqueue failed",
 				"validator", delegation.Validator,
 				"delegator", delegation.Delegator,
-				"err", err)
+				"err", err,
+				"retry_retained", atomicEnqueue)
+			continue
+		}
+		if commit != nil {
+			commit()
 		}
 	}
 }

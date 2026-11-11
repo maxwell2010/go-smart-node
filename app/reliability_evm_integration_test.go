@@ -11,6 +11,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/cosmos/cosmos-sdk/crypto/keys/ed25519"
 	sdk "github.com/cosmos/cosmos-sdk/types"
 	"github.com/cosmos/cosmos-sdk/types/module"
 	authtypes "github.com/cosmos/cosmos-sdk/x/auth/types"
@@ -251,6 +252,129 @@ func TestIntegrationAutoUnbondRealEVM(t *testing.T) {
 			dsc.ValidatorKeeper.ProcessAutoUnbond(ctx)
 			require.Equal(t, int64(3), reliabilitySlot(dsc, ctx, target, 0), "successful job must not enqueue twice")
 			t.Log("real EVM revert on second enqueue: atomic rollback, retained marker, 3 successful calls on retry, no second enqueue verified")
+		})
+	}
+}
+
+func TestIntegrationForceUndelegateRetryRealEVM(t *testing.T) {
+	for _, enabled := range []bool{false, true} {
+		name := "historical"
+		if enabled {
+			name = "activated"
+		}
+		t.Run(name, func(t *testing.T) {
+			reliabilityActivate(t, enabled)
+			dsc, ctx, _, db := reliabilityNew(t)
+			defer db.Close()
+			target, fixture := reliabilityDeploy(t, dsc, ctx, "AutoUnbondFixture")
+			master, _ := reliabilityDeploy(t, dsc, ctx, "ValidatorFixture")
+			reliabilityRegistry(t, dsc, ctx, target, master)
+
+			k := dsc.ValidatorKeeper
+			params := k.GetParams(ctx)
+			params.MaxDelegations = 1
+			k.SetParams(ctx, params)
+			base, err := dsc.CoinKeeper.GetCoin(ctx, cmdcfg.BaseDenom)
+			require.NoError(t, err)
+			base.DRC20Contract = common.HexToAddress("0x4444").Hex()
+			dsc.CoinKeeper.SetCoin(ctx, base)
+
+			val := sdk.ValAddress(bytes.Repeat([]byte{0x51}, 20))
+			retained := sdk.AccAddress(bytes.Repeat([]byte{0x52}, 20))
+			failed := sdk.AccAddress(bytes.Repeat([]byte{0x53}, 20))
+			independent := sdk.AccAddress(bytes.Repeat([]byte{0x54}, 20))
+			validator, err := validatortypes.NewValidator(val, retained, ed25519.GenPrivKey().PubKey(), validatortypes.Description{}, sdk.ZeroDec())
+			require.NoError(t, err)
+			validator.Online = true
+			validator.Stake = 14
+			k.CreateValidator(ctx, validator)
+
+			volume := validatorkeeper.TokensFromConsensusPower(100)
+			const denom = "retrycoin"
+			dsc.CoinKeeper.SetCoin(ctx, cointypes.Coin{
+				Denom: denom, Title: "Retry coin", Creator: retained.String(), CRR: 100,
+				Volume: volume, Reserve: volume, LimitVolume: volume, MinVolume: sdk.ZeroInt(),
+				DRC20Contract: common.HexToAddress("0x5555").Hex(),
+			})
+			failedAmount := validatorkeeper.TokensFromConsensusPower(4)
+			failedStake := validatortypes.NewStakeCoin(sdk.NewCoin(denom, failedAmount))
+			failedStake.Holds = []*validatortypes.StakeHold{
+				{Amount: sdk.NewInt(10), HoldEndTime: 1900000000},
+				{Amount: sdk.NewInt(20), HoldEndTime: 2000000000},
+			}
+			k.SetCustomCoinStaked(ctx, denom, failedAmount)
+			for _, entry := range []struct {
+				delegator sdk.AccAddress
+				stake     validatortypes.Stake
+			}{
+				{retained, validatortypes.NewStakeCoin(sdk.NewCoin(base.Denom, validatorkeeper.TokensFromConsensusPower(8)))},
+				{failed, failedStake},
+				{independent, validatortypes.NewStakeCoin(sdk.NewCoin(base.Denom, validatorkeeper.TokensFromConsensusPower(2)))},
+			} {
+				k.SetDelegation(ctx, validatortypes.NewDelegation(entry.delegator, val, entry.stake))
+				k.IncrementDelegationsCount(ctx, val)
+			}
+
+			setFailHold := func(ctx sdk.Context, timestamp int64) {
+				t.Helper()
+				_, err := dsc.EvmKeeper.CallEVM(ctx, fixture, common.Address{}, target, true, "setFailHold", big.NewInt(timestamp))
+				require.NoError(t, err)
+			}
+			assertState := func(ctx sdk.Context, wantCount uint32, wantPower, wantQueue int64, wantCustom sdk.Int, wantEvictions, wantCustomEvents int) {
+				t.Helper()
+				require.Equal(t, wantCount, k.GetDelegationsCount(ctx, val))
+				require.Len(t, k.GetValidatorDelegations(ctx, val), int(wantCount))
+				require.True(t, k.GetCustomCoinStaked(ctx, denom).Equal(wantCustom))
+				require.Equal(t, wantQueue, reliabilitySlot(dsc, ctx, target, 0))
+				rs, err := k.GetValidatorRS(ctx, val)
+				require.NoError(t, err)
+				require.Equal(t, wantPower, rs.Stake)
+				evictions, customUpdates := 0, 0
+				for _, event := range ctx.EventManager().Events() {
+					switch event.Type {
+					case "decimal.validator.v1.EventForceUndelegate":
+						evictions++
+					case "decimal.validator.v1.EventUpdateCoinsStaked":
+						customUpdates++
+					}
+				}
+				require.Equal(t, wantEvictions, evictions)
+				require.Equal(t, wantCustomEvents, customUpdates)
+			}
+			checkCap := func(ctx sdk.Context) {
+				t.Helper()
+				current, found := k.GetValidator(ctx, val)
+				require.True(t, found)
+				k.CheckDelegations(ctx, current)
+			}
+
+			setFailHold(ctx, 2000000000)
+			ctx = ctx.WithEventManager(sdk.NewEventManager())
+			checkCap(ctx)
+			_, found := k.GetDelegation(ctx, retained, val, base.Denom)
+			require.True(t, found)
+			_, found = k.GetDelegation(ctx, independent, val, base.Denom)
+			require.False(t, found, "a later eligible delegation should still enqueue")
+			remaining, found := k.GetDelegation(ctx, failed, val, failedStake.ID)
+			if !enabled {
+				require.False(t, found, "historical cap check removed the failed candidate")
+				assertState(ctx, 1, 8, 2, sdk.ZeroInt(), 2, 1)
+				t.Log("historical cap check removed the delegation and left one of its EVM enqueues committed")
+				return
+			}
+			require.True(t, found, "failed candidate must remain eligible for retry")
+			require.Equal(t, failedStake, remaining.Stake)
+			assertState(ctx, 2, 12, 1, failedAmount, 1, 0)
+
+			setFailHold(ctx, 0)
+			next := ctx.WithBlockHeight(ctx.BlockHeight() + 1).WithEventManager(sdk.NewEventManager())
+			checkCap(next)
+			_, found = k.GetDelegation(next, failed, val, failedStake.ID)
+			require.False(t, found)
+			assertState(next, 1, 8, 4, sdk.ZeroInt(), 1, 1)
+			checkCap(next.WithEventManager(sdk.NewEventManager()))
+			require.Equal(t, int64(4), reliabilitySlot(dsc, next, target, 0), "successful eviction must not enqueue again")
+			t.Log("real EVM second-hold failure rolled back only that eviction; its three enqueues committed once on retry")
 		})
 	}
 }
