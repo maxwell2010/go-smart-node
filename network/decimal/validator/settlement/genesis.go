@@ -18,6 +18,7 @@ type GenesisLimits struct {
 	MaxRows       uint32
 	SDKGas        uint64
 	DELValidators []common.Address
+	NFTOrigins    []NFTGenesisOrigin
 }
 
 // AttestGenesis verifies a bounded settlement snapshot against the entire
@@ -31,7 +32,8 @@ type GenesisLimits struct {
 // each active NFT row. It runs in a discarded cache under the same work meter.
 func (e *Executor) AttestGenesis(ctx sdk.Context, rows []validatortypes.EVMFrozenBinding, limits GenesisLimits, attestNFT func(sdk.Context, validatortypes.EVMFrozenBinding) error) (err error) {
 	if e == nil || e.evm == nil || limits.MaxRows == 0 || limits.MaxRows > validatortypes.MaxBindingPageSize || limits.SDKGas == 0 ||
-		len(rows) > int(limits.MaxRows) || len(limits.DELValidators) > int(limits.MaxRows) || (len(limits.DELValidators) != 0 && len(rows) != 0) {
+		len(rows) > int(limits.MaxRows) || len(limits.DELValidators) > int(limits.MaxRows) || len(limits.NFTOrigins) > int(limits.MaxRows) ||
+		(len(limits.DELValidators) != 0 && len(rows) != 0) || (len(limits.NFTOrigins) != 0 && len(limits.DELValidators) == 0) {
 		return errors.New("invalid Gateway genesis attestation limits or row count")
 	}
 	if ctx.BlockHeight() < 0 || ctx.BlockTime().Unix() <= 0 || len(ctx.BlockHeader().ProposerAddress) != common.AddressLength {
@@ -129,7 +131,13 @@ func (e *Executor) AttestGenesis(ctx sdk.Context, rows []validatortypes.EVMFroze
 		}
 	}
 	if len(limits.DELValidators) != 0 {
-		return e.attestEmptyDELGenesis(child, limits.DELValidators)
+		if err := e.attestEmptyDELGenesis(child, limits.DELValidators); err != nil {
+			return err
+		}
+		if len(limits.NFTOrigins) != 0 {
+			return e.attestFreshNFTGenesis(child, limits.NFTOrigins)
+		}
+		return nil
 	}
 	return e.verifyGenesisBacking(child, claims)
 }

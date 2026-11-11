@@ -9,11 +9,13 @@ import (
 
 	abci "github.com/cometbft/cometbft/abci/types"
 	cryptoenc "github.com/cometbft/cometbft/crypto/encoding"
+	"github.com/cosmos/cosmos-sdk/codec/address"
 	sdk "github.com/cosmos/cosmos-sdk/types"
 	"github.com/ethereum/go-ethereum/common"
 	nfttypes "github.com/maxwell2010/go-smart-node/network/decimal/nft/types"
 	"github.com/maxwell2010/go-smart-node/network/decimal/validator/settlement"
 	validatortypes "github.com/maxwell2010/go-smart-node/network/decimal/validator/types"
+	"github.com/maxwell2010/go-smart-node/network/identity"
 )
 
 const (
@@ -45,6 +47,9 @@ func parseWithdrawalGenesisProfile(raw json.RawMessage) (*WithdrawalProfile, err
 	if profile.EnableDELHold && !profile.EnableDELDelegation {
 		return nil, errors.New("DEL hold genesis requires DEL delegation admission")
 	}
+	if profile.EnableNFTDelegation && !profile.EnableDELDelegation {
+		return nil, errors.New("NFT delegation genesis requires the fresh DEL delegation profile")
+	}
 	seen := make(map[common.Address]bool)
 	for _, addr := range []common.Address{profile.Registry, profile.Gateway, profile.Library, profile.NFTCenter,
 		profile.PositionVault, profile.MasterValidator, profile.WrappedDEL} {
@@ -72,9 +77,15 @@ func validateWithdrawalGenesisSnapshot(profile WithdrawalProfile, nft *nfttypes.
 		}
 	}
 	if profile.EnableDELDelegation {
-		if len(validators.Validators) == 0 || len(validators.EVMFrozenBindings) != 0 || len(validators.Undelegations) != 0 ||
-			len(nft.Collections) != 0 || len(nft.ExternalBindings) != 0 || len(nft.IsolatedVaults) != 0 || len(nft.IsolatedPositions) != 0 {
+		if len(validators.Validators) == 0 || len(validators.EVMFrozenBindings) != 0 || len(validators.Undelegations) != 0 {
 			return errors.New("DEL delegation genesis requires declared source validators and empty native positions and queues")
+		}
+		if profile.EnableNFTDelegation {
+			_, err := freshNFTGenesisOrigins(profile, nft)
+			return err
+		}
+		if len(nft.Collections) != 0 || len(nft.ExternalBindings) != 0 || len(nft.IsolatedVaults) != 0 || len(nft.IsolatedPositions) != 0 {
+			return errors.New("DEL-only genesis requires empty native NFT metadata")
 		}
 		return nil
 	}
@@ -121,6 +132,68 @@ func validateWithdrawalGenesisSnapshot(profile WithdrawalProfile, nft *nfttypes.
 		return errors.New("withdrawal genesis is missing native NFT token metadata")
 	}
 	return nil
+}
+
+func freshNFTGenesisOrigins(profile WithdrawalProfile, nft *nfttypes.GenesisState) ([]settlement.NFTGenesisOrigin, error) {
+	if len(nft.IsolatedPositions) != 0 || len(nft.IsolatedVaults) != 1 || len(nft.Collections) < 2 ||
+		len(nft.ExternalBindings) == 0 || len(nft.ExternalBindings) > maxWithdrawalGenesisRows || len(nft.Collections) > len(nft.ExternalBindings)+1 {
+		return nil, errors.New("NFT delegation genesis requires bounded origins and one empty isolated vault")
+	}
+	vault := nft.IsolatedVaults[0]
+	if common.BytesToAddress(vault.Vault) != profile.PositionVault || common.BytesToHash(vault.NextPositionID) != common.BytesToHash([]byte{1}) {
+		return nil, errors.New("NFT delegation genesis has a different vault or an advanced cursor")
+	}
+	bindings := make(map[string]nfttypes.ExternalNFTBinding, len(nft.ExternalBindings))
+	for _, binding := range nft.ExternalBindings {
+		bindings[binding.NativeTokenID] = binding
+	}
+	ownerCodec := address.NewBech32Codec(identity.Bech32PrefixAccAddr)
+	origins := make([]settlement.NFTGenesisOrigin, 0, len(bindings))
+	for _, collection := range nft.Collections {
+		contract := common.HexToAddress(collection.AddressDRC)
+		if contract == profile.PositionVault {
+			if collection.TypeNft != nfttypes.NftType_NFT721 || collection.ReserveLess || len(collection.Tokens) != 0 || collection.Supply != 0 {
+				return nil, errors.New("NFT delegation genesis receipt collection must be empty")
+			}
+			continue
+		}
+		if contract == (common.Address{}) || collection.TypeNft != nfttypes.NftType_NFT1155 || collection.ReserveLess || len(collection.Tokens) == 0 {
+			return nil, errors.New("NFT delegation genesis origins must be bound reserve ERC1155 collections")
+		}
+		for _, token := range collection.Tokens {
+			binding, found := bindings[token.ID]
+			if !found || !bytes.Equal(binding.Contract, contract[:]) || token.IsolatedReceipt || token.ReserveLess ||
+				token.Burnt != 0 || token.Minted == 0 || int(token.Minted) != len(token.SubTokens) ||
+				token.Reserve.Denom != identity.BaseDenom || !token.Reserve.IsPositive() {
+				return nil, errors.New("NFT delegation genesis origin token differs from its fresh backed native binding")
+			}
+			delete(bindings, token.ID)
+			origin := settlement.NFTGenesisOrigin{Contract: contract, TokenID: common.BytesToHash(binding.TokenID), Supply: token.Minted, UnitReserve: token.Reserve.Amount}
+			ownerIndexes := make(map[common.Address]int)
+			for _, unit := range token.SubTokens {
+				if unit.Reserve != nil && !unit.Reserve.IsEqual(token.Reserve) {
+					return nil, errors.New("NFT delegation genesis origin units require one exact DEL rate")
+				}
+				owner, err := ownerCodec.StringToBytes(unit.Owner)
+				if err != nil || len(owner) != common.AddressLength {
+					return nil, errors.New("invalid NFT delegation genesis origin owner")
+				}
+				addr := common.BytesToAddress(owner)
+				index, found := ownerIndexes[addr]
+				if !found {
+					index = len(origin.Owners)
+					ownerIndexes[addr] = index
+					origin.Owners = append(origin.Owners, settlement.NFTGenesisOwner{Address: addr})
+				}
+				origin.Owners[index].Units++
+			}
+			origins = append(origins, origin)
+		}
+	}
+	if len(bindings) != 0 {
+		return nil, errors.New("NFT delegation genesis contains an untracked external binding")
+	}
+	return origins, nil
 }
 
 func (app *App) initWithdrawalGenesis(ctx sdk.Context, req *abci.RequestInitChain, genesis GenesisState, raw json.RawMessage) (*abci.ResponseInitChain, error) {
@@ -198,6 +271,16 @@ func (app *App) initWithdrawalGenesis(ctx sdk.Context, req *abci.RequestInitChai
 				return nil, errors.New("invalid DEL genesis source validator address")
 			}
 			limits.DELValidators = append(limits.DELValidators, common.BytesToAddress(operator))
+		}
+	}
+	if profile.EnableNFTDelegation {
+		var nft nfttypes.GenesisState
+		if err := app.appCodec.UnmarshalJSON(genesis[nfttypes.ModuleName], &nft); err != nil {
+			return nil, err
+		}
+		limits.NFTOrigins, err = freshNFTGenesisOrigins(*profile, &nft)
+		if err != nil {
+			return nil, err
 		}
 	}
 	if err := controller.executor.AttestGenesis(read, validators.EVMFrozenBindings, limits, controller.assets.AttestGenesisNFT); err != nil {

@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"errors"
 	"math/big"
+	"time"
 
 	sdkmath "cosmossdk.io/math"
 	sdk "github.com/cosmos/cosmos-sdk/types"
@@ -24,6 +25,14 @@ type NFTIsolation struct {
 	StakeID            common.Hash
 	OriginSupplyAfter  uint32
 	OriginReserveAfter sdkmath.Int
+}
+
+type NFTWithdrawal struct {
+	Position    evmview.PositionSnapshot
+	Companion   DELTransition
+	StakeID     common.Hash
+	FrozenIndex common.Hash
+	Deadline    time.Time
 }
 
 // VerifySignedNFTIsolation admits only the direct no-hold Gateway route.
@@ -121,6 +130,82 @@ func (e *Executor) VerifySignedNFTIsolation(ctx sdk.Context, msg core.Message, r
 		OriginSupplyAfter: supply, OriginReserveAfter: sdkmath.NewIntFromBigInt(pool)}, nil
 }
 
+// VerifySignedNFTWithdrawal proves the request for one vault receipt. The
+// receipt stays in Gateway custody until the shared settlement path runs.
+func (e *Executor) VerifySignedNFTWithdrawal(ctx sdk.Context, msg core.Message, receipt *ethtypes.Receipt) (NFTWithdrawal, error) {
+	var proof NFTWithdrawal
+	method := e.gateway.Methods["withdrawNFT"]
+	if msg.To == nil || *msg.To != e.roles.Gateway || msg.Value == nil || msg.Value.Sign() != 0 ||
+		len(msg.SetCodeAuthorizations) != 0 || len(msg.Data) != 4+3*common.HashLength || !bytes.Equal(msg.Data[:4], method.ID) || msg.From == Sender() {
+		return proof, errors.New("NFT withdrawal requires a direct signed Gateway call with zero value")
+	}
+	args, err := method.Inputs.Unpack(msg.Data[4:])
+	if err != nil {
+		return proof, err
+	}
+	canonical, err := method.Inputs.Pack(args...)
+	if err != nil || !bytes.Equal(canonical, msg.Data[4:]) {
+		return proof, errors.New("noncanonical NFT withdrawal call")
+	}
+	validator, vault := args[0].(common.Address), args[1].(common.Address)
+	positionID := common.BigToHash(args[2].(*big.Int))
+	if validator == (common.Address{}) || vault != e.roles.PositionVault || positionID == (common.Hash{}) {
+		return proof, errors.New("NFT withdrawal must name the approved vault and a valid position")
+	}
+	if err := e.verifyDELStakeReceipt(ctx, receipt, validator, msg.From, 4); err != nil {
+		return proof, err
+	}
+	position, err := e.auth.Position(ctx, positionID)
+	if err != nil {
+		return proof, err
+	}
+	reserve := position.ReserveAmount.Big()
+	if position.Status != evmview.PositionActive || position.Owner != e.roles.Gateway || position.ReserveKind != nfttypes.IsolatedReserveDEL ||
+		position.ReserveToken != (common.Address{}) || reserve.Sign() <= 0 || reserve.BitLen() > 255 {
+		return proof, errors.New("NFT withdrawal did not preserve DEL-backed Gateway custody")
+	}
+	companion, post, err := e.readNFTCompanion(ctx, validator, msg.From)
+	if err != nil {
+		return proof, err
+	}
+	if err := e.checkDELStakeLogs(receipt.Logs[:2], companion.StakeID, post, new(big.Int).Neg(reserve), false); err != nil {
+		return proof, err
+	}
+	stakeID, err := e.verifyNFTStake(ctx, position, validator, msg.From, false)
+	if err != nil {
+		return proof, err
+	}
+	request := receipt.Logs[2]
+	if len(request.Data) != (2+frozenWordCount)*common.HashLength {
+		return proof, errors.New("unexpected NFT withdrawal request event size")
+	}
+	index := common.BytesToHash(request.Data[common.HashLength : 2*common.HashLength])
+	if index == common.MaxHash {
+		return proof, errors.New("NFT withdrawal requires a real frozen index")
+	}
+	words, err := e.readFrozen(ctx, index)
+	if err != nil {
+		return proof, err
+	}
+	var zero common.Hash
+	if words[0] != common.BytesToHash(validator[:]) || words[1] != common.BytesToHash(msg.From[:]) || words[2] != common.BytesToHash(vault[:]) ||
+		words[3] != smallWord(1) || words[4] != positionID || words[5] != smallWord(tokenERC721) || words[6] != zero || words[7] != zero ||
+		words[8] != smallWord(statusFrozen) || words[9] != smallWord(freezeWithdraw) {
+		return proof, errors.New("frozen NFT differs from the signed withdrawal request")
+	}
+	deadline := words[10].Big()
+	if !deadline.IsInt64() || deadline.Int64() <= ctx.BlockTime().Unix() {
+		return proof, errors.New("NFT withdrawal deadline must follow the request block")
+	}
+	requestWords := append([]common.Hash{companion.StakeID, index}, words[:]...)
+	if !matchesNFTEvent(request, e.roles.Gateway, []common.Hash{e.gateway.Events["WithdrawRequest"].ID}, requestWords...) ||
+		!matchesNFTEvent(receipt.Logs[3], e.roles.Gateway, []common.Hash{e.gateway.Events["NFTUndelegated"].ID, stakeID}, index) {
+		return proof, errors.New("NFT withdrawal events differ from the exact frozen Gateway row")
+	}
+	return NFTWithdrawal{Position: position, Companion: companion, StakeID: stakeID, FrozenIndex: index,
+		Deadline: time.Unix(deadline.Int64(), 0).UTC()}, nil
+}
+
 func (e *Executor) isolationOriginPoststate(ctx sdk.Context, origin common.Address, originID *big.Int) (uint32, *big.Int, error) {
 	if e.origin.Methods["totalSupply0"].Sig != "totalSupply(uint256)" {
 		return 0, nil, errors.New("compiler origin supply ABI differs")
@@ -135,9 +220,10 @@ func (e *Executor) isolationOriginPoststate(ctx sdk.Context, origin common.Addre
 	}
 	supply := new(big.Int).SetBytes(rawSupply)
 	pool := new(big.Int).SetBytes(rawReserve[common.HashLength : 2*common.HashLength])
+	held := e.evm.GetBalance(ctx, origin)
 	if supply.BitLen() > 32 || common.BytesToHash(rawReserve[:common.HashLength]) != (common.Hash{}) ||
 		common.BytesToHash(rawReserve[2*common.HashLength:]) != smallWord(byte(nfttypes.IsolatedReserveDEL)) ||
-		e.evm.GetBalance(ctx, origin).ToBig().Cmp(pool) < 0 {
+		held == nil || held.ToBig().Cmp(pool) < 0 {
 		return 0, nil, errors.New("ERC1155 origin pool or supply differs from a funded DEL position")
 	}
 	return uint32(supply.Uint64()), pool, nil
