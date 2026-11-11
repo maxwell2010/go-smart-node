@@ -20,7 +20,7 @@ mkdir -- "$output"
 evidence_owner="$(id -u):$(id -g)"
 preserve_public_reports() {
   local file
-  for file in "$output/daemon.json" "$output/hermes.json" "$output/withdrawal-genesis.json"; do
+  for file in "$output/daemon.json" "$output/hermes.json" "$output/withdrawal-genesis.json" "$output/del-delegation.json"; do
     if [[ -L "$file" ]]; then echo 'Refuse symbolic report file.' >&2; return 1; fi
     if [[ -f "$file" ]]; then
       sudo -n chown -- "$evidence_owner" "$file" || return 1
@@ -154,8 +154,9 @@ PY
 if [[ "$withdrawal_genesis" == withdrawal-genesis ]]; then
   # No fixture document, key or raw generator/daemon log is uploaded. The
   # generator runs on the same verified checkout immediately before the lab.
-  mkdir -m 700 -- "$work/withdrawal-fixture"
+  mkdir -m 700 -- "$work/withdrawal-fixture" "$work/del-fixture"
   if ! MCND_WITHDRAWAL_GENESIS_FIXTURE_DIR="$work/withdrawal-fixture" \
+      MCND_DEL_DELEGATION_FIXTURE_DIR="$work/del-fixture" \
       go test -mod=readonly -tags= -trimpath -p 2 -count=1 -timeout 8m -json -run '^TestOwnedAppSignedRegistryBootstrap$' ./systemcontracts \
       > "$work/withdrawal-fixture-build.log" 2>&1; then
     checkout_free="$(df -Pk "$root" | awk 'END {print $4}')" || checkout_free=unknown
@@ -206,5 +207,21 @@ assert report['status']=='PASS' and 'error' not in report,report
 assert report['sourceCommit']==sys.argv[2] and report['binarySha256']==sys.argv[3],report
 assert report['invalidGenesis']['status']=='REJECTED',report
 print('Authenticated withdrawal genesis, completion, rejection and restart passed.')
+PY
+  sudo -n unshare --net -- bash -euc 'ip link set lo up; exec "$@"' _ \
+    env TMPDIR="$work" "$python" "$root/network/tools/del_delegation_smoke.py" \
+    --binary "$work/mcnd" --binary-sha256 "$mcnd_sha" --source-commit "$revision" \
+    --fixture "$work/del-fixture" --home-parent "$work" --report "$output/del-delegation.json" \
+    |& tee "$output/del-delegation.log"
+  preserve_public_reports
+  "$python" - "$output/del-delegation.json" "$revision" "$mcnd_sha" <<'PY'
+import json,sys
+from pathlib import Path
+report=json.loads(Path(sys.argv[1]).read_text())
+assert report['status']=='PASS' and 'error' not in report,report
+assert report['sourceCommit']==sys.argv[2] and report['binarySha256']==sys.argv[3],report
+assert report['delegation']['success'] and report['withdrawal']['success'] and not report['repeatComplete']['success'],report
+assert report['payout']['amountAtomic']=='3000000000000000000' and report['payout']['sdkGasCharged']>0,report
+print('Fresh DEL delegation, full withdrawal, EndBlock payout, repeat rejection and restart passed.')
 PY
 fi

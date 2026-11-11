@@ -19,7 +19,7 @@ on:
         type: choice
         options: ['off', modern-smoke, modern-full]
       withdrawal_genesis:
-        description: Also boot the private authenticated withdrawal genesis in the process scope
+        description: Also boot the private authenticated NFT withdrawal and DEL delegation genesis fixtures
         default: false
         type: boolean
 

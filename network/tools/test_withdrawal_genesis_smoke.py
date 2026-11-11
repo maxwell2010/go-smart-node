@@ -87,7 +87,7 @@ class WithdrawalGenesisSmokeTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, 'negative control changed'):
             smoke.initial_height(genesis, changed)
         with patch.object(smoke, 'comet', return_value={'height': '350', 'finalize_block_events': []}):
-            self.assertEqual(smoke.scan_blocks(350, 350, parsed), [])
+            self.assertEqual(smoke.scan_blocks(350, 350, parsed['gateway'], parsed['nft']['id']), [])
 
     def test_completion_requires_exact_committed_endblock_marker(self):
         expected = fixture()

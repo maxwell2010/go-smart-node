@@ -295,11 +295,11 @@ def check_admission(height, expected):
           'new Gateway delegation estimate did not fail for the expected admission reason')
 
 
-def scan_blocks(first, last, expected):
+def scan_blocks(first, last, gateway, frozen_id):
     check(1 <= first <= last + 1 and last - first + 1 <= MAX_BLOCKS, 'unexpected block range in disposable process')
     completions = []
     for height in range(first, last + 1):
-        count = completion_count(comet(f'block_results?height={height}'), height, expected['gateway'], expected['nft']['id'])
+        count = completion_count(comet(f'block_results?height={height}'), height, gateway, frozen_id)
         completions.extend([height] * count)
     return completions
 
@@ -362,7 +362,7 @@ def run_gate(args, binary, root, expected, genesis, invalid, validator, env, own
     check(int(ethereum('eth_chainId', []), 16) == EVM_CHAIN, 'EVM RPC chain mismatch')
     start_time = block_time(start_height)
     check(start_time.timestamp() < expected['dueAt'], 'first committed state did not precede the deadline')
-    check(not scan_blocks(initial_height, start_height, expected), 'withdrawal completed before it was due')
+    check(not scan_blocks(initial_height, start_height, expected['gateway'], expected['nft']['id']), 'withdrawal completed before it was due')
     report['before'] = check_nft(start_height, expected['nft'], expected['gateway'])
     report['before']['blockTime'] = start_time.isoformat()
     check_admission(start_height, expected)
@@ -375,7 +375,7 @@ def run_gate(args, binary, root, expected, genesis, invalid, validator, env, own
     while not completed:
         last = wait_height(child, height + 1, until, log_path, report)
         check(last - initial_height < MAX_BLOCKS, 'withdrawal exceeded the disposable block budget')
-        completed = scan_blocks(height + 1, last, expected)
+        completed = scan_blocks(height + 1, last, expected['gateway'], expected['nft']['id'])
         height = last
     check(len(completed) == 1, 'withdrawal completed more than once')
     completed_at = completed[0]
@@ -400,7 +400,7 @@ def run_gate(args, binary, root, expected, genesis, invalid, validator, env, own
     restarted_height = wait_height(child, height + 2, time.monotonic() + 45, restart_log, report)
     check(restarted_height - initial_height < MAX_BLOCKS, 'restart exceeded the disposable block budget')
     check(int(ethereum('eth_chainId', []), 16) == EVM_CHAIN, 'restarted EVM RPC chain mismatch')
-    check(not scan_blocks(completed_at + 1, restarted_height, expected), 'withdrawal repeated before or after disk restart')
+    check(not scan_blocks(completed_at + 1, restarted_height, expected['gateway'], expected['nft']['id']), 'withdrawal repeated before or after disk restart')
     report['restart'] = check_nft(restarted_height, expected['nft'], expected['nft']['beneficiary'])
     check(report['restart']['vaultBackingAtomic'] == report['before']['vaultBackingAtomic'], 'vault backing changed after restart')
     owner.stop(child)

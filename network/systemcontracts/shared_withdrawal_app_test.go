@@ -82,6 +82,9 @@ func runSharedWithdrawalDEL(t *testing.T, e isolatedBackendEnv, profile ownedapp
 		Meta      string
 	}{{validator, string(meta)}})
 	gov(gateway, target, "setFreezeTime", big.NewInt(20), new(big.Int))
+	v, err := validatortypes.NewValidator(operator, beneficiary, &ed25519.PubKey{Key: key}, validatortypes.Description{Moniker: "shared-withdrawal"}, sdkmath.LegacyZeroDec())
+	require.NoError(t, err)
+	exportDELDelegationDaemonFixture(t, e, profile, v)
 
 	pack := func(method string, args ...interface{}) []byte {
 		t.Helper()
@@ -112,8 +115,6 @@ func runSharedWithdrawalDEL(t *testing.T, e isolatedBackendEnv, profile ownedapp
 		deadline = time.Unix(frozen.UnfreezeTimestamp.Int64(), 0).UTC()
 	}
 	require.NotNil(t, id)
-	v, err := validatortypes.NewValidator(operator, beneficiary, &ed25519.PubKey{Key: key}, validatortypes.Description{Moniker: "shared-withdrawal"}, sdkmath.LegacyZeroDec())
-	require.NoError(t, err)
 	entry := validatortypes.UndelegationEntry{CreationHeight: requestCtx.BlockHeight(), CompletionTime: deadline,
 		Stake: validatortypes.NewStakeCoin(sdk.NewCoin(identity.BaseDenom, amount))}
 	hash, err := validatortypes.NativeQueueEntryHash(1, beneficiary, operator, "", &entry)
