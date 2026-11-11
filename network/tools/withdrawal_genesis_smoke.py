@@ -115,9 +115,26 @@ def native(path, height):
     return body
 
 
-def wait_height(child, minimum, deadline):
+def safe_diagnostic(text):
+    categories = ('authenticate withdrawal genesis', 'genesis signing domain', 'failed to unmarshal',
+                  'failed to initialize', 'validator set', 'priv-validator', 'no space left on device')
+    notes = [category for category in categories if category in text.lower()]
+    notes += list(dict.fromkeys(re.findall(r'unable to resolve type URL (/[A-Za-z0-9_.]{1,140})', text)))[:4]
+    notes += list(dict.fromkeys(re.findall(r'\b[A-Za-z0-9_-]+\.go:\d{1,6}(?::\d{1,5})?', text)))[:8]
+    return ', '.join(notes) if notes else 'no allowlisted diagnostic'
+
+
+def log_tail(path):
+    with path.open('rb') as stream:
+        stream.seek(max(0, path.stat().st_size - 65536))
+        return stream.read(65536).decode('utf8', errors='replace')
+
+
+def wait_height(child, minimum, deadline, log_path):
     while time.monotonic() < deadline:
-        check(child.poll() is None, 'daemon exited before reaching the expected committed height')
+        code = child.poll()
+        if code is not None:
+            raise RuntimeError(f'daemon exited ({code}) before committed height {minimum}: ' + safe_diagnostic(log_tail(log_path)))
         try:
             status = comet('status')
         except (OSError, json.JSONDecodeError):
@@ -128,7 +145,7 @@ def wait_height(child, minimum, deadline):
         if height >= minimum:
             return height
         time.sleep(0.25)
-    raise TimeoutError('daemon did not reach the expected committed height')
+    raise TimeoutError(f'daemon did not reach committed height {minimum}: ' + safe_diagnostic(log_tail(log_path)))
 
 
 def block_time(height):
@@ -234,11 +251,14 @@ def run_gate(args, binary, root, expected, genesis, invalid, validator, env, own
     prepare(good, genesis)
     version = json.loads(run_command(binary, good, ['version', '--long', '--output', 'json'], env))
     check(version['server_name'] == 'mcnd' and version['commit'] == args.source_commit, 'daemon version differs from checked source')
-    run_command(binary, good, ['genesis', 'validate-genesis'], env)
+    try:
+        run_command(binary, good, ['genesis', 'validate-genesis'], env)
+    except RuntimeError as error:
+        raise RuntimeError('genesis validation rejected the positive fixture: ' + safe_diagnostic(str(error))) from None
 
     child, log_path = launch(good, 'start', domain)
     initial_height = report['initialHeight']
-    start_height = wait_height(child, initial_height + 2, time.monotonic() + 45)
+    start_height = wait_height(child, initial_height + 2, time.monotonic() + 45, log_path)
     check(int(ethereum('eth_chainId', []), 16) == EVM_CHAIN, 'EVM RPC chain mismatch')
     start_time = block_time(start_height)
     check(start_time.timestamp() < expected['dueAt'], 'first committed state did not precede the deadline')
@@ -252,7 +272,7 @@ def run_gate(args, binary, root, expected, genesis, invalid, validator, env, own
     height = start_height
     completed = []
     while not completed:
-        last = wait_height(child, height + 1, until)
+        last = wait_height(child, height + 1, until, log_path)
         check(last - initial_height < MAX_BLOCKS, 'withdrawal exceeded the disposable block budget')
         completed = scan_blocks(height + 1, last, expected)
         height = last
@@ -275,7 +295,7 @@ def run_gate(args, binary, root, expected, genesis, invalid, validator, env, own
     report['genesisSDKGasCharged'] = admissions[0]['gas']
 
     child, restart_log = launch(good, 'restart', [])
-    restarted_height = wait_height(child, height + 2, time.monotonic() + 45)
+    restarted_height = wait_height(child, height + 2, time.monotonic() + 45, restart_log)
     check(restarted_height - initial_height < MAX_BLOCKS, 'restart exceeded the disposable block budget')
     check(int(ethereum('eth_chainId', []), 16) == EVM_CHAIN, 'restarted EVM RPC chain mismatch')
     check(not scan_blocks(completed_at + 1, restarted_height, expected), 'withdrawal repeated before or after disk restart')
@@ -289,8 +309,9 @@ def run_gate(args, binary, root, expected, genesis, invalid, validator, env, own
     prepare(bad, invalid)
     child, invalid_log = launch(bad, 'invalid', domain)
     code = child.wait(timeout=30)
-    check(code != 0 and expected['invalidError'] in invalid_log.read_text(encoding='utf8'),
-          'tampered genesis did not fail for the expected frozen-state authentication reason')
+    diagnostic = log_tail(invalid_log)
+    check(code != 0 and expected['invalidError'] in diagnostic,
+          f'tampered genesis did not fail for the expected authentication reason ({code}): ' + safe_diagnostic(diagnostic))
     report['invalidGenesis'] = {'status': 'REJECTED', 'exitCode': code, 'expectedAuthenticationFailure': True}
 
 
