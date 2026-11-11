@@ -303,4 +303,7 @@ func runCanonicalIsolatedGateway(t *testing.T, e isolatedBackendEnv, rejectBurn 
 	t.Run("authoritative token address bindings", func(t *testing.T) {
 		runExactTokenAddressBindings(t, e, registryAddress, gaddr, roles["nft-center"], originAddress, wrapped, addressBindingValidator, gateway)
 	})
+	t.Run("mature withdrawal scheduler with actual Gateway", func(t *testing.T) {
+		runGatewayWithdrawalSettlement(t, e, gateway, gaddr, wrapped, addressBindingValidator)
+	})
 }
