@@ -289,7 +289,10 @@ func newApp(
 	}
 	var cache storetypes.MultiStorePersistentCache
 
-	if cast.ToBool(appOpts.Get(sdkserver.FlagInterBlockCache)) {
+	path, stateSync := appOpts.Get(stateSyncGenesisOption).(stateSyncGenesisPath)
+	// The SDK reloads stores after restoring the snapshot but retains its
+	// inter-block cache, including misses from the pre-restore database.
+	if !stateSync && cast.ToBool(appOpts.Get(sdkserver.FlagInterBlockCache)) {
 		cache = store.NewCommitKVStoreCacheManager()
 	}
 
@@ -331,7 +334,7 @@ func newApp(
 	}
 
 	app := ownedapp.NewApp(logger, db, true, appOpts, baseappOptions...)
-	if path, ok := appOpts.Get(stateSyncGenesisOption).(stateSyncGenesisPath); ok && app.LastBlockHeight() == 0 {
+	if stateSync && app.LastBlockHeight() == 0 {
 		doc, state, err := readNativeGenesisAt(string(path))
 		if err != nil {
 			panic(fmt.Errorf("read state sync genesis: %w", err))
