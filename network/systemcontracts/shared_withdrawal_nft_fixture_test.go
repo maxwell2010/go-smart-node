@@ -2,6 +2,7 @@ package systemcontracts_test
 
 import (
 	"bytes"
+	"fmt"
 	"math/big"
 	"testing"
 	"time"
@@ -28,12 +29,23 @@ import (
 // derived from the actual position and withdrawal receipts.
 func runSharedWithdrawalNFT(t *testing.T, e isolatedBackendEnv, profile ownedapp.WithdrawalProfile, gateway, origin, vault contracts.Artifact, originAddress, validator common.Address) {
 	t.Helper()
+	for _, quantity := range []uint32{1, nfttypes.MaxIsolatedOriginUnits} {
+		t.Run(fmt.Sprintf("NFT_%d_origin_units", quantity), func(t *testing.T) {
+			runSharedWithdrawalNFTQuantity(t, e, profile, gateway, origin, vault, originAddress, validator, quantity)
+		})
+	}
+}
+
+func runSharedWithdrawalNFTQuantity(t *testing.T, e isolatedBackendEnv, profile ownedapp.WithdrawalProfile, gateway, origin, vault contracts.Artifact, originAddress, validator common.Address, quantity uint32) {
+	t.Helper()
 	require.NotNil(t, e.advance)
 	beneficiary := crypto.PubkeyToAddress(e.keys[0].PublicKey)
 	beneficiaryNative := sdk.AccAddress(beneficiary.Bytes()).String()
 	escrowNative := sdk.AccAddress(profile.Gateway.Bytes()).String()
-	amount := sdkmath.NewIntWithDecimal(2, 18)
-	originID := new(big.Int).Add(new(big.Int).Lsh(big.NewInt(1), 224), big.NewInt(651))
+	unitReserve := sdkmath.NewIntWithDecimal(2, 18)
+	mintQuantity := big.NewInt(int64(quantity))
+	mintReserve := unitReserve.MulRaw(int64(quantity))
+	originID := new(big.Int).Add(new(big.Int).Lsh(big.NewInt(1), 224), big.NewInt(650+int64(quantity)))
 	zero := new(big.Int)
 	call := func(key int, artifact contracts.Artifact, target common.Address, value *big.Int, success bool, method string, args ...interface{}) *evmtypes.MsgEthereumTxResponse {
 		t.Helper()
@@ -59,11 +71,28 @@ func runSharedWithdrawalNFT(t *testing.T, e isolatedBackendEnv, profile ownedapp
 		require.Len(t, values, 1)
 		return values[0]
 	}
-	call(0, origin, originAddress, amount.BigInt(), true, "mintByDEL", beneficiary, originID, big.NewInt(1), "ipfs://shared-withdrawal-nft")
+	vaultBank := func() sdk.Coin {
+		return e.app.BankKeeper.GetBalance(e.ctx(), sdk.AccAddress(profile.PositionVault.Bytes()), identity.BaseDenom)
+	}
+	beforeVaultBacking := vaultBank()
+	balanceOfOrigin := exactABIMethod(t, origin.ABI, "balanceOf(address,uint256)")
+	call(0, origin, originAddress, mintReserve.BigInt(), true, "mintByDEL", beneficiary, originID, mintQuantity, "ipfs://shared-withdrawal-nft")
+	require.Equal(t, mintQuantity, read(origin, originAddress, balanceOfOrigin, beneficiary, originID))
 	call(0, origin, originAddress, zero, true, "setApprovalForAll", profile.Gateway, true)
 	positionID := new(big.Int).Set(read(vault, profile.PositionVault, "nextPositionId").(*big.Int))
-	call(0, gateway, profile.Gateway, zero, true, "delegateNFT1155", validator, originAddress, originID, big.NewInt(1))
+	call(0, gateway, profile.Gateway, zero, true, "delegateNFT1155", validator, originAddress, originID, mintQuantity)
+	require.Zero(t, read(origin, originAddress, balanceOfOrigin, beneficiary, originID).(*big.Int).Sign())
 	require.Equal(t, profile.Gateway, read(vault, profile.PositionVault, "ownerOf", positionID))
+	actualPosition := abi.ConvertType(read(vault, profile.PositionVault, "getPosition", positionID), new(isolatedPosition)).(*isolatedPosition)
+	require.Equal(t, originAddress, actualPosition.OriginContract)
+	require.Equal(t, originID, actualPosition.OriginTokenId)
+	require.Equal(t, uint8(1), actualPosition.OriginStandard)
+	require.Equal(t, mintQuantity, actualPosition.OriginQuantity)
+	require.Equal(t, profile.Gateway, actualPosition.PhysicalOwner)
+	require.Equal(t, uint8(1), actualPosition.Status)
+	require.Equal(t, isolatedReserve{Amount: mintReserve.BigInt(), ReserveType: 1}, actualPosition.Reserve)
+	amount := sdkmath.NewIntFromBigInt(actualPosition.Reserve.Amount)
+	require.True(t, vaultBank().Amount.Sub(beforeVaultBacking.Amount).Equal(amount))
 	created := e.ctx()
 	request := call(0, gateway, profile.Gateway, zero, true, "withdrawNFT", validator, profile.PositionVault, positionID)
 	var frozenID, nftFrozenID *big.Int
@@ -114,32 +143,50 @@ func runSharedWithdrawalNFT(t *testing.T, e isolatedBackendEnv, profile ownedapp
 	nextPosition := common.BigToHash(read(vault, profile.PositionVault, "nextPositionId").(*big.Int))
 	domain, ok := e.app.NativeValidatorKeeper.ConfiguredEVMSourceDomain()
 	require.True(t, ok)
-	const originName, receiptName = "withdrawal_origin_unit", "withdrawal_vault_receipt"
+	originName := fmt.Sprintf("withdrawal_origin_%d", quantity)
+	receiptName := fmt.Sprintf("withdrawal_receipt_%d", quantity)
 	const originDenom, receiptDenom = "withdrawal_origin", "withdrawal_vault"
 	vaultCreator := sdk.AccAddress(e.govOwner.Bytes()).String()
 	reserve := sdk.NewCoin(identity.BaseDenom, amount)
+	originUnits := make([]uint32, actualPosition.OriginQuantity.Uint64())
+	for i := range originUnits {
+		originUnits[i] = uint32(i + 1)
+	}
 	lineage := nfttypes.IsolatedPositionLineage{
 		Vault: profile.PositionVault.Bytes(), PositionID: position.Bytes(), ReceiptNativeTokenID: receiptName, ReceiptSubTokenID: 1,
-		OriginContract: originAddress.Bytes(), OriginTokenID: originWord.Bytes(), OriginNativeTokenID: originName, OriginSubTokenIDs: []uint32{1},
+		OriginContract: originAddress.Bytes(), OriginTokenID: originWord.Bytes(), OriginNativeTokenID: originName, OriginSubTokenIDs: originUnits,
 		ParentPositionID: make([]byte, 32), Reserve: nfttypes.IsolatedReserveSnapshot{Kind: nfttypes.IsolatedReserveDEL, Token: make([]byte, 20), Amount: common.BigToHash(amount.BigInt()).Bytes()},
 	}
 	nftGenesis, err := e.app.NativeNFTKeeper.ExportGenesis(e.ctx())
 	require.NoError(t, err)
-	require.Empty(t, nftGenesis.Collections)
-	nftGenesis.Collections = []nfttypes.Collection{
-		{Creator: beneficiaryNative, Denom: originDenom, Supply: 1, TypeNft: nfttypes.NftType_NFT1155, AddressDRC: originAddress.Hex(), Tokens: nfttypes.Tokens{
-			{Creator: beneficiaryNative, Denom: originDenom, ID: originName, URI: uri, Reserve: reserve, Minted: 1, Burnt: 1},
-		}},
-		{Creator: vaultCreator, Denom: receiptDenom, Supply: 1, TypeNft: nfttypes.NftType_NFT721, AddressDRC: profile.PositionVault.Hex(), Tokens: nfttypes.Tokens{
-			{Creator: vaultCreator, Denom: receiptDenom, ID: receiptName, URI: uri, Reserve: reserve, Minted: 1, IsolatedReceipt: true, SubTokens: nfttypes.SubTokens{{ID: 1, Owner: escrowNative}}},
-		}},
+	addToken := func(creator, denom string, standard nfttypes.NftType, address common.Address, token *nfttypes.Token) {
+		for i := range nftGenesis.Collections {
+			collection := &nftGenesis.Collections[i]
+			if collection.Creator != creator || collection.Denom != denom {
+				continue
+			}
+			require.Equal(t, standard, collection.TypeNft)
+			require.Equal(t, address, common.HexToAddress(collection.AddressDRC))
+			collection.Tokens = append(collection.Tokens, token)
+			collection.Supply++
+			return
+		}
+		nftGenesis.Collections = append(nftGenesis.Collections, nfttypes.Collection{
+			Creator: creator, Denom: denom, Supply: 1, TypeNft: standard, AddressDRC: address.Hex(), Tokens: nfttypes.Tokens{token},
+		})
 	}
-	nftGenesis.ExternalBindings = []nfttypes.ExternalNFTBinding{
-		{ChainID: domain.ChainID, EVMChainID: domain.EVMChainID, Contract: originAddress.Bytes(), TokenID: originWord.Bytes(), NativeTokenID: originName, NFTType: nfttypes.NftType_NFT1155, NextSubTokenID: 2},
-		{ChainID: domain.ChainID, EVMChainID: domain.EVMChainID, Contract: profile.PositionVault.Bytes(), TokenID: position.Bytes(), NativeTokenID: receiptName, NFTType: nfttypes.NftType_NFT721, NextSubTokenID: 2},
-	}
+	addToken(beneficiaryNative, originDenom, nfttypes.NftType_NFT1155, originAddress, &nfttypes.Token{
+		Creator: beneficiaryNative, Denom: originDenom, ID: originName, URI: uri, Reserve: sdk.NewCoin(identity.BaseDenom, unitReserve), Minted: quantity, Burnt: quantity,
+	})
+	addToken(vaultCreator, receiptDenom, nfttypes.NftType_NFT721, profile.PositionVault, &nfttypes.Token{
+		Creator: vaultCreator, Denom: receiptDenom, ID: receiptName, URI: uri, Reserve: reserve, Minted: 1, IsolatedReceipt: true, SubTokens: nfttypes.SubTokens{{ID: 1, Owner: escrowNative}},
+	})
+	nftGenesis.ExternalBindings = append(nftGenesis.ExternalBindings,
+		nfttypes.ExternalNFTBinding{ChainID: domain.ChainID, EVMChainID: domain.EVMChainID, Contract: originAddress.Bytes(), TokenID: originWord.Bytes(), NativeTokenID: originName, NFTType: nfttypes.NftType_NFT1155, NextSubTokenID: uint64(quantity) + 1},
+		nfttypes.ExternalNFTBinding{ChainID: domain.ChainID, EVMChainID: domain.EVMChainID, Contract: profile.PositionVault.Bytes(), TokenID: position.Bytes(), NativeTokenID: receiptName, NFTType: nfttypes.NftType_NFT721, NextSubTokenID: 2},
+	)
 	nftGenesis.IsolatedVaults = []nfttypes.IsolatedVaultState{{ChainID: domain.ChainID, EVMChainID: domain.EVMChainID, Vault: profile.PositionVault.Bytes(), NextPositionID: nextPosition.Bytes(), ReceiptCreator: vaultCreator, ReceiptDenom: receiptDenom}}
-	nftGenesis.IsolatedPositions = []nfttypes.IsolatedPositionLineage{lineage}
+	nftGenesis.IsolatedPositions = append(nftGenesis.IsolatedPositions, lineage)
 	require.NoError(t, nftGenesis.Validate())
 	replaceWithdrawalFixtureStore(t, e, nfttypes.StoreKey, func(ctx sdk.Context) error { return e.app.NativeNFTKeeper.InitGenesis(ctx, nftGenesis) })
 
@@ -157,9 +204,9 @@ func runSharedWithdrawalNFT(t *testing.T, e isolatedBackendEnv, profile ownedapp
 		ReserveAsset: &validatortypes.EVMReserveAsset{ReserveKind: 1, Token: make([]byte, 20), NativeDenom: identity.BaseDenom},
 		NFTPosition: &validatortypes.NFTPositionIdentity{
 			Mode:    validatortypes.NFTPositionMode_NFT_POSITION_ISOLATED_RECEIPT,
-			Origin:  &validatortypes.EVMNFTReference{Contract: originAddress.Bytes(), TokenID: originWord.Bytes(), NativeTokenID: originName, NativeSubTokenIDs: []uint32{1}, Standard: 1155},
+			Origin:  &validatortypes.EVMNFTReference{Contract: originAddress.Bytes(), TokenID: originWord.Bytes(), NativeTokenID: originName, NativeSubTokenIDs: originUnits, Standard: 1155},
 			Custody: &validatortypes.EVMNFTReference{Contract: profile.PositionVault.Bytes(), TokenID: position.Bytes(), NativeTokenID: receiptName, NativeSubTokenIDs: []uint32{1}, Standard: 721},
-			Vault:   profile.PositionVault.Bytes(), PositionID: position.Bytes(), ParentPositionID: make([]byte, 32), OriginQuantity: sdkmath.OneInt(), ReceiptQuantity: sdkmath.OneInt(),
+			Vault:   profile.PositionVault.Bytes(), PositionID: position.Bytes(), ParentPositionID: make([]byte, 32), OriginQuantity: sdkmath.NewIntFromBigInt(actualPosition.OriginQuantity), ReceiptQuantity: sdkmath.OneInt(),
 		},
 		NativeTarget:    &validatortypes.NativeStakeTarget{StakeType: validatortypes.StakeType_NFT, ID: receiptName, SubTokenIDs: []uint32{1}},
 		NativeEntryHash: entryHash, Active: true, CreatedHeight: created.BlockHeight(), UpdatedHeight: created.BlockHeight(),
@@ -171,9 +218,6 @@ func runSharedWithdrawalNFT(t *testing.T, e isolatedBackendEnv, profile ownedapp
 	validators.EVMFrozenBindings = append(validators.EVMFrozenBindings, binding)
 	replaceWithdrawalFixtureStore(t, e, validatortypes.StoreKey, func(ctx sdk.Context) error { return e.app.NativeValidatorKeeper.InitGenesis(ctx, validators) })
 
-	vaultBank := func() sdk.Coin {
-		return e.app.BankKeeper.GetBalance(e.ctx(), sdk.AccAddress(profile.PositionVault.Bytes()), identity.BaseDenom)
-	}
 	backing := vaultBank()
 	assertEVM := func(owner common.Address, status uint8) {
 		t.Helper()
