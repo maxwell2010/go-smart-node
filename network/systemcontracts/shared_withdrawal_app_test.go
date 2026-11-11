@@ -181,7 +181,7 @@ func runSharedWithdrawalDEL(t *testing.T, e isolatedBackendEnv, profile ownedapp
 	e.credit.Set(amount.BigInt())
 	e.send(e.keys[0], &target, new(big.Int), completion, true)
 	pending(false)
-	require.Equal(t, backing.Sub(amount), balance(wrapped))
+	require.Equal(t, backing.Sub(amount).String(), balance(wrapped).String())
 	require.Nil(t, state().Get(pairKey))
 	var completed int
 	for _, event := range e.events() {
@@ -191,6 +191,6 @@ func runSharedWithdrawalDEL(t *testing.T, e isolatedBackendEnv, profile ownedapp
 	}
 	require.Equal(t, 1, completed)
 	e.send(e.keys[0], &target, new(big.Int), completion, false)
-	require.Equal(t, backing.Sub(amount), balance(wrapped))
+	require.Equal(t, backing.Sub(amount).String(), balance(wrapped).String())
 	return validator
 }
