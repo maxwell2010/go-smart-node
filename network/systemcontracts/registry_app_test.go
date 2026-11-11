@@ -166,7 +166,7 @@ func TestOwnedAppSignedRegistryBootstrap(t *testing.T) {
 	data, err := json.Marshal(genesis)
 	require.NoError(t, err)
 	now := time.Unix(1900000000, 0).UTC()
-	if os.Getenv(withdrawalGenesisFixtureEnv) != "" {
+	if os.Getenv(withdrawalGenesisFixtureEnv) != "" || os.Getenv(nativeConsensusDaemonFixtureEnv) != "" {
 		now = time.Now().UTC().Truncate(time.Second).Add(-time.Hour)
 	}
 	var nftFixture signedNFTAdmissionGenesis

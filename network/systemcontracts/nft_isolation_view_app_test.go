@@ -126,6 +126,17 @@ func runIsolatedPositionReader(t *testing.T, e isolatedBackendEnv) {
 		require.NoError(t, err)
 		return master, e.deploy(proxy, e.setup, masterConfig)
 	}
+	if dir := os.Getenv(nativeConsensusDaemonFixtureEnv); dir != "" {
+		master, masterAddress := deployMaster()
+		govSetup(registry, registryAddress, "setContractAddress", "master-validator", masterAddress)
+		profile := ownedapp.WithdrawalProfile{
+			Registry: registryAddress, Gateway: gatewayAddress, Library: libraryAddress, NFTCenter: factoryAddress,
+			PositionVault: vaultAddress, MasterValidator: masterAddress, WrappedDEL: wrapped,
+			SettlementOnly: true, EnableDELDelegation: true,
+		}
+		exportNativeConsensusDaemonFixture(t, e, dir, profile, gateway, master, wrapper, govSetup)
+		return
+	}
 	if os.Getenv(signedNFTAdmissionPhaseEnv) == "seed" {
 		master, masterAddress := deployMaster()
 		govSetup(registry, registryAddress, "setContractAddress", "master-validator", masterAddress)

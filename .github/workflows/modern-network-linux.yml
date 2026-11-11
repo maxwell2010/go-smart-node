@@ -30,6 +30,10 @@ on:
         description: Also rehearse a same-family daemon replacement and proof-based Hermes client upgrade
         default: false
         type: boolean
+      native_consensus:
+        description: Also check a signed native consensus transition on three isolated mcnd nodes
+        default: false
+        type: boolean
 
 permissions:
   contents: read
@@ -183,8 +187,9 @@ jobs:
           WITHDRAWAL_GENESIS: ${{ inputs.withdrawal_genesis }}
           DEL_STATE_SYNC: ${{ inputs.del_state_sync }}
           IBC_CLIENT_UPGRADE: ${{ inputs.ibc_client_upgrade }}
+          NATIVE_CONSENSUS: ${{ inputs.native_consensus }}
         run: |
-          args=("$RUNNER_TEMP/process-evidence" off off off)
+          args=("$RUNNER_TEMP/process-evidence" off off off off)
           if [[ "$DEL_STATE_SYNC" == true ]]; then
             args[1]=withdrawal-genesis
             args[2]=del-state-sync
@@ -193,6 +198,9 @@ jobs:
           fi
           if [[ "$IBC_CLIENT_UPGRADE" == true ]]; then
             args[3]=ibc-client-upgrade
+          fi
+          if [[ "$NATIVE_CONSENSUS" == true ]]; then
+            args[4]=native-consensus
           fi
           bash scripts/remote/process-gates.sh "${args[@]}"
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9

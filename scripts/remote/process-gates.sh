@@ -12,6 +12,8 @@ del_state_sync="${3:-off}"
 [[ "$del_state_sync" == off || ( "$del_state_sync" == del-state-sync && "$withdrawal_genesis" == withdrawal-genesis ) ]] || { echo 'Unsupported DEL state sync option.' >&2; exit 2; }
 ibc_client_upgrade="${4:-off}"
 [[ "$ibc_client_upgrade" == off || "$ibc_client_upgrade" == ibc-client-upgrade ]] || { echo 'Unsupported IBC client upgrade option.' >&2; exit 2; }
+native_consensus="${5:-off}"
+[[ "$native_consensus" == off || "$native_consensus" == native-consensus ]] || { echo 'Unsupported native consensus option.' >&2; exit 2; }
 for tool in sudo unshare ip gcc python3 go; do command -v "$tool" >/dev/null; done
 python="$(command -v python3)"
 "$python" -c 'import sys,tomllib; assert sys.version_info >= (3,11), "Python >=3.11 required"'
@@ -24,7 +26,7 @@ mkdir -- "$output"
 evidence_owner="$(id -u):$(id -g)"
 preserve_public_reports() {
   local file
-  for file in "$output/daemon.json" "$output/hermes.json" "$output/withdrawal-genesis.json" "$output/del-delegation.json" "$output/ibc-client-upgrade.json"; do
+  for file in "$output/daemon.json" "$output/hermes.json" "$output/withdrawal-genesis.json" "$output/del-delegation.json" "$output/ibc-client-upgrade.json" "$output/native-consensus.json"; do
     if [[ -L "$file" ]]; then echo 'Refuse symbolic report file.' >&2; return 1; fi
     if [[ -f "$file" ]]; then
       sudo -n chown -- "$evidence_owner" "$file" || return 1
@@ -202,18 +204,12 @@ assert set(report['phases'])==required and all(phase['status']=='PASS' for phase
 PY
 fi
 
-if [[ "$withdrawal_genesis" == withdrawal-genesis ]]; then
-  # No fixture document, key or raw generator/daemon log is uploaded. The
-  # generator runs on the same verified checkout immediately before the lab.
-  mkdir -m 700 -- "$work/withdrawal-fixture" "$work/del-fixture"
-  if ! MCND_WITHDRAWAL_GENESIS_FIXTURE_DIR="$work/withdrawal-fixture" \
-      MCND_DEL_DELEGATION_FIXTURE_DIR="$work/del-fixture" \
-      go test -mod=readonly -tags= -trimpath -p 2 -count=1 -timeout 8m -json -run '^TestOwnedAppSignedRegistryBootstrap$' ./systemcontracts \
-      > "$work/withdrawal-fixture-build.log" 2>&1; then
-    checkout_free="$(df -Pk "$root" | awk 'END {print $4}')" || checkout_free=unknown
-    fixture_free="$(df -Pk "$work_parent" | awk 'END {print $4}')" || fixture_free=unknown
-    printf 'Available worker space after fixture failure (KiB): checkout=%s fixture=%s\n' "$checkout_free" "$fixture_free"
-    "$python" - "$work/withdrawal-fixture-build.log" <<'PY'
+private_fixture_diagnostic() {
+  local checkout_free fixture_free
+  checkout_free="$(df -Pk "$root" | awk 'END {print $4}')" || checkout_free=unknown
+  fixture_free="$(df -Pk "$work_parent" | awk 'END {print $4}')" || fixture_free=unknown
+  printf 'Available worker space after fixture failure (KiB): checkout=%s fixture=%s\n' "$checkout_free" "$fixture_free"
+  "$python" - "$1" <<'PY'
 import json,re,sys
 location=re.compile(r'\b[A-Za-z0-9_-]+\.go:\d+(?::\d+)?')
 diagnostics=[]
@@ -242,6 +238,17 @@ if diagnostics:
 if categories:
     print('Private fixture failure categories:', ', '.join(sorted(categories)))
 PY
+}
+
+if [[ "$withdrawal_genesis" == withdrawal-genesis ]]; then
+  # No fixture document, key or raw generator/daemon log is uploaded. The
+  # generator runs on the same verified checkout immediately before the lab.
+  mkdir -m 700 -- "$work/withdrawal-fixture" "$work/del-fixture"
+  if ! MCND_WITHDRAWAL_GENESIS_FIXTURE_DIR="$work/withdrawal-fixture" \
+      MCND_DEL_DELEGATION_FIXTURE_DIR="$work/del-fixture" \
+      go test -mod=readonly -tags= -trimpath -p 2 -count=1 -timeout 8m -json -run '^TestOwnedAppSignedRegistryBootstrap$' ./systemcontracts \
+      > "$work/withdrawal-fixture-build.log" 2>&1; then
+    private_fixture_diagnostic "$work/withdrawal-fixture-build.log"
     exit 1
   fi
   sudo -n unshare --net -- bash -euc 'ip link set lo up; exec "$@"' _ \
@@ -293,5 +300,39 @@ if sys.argv[4]=='del-state-sync':
     assert sync['replayed']==report['final'] and sync['finalAppHash']==sync['witnessFinalAppHash'] and len(sync['finalAppHash'])==64,report
     print('Isolated P2P snapshot restore, separate RPC witness, financial replay and committed AppHash checks passed.')
 print('Fresh DEL delegation, top-up, partial payout, repeat rejection, restart and remainder payout passed.')
+PY
+fi
+
+
+if [[ "$native_consensus" == native-consensus ]]; then
+  mkdir -m 700 -- "$work/native-consensus-fixture"
+  if ! MCND_NATIVE_CONSENSUS_FIXTURE_DIR="$work/native-consensus-fixture" \
+      go test -mod=readonly -tags= -trimpath -p 2 -count=1 -timeout 8m -json \
+      -run '^TestOwnedAppSignedRegistryBootstrap$/^authenticated_isolated_position_reader$' ./systemcontracts \
+      > "$work/native-consensus-fixture.log" 2>&1; then
+    private_fixture_diagnostic "$work/native-consensus-fixture.log"
+    exit 1
+  fi
+  sudo -n unshare --net -- bash -euc 'ip link set lo up; exec "$@"' _ \
+    env TMPDIR="$work" "$python" -B "$root/network/tools/native_consensus_smoke.py" \
+    --binary "$work/mcnd" --binary-sha256 "$mcnd_sha" --source-commit "$revision" \
+    --fixture "$work/native-consensus-fixture" --home-parent "$work" --report "$output/native-consensus.json" \
+    |& tee "$output/native-consensus.log"
+  preserve_public_reports
+  "$python" - "$output/native-consensus.json" "$revision" "$mcnd_sha" <<'PY'
+import json,sys
+from pathlib import Path
+report=json.loads(Path(sys.argv[1]).read_text())
+assert report['status']=='PASS' and 'error' not in report,report
+assert report['sourceCommit']==sys.argv[2] and report['binarySha256']==sys.argv[3],report
+assert report['initialPower']=={'a':2,'b':1} and report['initialSigners']==['a','b'],report
+assert report['delegation']['success'] and report['abciUpdates']=={'b':0,'c':3},report
+for label,powers in (('H+0',{'a':2,'b':1}),('H+1',{'a':2,'b':1}),('H+2',{'a':2,'c':3})):
+    assert report['transition'][label]['powers']==powers,report
+assert report['transition']['H+2']['signers']==['a','c'],report
+assert report['restart']['powers']=={'a':2,'c':3} and report['restart']['signers']==['a','c'],report
+assert report['restart']['height']>report['restart']['checkpointHeight'],report
+assert report['before']['wrappedAtomic']=='3000000000000000000' and report['final']['wrappedAtomic']=='6000000000000000000',report
+print('Three replicas agree on the signed DEL validator replacement at H+2 and on restart.')
 PY
 fi
