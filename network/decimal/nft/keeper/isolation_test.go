@@ -130,9 +130,27 @@ func TestIsolatedLineageResourceBoundary(t *testing.T) {
 			got, err := k.GetIsolatedLineage(ctx, p.Vault, p.PositionID)
 			require.NoError(t, err)
 			require.Len(t, got.OriginSubTokenIDs, int(quantity))
-			t.Logf("%d-unit native lineage: protobuf=%d bytes bounded authenticated-index read SDKgas=%d; full receipt orchestration admission not active", quantity, proto.Size(&p), ctx.GasMeter().GasConsumed())
+			gas := ctx.GasMeter().GasConsumed()
+			require.Less(t, gas, uint64(2_800_000), "archive validation must not reread token metadata for every unit")
+			t.Logf("%d-unit native lineage: protobuf=%d bytes, authenticated index read SDK gas=%d", quantity, proto.Size(&p), gas)
 		})
 	}
+}
+
+func TestIsolatedLineageChecksArchivedUnitRecords(t *testing.T) {
+	ctx, k, g, _ := isolatedLineageFixture(t)
+	require.NoError(t, k.InitGenesis(ctx, g))
+	position := g.IsolatedPositions[0]
+	state := k.service.OpenKVStore(ctx)
+	unit := position.OriginSubTokenIDs[0]
+	unitKey := types.GetSubTokenKey(position.OriginNativeTokenID, unit)
+	require.NoError(t, state.Set(unitKey, []byte{0xff}))
+	_, err := k.GetIsolatedLineage(ctx, position.Vault, position.PositionID)
+	require.ErrorContains(t, err, "isolated origin unit remains active")
+	require.NoError(t, state.Delete(unitKey))
+	require.NoError(t, state.Delete(types.GetIsolatedOriginUnitKey(position.OriginNativeTokenID, unit)))
+	_, err = k.GetIsolatedLineage(ctx, position.Vault, position.PositionID)
+	require.ErrorContains(t, err, "isolated origin reverse index mismatch")
 }
 
 type failIsolatedIndexService struct{ store.KVStoreService }

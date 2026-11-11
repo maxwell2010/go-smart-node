@@ -113,10 +113,13 @@ func (k *StateKeeper) GetIsolatedLineage(ctx sdk.Context, vault, id []byte) (typ
 		if unit > originToken.Minted {
 			return types.IsolatedPositionLineage{}, errors.New("isolated origin unit exceeds lifetime cursor")
 		}
-		if _, err := k.GetSubToken(ctx, p.OriginNativeTokenID, unit); !errors.Is(err, ErrNotFound) {
-			if err != nil {
-				return types.IsolatedPositionLineage{}, err
-			}
+		// The origin token was validated above. Archived units must have no
+		// primary record, so a lookup needs neither metadata nor decoding.
+		active, err := state.Has(types.GetSubTokenKey(p.OriginNativeTokenID, unit))
+		if err != nil {
+			return types.IsolatedPositionLineage{}, err
+		}
+		if active {
 			return types.IsolatedPositionLineage{}, errors.New("isolated origin unit remains active")
 		}
 		indexed, err = state.Get(types.GetIsolatedOriginUnitKey(p.OriginNativeTokenID, unit))
