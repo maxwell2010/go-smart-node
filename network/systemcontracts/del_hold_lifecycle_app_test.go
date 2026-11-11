@@ -3,7 +3,6 @@ package systemcontracts_test
 import (
 	"math/big"
 	"testing"
-	"time"
 
 	sdkmath "cosmossdk.io/math"
 	"github.com/ethereum/go-ethereum/accounts/abi"
