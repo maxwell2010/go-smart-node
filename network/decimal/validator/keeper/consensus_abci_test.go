@@ -17,7 +17,6 @@ import (
 	"github.com/cosmos/cosmos-sdk/baseapp"
 	"github.com/cosmos/cosmos-sdk/runtime"
 	sdk "github.com/cosmos/cosmos-sdk/types"
-	"github.com/maxwell2010/go-smart-node/network/decimal/validator/types"
 	"github.com/stretchr/testify/require"
 )
 
