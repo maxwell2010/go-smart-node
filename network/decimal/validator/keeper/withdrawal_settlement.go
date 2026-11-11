@@ -7,8 +7,10 @@ import (
 
 	"cosmossdk.io/core/store"
 	storetypes "cosmossdk.io/store/types"
+	"github.com/cosmos/cosmos-sdk/codec/address"
 	sdk "github.com/cosmos/cosmos-sdk/types"
 	"github.com/maxwell2010/go-smart-node/network/decimal/validator/types"
+	"github.com/maxwell2010/go-smart-node/network/identity"
 )
 
 const (
@@ -27,8 +29,9 @@ func withdrawalDueKey(r *bindingRecord) []byte {
 
 // WithdrawalExecutor settles one authenticated frozen binding in the supplied
 // cache. It must execute the Gateway and apply its native receipt projection
-// in that cache, returning an error on a revert or incomplete projection.
-// The keeper checks the resulting binding before committing any writes.
+// in that cache, returning an error on a revert or incomplete projection. The
+// projection retires the binding, and the keeper removes the matching native
+// undelegation entry before committing any writes.
 type WithdrawalExecutor func(sdk.Context, types.EVMFrozenBinding) error
 
 type WithdrawalSettlementResult struct {
@@ -173,6 +176,49 @@ func (k *StateKeeper) attemptWithdrawal(ctx sdk.Context, gas uint64, row *bindin
 	if !bytes.Equal(got, want) {
 		return errors.New("withdrawal execution did not settle the matching native binding")
 	}
+	if err = k.removeSettledUndelegation(child, row.frozen); err != nil {
+		return err
+	}
 	commit()
 	return nil
+}
+
+func (k *StateKeeper) removeSettledUndelegation(ctx sdk.Context, binding *types.EVMFrozenBinding) error {
+	owner, err := address.NewBech32Codec(identity.Bech32PrefixAccAddr).BytesToString(binding.Beneficiary)
+	if err != nil {
+		return err
+	}
+	operator, err := k.ValidatorAddressCodec().BytesToString(binding.SourceValidator)
+	if err != nil {
+		return err
+	}
+	key := composite(undelegationPrefix, owner, operator)
+	var pending types.Undelegation
+	if err = k.read(ctx, key, &pending); err != nil {
+		return err
+	}
+	params, err := k.GetParams(ctx)
+	if err != nil {
+		return err
+	}
+	if pending.Delegator != owner || pending.Validator != operator || uint64(len(pending.Entries)) > uint64(params.MaxEntries) {
+		return errors.New("invalid native undelegation pair")
+	}
+	for i := range pending.Entries {
+		entry := &pending.Entries[i]
+		hash, err := types.NativeQueueEntryHash(1, owner, operator, "", entry)
+		if err != nil {
+			return err
+		}
+		if !bytes.Equal(hash, binding.NativeEntryHash) {
+			continue
+		}
+		// Two requests may have byte-identical entries. Remove one copy.
+		pending.Entries = append(pending.Entries[:i], pending.Entries[i+1:]...)
+		if len(pending.Entries) == 0 {
+			return k.service.OpenKVStore(ctx).Delete(key)
+		}
+		return k.put(ctx, key, &pending)
+	}
+	return errors.New("settled binding has no matching native undelegation")
 }

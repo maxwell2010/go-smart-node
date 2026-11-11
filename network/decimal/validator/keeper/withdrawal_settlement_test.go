@@ -118,6 +118,10 @@ func TestWithdrawalSettlementRetriesWithoutBlockingOthersAcrossIAVLReopen(t *tes
 	require.Equal(t, WithdrawalSettlementResult{Settled: maxWithdrawalAttempts}, next)
 	require.Equal(t, wideID, seen[0])
 	require.Equal(t, stateWord(0), seen[1])
+	exported, err := k.ExportGenesis(ctx)
+	require.NoError(t, err)
+	require.Len(t, exported.Undelegations, 1)
+	require.Len(t, exported.Undelegations[0].Entries, 2)
 
 	ctx = ctx.WithBlockHeight(12).WithBlockTime(time.Unix(2002, 0))
 	last, err := k.SettleMatureWithdrawals(ctx, 1_000_000, func(child sdk.Context, row types.EVMFrozenBinding) error {
@@ -129,6 +133,9 @@ func TestWithdrawalSettlementRetriesWithoutBlockingOthersAcrossIAVLReopen(t *tes
 	row, err := k.GetEVMFrozenBinding(ctx, future.Gateway, future.FrozenIndex)
 	require.NoError(t, err)
 	require.False(t, row.Active)
+	exported, err = k.ExportGenesis(ctx)
+	require.NoError(t, err)
+	require.Empty(t, exported.Undelegations)
 	cms.Commit()
 }
 
