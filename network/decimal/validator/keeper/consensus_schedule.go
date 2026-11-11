@@ -264,12 +264,16 @@ func (k *StateKeeper) ScheduledEndBlock(ctx sdk.Context, eligible []string) ([]a
 	if err != nil {
 		return nil, err
 	}
-	return k.advanceScheduledConsensus(ctx, rows, eligible)
+	return k.advanceScheduledConsensus(ctx, rows, eligible, false)
 }
 
-func (k *StateKeeper) advanceScheduledConsensus(ctx sdk.Context, rows []types.ScheduledValidatorSet, eligible []string) ([]abci.ValidatorUpdate, error) {
+func (k *StateKeeper) advanceScheduledConsensus(ctx sdk.Context, rows []types.ScheduledValidatorSet, eligible []string, deriveStakePower bool) ([]abci.ValidatorUpdate, error) {
 	child, commit := ctx.CacheContext()
-	updates, err := k.EndBlockValidatorUpdates(child, rows[0].Validators, eligible)
+	var stakeBaseline []types.Validator
+	if deriveStakePower {
+		stakeBaseline = rows[1].Validators
+	}
+	updates, err := k.endBlockValidatorUpdates(child, rows[0].Validators, eligible, stakeBaseline)
 	if err != nil {
 		return nil, err
 	}

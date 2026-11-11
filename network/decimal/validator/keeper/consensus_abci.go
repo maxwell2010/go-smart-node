@@ -160,6 +160,10 @@ func (k *StateKeeper) VerifyABCIConsensusStartup(ctx sdk.Context, committedHeigh
 // prior commitment authenticates H and NextValidatorsHash authenticates H+1.
 // DecidedLastCommit contains H-1 address/power metadata, not H or signatures.
 func (k *StateKeeper) ScheduledABCIEndBlock(ctx sdk.Context, eligible []string) ([]abci.ValidatorUpdate, error) {
+	return k.scheduledABCIEndBlock(ctx, eligible, false)
+}
+
+func (k *StateKeeper) scheduledABCIEndBlock(ctx sdk.Context, eligible []string, deriveStakePower bool) ([]abci.ValidatorUpdate, error) {
 	if ctx.BlockHeight() <= 0 || ctx.BlockHeight() > math.MaxInt64-2 {
 		return nil, errors.New("invalid scheduled ABCI end block height")
 	}
@@ -188,7 +192,7 @@ func (k *StateKeeper) ScheduledABCIEndBlock(ctx sdk.Context, eligible []string) 
 	// Only the local history projection receives the derived current set hash.
 	// SDK53's supplied HeaderHash remains the actual Comet block hash.
 	header.ValidatorsHash = bytes.Clone(anchor.currentHash[:])
-	updates, err := k.advanceScheduledConsensus(child.WithBlockHeader(header), rows, eligible)
+	updates, err := k.advanceScheduledConsensus(child.WithBlockHeader(header), rows, eligible, deriveStakePower)
 	if err != nil {
 		return nil, err
 	}
