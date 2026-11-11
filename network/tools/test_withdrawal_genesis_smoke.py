@@ -15,7 +15,7 @@ def fixture():
             'id': '0x' + '00' * 32, 'tokenId': '0x' + '03' * 32,
             'vault': '0x' + '02' * 20, 'beneficiary': '0x' + '04' * 20,
             'nativeTokenId': 'receipt_1', 'nativeSubTokenId': 7,
-            'originQuantity': 1024, 'reserveAtomic': '2000000000000000000',
+            'originQuantity': 1024, 'reserveAtomic': smoke.RESERVE_ATOMIC,
             'positionCallData': '0x' + '10' * 4 + '03' * 32,
         },
     }
@@ -65,6 +65,8 @@ class WithdrawalGenesisSmokeTests(unittest.TestCase):
         self.assertEqual(smoke.completion_count(result, 4, expected['gateway'], expected['nft']['id']), 1)
         with self.assertRaisesRegex(ValueError, 'height mismatch'):
             smoke.completion_count(result, 5, expected['gateway'], expected['nft']['id'])
+        with self.assertRaisesRegex(ValueError, 'lack committed'):
+            smoke.completion_count({'height': '4'}, 4, expected['gateway'], expected['nft']['id'])
         event['attributes'][-1]['value'] = 'BeginBlock'
         with self.assertRaisesRegex(ValueError, 'execution mode'):
             smoke.completion_count(result, 4, expected['gateway'], expected['nft']['id'])
