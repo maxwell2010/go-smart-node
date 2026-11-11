@@ -48,3 +48,12 @@ The final run compares the exact pending packet sequence and commitment hash bef
 Every phase reconciles both relayer accounts' native balances exactly against principal movements and committed native fee events, with positive charged gas. Real voucher/escrow state and packet commitment clearing are checked. `MAINTAINED53_EVIDENCE.json` records the source report hash, binary provenance and per-phase receipt counts/fee totals without fixture keys or genesis assets. The source report remains a local artifact; generated fixture homes and all child processes were removed/stopped by the harness.
 
 This passes the current application's isolated ICS20 process-interoperability component. It does not prove native Decimal validator/coin/NFT/fee parity, system-contract bootstrap, SDK major-version migration or an IBC client upgrade. The lab validator/relayer uses native Cosmos secp256k1; it is not a production template for legacy Ethereum contract ownership roles. Repeat the process gate when native consensus/financial wiring or the daemon runtime changes. No public network transaction was broadcast.
+
+
+## Isolated IBC client upgrade rehearsal
+
+Dispatch `Modern network validation` with `scope=process` and `ibc_client_upgrade=true`. The optional gate starts a fresh chain pair, sends a packet, and schedules a same-family upgrade through a signed governance proposal and vote. It checks the old daemon's upgrade hint and the two committed proofs, runs pinned Hermes against the original client, starts the rehearsal binary on the same disposable home, and verifies the packet acknowledgement, voucher return, refund and actual fees.
+
+The rehearsal binary uses one overlay that registers a handler changing the staking unbonding period. Its hash, overlay hash and matching dependency graph are recorded in the CI evidence. The default build carries no rehearsal handler. This gate covers binary replacement within the pinned SDK/IBC family. A major version migration requires its own binaries, store migrations and replay evidence.
+
+Protocol and CLI references are pinned to [IBC-Go v10.7.0 client proof verification](https://github.com/cosmos/ibc-go/blob/v10.7.0/modules/light-clients/07-tendermint/upgrade.go), [SDK x/upgrade v0.2.0 boundary handling](https://github.com/cosmos/cosmos-sdk/blob/x/upgrade/v0.2.0/x/upgrade/abci.go), and [Hermes v1.13.3 client upgrade](https://github.com/informalsystems/hermes/blob/v1.13.3/guide/src/templates/help_templates/upgrade/client.md).
