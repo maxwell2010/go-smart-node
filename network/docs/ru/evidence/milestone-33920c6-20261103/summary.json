@@ -1,0 +1,108 @@
+{
+  "sourceCommit": "33920c6b9b996308a40d2878730c79a931313cff",
+  "validationDateUTC": "2026-11-03",
+  "scope": "Development. Isolated daemon and ICS20 with fresh homes. Legacy tests in separate jobs.",
+  "runs": {
+    "modernModule": {
+      "id": 41643816347,
+      "jobID": 125943786665,
+      "conclusion": "success"
+    },
+    "isolatedProcesses": {
+      "id": 41645730986,
+      "jobID": 125950441585,
+      "conclusion": "success"
+    },
+    "developmentArchive": {
+      "id": 41643816350,
+      "jobID": 125943786168,
+      "conclusion": "success"
+    },
+    "legacyReliability": {
+      "id": 41643816340,
+      "jobID": 125943786226,
+      "conclusion": "success"
+    },
+    "legacyCandidate": {
+      "id": 41643816354,
+      "jobIDs": {
+        "ordinary": 125943785736,
+        "experimental_ibc": 125943786355
+      },
+      "conclusion": "success"
+    }
+  },
+  "artifactGeneration": {
+    "sourceCommit": "82d1ed96bc0e82fd1d1d0c8afbcbf31a35a1f76a",
+    "runID": 41642996923,
+    "jobID": 125940971248,
+    "conclusion": "success",
+    "compilerSHA256": "0479d44fdf9c501c25337fdc540419f1593b884a87b47f023da4f1c700fda782",
+    "trackedArtifactsMatchingManifest": 37
+  },
+  "processArtifact": {
+    "id": 13234148917,
+    "sizeBytes": 295665,
+    "retentionDays": 7,
+    "sha256": "dec2aff19aa3ad935234c455cb73a3f997e94eb5ab22c8b1764e732f77827bc8",
+    "reportSHA256": {
+      "manifest.json": "fdd04a0ac04eb67a6a74ae2e6b00f90f1a044a0ce398da02f4cf0ac001ed5fe1",
+      "daemon.json": "14d3103f9d4cea602d3b24283752d49e56432b4dcf53e8052db1205663e45650",
+      "hermes.json": "7ed7edecfb8a9615e7e02671b39ab6517a0b11e7f64460ddfc27f37bfe960309",
+      "mcnd-metadata-verified.json": "d7fe17e736a5cf59df612dc3ceceb75a587c25ff0e22377645a4e38eae0b9570"
+    }
+  },
+  "processBuild": {
+    "provenanceVerified": true,
+    "goVersion": "go1.26.10",
+    "mcndVerifiedDependencies": 247,
+    "mcndSHA256": "80e1e282c6dca1281baeaf751564ed378f7a3c52ac06f35ad2582718de0012fc",
+    "referenceSHA256": "14202372495a1d7330e4250586a8cdb9d959cbef10f95ace249ec0a9505bc71d",
+    "hermes": {
+      "sha256": "ed8d57781f57a93e74259c12c8feee661b9633c882307f3a6236e41dbf5ffe35",
+      "official_release": "v1.13.3"
+    },
+    "hermesVersionOutput": "hermes 1.13.2+bab3b80"
+  },
+  "daemon": {
+    "status": "PASS",
+    "chainID": "mintcandy_990001-1",
+    "evmChainID": 990001,
+    "historyRole": "rpc-ibc",
+    "wrongDomainExitCode": 1,
+    "checks": [
+      "fresh-home retention configuration applied; block pruning window not exercised",
+      "owned empty-balance del genesis and inert generic mint",
+      "Ethereum operator key with coin60, funded genesis and native signed validator gentx",
+      "first-start actual height 3 and eth_chainId 990001",
+      "first-start mounted native coin allocation and empty NFT query routes",
+      "Ethereum operator signs native bank tx; exact fee/value debit, receiver balance and SDK/EVM shared nonce",
+      "restart actual height 5 and eth_chainId 990001",
+      "restart mounted native coin allocation and empty NFT query routes",
+      "mismatched restart rejected without modifying home"
+    ]
+  },
+  "hermes": {
+    "status": "TWO_PROCESS_HERMES_PASS",
+    "releaseGate": true,
+    "channel": {
+      "a": "channel-0",
+      "b": "channel-0"
+    },
+    "phases": {
+      "client_connection_channel_handshake": "PASS",
+      "native_send": "PASS",
+      "voucher_return": "PASS",
+      "pending_packet_restart": "PASS",
+      "error_ack_refund": "PASS",
+      "timeout_refund": "PASS"
+    },
+    "feeChecks": 26,
+    "preservedPacketSequence": 2,
+    "preservedPacketCommitment": "a482fe4d5d235c5e6441623df724f940ef86705ccc87879d828256d4f0638826",
+    "errorAckSequence": 3,
+    "timeoutSequence": 4,
+    "scope": "Actual owned/reference IBC interoperability only; native Decimal economic parity is a separate gate.",
+    "upgradeScope": "Same-binary disk reopen only; no module migration, client upgrade or SDK major upgrade is verified."
+  }
+}
