@@ -204,6 +204,14 @@ func (k *StateKeeper) ApplyDelegationBatch(ctx sdk.Context, changes []Delegation
 	}
 	child, commit := ctx.CacheContext()
 	state := k.service.OpenKVStore(child)
+	indexed, err := k.hasActiveDELReserveIndex(child)
+	if err != nil {
+		return err
+	}
+	var reserveDeltas map[string]*activeDELReserveDelta
+	if indexed {
+		reserveDeltas = map[string]*activeDELReserveDelta{}
+	}
 	type record struct {
 		key, data []byte
 		value     types.Delegation
@@ -252,6 +260,7 @@ func (k *StateKeeper) ApplyDelegationBatch(ctx sdk.Context, changes []Delegation
 				return errors.New("duplicate native delegation batch key")
 			}
 			rows[string(key)] = record{key: key, data: data, value: detached}
+			recordActiveDELReserveDelta(reserveDeltas, detached, index == 0)
 			if _, read := counts[detached.Validator]; !read {
 				count, err := k.delegationCount(child, detached.Validator)
 				if err != nil {
@@ -333,6 +342,9 @@ func (k *StateKeeper) ApplyDelegationBatch(ctx sdk.Context, changes []Delegation
 		if err := k.writeDelegationCount(child, operator, uint32(counts[operator])); err != nil {
 			return err
 		}
+	}
+	if err := k.applyActiveDELReserveDeltas(child, reserveDeltas); err != nil {
+		return err
 	}
 	commit()
 	return nil

@@ -304,6 +304,11 @@ func (k *StateKeeper) SetValidator(ctx sdk.Context, v types.Validator) error {
 	if e = k.service.OpenKVStore(child).Set(index, []byte(v.OperatorAddress)); e != nil {
 		return e
 	}
+	if previous == nil {
+		if err := k.registerActiveDELReserveValidator(child, v.OperatorAddress); err != nil {
+			return err
+		}
+	}
 	commit()
 	return nil
 }

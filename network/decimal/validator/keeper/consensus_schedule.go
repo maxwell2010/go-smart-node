@@ -253,10 +253,21 @@ func (k *StateKeeper) ScheduledEndBlock(ctx sdk.Context, eligible []string) ([]a
 	if ctx.BlockHeight() <= 0 || ctx.BlockHeight() > math.MaxInt64-2 {
 		return nil, errors.New("invalid scheduled end block height")
 	}
+	anchored, err := k.service.OpenKVStore(ctx).Has([]byte{abciConsensusAnchorKey})
+	if err != nil {
+		return nil, err
+	}
+	if anchored {
+		return nil, errors.New("anchored native consensus requires the ABCI scheduled end block")
+	}
 	rows, err := k.readScheduledPair(ctx)
 	if err != nil {
 		return nil, err
 	}
+	return k.advanceScheduledConsensus(ctx, rows, eligible)
+}
+
+func (k *StateKeeper) advanceScheduledConsensus(ctx sdk.Context, rows []types.ScheduledValidatorSet, eligible []string) ([]abci.ValidatorUpdate, error) {
 	child, commit := ctx.CacheContext()
 	updates, err := k.EndBlockValidatorUpdates(child, rows[0].Validators, eligible)
 	if err != nil {
