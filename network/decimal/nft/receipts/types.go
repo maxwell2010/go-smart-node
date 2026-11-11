@@ -33,10 +33,13 @@ const (
 	// EntryPointIBC is reserved but unsupported until the shared native pipeline
 	// has actual callback entry-point coverage. It must never silently fall back.
 	EntryPointIBC
+	// EntryPointWithdrawalSettlement is restricted to completion receipts after
+	// the Gateway withdrawal executor verifies the frozen row and payout.
+	EntryPointWithdrawalSettlement
 )
 
 func (e EntryPoint) Validate() error {
-	if e != EntryPointSignedEthereum && e != EntryPointGovernance {
+	if e != EntryPointSignedEthereum && e != EntryPointGovernance && e != EntryPointWithdrawalSettlement {
 		return errors.New("unsupported NFT receipt entry point")
 	}
 	return nil
