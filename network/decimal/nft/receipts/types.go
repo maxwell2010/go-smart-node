@@ -36,10 +36,13 @@ const (
 	// EntryPointWithdrawalSettlement is restricted to completion receipts after
 	// the Gateway withdrawal executor verifies the frozen row and payout.
 	EntryPointWithdrawalSettlement
+	// EntryPointWalletTransfer is restricted to direct approved NFT calls in
+	// the application hook. Gas estimation uses the same hook without a tx hash.
+	EntryPointWalletTransfer
 )
 
 func (e EntryPoint) Validate() error {
-	if e != EntryPointSignedEthereum && e != EntryPointGovernance && e != EntryPointWithdrawalSettlement {
+	if e != EntryPointSignedEthereum && e != EntryPointGovernance && e != EntryPointWithdrawalSettlement && e != EntryPointWalletTransfer {
 		return errors.New("unsupported NFT receipt entry point")
 	}
 	return nil
@@ -136,7 +139,6 @@ type NativeState interface {
 	GetExternalNFTBinding(sdk.Context, string) (types.ExternalNFTBinding, error)
 	ResolveExternalNFT(sdk.Context, []byte, []byte) (types.ExternalNFTBinding, error)
 	GetToken(sdk.Context, string) (types.Token, error)
-	GetSubToken(sdk.Context, string, uint32) (types.SubToken, error)
-	ListActiveSubTokenIDs(sdk.Context, string, string, uint32, uint32) ([]uint32, uint32, error)
+	ListActiveSubTokens(sdk.Context, string, string, uint32, uint32) ([]types.SubToken, uint32, error)
 	TransferSubTokens(sdk.Context, string, []uint32, string, string) error
 }

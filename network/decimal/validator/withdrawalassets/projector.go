@@ -79,7 +79,7 @@ func (p *Projector) ProjectWalletTransfer(ctx sdk.Context, receipt *ethtypes.Rec
 	if err != nil {
 		return err
 	}
-	plan, err := planner.Plan(ctx, nftreceipts.Execution{EntryPoint: nftreceipts.EntryPointSignedEthereum, Receipt: receipt})
+	plan, err := planner.Plan(ctx, nftreceipts.Execution{EntryPoint: nftreceipts.EntryPointWalletTransfer, Receipt: receipt})
 	if err != nil {
 		return err
 	}

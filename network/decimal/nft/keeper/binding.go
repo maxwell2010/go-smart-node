@@ -105,6 +105,19 @@ func (k *StateKeeper) ResolveExternalNFT(ctx sdk.Context, contract, tokenID []by
 // uint32 order. after is exclusive; an empty page ends iteration. The returned
 // cursor is the last ID read, and never a newly allocated or reused ID.
 func (k *StateKeeper) ListActiveSubTokenIDs(ctx sdk.Context, nativeID, owner string, after, limit uint32) (ids []uint32, cursor uint32, err error) {
+	units, cursor, err := k.ListActiveSubTokens(ctx, nativeID, owner, after, limit)
+	if err != nil {
+		return nil, 0, err
+	}
+	for _, unit := range units {
+		ids = append(ids, unit.ID)
+	}
+	return ids, cursor, nil
+}
+
+// ListActiveSubTokens validates each primary record against the owner index
+// and reuses the authenticated token metadata throughout the page.
+func (k *StateKeeper) ListActiveSubTokens(ctx sdk.Context, nativeID, owner string, after, limit uint32) (units []types.SubToken, cursor uint32, err error) {
 	if limit == 0 || limit > MaxIdentityPageSize {
 		return nil, 0, errors.New("invalid NFT identity page limit")
 	}
@@ -112,7 +125,8 @@ func (k *StateKeeper) ListActiveSubTokenIDs(ctx sdk.Context, nativeID, owner str
 	if err != nil {
 		return nil, 0, err
 	}
-	if _, err := k.GetToken(ctx, nativeID); err != nil {
+	token, err := k.GetToken(ctx, nativeID)
+	if err != nil {
 		return nil, 0, err
 	}
 	prefix := types.GetSubTokensByOwnerKey(ownerAddress, nativeID)
@@ -122,7 +136,7 @@ func (k *StateKeeper) ListActiveSubTokenIDs(ctx sdk.Context, nativeID, owner str
 		return nil, 0, err
 	}
 	defer func() { err = errors.Join(err, iterator.Close()) }()
-	for ; iterator.Valid() && uint32(len(ids)) < limit; iterator.Next() {
+	for ; iterator.Valid() && uint32(len(units)) < limit; iterator.Next() {
 		if err := iterator.Error(); err != nil {
 			return nil, 0, err
 		}
@@ -134,7 +148,7 @@ func (k *StateKeeper) ListActiveSubTokenIDs(ctx sdk.Context, nativeID, owner str
 		if id == after {
 			continue
 		}
-		sub, err := k.GetSubToken(ctx, nativeID, id)
+		sub, err := k.readActiveSubToken(ctx, token, id)
 		if err != nil {
 			return nil, 0, err
 		}
@@ -142,9 +156,9 @@ func (k *StateKeeper) ListActiveSubTokenIDs(ctx sdk.Context, nativeID, owner str
 		if err != nil || !actual.Equals(ownerAddress) {
 			return nil, 0, errors.New("NFT owner index differs from active unit")
 		}
-		ids, cursor = append(ids, id), id
+		units, cursor = append(units, sub), id
 	}
-	return ids, cursor, nil
+	return units, cursor, nil
 }
 
 // ListTokenIDsByURI uses the URI multimap for external collections (including

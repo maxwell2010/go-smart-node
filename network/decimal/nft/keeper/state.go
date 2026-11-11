@@ -243,15 +243,40 @@ func (k *StateKeeper) GetToken(ctx sdk.Context, id string) (types.Token, error) 
 }
 
 func (k *StateKeeper) GetSubToken(ctx sdk.Context, id string, index uint32) (types.SubToken, error) {
-	var sub types.SubToken
 	token, err := k.GetToken(ctx, id)
+	if err != nil {
+		return types.SubToken{}, err
+	}
+	return k.getIndexedSubToken(ctx, token, index)
+}
+
+func (k *StateKeeper) getIndexedSubToken(ctx sdk.Context, token types.Token, index uint32) (types.SubToken, error) {
+	sub, err := k.readActiveSubToken(ctx, token, index)
 	if err != nil {
 		return sub, err
 	}
+	owner, err := account(sub.Owner)
+	if err != nil {
+		return types.SubToken{}, err
+	}
+	indexed, err := k.service.OpenKVStore(ctx).Get(types.GetSubTokenByOwnerKey(owner, token.ID, index))
+	if err != nil {
+		return types.SubToken{}, err
+	}
+	if string(indexed) != token.ID {
+		return types.SubToken{}, errors.New("NFT owner index is missing or inconsistent")
+	}
+	return sub, nil
+}
+
+// readActiveSubToken checks the primary record. Callers must also check the
+// owner index, either with a point read or against their current iterator row.
+func (k *StateKeeper) readActiveSubToken(ctx sdk.Context, token types.Token, index uint32) (types.SubToken, error) {
+	var sub types.SubToken
 	if index == 0 || index > token.Minted {
 		return sub, ErrNotFound
 	}
-	if err := k.read(ctx, types.GetSubTokenKey(id, index), &sub); err != nil {
+	if err := k.read(ctx, types.GetSubTokenKey(token.ID, index), &sub); err != nil {
 		return sub, err
 	}
 	if sub.ID != index {
@@ -265,17 +290,6 @@ func (k *StateKeeper) GetSubToken(ctx sdk.Context, id string, index uint32) (typ
 	}
 	if token.ReserveLess && sub.Reserve != nil && !sub.Reserve.IsZero() {
 		return types.SubToken{}, errors.New("reserveless NFT sub-token has nonzero reserve")
-	}
-	owner, err := account(sub.Owner)
-	if err != nil {
-		return types.SubToken{}, err
-	}
-	indexed, err := k.service.OpenKVStore(ctx).Get(types.GetSubTokenByOwnerKey(owner, id, index))
-	if err != nil {
-		return types.SubToken{}, err
-	}
-	if string(indexed) != id {
-		return types.SubToken{}, errors.New("NFT owner index is missing or inconsistent")
 	}
 	return sub, nil
 }
@@ -541,13 +555,17 @@ func (k *StateKeeper) TransferSubTokens(ctx sdk.Context, id string, indexes []ui
 	}
 	child, commit := ctx.CacheContext()
 	state := k.service.OpenKVStore(child)
+	token, err := k.GetToken(child, id)
+	if err != nil {
+		return err
+	}
 	seen := make(map[uint32]bool, len(indexes))
 	for _, index := range indexes {
 		if seen[index] {
 			return errors.New("duplicated NFT sub-token ID")
 		}
 		seen[index] = true
-		sub, err := k.GetSubToken(child, id, index)
+		sub, err := k.getIndexedSubToken(child, token, index)
 		if err != nil {
 			return err
 		}

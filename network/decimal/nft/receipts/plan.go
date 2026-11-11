@@ -355,29 +355,26 @@ func (p *Planner) snapshot(ctx sdk.Context, transfers []Transfer, profiles map[c
 				if limit == 0 {
 					limit = 1
 				} // One bounded empty-page probe permits exact exhaustion.
-				ids, cursor, err := p.state.ListActiveSubTokenIDs(ctx, binding.NativeTokenID, text, after, limit)
+				units, cursor, err := p.state.ListActiveSubTokens(ctx, binding.NativeTokenID, text, after, limit)
 				if err != nil {
 					return nil, err
 				}
-				if len(ids) == 0 {
+				if len(units) == 0 {
 					break
 				}
-				readUnits += uint64(len(ids))
+				readUnits += uint64(len(units))
 				if readUnits > uint64(p.decoder.limits.MaxUnits) {
 					return nil, errors.New("NFT native snapshot read-unit limit exceeded")
 				}
-				ctx.GasMeter().ConsumeGas(uint64(len(ids))*100, "NFT bounded native unit snapshot")
-				for _, id := range ids {
+				ctx.GasMeter().ConsumeGas(uint64(len(units))*100, "NFT bounded native unit snapshot")
+				for _, unit := range units {
+					id := unit.ID
 					if id <= after {
 						return nil, errors.New("NFT native owner page is not strictly ordered")
 					}
 					after = id
 					if _, present := asset.units[id]; present {
 						return nil, errors.New("NFT native unit appears under multiple owners")
-					}
-					unit, err := p.state.GetSubToken(ctx, binding.NativeTokenID, id)
-					if err != nil {
-						return nil, err
 					}
 					actual, err := nativeAddress(unit.Owner)
 					if err != nil || actual != owner {

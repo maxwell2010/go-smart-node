@@ -2,6 +2,7 @@ package systemcontracts_test
 
 import (
 	"bytes"
+	"encoding/json"
 	"math/big"
 	"testing"
 
@@ -10,6 +11,7 @@ import (
 	evmtypes "github.com/cosmos/evm/x/vm/types"
 	"github.com/ethereum/go-ethereum/accounts/abi"
 	"github.com/ethereum/go-ethereum/common"
+	"github.com/ethereum/go-ethereum/common/hexutil"
 	"github.com/ethereum/go-ethereum/crypto"
 	nftkeeper "github.com/maxwell2010/go-smart-node/network/decimal/nft/keeper"
 	nfttypes "github.com/maxwell2010/go-smart-node/network/decimal/nft/types"
@@ -128,6 +130,22 @@ func runSignedNFTAdmissionLifecycle(t *testing.T, e isolatedBackendEnv, genesis 
 
 	// A direct wallet transfer moves the same ERC1155 unit in both ledgers.
 	other := crypto.PubkeyToAddress(e.keys[1].PublicKey)
+	input, err := origin.ABI.Pack("safeTransferFrom", user, other, originToken.Big(), one, []byte{})
+	require.NoError(t, err)
+	args, err := json.Marshal(map[string]interface{}{"from": user, "to": originAddress, "input": hexutil.Encode(input), "gasPrice": "0xe8d4a51000"})
+	require.NoError(t, err)
+	ctx := e.ctx()
+	estimate, err := e.app.EVMKeeper.EstimateGas(ctx, &evmtypes.EthCallRequest{
+		Args: args, GasCap: signedNFTGasLimit, ProposerAddress: sdk.ConsAddress(ctx.BlockHeader().ProposerAddress),
+	})
+	require.NoError(t, err)
+	require.Empty(t, estimate.VmError)
+	require.Greater(t, estimate.Gas, uint64(21_000))
+	require.LessOrEqual(t, estimate.Gas, uint64(signedNFTGasLimit))
+	checkOrigin(quantity, 0)
+	unitBeforeEstimate, err := nftKeeper.GetSubToken(e.ctx(), signedNFTNativeOriginID, 1)
+	require.NoError(t, err)
+	require.Equal(t, f.beneficiary, unitBeforeEstimate.Owner)
 	transferOrigin := func(signer int, from, to common.Address, succeeds bool) {
 		t.Helper()
 		transfer, err := origin.ABI.Pack("safeTransferFrom", from, to, originToken.Big(), one, []byte{})
