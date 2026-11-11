@@ -18,7 +18,7 @@ from mcnd_process_smoke import HTTP, ProcessOwner, SignalGuard, private_environm
 CHAIN = 'mintcandy_990001-1'
 EVM_CHAIN = 990001
 COMET = 'http://127.0.0.1:28657'
-REST = 'http://127.0.0.1:1319'
+REST = 'http://127.0.0.1:1317'
 EVM = 'http://127.0.0.1:8645'
 ADDRESS = r'0x[0-9a-fA-F]{40}'
 WORD = r'0x[0-9a-f]{64}'
@@ -119,6 +119,8 @@ def safe_diagnostic(text):
     categories = ('authenticate withdrawal genesis', 'genesis signing domain', 'failed to unmarshal',
                   'failed to initialize', 'validator set', 'priv-validator', 'no space left on device')
     notes = [category for category in categories if category in text.lower()]
+    flags = re.findall(r'unknown (?:shorthand )?flag: ([-A-Za-z0-9._]{2,80})', text, re.IGNORECASE)
+    notes += ['unknown flag ' + flag for flag in list(dict.fromkeys(flags))[:4]]
     notes += list(dict.fromkeys(re.findall(r'unable to resolve type URL (/[A-Za-z0-9_.]{1,140})', text)))[:4]
     notes += list(dict.fromkeys(re.findall(r'\b[A-Za-z0-9_-]+\.go:\d{1,6}(?::\d{1,5})?', text)))[:8]
     return ', '.join(notes) if notes else 'no allowlisted diagnostic'
@@ -237,7 +239,7 @@ def run_gate(args, binary, root, expected, genesis, invalid, validator, env, own
         private_write(home / 'config/priv_validator_key.json', validator)
 
     start = ['start', '--rpc.laddr', 'tcp://127.0.0.1:28657', '--p2p.laddr', 'tcp://127.0.0.1:28656',
-             '--grpc.address', '127.0.0.1:9190', '--api.enable=true', '--api.address', 'tcp://127.0.0.1:1319',
+             '--grpc.address', '127.0.0.1:9190', '--api.enable=true',
              '--grpc-web.enable=false', '--json-rpc.enable=true', '--json-rpc.address', '127.0.0.1:8645',
              '--json-rpc.ws-address', '127.0.0.1:8646', '--log_format', 'json', '--log_level', 'info']
     domain = ['--chain-id', CHAIN, '--evm.evm-chain-id', str(EVM_CHAIN)]

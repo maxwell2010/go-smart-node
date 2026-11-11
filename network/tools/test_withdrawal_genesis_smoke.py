@@ -121,6 +121,8 @@ class WithdrawalGenesisSmokeTests(unittest.TestCase):
         public = smoke.safe_diagnostic(synthetic)
         self.assertEqual(public, 'failed to unmarshal, /example.FixtureMsg, withdrawal_genesis.go:172:15')
         self.assertNotIn('DO_NOT_PUBLISH_TEST_MARKER', public)
+        public = smoke.safe_diagnostic('Error: unknown flag: --api.address DO_NOT_PUBLISH_TEST_MARKER')
+        self.assertEqual(public, 'unknown flag --api.address')
 
 
 if __name__ == '__main__':
