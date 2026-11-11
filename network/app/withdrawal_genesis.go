@@ -155,6 +155,7 @@ func (app *App) initWithdrawalGenesis(ctx sdk.Context, req *abci.RequestInitChai
 	}
 	header := child.BlockHeader()
 	header.ProposerAddress = proposer
+	header.Height = max(req.InitialHeight, 1)
 	read, _ := child.CacheContext()
 	read = read.WithBlockHeader(header)
 	gasBefore := read.GasMeter().GasConsumed()
