@@ -80,10 +80,7 @@ func (s GatewayDELStake) depositHold(previous *types.Delegation, deposited sdkma
 	return gatewayDELHoldStake(amount, lots), nil
 }
 
-func (s GatewayDELStake) takeHold(previous *types.Delegation, withdrawn sdkmath.Int, now int64) (types.Stake, *types.Delegation, error) {
-	if s.HoldDeadline >= now {
-		return types.Stake{}, nil, errors.New("Gateway DEL hold has not expired")
-	}
+func (s GatewayDELStake) takeHold(previous *types.Delegation, withdrawn sdkmath.Int) (types.Stake, *types.Delegation, error) {
 	var moved, kept []*types.StakeHold
 	remaining := withdrawn
 	for _, lot := range previous.Stake.Holds {

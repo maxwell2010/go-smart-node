@@ -185,7 +185,10 @@ func (k *StateKeeper) ApplyGatewayDELWithdrawal(ctx sdk.Context, next GatewayDEL
 	stake := types.NewStakeCoin(sdk.NewCoin(identity.BaseDenom, amount))
 	change := DelegationChange{Expected: delegation}
 	if next.HoldDeadline != 0 {
-		stake, change.Next, err = next.takeHold(delegation, amount, ctx.BlockTime().Unix())
+		if next.HoldDeadline >= ctx.BlockTime().Unix() {
+			return errors.New("Gateway DEL hold has not expired")
+		}
+		stake, change.Next, err = next.takeHold(delegation, amount)
 		if err != nil {
 			return err
 		}
