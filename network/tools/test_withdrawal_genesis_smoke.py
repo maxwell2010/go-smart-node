@@ -1,6 +1,8 @@
+import io
 import json
 import pathlib
 import unittest
+import urllib.error
 from unittest.mock import MagicMock, call, patch
 
 import withdrawal_genesis_smoke as smoke
@@ -32,6 +34,28 @@ class WithdrawalGenesisSmokeTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, 'above the 23000000 regression limit'):
             smoke.check_settlement_gas(report, 23_000_001)
         self.assertEqual(report['sdkGasHeadroom'], 999_999)
+
+    def test_wait_height_requires_application_commit_not_only_comet_status(self):
+        advertised = {'node_info': {'network': smoke.CHAIN}, 'sync_info': {'latest_block_height': '2032'}}
+        app_before = {'response': {'last_block_height': '2030'}}
+        app_after = {'response': {'last_block_height': '2031'}}
+        child = MagicMock()
+        child.poll.return_value = None
+        with patch.object(smoke, 'comet', side_effect=[advertised, app_before, advertised, app_after]) as comet, \
+                patch.object(smoke.time, 'monotonic', return_value=1), patch.object(smoke.time, 'sleep') as sleep:
+            height = smoke.wait_height(child, 2031, 2, None, {})
+        self.assertEqual(height, 2031)
+        self.assertEqual(comet.call_args_list, [call('status'), call('abci_info'), call('status'), call('abci_info')])
+        sleep.assert_called_once()
+
+    def test_http_error_preserves_endpoint_height_and_only_known_reason(self):
+        url = smoke.REST + '/decimal/nft/v1/token/receipt'
+        source = io.BytesIO(b'{"message":"cannot query with height in the future DO_NOT_PUBLISH_TEST_MARKER"}')
+        error = urllib.error.HTTPError(url, 500, 'Internal Server Error', {}, source)
+        with patch.object(smoke.HTTP, 'open', side_effect=error):
+            with self.assertRaises(OSError) as captured:
+                smoke.native('/decimal/nft/v1/token/receipt', 2043)
+        self.assertEqual(str(captured.exception), 'HTTP 500 GET /decimal/nft/v1/token/receipt at height 2043: cannot query with height in the future')
 
     def test_fixture_retains_full_word_and_requires_bounded_deadline(self):
         expected = fixture()

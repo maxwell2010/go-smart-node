@@ -9,6 +9,7 @@ import re
 import stat
 import tempfile
 import time
+import urllib.error
 import urllib.parse
 import urllib.request
 
@@ -90,26 +91,59 @@ def bech32_payload(owner):
     return '0x' + address.to_bytes(20, 'big').hex()
 
 
+def rpc_context(url, payload=None, headers=None):
+    parsed = urllib.parse.urlsplit(url)
+    height = (headers or {}).get(HEIGHT_HEADER)
+    if payload is None:
+        endpoint = 'GET ' + parsed.path
+        height = height or urllib.parse.parse_qs(parsed.query).get('height', [None])[0]
+    else:
+        endpoint = 'POST ' + payload['method']
+        params = payload.get('params') or []
+        if params and isinstance(params[-1], str) and re.fullmatch(r'0x[0-9a-f]{1,16}', params[-1]):
+            height = str(int(params[-1], 16))
+    return endpoint + (f' at height {height}' if height else '')
+
+
+def rpc_reason(text):
+    phrases = ('cannot query with height in the future', 'version does not exist', 'could not load state',
+               'could not find results', 'block results are not available', 'height is not available',
+               'header not found', 'please wait for first block', 'context did not contain latest block height')
+    sample = text[:4096].lower()
+    return ', '.join(phrase for phrase in phrases if phrase in sample) or 'no allowlisted upstream reason'
+
+
 def request(url, payload=None, headers=None):
     data = None if payload is None else json.dumps(payload).encode()
     req = urllib.request.Request(url, data=data, headers=headers or {})
     if data is not None:
         req.add_header('Content-Type', 'application/json')
-    with HTTP.open(req, timeout=4) as response:
-        raw = response.read(2 * 1024 * 1024 + 1)
-        check(len(raw) <= 2 * 1024 * 1024, 'disposable RPC response exceeds limit')
-        return json.loads(raw), response.headers
+    try:
+        with HTTP.open(req, timeout=4) as response:
+            raw = response.read(2 * 1024 * 1024 + 1)
+            check(len(raw) <= 2 * 1024 * 1024, 'disposable RPC response exceeds limit')
+            return json.loads(raw), response.headers
+    except urllib.error.HTTPError as error:
+        with error:
+            reason = rpc_reason(error.read(4096).decode('utf8', errors='replace'))
+        raise OSError(f'HTTP {error.code} {rpc_context(url, payload, headers)}: {reason}') from None
+    except OSError as error:
+        raise OSError(f'{rpc_context(url, payload, headers)}: {type(error).__name__}') from None
 
 
 def comet(method):
-    response, _ = request(COMET + '/' + method)
-    check('error' not in response and 'result' in response, 'Comet RPC failed: ' + method)
+    url = COMET + '/' + method
+    response, _ = request(url)
+    check('error' not in response and 'result' in response,
+          f'Comet RPC {rpc_context(url)} failed: ' + rpc_reason(str(response.get('error', ''))))
     return response['result']
 
 
 def ethereum(method, params):
-    response, _ = request(EVM, {'jsonrpc': '2.0', 'id': 1, 'method': method, 'params': params})
-    check('error' not in response and 'result' in response, 'EVM RPC failed: ' + method)
+    payload = {'jsonrpc': '2.0', 'id': 1, 'method': method, 'params': params}
+    response, _ = request(EVM, payload)
+    check('error' not in response and 'result' in response,
+          f'EVM RPC {rpc_context(EVM, payload)} failed: ' + rpc_reason(str(response.get('error', ''))))
     return response['result']
 
 
@@ -178,21 +212,27 @@ def readiness_diagnostic(path, report):
 
 
 def wait_height(child, minimum, deadline, log_path, report):
+    last_heights = ''
     while time.monotonic() < deadline:
         code = child.poll()
         if code is not None:
             raise RuntimeError(f'daemon exited ({code}) before committed height {minimum}: ' + readiness_diagnostic(log_path, report))
         try:
             status = comet('status')
+            check(status['node_info']['network'] == CHAIN, 'Comet RPC chain mismatch')
+            advertised = int(status['sync_info']['latest_block_height'])
+            committed = int(comet('abci_info')['response'].get('last_block_height', '0'))
         except (OSError, json.JSONDecodeError):
             time.sleep(0.25)
             continue
-        check(status['node_info']['network'] == CHAIN, 'Comet RPC chain mismatch')
-        height = int(status['sync_info']['latest_block_height'])
+        # Comet can advertise a block before Commit makes its SDK version
+        # queryable. Block results and historical state must both be ready.
+        height = min(advertised, committed)
         if height >= minimum:
             return height
+        last_heights = f' (Comet advertised {advertised}, application committed {committed})'
         time.sleep(0.25)
-    raise TimeoutError(f'daemon did not reach committed height {minimum}: ' + readiness_diagnostic(log_path, report))
+    raise TimeoutError(f'daemon did not reach committed height {minimum}{last_heights}: ' + readiness_diagnostic(log_path, report))
 
 
 def block_time(height):
