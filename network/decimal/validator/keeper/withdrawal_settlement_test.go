@@ -43,16 +43,6 @@ func withdrawalGenesis(t *testing.T, g *types.GenesisState, id []byte, deadline 
 	return row
 }
 
-func markWithdrawalSettled(ctx sdk.Context, k *StateKeeper, row types.EVMFrozenBinding) error {
-	row.Active = false
-	row.UpdatedHeight = ctx.BlockHeight()
-	plan, err := k.PrepareBindingPlan(ctx, []BindingMutation{{Frozen: &row}})
-	if err != nil {
-		return err
-	}
-	return k.ApplyBindingPlan(ctx, plan)
-}
-
 func TestWithdrawalSettlementRetriesWithoutBlockingOthersAcrossIAVLReopen(t *testing.T) {
 	dir := t.TempDir()
 	open := func() (sdk.Context, multistore.CommitMultiStore, dbm.DB, *StateKeeper) {
@@ -87,7 +77,7 @@ func TestWithdrawalSettlementRetriesWithoutBlockingOthersAcrossIAVLReopen(t *tes
 		require.Equal(t, stateWord(uint64(attempts-1)), row.FrozenIndex)
 		require.NoError(t, k.service.OpenKVStore(child).Set(failMarker, []byte{1}))
 		child.EventManager().EmitEvent(sdk.NewEvent("failed_withdrawal"))
-		require.NoError(t, markWithdrawalSettled(child, k, row))
+		require.NoError(t, k.ApplyWithdrawalCompletion(child, row))
 		switch attempts {
 		case 1:
 			// Explicit VM or projection failure after tentative writes.
@@ -112,7 +102,7 @@ func TestWithdrawalSettlementRetriesWithoutBlockingOthersAcrossIAVLReopen(t *tes
 	var seen [][]byte
 	next, err := k.SettleMatureWithdrawals(ctx, 1_000_000, func(child sdk.Context, row types.EVMFrozenBinding) error {
 		seen = append(seen, bytes.Clone(row.FrozenIndex))
-		return markWithdrawalSettled(child, k, row)
+		return k.ApplyWithdrawalCompletion(child, row)
 	})
 	require.NoError(t, err)
 	require.Equal(t, WithdrawalSettlementResult{Settled: maxWithdrawalAttempts}, next)
@@ -128,7 +118,7 @@ func TestWithdrawalSettlementRetriesWithoutBlockingOthersAcrossIAVLReopen(t *tes
 	ctx = ctx.WithBlockHeight(12).WithBlockTime(time.Unix(2002, 0))
 	last, err := k.SettleMatureWithdrawals(ctx, 1_000_000, func(child sdk.Context, row types.EVMFrozenBinding) error {
 		require.NotEqual(t, wideID, row.FrozenIndex, "committed payout must not be tried again")
-		return markWithdrawalSettled(child, k, row)
+		return k.ApplyWithdrawalCompletion(child, row)
 	})
 	require.NoError(t, err)
 	require.Equal(t, WithdrawalSettlementResult{Settled: 2}, last)
@@ -141,7 +131,7 @@ func TestWithdrawalSettlementRetriesWithoutBlockingOthersAcrossIAVLReopen(t *tes
 	cms.Commit()
 }
 
-func TestWithdrawalSettlementRequiresMatchingCompletedBinding(t *testing.T) {
+func TestWithdrawalSettlementRequiresExactPairDelta(t *testing.T) {
 	ctx, service, _ := environment(t)
 	ctx = ctx.WithChainID(bindingTestChain).WithBlockHeight(10).WithBlockTime(time.Unix(1999, 0))
 	k, err := NewStateKeeperWithDomain(service, bindingTestChain, 990001)
@@ -153,16 +143,28 @@ func TestWithdrawalSettlementRequiresMatchingCompletedBinding(t *testing.T) {
 	g.EVMFrozenBindings[0].NativeEntryHash, err = types.NativeQueueEntryHash(1, pair.Delegator, pair.Validator, "", &pair.Entries[0])
 	require.NoError(t, err)
 	require.NoError(t, k.InitGenesis(ctx, g))
-	before, err := k.SettleMatureWithdrawals(ctx, 1_000_000, func(sdk.Context, types.EVMFrozenBinding) error {
-		t.Fatal("settlement must not run before the deadline")
+	unreachable := func(sdk.Context, types.EVMFrozenBinding) error {
+		t.Fatal("the executor must not run before the full native deadline")
 		return nil
-	})
+	}
+	before, err := k.SettleMatureWithdrawals(ctx, 1_000_000, unreachable)
 	require.NoError(t, err)
 	require.Empty(t, before)
 	ctx = ctx.WithBlockTime(time.Unix(2000, 0))
+	before, err = k.SettleMatureWithdrawals(ctx, 1_000_000, unreachable)
+	require.NoError(t, err)
+	require.Equal(t, WithdrawalSettlementResult{Retried: 1}, before)
+
+	ctx = ctx.WithBlockHeight(11).WithBlockTime(pair.Entries[0].CompletionTime)
 	marker := []byte{0xfa}
-	result, err := k.SettleMatureWithdrawals(ctx, 1_000_000, func(child sdk.Context, _ types.EVMFrozenBinding) error {
-		return service.OpenKVStore(child).Set(marker, []byte{1})
+	result, err := k.SettleMatureWithdrawals(ctx, 1_000_000, func(child sdk.Context, row types.EVMFrozenBinding) error {
+		require.NoError(t, service.OpenKVStore(child).Set(marker, []byte{1}))
+		// Metadata-only retirement is insufficient even if the frozen row and
+		// all its indexes are otherwise exactly the expected poststate.
+		row.Active, row.UpdatedHeight = false, child.BlockHeight()
+		plan, err := k.PrepareBindingPlan(child, []BindingMutation{{Frozen: &row}})
+		require.NoError(t, err)
+		return k.ApplyBindingPlan(child, plan)
 	})
 	require.NoError(t, err)
 	require.Equal(t, WithdrawalSettlementResult{Retried: 1}, result)
@@ -172,14 +174,80 @@ func TestWithdrawalSettlementRequiresMatchingCompletedBinding(t *testing.T) {
 	current, err := k.GetEVMFrozenBinding(ctx, b.Gateway, b.FrozenIndex)
 	require.NoError(t, err)
 	require.True(t, current.Active)
-	execute := func(child sdk.Context, row types.EVMFrozenBinding) error {
-		return markWithdrawalSettled(child, k, row)
-	}
-	result, err = k.SettleMatureWithdrawals(ctx, 1_000_000, execute)
-	require.NoError(t, err)
-	require.Equal(t, WithdrawalSettlementResult{Retried: 1}, result, "the full native deadline must have passed")
-	ctx = ctx.WithBlockHeight(11).WithBlockTime(pair.Entries[0].CompletionTime)
-	result, err = k.SettleMatureWithdrawals(ctx, 1_000_000, execute)
+	require.Empty(t, ctx.EventManager().Events())
+	result, err = k.SettleMatureWithdrawals(ctx, 1_000_000, k.ApplyWithdrawalCompletion)
 	require.NoError(t, err)
 	require.Equal(t, WithdrawalSettlementResult{Settled: 1}, result)
+	require.Len(t, ctx.EventManager().Events(), 1)
+}
+
+func TestApplyWithdrawalCompletionKeepsEqualEntriesSeparateAndRejectsReplay(t *testing.T) {
+	ctx, service, _ := environment(t)
+	ctx = ctx.WithChainID(bindingTestChain).WithBlockHeight(10).WithBlockTime(time.Unix(1999, 0))
+	k, err := NewStateKeeperWithDomain(service, bindingTestChain, 990001)
+	require.NoError(t, err)
+	g := bindingGenesisState(t, false)
+	first := withdrawalGenesis(t, g, stateWord(0), 2000)
+	wideID := stateWord(0)
+	wideID[0] = 1
+	second := withdrawalGenesis(t, g, wideID, 2000)
+	require.Equal(t, first.NativeEntryHash, second.NativeEntryHash)
+	require.NoError(t, k.InitGenesis(ctx, g))
+	require.ErrorContains(t, k.ApplyWithdrawalCompletion(ctx, first), "has not matured")
+	ctx = ctx.WithBlockTime(time.Unix(2000, 0))
+	mismatched := first
+	mismatched.SourceStakeID = stateWord(31)
+	require.ErrorContains(t, k.ApplyWithdrawalCompletion(ctx, mismatched), "expected preimage")
+	require.Empty(t, ctx.EventManager().Events())
+
+	require.NoError(t, k.ApplyWithdrawalCompletion(ctx, first))
+	require.ErrorIs(t, k.ApplyWithdrawalCompletion(ctx, first), ErrWithdrawalAlreadyCompleted)
+	require.ErrorContains(t, k.ApplyWithdrawalCompletion(ctx, mismatched), "expected identity")
+	revision, err := k.BindingRevision(ctx)
+	require.NoError(t, err)
+	require.EqualValues(t, 1, revision)
+	require.Len(t, ctx.EventManager().Events(), 1)
+	remaining, err := k.ExportGenesis(ctx)
+	require.NoError(t, err)
+	require.Len(t, remaining.Undelegations, 1)
+	require.Len(t, remaining.Undelegations[0].Entries, 1)
+	active, err := k.GetEVMFrozenBinding(ctx, second.Gateway, second.FrozenIndex)
+	require.NoError(t, err)
+	require.True(t, active.Active)
+
+	// Fail the final queue deletion after the tentative binding retirement.
+	fault, err := NewStateKeeperWithDomain(failingService{service: service, prefix: undelegationPrefix, deleteOnly: true}, bindingTestChain, 990001)
+	require.NoError(t, err)
+	require.ErrorContains(t, fault.ApplyWithdrawalCompletion(ctx, second), "injected delete failure")
+	unchanged, err := k.ExportGenesis(ctx)
+	require.NoError(t, err)
+	assertGenesisBytes(t, remaining, unchanged)
+	require.Len(t, ctx.EventManager().Events(), 1)
+	require.NoError(t, k.ApplyWithdrawalCompletion(ctx, second))
+	finished, err := k.ExportGenesis(ctx)
+	require.NoError(t, err)
+	require.Empty(t, finished.Undelegations)
+	require.Len(t, ctx.EventManager().Events(), 2)
+}
+
+func TestWithdrawalSettlementLowerLimitLeavesLaterDueEntries(t *testing.T) {
+	ctx, service, _ := environment(t)
+	ctx = ctx.WithChainID(bindingTestChain).WithBlockHeight(10).WithBlockTime(time.Unix(2000, 0))
+	k, err := NewStateKeeperWithDomain(service, bindingTestChain, 990001)
+	require.NoError(t, err)
+	g := bindingGenesisState(t, false)
+	for i := range 3 {
+		withdrawalGenesis(t, g, stateWord(uint64(i)), 2000)
+	}
+	require.NoError(t, k.InitGenesis(ctx, g))
+	first, err := k.SettleMatureWithdrawalsLimit(ctx, 2, 1_000_000, k.ApplyWithdrawalCompletion)
+	require.NoError(t, err)
+	require.Equal(t, WithdrawalSettlementResult{Settled: 2}, first)
+	remaining, err := k.GetEVMFrozenBinding(ctx, stateAddress(3), stateWord(2))
+	require.NoError(t, err)
+	require.True(t, remaining.Active)
+	ctx = ctx.WithBlockHeight(11).WithBlockTime(time.Unix(2001, 0))
+	last, err := k.SettleMatureWithdrawalsLimit(ctx, 2, 1_000_000, k.ApplyWithdrawalCompletion)
+	require.NoError(t, err)
+	require.Equal(t, WithdrawalSettlementResult{Settled: 1}, last)
 }
