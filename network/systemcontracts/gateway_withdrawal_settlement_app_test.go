@@ -218,10 +218,7 @@ func runGatewayWithdrawalSettlement(t *testing.T, e isolatedBackendEnv, gateway 
 		}
 		require.Equal(t, 1, count)
 		require.Equal(t, before.Add(amount), bank(child, beneficiary), "real WDEL unwrap credits exactly one DEL payout inside the attempt")
-		row.Active, row.UpdatedHeight = false, child.BlockHeight()
-		plan, err := k.PrepareBindingPlan(child, []validatorkeeper.BindingMutation{{Frozen: &row}})
-		require.NoError(t, err)
-		require.NoError(t, k.ApplyBindingPlan(child, plan))
+		require.NoError(t, k.ApplyWithdrawalCompletion(child, row))
 		child.EventManager().EmitEvent(sdk.NewEvent(projectionEvent))
 		if attempts == 1 {
 			return errors.New("fixture projection rejected after Gateway payout")

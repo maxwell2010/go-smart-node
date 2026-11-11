@@ -469,6 +469,11 @@ func (k *Keeper) ApplyMessageWithConfig(ctx sdk.Context, stateDB *statedb.StateD
 	if err != nil {
 		return nil, err
 	}
+	guarded := commit && (internal || callFromPrecompile) && k.internalCommitGuard != nil
+	var guardSnapshot, firstLog int
+	if guarded {
+		guardSnapshot, firstLog = stateDB.Snapshot(), len(stateDB.Logs())
+	}
 
 	if contractCreation {
 		// take over the nonce management from evm:
@@ -521,6 +526,17 @@ func (k *Keeper) ApplyMessageWithConfig(ctx sdk.Context, stateDB *statedb.StateD
 	// update leftoverGas and temporaryGasUsed with refund amount
 	leftoverGas += refund
 	temporaryGasUsed := maxUsedGas - refund
+
+	if guarded && vmErr == nil {
+		if err := k.internalCommitGuard(ctx, msg, stateDB.Logs()[firstLog:]); err != nil {
+			// A nested precompile may share the outer StateDB. Skipping Commit
+			// alone would leave dirty state behind in its journal.
+			stateDB.RevertToSnapshot(guardSnapshot)
+			vmErr = fmt.Errorf("internal EVM state transition rejected: %w", err)
+			commit = false
+			temporaryGasUsed = maxUsedGas
+		}
+	}
 
 	// EVM execution error needs to be available for the JSON-RPC client
 	var vmError string

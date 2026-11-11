@@ -26,6 +26,8 @@ import (
 type isolatedBackendEnv struct {
 	app             *ownedapp.App
 	ctx             func() sdk.Context
+	advance         func()
+	nextGasLimit    func(uint64)
 	send            func(*ecdsa.PrivateKey, *common.Address, *big.Int, []byte, bool) *evmtypes.MsgEthereumTxResponse
 	load            func(string) contracts.Artifact
 	deploy          func(contracts.Artifact, ...interface{}) common.Address

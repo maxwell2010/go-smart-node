@@ -70,8 +70,8 @@ type Keeper struct {
 	// Tracer used to collect execution traces from the EVM transaction execution
 	tracer string
 
-	hooks types.EvmHooks
-	// EVM Hooks for tx post-processing
+	hooks               types.EvmHooks
+	internalCommitGuard func(sdk.Context, core.Message, []*ethtypes.Log) error
 
 	// precompiles defines the map of all available precompiled smart contracts.
 	// Some of these precompiled contracts might not be active depending on the EVM
@@ -219,6 +219,18 @@ func (k *Keeper) SetHooks(eh types.EvmHooks) *Keeper {
 
 	k.hooks = eh
 	return k
+}
+
+// AppendHooks composes application-owned observers during initialization.
+func (k *Keeper) AppendHooks(hook types.EvmHooks) {
+	if hook == nil {
+		panic("cannot append nil EVM hooks")
+	}
+	if k.hooks == nil {
+		k.SetHooks(hook)
+		return
+	}
+	k.hooks = NewMultiEvmHooks(k.hooks, hook)
 }
 
 // PostTxProcessing delegates the call to the hooks.

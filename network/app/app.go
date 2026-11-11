@@ -33,6 +33,7 @@ import (
 	_ "github.com/ethereum/go-ethereum/eth/tracers/native"
 
 	abci "github.com/cometbft/cometbft/abci/types"
+	cmtproto "github.com/cometbft/cometbft/proto/tendermint/types"
 
 	dbm "github.com/cosmos/cosmos-db"
 	evmante "github.com/cosmos/evm/ante"
@@ -193,6 +194,7 @@ type App struct {
 	NativeCoinKeeper      *nativecoinkeeper.StateKeeper
 	NativeNFTKeeper       *nativenftkeeper.StateKeeper
 	NativeValidatorKeeper *nativevalidatorkeeper.StateKeeper
+	withdrawals           *withdrawalController
 	AccountKeeper         authkeeper.AccountKeeper
 	BankKeeper            bankkeeper.Keeper
 	StakingKeeper         *stakingkeeper.Keeper
@@ -797,6 +799,9 @@ func NewApp(
 			logger.Error("error on loading last version", "err", err)
 			os.Exit(1)
 		}
+		if err := app.loadCommittedWithdrawalSettlement(); err != nil {
+			panic(err)
+		}
 	}
 
 	return app
@@ -857,7 +862,16 @@ func (app *App) BeginBlocker(ctx sdk.Context) (sdk.BeginBlock, error) {
 
 // EndBlocker application updates every end block
 func (app *App) EndBlocker(ctx sdk.Context) (sdk.EndBlock, error) {
-	return app.ModuleManager.EndBlock(ctx)
+	result, err := app.ModuleManager.EndBlock(ctx)
+	if err != nil || app.withdrawals == nil {
+		return result, err
+	}
+	settlementCtx := ctx.WithEventManager(sdk.NewEventManager())
+	if err := app.withdrawals.settle(settlementCtx); err != nil {
+		return sdk.EndBlock{}, err
+	}
+	result.Events = append(result.Events, settlementCtx.EventManager().ABCIEvents()...)
+	return result, nil
 }
 
 func (app *App) FinalizeBlock(req *abci.RequestFinalizeBlock) (res *abci.ResponseFinalizeBlock, err error) {
@@ -900,7 +914,15 @@ func (app *App) PreBlocker(ctx sdk.Context, _ *abci.RequestFinalizeBlock) (*sdk.
 
 // LoadHeight loads a particular height
 func (app *App) LoadHeight(height int64) error {
-	return app.LoadVersion(height)
+	if err := app.LoadVersion(height); err != nil {
+		return err
+	}
+	return app.loadCommittedWithdrawalSettlement()
+}
+
+func (app *App) loadCommittedWithdrawalSettlement() error {
+	ctx := app.NewUncachedContext(false, cmtproto.Header{ChainID: app.chainID, Height: app.LastBlockHeight()})
+	return app.LoadWithdrawalSettlement(ctx)
 }
 
 // LegacyAmino returns App's amino codec.

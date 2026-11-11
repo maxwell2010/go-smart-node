@@ -13,6 +13,15 @@ import (
 	"github.com/ethereum/go-ethereum/core/vm"
 )
 
+// SetInternalCommitGuard installs the application's check for internal EVM
+// state transitions that do not pass through signed transaction hooks.
+func (k *Keeper) SetInternalCommitGuard(guard func(sdk.Context, core.Message, []*ethtypes.Log) error) {
+	if guard == nil || k.internalCommitGuard != nil {
+		panic("internal EVM commit guard must be installed exactly once")
+	}
+	k.internalCommitGuard = guard
+}
+
 // nativeWorkConfig postpones the minimum fee floor until EVM and native work
 // have both completed. The floor must not consume the native execution budget.
 func nativeWorkConfig(cfg *statedb.EVMConfig, limit uint64) (*statedb.EVMConfig, uint64, error) {

@@ -142,12 +142,17 @@ func TestOwnedAppSignedRegistryBootstrap(t *testing.T) {
 	nativeCredit := new(big.Int)
 	var lastBlockEvents []abci.Event
 	var lastAllEvents []abci.Event
+	var nextGasLimit uint64
 	send := func(key *ecdsa.PrivateKey, to *common.Address, value *big.Int, input []byte, success bool) *evmtypes.MsgEthereumTxResponse {
 		t.Helper()
 		from := crypto.PubkeyToAddress(key.PublicKey)
 		before := a.BankKeeper.GetBalance(ctx(), sdk.AccAddress(from.Bytes()), identity.BaseDenom).Amount
 		nonce := a.EVMKeeper.GetNonce(ctx(), from)
-		raw := ethtypes.NewTx(&ethtypes.LegacyTx{Nonce: nonce, To: to, Value: value, Gas: 8_000_000, GasPrice: price, Data: input})
+		gasLimit := uint64(8_000_000)
+		if nextGasLimit != 0 {
+			gasLimit, nextGasLimit = nextGasLimit, 0
+		}
+		raw := ethtypes.NewTx(&ethtypes.LegacyTx{Nonce: nonce, To: to, Value: value, Gas: gasLimit, GasPrice: price, Data: input})
 		signer := ethtypes.NewEIP155Signer(big.NewInt(990001))
 		signed, err := ethtypes.SignTx(raw, signer, key)
 		require.NoError(t, err)
@@ -189,6 +194,14 @@ func TestOwnedAppSignedRegistryBootstrap(t *testing.T) {
 		require.Equal(t, nonce+1, a.EVMKeeper.GetNonce(ctx(), from))
 		nativeCredit.SetUint64(0)
 		return response
+	}
+	advance := func() {
+		height := a.LastBlockHeight() + 1
+		result, err := a.FinalizeBlock(&abci.RequestFinalizeBlock{Height: height, Time: now.Add(time.Duration(height) * time.Second), NextValidatorsHash: vals.Hash(), ProposerAddress: vals.Proposer.Address})
+		require.NoError(t, err)
+		lastBlockEvents, lastAllEvents = result.Events, result.Events
+		_, err = a.Commit()
+		require.NoError(t, err)
 	}
 	load := func(name string) contracts.Artifact {
 		t.Helper()
@@ -1410,7 +1423,7 @@ func TestOwnedAppSignedRegistryBootstrap(t *testing.T) {
 		runCanonicalIsolatedGateway(t, isolatedBackendEnv{app: a, ctx: ctx, send: send, load: load, deploy: deploy, keys: keys, credit: nativeCredit, events: func() []abci.Event { return lastAllEvents }, setup: setup}, func(reject bool) { rejectNativeBurn = reject })
 	})
 	t.Run("authenticated isolated position reader", func(t *testing.T) {
-		runIsolatedPositionReader(t, isolatedBackendEnv{app: a, ctx: ctx, send: send, load: load, deploy: deploy, keys: keys, credit: nativeCredit, events: func() []abci.Event { return lastAllEvents }, setup: setup, govOwner: common.BytesToAddress(authtypes.NewModuleAddress(govtypes.ModuleName))})
+		runIsolatedPositionReader(t, isolatedBackendEnv{app: a, ctx: ctx, advance: advance, nextGasLimit: func(limit uint64) { nextGasLimit = limit }, send: send, load: load, deploy: deploy, keys: keys, credit: nativeCredit, events: func() []abci.Event { return lastAllEvents }, setup: setup, govOwner: common.BytesToAddress(authtypes.NewModuleAddress(govtypes.ModuleName))})
 	})
 	t.Run("curve converter ordinary financial controls", func(t *testing.T) {
 		runCurveConverterFinancial(t, isolatedBackendEnv{app: a, ctx: ctx, send: send, load: load, deploy: deploy, keys: keys, credit: nativeCredit, events: func() []abci.Event { return lastAllEvents }, blockEvents: func() []abci.Event { return lastBlockEvents }, setup: setup, govOwner: common.BytesToAddress(authtypes.NewModuleAddress(govtypes.ModuleName))})

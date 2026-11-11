@@ -12,6 +12,7 @@ import (
 	"github.com/ethereum/go-ethereum/core"
 	ethtypes "github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/crypto"
+	ownedapp "github.com/maxwell2010/go-smart-node/network/app"
 	nftview "github.com/maxwell2010/go-smart-node/network/decimal/nft/evmview"
 	nftkeeper "github.com/maxwell2010/go-smart-node/network/decimal/nft/keeper"
 	"github.com/maxwell2010/go-smart-node/network/decimal/nft/receipts"
@@ -275,5 +276,10 @@ func runIsolatedPositionReader(t *testing.T, e isolatedBackendEnv) {
 	t.Logf("actual isolated StakeSource authentication SDKgas=%d; native capture/pipeline costs separate", cost)
 	t.Run("registered custom DRC20 minimum-supply gate", func(t *testing.T) {
 		runRegisteredCustomMinimum(t, customMinimumEnv{base: e, registry: registryAddress, gateway: gatewayAddress, vault: vaultAddress, origin: originAddress, master: masterAddress, call: call, gov: govSetup, reader: sourceReader})
+	})
+	t.Run("shared App withdrawal settlement", func(t *testing.T) {
+		profile := ownedapp.WithdrawalProfile{Registry: registryAddress, Gateway: gatewayAddress, Library: libraryAddress, NFTCenter: factoryAddress,
+			PositionVault: vaultAddress, MasterValidator: masterAddress, WrappedDEL: wrapped}
+		runSharedWithdrawalDEL(t, e, profile, gateway, master, govSetup)
 	})
 }
