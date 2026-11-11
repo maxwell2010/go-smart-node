@@ -74,6 +74,10 @@ func ReconcileNativeGenesisAllocation(cdc codec.JSONCodec, genesis map[string]js
 
 // ValidateNativeGenesisAllocation never repairs an arbitrary genesis at startup.
 func ValidateNativeGenesisAllocation(cdc codec.JSONCodec, genesis map[string]json.RawMessage) error {
+	profile, err := parseWithdrawalGenesisProfile(genesis[WithdrawalGenesisKey])
+	if err != nil {
+		return err
+	}
 	coin, total, err := nativeAllocation(cdc, genesis)
 	if err != nil {
 		return err
@@ -94,7 +98,8 @@ func ValidateNativeGenesisAllocation(cdc codec.JSONCodec, genesis map[string]jso
 	if err := nft.Validate(); err != nil {
 		return err
 	}
-	if len(coin.Coins) != 0 || len(coin.Checks) != 0 || len(nft.Collections) != 0 || len(nft.ExternalBindings) != 0 || len(nft.IsolatedVaults) != 0 || len(nft.IsolatedPositions) != 0 {
+	if len(coin.Coins) != 0 || len(coin.Checks) != 0 ||
+		(profile == nil && (len(nft.Collections) != 0 || len(nft.ExternalBindings) != 0 || len(nft.IsolatedVaults) != 0 || len(nft.IsolatedPositions) != 0)) {
 		return errors.New("nonempty native asset genesis requires authenticated contract bootstrap and backing reconciliation, not yet enabled")
 	}
 	var validators nativevalidatortypes.GenesisState
@@ -109,6 +114,9 @@ func ValidateNativeGenesisAllocation(cdc codec.JSONCodec, genesis map[string]jso
 	}
 	if validators.Params.BaseDenom != identity.BaseDenom {
 		return errors.New("native validator base denomination must be del")
+	}
+	if profile != nil {
+		return validateWithdrawalGenesisSnapshot(*profile, &nft, &validators)
 	}
 	if len(validators.Validators) != 0 || len(validators.Delegations) != 0 || len(validators.Undelegations) != 0 || len(validators.Redelegations) != 0 || len(validators.LastValidatorPowers) != 0 || validators.LastTotalPower != 0 || len(validators.ValidatorOfflineSince) != 0 || len(validators.ScheduledValidatorSets) != 0 || len(validators.EVMStakeBindings) != 0 || len(validators.EVMFrozenBindings) != 0 || validators.BindingRevision != 0 {
 		return errors.New("nonempty native validator genesis requires authenticated financial bootstrap and consensus-controller activation, not yet enabled")

@@ -2,6 +2,7 @@ package systemcontracts_test
 
 import (
 	"math/big"
+	"os"
 	"testing"
 
 	storetypes "cosmossdk.io/store/types"
@@ -281,6 +282,9 @@ func runIsolatedPositionReader(t *testing.T, e isolatedBackendEnv) {
 		profile := ownedapp.WithdrawalProfile{Registry: registryAddress, Gateway: gatewayAddress, Library: libraryAddress, NFTCenter: factoryAddress,
 			PositionVault: vaultAddress, MasterValidator: masterAddress, WrappedDEL: wrapped}
 		validator := runSharedWithdrawalDEL(t, e, profile, gateway, master, govSetup)
+		if os.Getenv(withdrawalGenesisFixtureEnv) != "" {
+			govSetup(gateway, gatewayAddress, "setFreezeTime", big.NewInt(75), new(big.Int))
+		}
 		runSharedWithdrawalNFT(t, e, profile, gateway, origin, vault, originAddress, validator)
 	})
 }

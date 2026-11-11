@@ -80,6 +80,15 @@ func (app *App) LoadWithdrawalSettlement(ctx sdk.Context) error {
 		}
 		return nil
 	}
+	controller, err := app.newWithdrawalController(profile)
+	if err != nil {
+		return err
+	}
+	app.installWithdrawalController(controller)
+	return nil
+}
+
+func (app *App) newWithdrawalController(profile WithdrawalProfile) (*withdrawalController, error) {
 	reader, err := nftview.New(app.NativeNFTKeeper, app.EVMKeeper, nftview.Config{
 		Protocol: nftview.ProfileIsolatedPositionsV1, ChainID: app.chainID, EVMChainID: app.evmChainID,
 		Registry: profile.Registry, Delegation: profile.Gateway, DelegationLibrary: profile.Library,
@@ -87,17 +96,17 @@ func (app *App) LoadWithdrawalSettlement(ctx sdk.Context) error {
 		WrappedDEL: profile.WrappedDEL, EVMGas: 250_000, SDKGas: 5_000_000, MaxOwners: 4, MaxQuantity: 10000,
 	})
 	if err != nil {
-		return err
+		return nil, err
 	}
 	executor, err := settlement.NewExecutor(app.EVMKeeper, reader, settlement.Config{
 		EVMGas: 750_000, MaxLogs: withdrawalMaxLogs, MaxLogBytes: withdrawalLogBytes,
 	})
 	if err != nil {
-		return err
+		return nil, err
 	}
 	coinABI, err := contracts.CompiledABI("DRC20")
 	if err != nil {
-		return err
+		return nil, err
 	}
 	// This profile settles DEL and receipts backed by DEL. A recognized
 	// custom-coin reserve mutation would require a separate admitted reader.
@@ -106,26 +115,28 @@ func (app *App) LoadWithdrawalSettlement(ctx sdk.Context) error {
 			return sdkmath.Int{}, sdkmath.Int{}, errors.New("custom reserve mutation is outside the withdrawal profile")
 		}, withdrawalMaxLogs)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	projector, err := withdrawalassets.New(reserve, app.NativeNFTKeeper, reader, app.NativeValidatorKeeper, nftreceipts.Limits{
 		MaxLogs: withdrawalMaxLogs, MaxBytes: withdrawalLogBytes, MaxAssets: 1, MaxIDs: 1, MaxUnits: 1,
 	})
 	if err != nil {
-		return err
+		return nil, err
 	}
 	gatewayABI, err := contracts.CompiledABI("MintCandyIsolatedDelegation")
 	if err != nil {
-		return err
+		return nil, err
 	}
-	controller := &withdrawalController{
+	return &withdrawalController{
 		profile: profile, abi: gatewayABI, topic: gatewayABI.Events["WithdrawCompleted"].ID,
 		keeper: app.NativeValidatorKeeper, executor: executor, assets: projector,
-	}
+	}, nil
+}
+
+func (app *App) installWithdrawalController(controller *withdrawalController) {
 	app.EVMKeeper.SetInternalCommitGuard(controller.guardInternalCommit)
 	app.EVMKeeper.AppendHooks(controller)
 	app.withdrawals = controller
-	return nil
 }
 
 func (c *withdrawalController) hasCompletion(ctx sdk.Context, logs []*ethtypes.Log) bool {

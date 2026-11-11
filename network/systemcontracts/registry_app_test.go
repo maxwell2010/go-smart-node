@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"errors"
 	"math/big"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -13,6 +15,8 @@ import (
 	"cosmossdk.io/math"
 	storetypes "cosmossdk.io/store/types"
 	abci "github.com/cometbft/cometbft/abci/types"
+	cmted25519 "github.com/cometbft/cometbft/crypto/ed25519"
+	"github.com/cometbft/cometbft/privval"
 	cmtproto "github.com/cometbft/cometbft/proto/tendermint/types"
 	cmttypes "github.com/cometbft/cometbft/types"
 	dbm "github.com/cosmos/cosmos-db"
@@ -102,7 +106,8 @@ func TestOwnedAppSignedRegistryBootstrap(t *testing.T) {
 		require.Equal(t, crypto.PubkeyToAddress(keys[i].PublicKey).Bytes(), accounts[i].GetAddress().Bytes())
 		balances[i] = banktypes.Balance{Address: accounts[i].GetAddress().String(), Coins: funds}
 	}
-	validator, _ := cmttypes.RandValidator(false, 1)
+	signer := cmted25519.GenPrivKey()
+	validator := cmttypes.NewValidator(signer.PubKey(), 1)
 	vals := cmttypes.NewValidatorSet([]*cmttypes.Validator{validator})
 	defaults := a.DefaultGenesis()
 	genesis, err := simtestutil.GenesisStateWithValSet(a.AppCodec(), defaults, vals, accounts, balances...)
@@ -138,6 +143,9 @@ func TestOwnedAppSignedRegistryBootstrap(t *testing.T) {
 	data, err := json.Marshal(genesis)
 	require.NoError(t, err)
 	now := time.Unix(1900000000, 0).UTC()
+	if os.Getenv(withdrawalGenesisFixtureEnv) != "" {
+		now = time.Now().UTC().Truncate(time.Second).Add(-time.Hour)
+	}
 	_, err = a.InitChain(&abci.RequestInitChain{ChainId: chainID, Time: now, AppStateBytes: data, ConsensusParams: simtestutil.DefaultConsensusParams})
 	require.NoError(t, err)
 	// Materialize fresh genesis before comparing balances through the committed
@@ -1434,7 +1442,19 @@ func TestOwnedAppSignedRegistryBootstrap(t *testing.T) {
 		runCanonicalIsolatedGateway(t, isolatedBackendEnv{app: a, ctx: ctx, send: send, load: load, deploy: deploy, keys: keys, credit: nativeCredit, events: func() []abci.Event { return lastAllEvents }, setup: setup}, func(reject bool) { rejectNativeBurn = reject })
 	})
 	t.Run("authenticated isolated position reader", func(t *testing.T) {
-		runIsolatedPositionReader(t, isolatedBackendEnv{app: a, ctx: ctx, advance: advance, nextGasLimit: func(limit uint64) { nextGasLimit = limit }, send: send, load: load, deploy: deploy, keys: keys, credit: nativeCredit, events: func() []abci.Event { return lastAllEvents }, setup: setup, govOwner: common.BytesToAddress(authtypes.NewModuleAddress(govtypes.ModuleName))})
+		runIsolatedPositionReader(t, isolatedBackendEnv{
+			app: a, ctx: ctx, advance: advance, nextGasLimit: func(limit uint64) { nextGasLimit = limit },
+			genesisClock: func(next time.Time) {
+				require.True(t, next.After(ctx().BlockTime()))
+				now = next.Add(-time.Duration(a.LastBlockHeight()+1) * time.Second)
+			},
+			saveGenesisKey: func(dir string) {
+				pv := privval.NewFilePV(signer, filepath.Join(dir, "priv_validator_key.json"), filepath.Join(dir, "unused_sign_state.json"))
+				pv.Key.Save()
+			},
+			send: send, load: load, deploy: deploy, keys: keys, credit: nativeCredit, events: func() []abci.Event { return lastAllEvents },
+			setup: setup, govOwner: common.BytesToAddress(authtypes.NewModuleAddress(govtypes.ModuleName)),
+		})
 	})
 	t.Run("curve converter ordinary financial controls", func(t *testing.T) {
 		runCurveConverterFinancial(t, isolatedBackendEnv{app: a, ctx: ctx, send: send, load: load, deploy: deploy, keys: keys, credit: nativeCredit, events: func() []abci.Event { return lastAllEvents }, blockEvents: func() []abci.Event { return lastBlockEvents }, setup: setup, govOwner: common.BytesToAddress(authtypes.NewModuleAddress(govtypes.ModuleName))})

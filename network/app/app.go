@@ -901,6 +901,9 @@ func (app *App) InitChainer(ctx sdk.Context, req *abci.RequestInitChain) (*abci.
 	if err := app.validateNativeBindingGenesis(genesisState); err != nil {
 		return nil, err
 	}
+	if raw, ok := genesisState[WithdrawalGenesisKey]; ok {
+		return app.initWithdrawalGenesis(ctx, req, genesisState, raw)
+	}
 	if err := app.UpgradeKeeper.SetModuleVersionMap(ctx, app.ModuleManager.GetVersionMap()); err != nil {
 		panic(err)
 	}
