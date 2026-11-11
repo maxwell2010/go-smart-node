@@ -65,6 +65,13 @@ func (e *Executor) VerifySignedDELHoldReset(ctx sdk.Context, msg core.Message, r
 	if heldAmount != (common.Hash{}) || !start.IsInt64() || start.Sign() <= 0 || start.Cmp(deadlines[0]) >= 0 {
 		return held, ordinary, errors.New("Gateway did not clear the identified DEL hold bucket")
 	}
+	if _, _, err := e.directDELPoststate(ctx, validator, beneficiary, deadlines[0].Int64(), new(big.Int)); err != nil {
+		return held, ordinary, err
+	}
+	ordinaryDirect, ordinaryBacked, err := e.directDELPoststate(ctx, validator, beneficiary, 0, ordinaryAmount)
+	if err != nil {
+		return held, ordinary, err
+	}
 	base := [8]common.Hash{common.BytesToHash(validator[:]), common.BytesToHash(beneficiary[:]), common.BytesToHash(e.roles.WrappedDEL[:]),
 		common.BigToHash(ordinaryAmount), {}, smallWord(tokenDEL), {}, {}}
 	for i, word := range base {
@@ -84,7 +91,7 @@ func (e *Executor) VerifySignedDELHoldReset(ctx sdk.Context, msg core.Message, r
 		return held, ordinary, errors.New("DEL hold reset requires the exact Gateway StakeReset event")
 	}
 	amount := new(big.Int).SetBytes(reset.Data[4*common.HashLength : 5*common.HashLength])
-	if amount.Sign() <= 0 || amount.BitLen() > 255 || ordinaryAmount.Cmp(amount) < 0 {
+	if amount.Sign() <= 0 || amount.BitLen() > 255 || ordinaryDirect.Cmp(amount) < 0 {
 		return held, ordinary, errors.New("invalid amount moved from held to ordinary DEL")
 	}
 	expectedReset := append(heldID.Bytes(), heldPost...)
@@ -102,11 +109,12 @@ func (e *Executor) VerifySignedDELHoldReset(ctx sdk.Context, msg core.Message, r
 	if err != nil {
 		return held, ordinary, err
 	}
-	if state.wrapped.Cmp(ordinaryAmount) < 0 {
+	if state.wrapped.Cmp(ordinaryDirect) < 0 {
 		return held, ordinary, errors.New("Gateway has insufficient backed WDEL for the reset DEL position")
 	}
 	held = DELTransition{Validator: validator, Beneficiary: beneficiary, StakeID: heldID, Amount: sdkmath.NewIntFromBigInt(amount),
-		Remaining: sdkmath.ZeroInt(), HoldDeadline: deadlines[0].Int64(), HoldStartTime: start.Int64()}
-	ordinary = DELTransition{Validator: validator, Beneficiary: beneficiary, StakeID: ordinaryID, Remaining: sdkmath.NewIntFromBigInt(ordinaryAmount)}
+		Remaining: sdkmath.ZeroInt(), NFTBacked: sdkmath.ZeroInt(), HoldDeadline: deadlines[0].Int64(), HoldStartTime: start.Int64()}
+	ordinary = DELTransition{Validator: validator, Beneficiary: beneficiary, StakeID: ordinaryID,
+		Remaining: sdkmath.NewIntFromBigInt(ordinaryDirect), NFTBacked: sdkmath.NewIntFromBigInt(ordinaryBacked)}
 	return held, ordinary, nil
 }
