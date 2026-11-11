@@ -53,29 +53,68 @@ func (s GatewayDELStake) binding(amount sdkmath.Int, created, updated int64) typ
 	}
 }
 
-// ApplyGatewayDELDelegation creates one new DEL position in the native ledger.
+func (k *StateKeeper) checkGatewayDELPrestate(ctx sdk.Context, next GatewayDELStake, amount sdkmath.Int, owner, operator string) (*types.EVMStakeBinding, *types.Delegation, error) {
+	active, err := k.GetEVMStakeBinding(ctx, gatewayDELCoinBinding, next.Gateway[:], next.StakeID[:])
+	if amount.IsZero() {
+		if errors.Is(err, ErrNotFound) {
+			return nil, nil, nil
+		}
+		if err == nil {
+			err = errors.New("Gateway DEL position already has a native binding")
+		}
+		return nil, nil, err
+	}
+	if err != nil {
+		return nil, nil, err
+	}
+	expected := next.binding(amount, active.CreatedHeight, active.UpdatedHeight)
+	actualBytes, err := types.CanonicalBindingBytes(&active)
+	if err != nil {
+		return nil, nil, err
+	}
+	expectedBytes, err := types.CanonicalBindingBytes(&expected)
+	if err != nil {
+		return nil, nil, err
+	}
+	if active.UpdatedHeight > ctx.BlockHeight() || !bytes.Equal(actualBytes, expectedBytes) {
+		return nil, nil, errors.New("Gateway DEL transition differs from the active native binding")
+	}
+	delegation, err := k.GetDelegation(ctx, owner, operator, types.StakeType_Coin, identity.BaseDenom)
+	if err != nil {
+		return nil, nil, err
+	}
+	if !delegation.Stake.Equal(types.NewStakeCoin(sdk.NewCoin(identity.BaseDenom, amount))) {
+		return nil, nil, errors.New("Gateway DEL transition differs from the native delegation")
+	}
+	return &active, &delegation, nil
+}
+
+// ApplyGatewayDELDelegation creates or increases one DEL position in the native ledger.
 // It never creates bank balances or modifies SDK staking power.
 func (k *StateKeeper) ApplyGatewayDELDelegation(ctx sdk.Context, next GatewayDELStake, deposited sdkmath.Int) error {
 	owner, operator, err := next.nativePair()
 	if err != nil {
 		return err
 	}
-	if deposited.IsNil() || !deposited.IsPositive() || !deposited.Equal(next.Amount) {
-		return errors.New("new Gateway DEL position differs from the deposit")
+	if deposited.IsNil() || !deposited.IsPositive() || next.Amount.LT(deposited) {
+		return errors.New("Gateway DEL position cannot account for the deposit")
 	}
 	child, commit := ctx.CacheContext()
-	if _, err = k.GetEVMStakeBinding(child, gatewayDELCoinBinding, next.Gateway[:], next.StakeID[:]); err == nil {
-		return errors.New("Gateway DEL position already has a native binding")
-	} else if !errors.Is(err, ErrNotFound) {
+	active, previous, err := k.checkGatewayDELPrestate(child, next, next.Amount.Sub(deposited), owner, operator)
+	if err != nil {
 		return err
 	}
-	row := next.binding(deposited, ctx.BlockHeight(), ctx.BlockHeight())
+	created := ctx.BlockHeight()
+	if active != nil {
+		created = active.CreatedHeight
+	}
+	row := next.binding(next.Amount, created, ctx.BlockHeight())
 	plan, err := k.PrepareBindingPlan(child, []BindingMutation{{Stake: &row}})
 	if err != nil {
 		return err
 	}
-	delegation := types.Delegation{Delegator: owner, Validator: operator, Stake: types.NewStakeCoin(sdk.NewCoin(identity.BaseDenom, deposited))}
-	if err := k.ApplyDelegationBatch(child, []DelegationChange{{Next: &delegation}}); err != nil {
+	delegation := types.Delegation{Delegator: owner, Validator: operator, Stake: types.NewStakeCoin(sdk.NewCoin(identity.BaseDenom, next.Amount))}
+	if err := k.ApplyDelegationBatch(child, []DelegationChange{{Expected: previous, Next: &delegation}}); err != nil {
 		return err
 	}
 	if err := k.ApplyBindingPlan(child, plan); err != nil {
@@ -87,42 +126,28 @@ func (k *StateKeeper) ApplyGatewayDELDelegation(ctx sdk.Context, next GatewayDEL
 	return nil
 }
 
-// ApplyGatewayDELWithdrawal moves the full direct DEL position into the
-// native queue and creates the matching frozen binding and maturity index.
+// ApplyGatewayDELWithdrawal moves the withdrawn amount into the native queue
+// and keeps any remaining direct DEL stake active under the same binding.
 func (k *StateKeeper) ApplyGatewayDELWithdrawal(ctx sdk.Context, next GatewayDELStake, index common.Hash, amount sdkmath.Int, deadline time.Time) error {
 	owner, operator, err := next.nativePair()
 	if err != nil {
 		return err
 	}
-	if amount.IsNil() || !amount.IsPositive() || !next.Amount.IsZero() || index == common.MaxHash ||
+	if amount.IsNil() || !amount.IsPositive() || index == common.MaxHash ||
 		deadline.Unix() <= 0 || deadline.Nanosecond() != 0 || deadline.Unix() < ctx.BlockTime().Unix() {
-		return errors.New("invalid full Gateway DEL withdrawal or deadline")
+		return errors.New("invalid Gateway DEL withdrawal or deadline")
+	}
+	before := next.Amount.BigInt()
+	before.Add(before, amount.BigInt())
+	if before.BitLen() > 256 {
+		return errors.New("Gateway DEL withdrawal prestate exceeds 256 bits")
 	}
 	child, commit := ctx.CacheContext()
-	active, err := k.GetEVMStakeBinding(child, gatewayDELCoinBinding, next.Gateway[:], next.StakeID[:])
-	if err != nil {
-		return err
-	}
-	expected := next.binding(amount, active.CreatedHeight, active.UpdatedHeight)
-	actualBytes, err := types.CanonicalBindingBytes(&active)
-	if err != nil {
-		return err
-	}
-	expectedBytes, err := types.CanonicalBindingBytes(&expected)
-	if err != nil {
-		return err
-	}
-	if active.UpdatedHeight > ctx.BlockHeight() || !bytes.Equal(actualBytes, expectedBytes) {
-		return errors.New("withdrawn DEL differs from the active native binding")
-	}
-	delegation, err := k.GetDelegation(child, owner, operator, types.StakeType_Coin, identity.BaseDenom)
+	active, delegation, err := k.checkGatewayDELPrestate(child, next, sdkmath.NewIntFromBigInt(before), owner, operator)
 	if err != nil {
 		return err
 	}
 	stake := types.NewStakeCoin(sdk.NewCoin(identity.BaseDenom, amount))
-	if !delegation.Stake.Equal(stake) {
-		return errors.New("withdrawn DEL differs from the native delegation")
-	}
 	if _, err := k.GetEVMFrozenBinding(child, next.Gateway[:], index[:]); err == nil {
 		return errors.New("Gateway frozen ID already has a native binding")
 	} else if !errors.Is(err, ErrNotFound) {
@@ -140,12 +165,22 @@ func (k *StateKeeper) ApplyGatewayDELWithdrawal(ctx sdk.Context, next GatewayDEL
 		ReportedReserveAmount: active.ReportedReserveAmount, ReserveAsset: active.ReserveAsset, NativeTarget: active.NativeTarget,
 		NativeEntryHash: entryHash, Active: true, CreatedHeight: ctx.BlockHeight(), UpdatedHeight: ctx.BlockHeight(),
 	}
-	remove := BindingReference{Kind: active.Kind, Gateway: active.Gateway, ID: active.StakeID}
-	plan, err := k.PrepareBindingPlan(child, []BindingMutation{{Remove: &remove}, {Frozen: &frozen}})
+	change := DelegationChange{Expected: delegation}
+	var mutation BindingMutation
+	if next.Amount.IsZero() {
+		mutation.Remove = &BindingReference{Kind: active.Kind, Gateway: active.Gateway, ID: active.StakeID}
+	} else {
+		row := next.binding(next.Amount, active.CreatedHeight, ctx.BlockHeight())
+		mutation.Stake = &row
+		remaining := *delegation
+		remaining.Stake = types.NewStakeCoin(sdk.NewCoin(identity.BaseDenom, next.Amount))
+		change.Next = &remaining
+	}
+	plan, err := k.PrepareBindingPlan(child, []BindingMutation{mutation, {Frozen: &frozen}})
 	if err != nil {
 		return err
 	}
-	if err := k.ApplyDelegationBatch(child, []DelegationChange{{Expected: &delegation}}); err != nil {
+	if err := k.ApplyDelegationBatch(child, []DelegationChange{change}); err != nil {
 		return err
 	}
 	if err := k.ApplyBindingPlan(child, plan); err != nil {
