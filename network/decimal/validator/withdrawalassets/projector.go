@@ -71,6 +71,27 @@ func (p *Projector) ProjectWalletTransfer(ctx sdk.Context, receipt *ethtypes.Rec
 	if receipt == nil || len(receipt.Logs) != 1 || receipt.Logs[0] == nil || receipt.Logs[0].Address != collection {
 		return errors.New("wallet NFT transfer requires one direct collection log")
 	}
+	if ctx.ExecMode() == sdk.ExecModeFinalize && receipt.TxHash == (common.Hash{}) {
+		return errors.New("committed wallet NFT transfer requires a transaction hash")
+	}
+	execution := nftreceipts.Execution{EntryPoint: nftreceipts.EntryPointWalletTransfer, Receipt: receipt}
+	decoded, err := p.wallet.Decode(ctx, execution)
+	if err != nil {
+		return err
+	}
+	if len(decoded.Transfers) == 0 {
+		return errors.New("wallet NFT transfer must identify the authenticated movement")
+	}
+	for _, transfer := range decoded.Transfers {
+		if transfer.Asset.Contract != collection || transfer.From == gateway || transfer.To == gateway || transfer.From == vault || transfer.To == vault {
+			return errors.New("wallet NFT transfer cannot move Gateway or vault custody or another collection")
+		}
+	}
+	if err := p.projectIndexedWalletTransfer(ctx, decoded); !errors.Is(err, nftkeeper.ErrActiveSubTokenCountUnavailable) {
+		return err
+	}
+	// An already initialized legacy store keeps the bounded ownership proof
+	// until the count index has been explicitly built and audited.
 	capture, err := validatorreceipts.NewStakeCaptureSession(p.bindings, stakeSource{reader: p.reader})
 	if err != nil {
 		return err
@@ -79,19 +100,9 @@ func (p *Projector) ProjectWalletTransfer(ctx sdk.Context, receipt *ethtypes.Rec
 	if err != nil {
 		return err
 	}
-	plan, err := planner.Plan(ctx, nftreceipts.Execution{EntryPoint: nftreceipts.EntryPointWalletTransfer, Receipt: receipt})
+	plan, err := planner.Plan(ctx, execution)
 	if err != nil {
 		return err
-	}
-	movements := plan.Movements()
-	if len(movements) == 0 {
-		return errors.New("wallet NFT transfer must identify the authenticated movement")
-	}
-	for _, move := range movements {
-		transfer := move.Transfer
-		if transfer.Asset.Contract != collection || transfer.From == gateway || transfer.To == gateway || transfer.From == vault || transfer.To == vault {
-			return errors.New("wallet NFT transfer cannot move Gateway or vault custody or another collection")
-		}
 	}
 	return planner.Apply(ctx, plan)
 }

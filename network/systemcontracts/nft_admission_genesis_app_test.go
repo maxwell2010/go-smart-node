@@ -31,6 +31,7 @@ const (
 	signedNFTNativeVaultDenom  = "signed_nft_vault"
 	signedNFTGasLimit          = 24_000_000
 	signedNFTUnitReserveDEL    = 2
+	signedNFTMintedUnits       = nfttypes.MaxIsolatedOriginUnits + 1
 )
 
 type signedNFTAdmissionGenesis struct {
@@ -97,7 +98,7 @@ func seedSignedNFTAdmissionGenesis(t *testing.T, e isolatedBackendEnv, profile o
 	t.Helper()
 	f := prepareSignedDELFixture(t, e, profile, gateway, master, wrapper, gov)
 	f.declareValidator()
-	quantity := nfttypes.MaxIsolatedOriginUnits
+	quantity := signedNFTMintedUnits
 	unitReserve := sdkmath.NewIntWithDecimal(signedNFTUnitReserveDEL, 18)
 	totalReserve := unitReserve.MulRaw(int64(quantity))
 	tokenID := common.BigToHash(new(big.Int).Add(new(big.Int).Lsh(big.NewInt(1), 224), big.NewInt(301)))

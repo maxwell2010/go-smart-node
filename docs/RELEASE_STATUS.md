@@ -28,6 +28,13 @@ current transport selection. Owned SDK Armor and geth patches have separate
 source manifests and scoped scan evidence. None of these corrections closes
 the final daemon's complete security review.
 
+The modern build pins Go 1.26.11 and `klauspost/compress` v1.20.2 to address
+GO-2026-6859 and GO-2026-6865. [The audit and clean archive installation](https://github.com/maxwell2010/go-smart-node/actions/runs/43041904175)
+passed on `250faa059c5e01b46eeb10b6d0de2f9814d25691`. Both the source and binary
+scans reported zero symbol advisories with that run's database snapshot.
+The [isolated process run](https://github.com/maxwell2010/go-smart-node/actions/runs/43042136814)
+also passed on the same updated dependency pins.
+
 Official Hermes and an independent SDK53 counterparty passed six phases in
 separate default-build OS processes: handshake, native DEL send, voucher return,
 both-node disk restart with the exact pending packet commitment, decoded error

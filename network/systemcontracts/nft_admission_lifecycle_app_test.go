@@ -30,17 +30,20 @@ func runSignedNFTAdmissionLifecycle(t *testing.T, e isolatedBackendEnv, genesis 
 		map[string]common.Address{"owned/DecimalDelegation.sol:DelegationNFTLib": profile.Library})
 	require.NoError(t, err)
 	user := crypto.PubkeyToAddress(e.keys[0].PublicKey)
+	other := crypto.PubkeyToAddress(e.keys[1].PublicKey)
 	operator, err := e.app.NativeValidatorKeeper.ValidatorAddressCodec().BytesToString(genesis.Validator.Bytes())
 	require.NoError(t, err)
 	f := signedDELFixture{t: t, env: e, gateway: gateway, wrapper: wrapper, target: profile.Gateway,
 		wrapped: profile.WrappedDEL, user: user, validator: genesis.Validator, beneficiary: sdk.AccAddress(user.Bytes()).String(), operator: operator}
 	const quantity = nfttypes.MaxIsolatedOriginUnits
+	var otherUnits uint32
 	units := big.NewInt(int64(quantity))
 	one := big.NewInt(1)
 	position := common.BigToHash(one)
 	nftID := common.Hash(f.read(gateway, f.target, "getNFTStakeId", profile.PositionVault, one, user, f.validator, new(big.Int)).([32]byte))
 	coinID := common.Hash(f.read(gateway, f.target, "getStakeId", f.validator, user, f.wrapped).([32]byte))
 	reserve := sdkmath.NewIntWithDecimal(signedNFTUnitReserveDEL, 18).MulRaw(int64(quantity))
+	otherReserve := sdkmath.NewIntWithDecimal(signedNFTUnitReserveDEL, 18)
 	direct := sdkmath.NewIntWithDecimal(3, 18)
 	zero := sdkmath.ZeroInt()
 	nftKeeper, validatorKeeper := e.app.NativeNFTKeeper, e.app.NativeValidatorKeeper
@@ -52,7 +55,7 @@ func runSignedNFTAdmissionLifecycle(t *testing.T, e isolatedBackendEnv, genesis 
 		for _, target := range []struct {
 			address common.Address
 			want    sdkmath.Int
-		}{{originAddress, originAmount}, {profile.PositionVault, vaultAmount}} {
+		}{{originAddress, originAmount.Add(otherReserve)}, {profile.PositionVault, vaultAmount}} {
 			bank := e.app.BankKeeper.GetBalance(e.ctx(), sdk.AccAddress(target.address.Bytes()), identity.BaseDenom)
 			require.True(t, target.want.Equal(bank.Amount))
 			require.Zero(t, target.want.BigInt().Cmp(e.app.EVMKeeper.GetBalance(e.ctx(), target.address).ToBig()))
@@ -61,21 +64,17 @@ func runSignedNFTAdmissionLifecycle(t *testing.T, e isolatedBackendEnv, genesis 
 	}
 	checkOrigin := func(live, burnt uint32) {
 		t.Helper()
-		for _, method := range []string{originSupplyMethod, originBalanceMethod} {
-			args := []interface{}{originToken.Big()}
-			if method == originBalanceMethod {
-				args = []interface{}{user, originToken.Big()}
-			}
-			require.Equal(t, int64(live), f.read(origin, originAddress, method, args...).(*big.Int).Int64())
-		}
+		require.Equal(t, int64(live), f.read(origin, originAddress, originSupplyMethod, originToken.Big()).(*big.Int).Int64())
+		require.Equal(t, int64(live-otherUnits), f.read(origin, originAddress, originBalanceMethod, user, originToken.Big()).(*big.Int).Int64())
+		require.Equal(t, int64(otherUnits), f.read(origin, originAddress, originBalanceMethod, other, originToken.Big()).(*big.Int).Int64())
 		token, err := nftKeeper.GetToken(e.ctx(), signedNFTNativeOriginID)
 		require.NoError(t, err)
-		require.Equal(t, uint32(quantity), token.Minted)
+		require.Equal(t, signedNFTMintedUnits, token.Minted)
 		require.Equal(t, burnt, token.Burnt)
 		binding, err := nftKeeper.GetExternalNFTBinding(e.ctx(), token.ID)
 		require.NoError(t, err)
 		require.Equal(t, originToken.Bytes(), binding.TokenID)
-		require.Equal(t, uint64(quantity)+1, binding.NextSubTokenID)
+		require.Equal(t, uint64(signedNFTMintedUnits)+1, binding.NextSubTokenID)
 	}
 	checkCoin := func(collateral sdkmath.Int) {
 		t.Helper()
@@ -106,7 +105,7 @@ func runSignedNFTAdmissionLifecycle(t *testing.T, e isolatedBackendEnv, genesis 
 	emptyVault, err := nftKeeper.GetIsolatedVaultState(e.ctx(), profile.PositionVault.Bytes())
 	require.NoError(t, err)
 	require.Equal(t, position.Bytes(), emptyVault.NextPositionID)
-	checkOrigin(quantity, 0)
+	checkOrigin(signedNFTMintedUnits, 0)
 	for _, id := range []uint32{1, quantity} {
 		sub, err := nftKeeper.GetSubToken(e.ctx(), signedNFTNativeOriginID, id)
 		require.NoError(t, err)
@@ -120,7 +119,7 @@ func runSignedNFTAdmissionLifecycle(t *testing.T, e isolatedBackendEnv, genesis 
 	// Missing approval prevents admission and leaves the next position unused.
 	delegateArgs := []interface{}{f.validator, originAddress, originToken.Big(), units}
 	f.signed("delegateNFT1155", zero, false, delegateArgs...)
-	checkOrigin(quantity, 0)
+	checkOrigin(signedNFTMintedUnits, 0)
 	checkBacking(reserve, zero)
 	checkCoin(zero)
 	require.Equal(t, one, f.read(vault, profile.PositionVault, "nextPositionId"))
@@ -128,8 +127,7 @@ func runSignedNFTAdmissionLifecycle(t *testing.T, e isolatedBackendEnv, genesis 
 	require.NoError(t, err)
 	e.send(e.keys[0], &originAddress, new(big.Int), approval, true)
 
-	// A direct wallet transfer moves the same ERC1155 unit in both ledgers.
-	other := crypto.PubkeyToAddress(e.keys[1].PublicKey)
+	// A one-unit wallet transfer remains available above the isolation limit.
 	input, err := origin.ABI.Pack("safeTransferFrom", user, other, originToken.Big(), one, []byte{})
 	require.NoError(t, err)
 	args, err := json.Marshal(map[string]interface{}{"from": user, "to": originAddress, "input": hexutil.Encode(input), "gasPrice": "0xe8d4a51000"})
@@ -142,40 +140,38 @@ func runSignedNFTAdmissionLifecycle(t *testing.T, e isolatedBackendEnv, genesis 
 	require.Empty(t, estimate.VmError)
 	require.Greater(t, estimate.Gas, uint64(21_000))
 	require.LessOrEqual(t, estimate.Gas, uint64(signedNFTGasLimit))
-	checkOrigin(quantity, 0)
+	checkOrigin(signedNFTMintedUnits, 0)
 	unitBeforeEstimate, err := nftKeeper.GetSubToken(e.ctx(), signedNFTNativeOriginID, 1)
 	require.NoError(t, err)
 	require.Equal(t, f.beneficiary, unitBeforeEstimate.Owner)
-	transferOrigin := func(signer int, from, to common.Address, succeeds bool) {
-		t.Helper()
-		transfer, err := origin.ABI.Pack("safeTransferFrom", from, to, originToken.Big(), one, []byte{})
-		require.NoError(t, err)
-		e.nextGasLimit(signedNFTGasLimit)
-		e.send(e.keys[signer], &originAddress, new(big.Int), transfer, succeeds)
-	}
-	transferOrigin(0, user, other, true)
+	e.nextGasLimit(estimate.Gas)
+	transfer := e.send(e.keys[0], &originAddress, new(big.Int), input, true)
+	reportGas("wallet_transfer_1025", transfer)
+	otherUnits = 1
 	sub, err := nftKeeper.GetSubToken(e.ctx(), signedNFTNativeOriginID, 1)
 	require.NoError(t, err)
 	require.Equal(t, sdk.AccAddress(other.Bytes()).String(), sub.Owner)
 	require.Equal(t, int64(1), f.read(origin, originAddress, originBalanceMethod, other, originToken.Big()).(*big.Int).Int64())
-	transferOrigin(1, other, user, true)
-	transferOrigin(0, user, f.target, false)
+	custodyTransfer, err := origin.ABI.Pack("safeTransferFrom", user, f.target, originToken.Big(), one, []byte{})
+	require.NoError(t, err)
+	e.nextGasLimit(signedNFTGasLimit)
+	e.send(e.keys[0], &originAddress, new(big.Int), custodyTransfer, false)
 	sub, err = nftKeeper.GetSubToken(e.ctx(), signedNFTNativeOriginID, 1)
 	require.NoError(t, err)
-	require.Equal(t, f.beneficiary, sub.Owner)
+	require.Equal(t, sdk.AccAddress(other.Bytes()).String(), sub.Owner)
 	require.Zero(t, f.read(origin, originAddress, originBalanceMethod, f.target, originToken.Big()).(*big.Int).Sign())
-	checkOrigin(quantity, 0)
+	checkOrigin(signedNFTMintedUnits, 0)
 	checkBacking(reserve, zero)
 	checkCoin(zero)
 
 	admitted := f.signed("delegateNFT1155", zero, true, delegateArgs...)
 	reportGas("delegate", admitted)
 	f.eventOnce("decimal_nft_delegated", map[string]string{"stake_id": nftID.Hex(), "position_id": position.Hex(), "reserve": reserve.String()})
-	checkOrigin(0, quantity)
+	checkOrigin(1, quantity)
 	checkBacking(zero, reserve)
 	checkCoin(reserve)
 
-	for _, id := range []uint32{1, quantity} {
+	for _, id := range []uint32{2, signedNFTMintedUnits} {
 		_, err := nftKeeper.GetSubToken(e.ctx(), signedNFTNativeOriginID, id)
 		require.ErrorIs(t, err, nftkeeper.ErrNotFound)
 	}
@@ -191,7 +187,7 @@ func runSignedNFTAdmissionLifecycle(t *testing.T, e isolatedBackendEnv, genesis 
 	require.Equal(t, make([]byte, 32), lineage.ParentPositionID)
 	expectedIDs := make([]uint32, quantity)
 	for i := range expectedIDs {
-		expectedIDs[i] = uint32(i + 1)
+		expectedIDs[i] = uint32(i + 2)
 	}
 	require.Equal(t, expectedIDs, lineage.OriginSubTokenIDs)
 	f.eventOnce("decimal_nft_isolated", map[string]string{"position_id": position.Hex(), "origin_token_id": signedNFTNativeOriginID,
@@ -341,7 +337,7 @@ func runSignedNFTAdmissionLifecycle(t *testing.T, e isolatedBackendEnv, genesis 
 	require.Zero(t, frozenRow().FreezeStatus)
 	checkPosition(user)
 	checkNativeOwner(user)
-	checkOrigin(0, quantity)
+	checkOrigin(1, quantity)
 	checkBacking(zero, reserve)
 	checkCoin(zero)
 	actualLineage, err := nftKeeper.GetIsolatedLineage(e.ctx(), lineage.Vault, lineage.PositionID)
