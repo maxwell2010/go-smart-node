@@ -340,7 +340,7 @@ func TestBindingConstructorRejectsTypedNilService(t *testing.T) {
 }
 
 func TestBindingActiveReceiptFreezesAndCompletesWithoutUnitReselection(t *testing.T) {
-	ctx, service, k := bindingEnvironment(t, true)
+	ctx, _, k := bindingEnvironment(t, true)
 	b := bindingNativeFixture()
 	d := normalizedBindingDelegation(t, b)
 	entry := types.UndelegationEntry{CreationHeight: 10, CompletionTime: time.Unix(3000, 0).UTC(), Stake: d.Stake}
@@ -375,18 +375,17 @@ func TestBindingActiveReceiptFreezesAndCompletesWithoutUnitReselection(t *testin
 	require.Equal(t, b.NativeTarget.SubTokenIDs, rows[0].NativeTarget.SubTokenIDs, "exact captured receipt unit survives active-to-frozen handoff")
 	_, err = k.ExportGenesis(ctx)
 	require.NoError(t, err)
-	child, commit = ctx.CacheContext()
-	require.NoError(t, service.OpenKVStore(child).Delete(composite(undelegationPrefix, u.Delegator, u.Validator)))
-	complete, err := k.PrepareBindingPlan(child, []BindingMutation{{Remove: &reference}})
-	require.NoError(t, err)
-	require.NoError(t, k.ApplyBindingPlan(child, complete))
-	commit()
+	require.ErrorContains(t, k.ApplyWithdrawalCompletion(ctx, frozen), "has not matured")
+	ctx = ctx.WithBlockHeight(11).WithBlockTime(entry.CompletionTime)
+	require.NoError(t, k.ApplyWithdrawalCompletion(ctx, frozen))
 	_, err = k.LookupCustodyUnitBinding(ctx, "receipt-native", 1)
 	require.ErrorIs(t, err, ErrNotFound)
 	export, err := k.ExportGenesis(ctx)
 	require.NoError(t, err)
 	require.Empty(t, export.EVMStakeBindings)
-	require.Empty(t, export.EVMFrozenBindings)
+	require.Len(t, export.EVMFrozenBindings, 1)
+	require.False(t, export.EVMFrozenBindings[0].Active)
+	require.Equal(t, frozen.NFTPosition, export.EVMFrozenBindings[0].NFTPosition)
 	require.Empty(t, export.Undelegations)
 	revision, err := k.BindingRevision(ctx)
 	require.NoError(t, err)

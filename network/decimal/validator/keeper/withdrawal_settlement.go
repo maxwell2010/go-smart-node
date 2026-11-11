@@ -4,11 +4,13 @@ import (
 	"bytes"
 	"errors"
 	"fmt"
+	"slices"
 
 	"cosmossdk.io/core/store"
 	storetypes "cosmossdk.io/store/types"
 	"github.com/cosmos/cosmos-sdk/codec/address"
 	sdk "github.com/cosmos/cosmos-sdk/types"
+	"github.com/cosmos/gogoproto/proto"
 	"github.com/maxwell2010/go-smart-node/network/decimal/validator/types"
 	"github.com/maxwell2010/go-smart-node/network/identity"
 )
@@ -28,10 +30,9 @@ func withdrawalDueKey(r *bindingRecord) []byte {
 }
 
 // WithdrawalExecutor settles one authenticated frozen binding in the supplied
-// cache. It must execute the Gateway and apply its native receipt projection
-// in that cache, returning an error on a revert or incomplete projection. The
-// projection retires the binding, and the keeper removes the matching native
-// undelegation entry before committing any writes.
+// cache. Execute the Gateway and project its receipt with
+// ApplyWithdrawalCompletion in that cache. A revert or projection failure must
+// return an error. The scheduler verifies the exact native result before commit.
 type WithdrawalExecutor func(sdk.Context, types.EVMFrozenBinding) error
 
 type WithdrawalSettlementResult struct {
@@ -45,7 +46,16 @@ type WithdrawalSettlementResult struct {
 // The caller supplies a deterministic gas cap per attempt and runs this once
 // in the block lifecycle. This method does not install an App handler.
 func (k *StateKeeper) SettleMatureWithdrawals(ctx sdk.Context, attemptGas uint64, execute WithdrawalExecutor) (WithdrawalSettlementResult, error) {
+	return k.SettleMatureWithdrawalsLimit(ctx, maxWithdrawalAttempts, attemptGas, execute)
+}
+
+// SettleMatureWithdrawalsLimit uses the same persistent cursor with a lower
+// per-block attempt limit. It accepts at most the default eight attempts.
+func (k *StateKeeper) SettleMatureWithdrawalsLimit(ctx sdk.Context, maxAttempts int, attemptGas uint64, execute WithdrawalExecutor) (WithdrawalSettlementResult, error) {
 	var result WithdrawalSettlementResult
+	if maxAttempts < 1 || maxAttempts > maxWithdrawalAttempts {
+		return result, errors.New("withdrawal attempt limit must be between one and eight")
+	}
 	if execute == nil || attemptGas == 0 {
 		return result, errors.New("withdrawal execution and gas limit are required")
 	}
@@ -70,15 +80,15 @@ func (k *StateKeeper) SettleMatureWithdrawals(ctx sdk.Context, attemptGas uint64
 	// since the next byte of each valid key is frozenBindingPrefix.
 	end := append(sdk.Uint64ToBigEndian(uint64(now)), 0xff)
 	end = append(append(bytes.Clone(start), make([]byte, 24)...), end...)
-	keys := make([][]byte, 0, maxWithdrawalAttempts)
+	keys := make([][]byte, 0, maxAttempts)
 	if cursor != nil && bytes.Compare(cursor, end) < 0 {
 		after := append(bytes.Clone(cursor), 0)
-		if err = appendWithdrawalKeys(state, after, end, &keys); err != nil {
+		if err = appendWithdrawalKeys(state, after, end, maxAttempts, &keys); err != nil {
 			return result, err
 		}
 		end = after
 	}
-	if err = appendWithdrawalKeys(state, start, end, &keys); err != nil {
+	if err = appendWithdrawalKeys(state, start, end, maxAttempts, &keys); err != nil {
 		return result, err
 	}
 	for _, key := range keys {
@@ -109,15 +119,15 @@ func validWithdrawalDueKey(key []byte) bool {
 	return len(key) == withdrawalDueKeyLen && key[0] == withdrawalDuePrefix && key[33] == frozenBindingPrefix
 }
 
-func appendWithdrawalKeys(state store.KVStore, start, end []byte, keys *[][]byte) error {
-	if len(*keys) == maxWithdrawalAttempts || bytes.Compare(start, end) >= 0 {
+func appendWithdrawalKeys(state store.KVStore, start, end []byte, maxAttempts int, keys *[][]byte) error {
+	if len(*keys) == maxAttempts || bytes.Compare(start, end) >= 0 {
 		return nil
 	}
 	it, err := state.Iterator(start, end)
 	if err != nil {
 		return err
 	}
-	for ; it.Valid() && len(*keys) < maxWithdrawalAttempts; it.Next() {
+	for ; it.Valid() && len(*keys) < maxAttempts; it.Next() {
 		if err = it.Error(); err != nil {
 			_ = it.Close()
 			return err
@@ -147,92 +157,202 @@ func (k *StateKeeper) attemptWithdrawal(ctx sdk.Context, gas uint64, row *bindin
 		}
 		ctx.GasMeter().ConsumeGas(meter.GasConsumedToLimit(), "withdrawal settlement")
 	}()
+	plan, err := k.planWithdrawalCompletion(child, row)
+	if err != nil {
+		return err
+	}
 	// Give the executor a separate copy so it cannot alter the expected row.
 	input, err := decodeBindingRecord(row.key, row.data)
 	if err != nil {
 		return err
 	}
-	if err = k.checkBindingIndexes(child, input); err != nil {
-		return err
-	}
 	if err = execute(child, *input.frozen); err != nil {
 		return err
 	}
-	after, err := k.GetEVMFrozenBinding(child, row.frozen.Gateway, row.frozen.FrozenIndex)
+	if err = k.verifyWithdrawalCompletion(child, plan); err != nil {
+		return err
+	}
+	commit()
+	return nil
+}
+
+// ErrWithdrawalAlreadyCompleted identifies a replay of the same completed
+// frozen identity. It carries no payment or authorization semantics.
+var ErrWithdrawalAlreadyCompleted = errors.New("withdrawal binding already completed")
+
+type withdrawalCompletion struct {
+	closed            *bindingRecord
+	pairKey, nextPair []byte
+}
+
+func closedWithdrawalBinding(row *bindingRecord, height int64) (*bindingRecord, error) {
+	if row == nil || row.frozen == nil || !row.active() || row.frozen.FreezeType != 1 || height < row.frozen.UpdatedHeight {
+		return nil, errors.New("expected an active withdrawal binding at the current height")
+	}
+	closed := *row.frozen
+	closed.Active = false
+	closed.UpdatedHeight = height
+	return recordFromFrozen(&closed)
+}
+
+// ApplyWithdrawalCompletion retires an exact, mature frozen binding and one
+// matching native undelegation entry atomically. The caller authenticates the
+// Gateway transition and supplies the pre-execution binding in the same outer
+// cache as the EVM and NFT receipt changes. This method only projects state.
+func (k *StateKeeper) ApplyWithdrawalCompletion(ctx sdk.Context, expected types.EVMFrozenBinding) error {
+	if err := k.checkBindingDomain(ctx); err != nil {
+		return err
+	}
+	preimage, err := recordFromFrozen(&expected)
 	if err != nil {
 		return err
 	}
-	expected := *row.frozen
-	expected.Active = false
-	expected.UpdatedHeight = child.BlockHeight()
-	want, err := types.CanonicalBindingBytes(&expected)
+	if !expected.Active || expected.FreezeType != 1 || ctx.BlockHeight() < expected.UpdatedHeight {
+		return errors.New("expected an active withdrawal binding at the current height")
+	}
+	child, commit := ctx.CacheContext()
+	current, err := k.readBindingRow(child, preimage.key)
 	if err != nil {
 		return err
 	}
-	got, err := types.CanonicalBindingBytes(&after)
+	if current.frozen.UpdatedHeight > ctx.BlockHeight() {
+		return errors.New("withdrawal binding is newer than the execution context")
+	}
+	if !current.active() {
+		closed, err := closedWithdrawalBinding(preimage, current.frozen.UpdatedHeight)
+		if err != nil || !bytes.Equal(current.data, closed.data) {
+			return errors.New("completed withdrawal binding differs from the expected identity")
+		}
+		if err = k.checkBindingIndexes(child, current); err != nil {
+			return err
+		}
+		return ErrWithdrawalAlreadyCompleted
+	}
+	if !bytes.Equal(current.data, preimage.data) {
+		return errors.New("withdrawal binding differs from the expected preimage")
+	}
+	completion, err := k.planWithdrawalCompletion(child, current)
 	if err != nil {
 		return err
 	}
-	if !bytes.Equal(got, want) {
-		return errors.New("withdrawal execution did not settle the matching native binding")
+	bindingPlan, err := k.PrepareBindingPlan(child, []BindingMutation{{Frozen: completion.closed.frozen}})
+	if err != nil {
+		return err
 	}
-	if err = k.removeSettledUndelegation(child, row.frozen); err != nil {
+	if err = k.ApplyBindingPlan(child, bindingPlan); err != nil {
+		return err
+	}
+	state := k.service.OpenKVStore(child)
+	if completion.nextPair == nil {
+		err = state.Delete(completion.pairKey)
+	} else {
+		err = state.Set(completion.pairKey, completion.nextPair)
+	}
+	if err != nil {
 		return err
 	}
 	child.EventManager().EmitEvent(sdk.NewEvent(
 		"decimal_withdrawal_completed",
-		sdk.NewAttribute("gateway", fmt.Sprintf("0x%x", row.frozen.Gateway)),
-		sdk.NewAttribute("frozen_index", fmt.Sprintf("0x%x", row.frozen.FrozenIndex)),
+		sdk.NewAttribute("gateway", fmt.Sprintf("0x%x", completion.closed.frozen.Gateway)),
+		sdk.NewAttribute("frozen_index", fmt.Sprintf("0x%x", completion.closed.frozen.FrozenIndex)),
 	))
 	commit()
 	return nil
 }
 
-func (k *StateKeeper) removeSettledUndelegation(ctx sdk.Context, binding *types.EVMFrozenBinding) error {
-	owner, err := address.NewBech32Codec(identity.Bech32PrefixAccAddr).BytesToString(binding.Beneficiary)
+func (k *StateKeeper) verifyWithdrawalCompletion(ctx sdk.Context, plan *withdrawalCompletion) error {
+	actual, err := k.readBindingRow(ctx, plan.closed.key)
 	if err != nil {
 		return err
 	}
-	operator, err := k.ValidatorAddressCodec().BytesToString(binding.SourceValidator)
+	if !bytes.Equal(actual.data, plan.closed.data) {
+		return errors.New("withdrawal execution did not settle the matching native binding")
+	}
+	if err = k.checkBindingIndexes(ctx, actual); err != nil {
+		return err
+	}
+	pair, err := k.service.OpenKVStore(ctx).Get(plan.pairKey)
 	if err != nil {
 		return err
+	}
+	if (pair == nil) != (plan.nextPair == nil) || !bytes.Equal(pair, plan.nextPair) {
+		return errors.New("withdrawal execution did not settle exactly one native undelegation entry")
+	}
+	return nil
+}
+
+// Read at most one native pair record, bounded by MaxRecordBytes and the
+// existing MaxEntries parameter. The content hash identifies one multiset entry.
+func (k *StateKeeper) planWithdrawalCompletion(ctx sdk.Context, row *bindingRecord) (*withdrawalCompletion, error) {
+	closed, err := closedWithdrawalBinding(row, ctx.BlockHeight())
+	if err != nil {
+		return nil, err
+	}
+	if err = k.checkBindingIndexes(ctx, row); err != nil {
+		return nil, err
+	}
+	binding := row.frozen
+	owner, err := address.NewBech32Codec(identity.Bech32PrefixAccAddr).BytesToString(binding.Beneficiary)
+	if err != nil {
+		return nil, err
+	}
+	operator, err := k.ValidatorAddressCodec().BytesToString(binding.SourceValidator)
+	if err != nil {
+		return nil, err
 	}
 	key := composite(undelegationPrefix, owner, operator)
 	var pending types.Undelegation
 	if err = k.read(ctx, key, &pending); err != nil {
-		return err
+		return nil, err
 	}
 	params, err := k.GetParams(ctx)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	if pending.Delegator != owner || pending.Validator != operator || uint64(len(pending.Entries)) > uint64(params.MaxEntries) {
-		return errors.New("invalid native undelegation pair")
+		return nil, errors.New("invalid native undelegation pair")
 	}
 	for i := range pending.Entries {
 		entry := &pending.Entries[i]
 		hash, err := types.NativeQueueEntryHash(1, owner, operator, "", entry)
 		if err != nil {
-			return err
+			return nil, err
 		}
 		if !bytes.Equal(hash, binding.NativeEntryHash) {
 			continue
+		}
+		if err = entry.Stake.Validate(); err != nil {
+			return nil, err
+		}
+		target := binding.NativeTarget
+		if entry.Stake.Type != target.StakeType || entry.Stake.ID != target.ID || entry.Stake.Stake.Denom != binding.ReserveAsset.NativeDenom || !slices.Equal(entry.Stake.SubTokenIDs, target.SubTokenIDs) {
+			return nil, errors.New("native undelegation stake differs from the frozen target")
+		}
+		if binding.SourceKind == types.EVMStakeBindingKind_EVM_STAKE_BINDING_COIN && !binding.RawAmount.Equal(entry.Stake.Stake.Amount) {
+			return nil, errors.New("native undelegation amount differs from the frozen coin amount")
 		}
 		deadline := entry.CompletionTime.Unix()
 		var expectedTimestamp [32]byte
 		copy(expectedTimestamp[24:], sdk.Uint64ToBigEndian(uint64(deadline)))
 		if deadline <= 0 || !bytes.Equal(binding.CompletionTimestamp, expectedTimestamp[:]) {
-			return errors.New("native undelegation deadline differs from settled binding")
+			return nil, errors.New("native undelegation deadline differs from the frozen binding")
 		}
 		if entry.CompletionTime.After(ctx.BlockTime()) {
-			return errors.New("native undelegation has not matured")
+			return nil, errors.New("native undelegation has not matured")
 		}
 		// Two requests may have byte-identical entries. Remove one copy.
 		pending.Entries = append(pending.Entries[:i], pending.Entries[i+1:]...)
-		if len(pending.Entries) == 0 {
-			return k.service.OpenKVStore(ctx).Delete(key)
+		plan := &withdrawalCompletion{closed: closed, pairKey: key}
+		if len(pending.Entries) != 0 {
+			plan.nextPair, err = proto.Marshal(&pending)
+			if err != nil {
+				return nil, err
+			}
+			if len(plan.nextPair) > MaxRecordBytes {
+				return nil, errors.New("native undelegation pair exceeds size limit")
+			}
 		}
-		return k.put(ctx, key, &pending)
+		return plan, nil
 	}
-	return errors.New("settled binding has no matching native undelegation")
+	return nil, errors.New("frozen binding has no matching native undelegation")
 }
