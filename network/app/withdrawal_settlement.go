@@ -59,8 +59,11 @@ type withdrawalController struct {
 // profile leaves default networks unchanged. Only the financial bootstrap or
 // a coordinated state upgrade may install the profile in the validator store.
 func (app *App) LoadWithdrawalSettlement(ctx sdk.Context) error {
+	if ctx.ChainID() != app.chainID {
+		return errors.New("withdrawal profile context differs from the application chain")
+	}
 	raw := ctx.KVStore(app.keys[validatortypes.StoreKey]).Get([]byte{WithdrawalProfileKey})
-	if len(raw) == 0 && app.withdrawals == nil {
+	if raw == nil && app.withdrawals == nil {
 		return nil
 	}
 	var profile WithdrawalProfile
