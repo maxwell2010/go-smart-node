@@ -38,6 +38,7 @@ type isolatedBackendEnv struct {
 	credit          *big.Int
 	events          func() []abci.Event
 	blockEvents     func() []abci.Event
+	deferrals       func() []string
 	setup, govOwner common.Address
 }
 
