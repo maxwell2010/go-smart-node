@@ -96,7 +96,10 @@ func (k Keeper) BlockValidatorUpdates(ctx context.Context) ([]abci.ValidatorUpda
 		}
 	}
 
-	matureRedelegations, err := k.DequeueAllMatureRedelegationQueue(queueCtx, now)
+	// The existing redelegation dequeue uses HeaderInfo.Time. Retry at that
+	// same cutoff so an untouched later timeslice cannot be overwritten.
+	redelegationCutoff := queueCtx.HeaderInfo().Time
+	matureRedelegations, err := k.DequeueAllMatureRedelegationQueue(queueCtx, redelegationCutoff)
 	if err != nil {
 		return nil, err
 	}
@@ -150,7 +153,7 @@ func (k Keeper) BlockValidatorUpdates(ctx context.Context) ([]abci.ValidatorUpda
 		commit()
 	}
 	if len(retryRedelegations) > 0 {
-		if err := k.SetRedelegationQueueTimeSlice(queueCtx, now, retryRedelegations); err != nil {
+		if err := k.SetRedelegationQueueTimeSlice(queueCtx, redelegationCutoff, retryRedelegations); err != nil {
 			return nil, err
 		}
 	}
