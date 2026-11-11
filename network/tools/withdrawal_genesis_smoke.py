@@ -28,6 +28,10 @@ HEIGHT_HEADER = 'x-cosmos-block-height'
 COMPLETION = 'decimal_withdrawal_completed'
 MAX_BLOCKS = 240
 RESERVE_ATOMIC = '2048000000000000000000'
+# Keep the engine limit aligned with withdrawalAttemptGas in app. The lower
+# regression limit leaves room for the measured 1024-unit EndBlock work.
+WITHDRAWAL_ATTEMPT_GAS_LIMIT = 24_000_000
+MAX_1024_SETTLEMENT_GAS = 23_000_000
 
 
 def check(condition, reason):
@@ -273,6 +277,15 @@ def log_records(path, message):
     return matches
 
 
+def check_settlement_gas(result, charged):
+    check(type(charged) is int and charged > 0, 'missing automatic settlement SDK gas')
+    result.update(sdkGasCharged=charged, sdkGasLimit=WITHDRAWAL_ATTEMPT_GAS_LIMIT,
+                  sdkGasHeadroom=WITHDRAWAL_ATTEMPT_GAS_LIMIT - charged,
+                  sdkGasRegressionLimit=MAX_1024_SETTLEMENT_GAS)
+    check(charged <= MAX_1024_SETTLEMENT_GAS,
+          f'1024-unit settlement charged {charged} SDK gas, above the {MAX_1024_SETTLEMENT_GAS} regression limit')
+
+
 def run_gate(args, binary, root, expected, genesis, invalid, validator, env, owner, report):
     def prepare(home, state):
         run_command(binary, home, ['init', 'withdrawal-genesis-fixture', '--chain-id', CHAIN, '--evm.evm-chain-id', str(EVM_CHAIN)], env)
@@ -336,9 +349,9 @@ def run_gate(args, binary, root, expected, genesis, invalid, validator, env, own
     admissions = log_records(log_path, 'authenticated withdrawal genesis admitted')
     check(len(admissions) == 1, 'expected one authenticated genesis admission diagnostic')
     work = log_records(log_path, 'withdrawal block settlement work')
-    check(len(work) == 1 and work[0].get('settled') == 1 and work[0].get('deferred') == 0 and work[0].get('gas', 0) > 0,
+    check(len(work) == 1 and work[0].get('settled') == 1 and work[0].get('deferred') == 0,
           'unexpected automatic withdrawal work diagnostic')
-    report['settlement']['sdkGasCharged'] = work[0]['gas']
+    check_settlement_gas(report['settlement'], work[0].get('gas'))
     check(type(admissions[0].get('gas')) is int and admissions[0]['gas'] > 0, 'missing authenticated genesis work gas')
     report['genesisSDKGasCharged'] = admissions[0]['gas']
 
