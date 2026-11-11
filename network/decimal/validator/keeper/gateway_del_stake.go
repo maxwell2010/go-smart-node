@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/binary"
 	"errors"
+	"math/big"
 	"time"
 
 	sdkmath "cosmossdk.io/math"
@@ -21,8 +22,9 @@ import (
 type GatewayDELStake struct {
 	Gateway, WrappedDEL, Beneficiary, Validator common.Address
 	StakeID, PenaltyCursor                      common.Hash
-	Amount                                      sdkmath.Int
-	HoldDeadline, HoldStartTime                 int64 // EVM bucket times in Unix seconds, both zero for unheld DEL.
+	Amount                                      sdkmath.Int // Direct DEL only, excluding logical NFT reserve.
+	NFTBacked                                   sdkmath.Int // Logical reserve in the same ordinary Gateway slot.
+	HoldDeadline, HoldStartTime                 int64       // EVM bucket times in Unix seconds, both zero for unheld DEL.
 }
 
 const gatewayDELCoinBinding = types.EVMStakeBindingKind_EVM_STAKE_BINDING_COIN
@@ -40,6 +42,10 @@ func (s GatewayDELStake) nativePair() (string, string, error) {
 		s.StakeID != crypto.Keccak256Hash(s.Validator[:], s.Beneficiary[:], s.WrappedDEL[:], words[:]) {
 		return "", "", errors.New("invalid Gateway DEL position or unsupported penalty cursor")
 	}
+	backed := s.nftBackedAmount()
+	if backed.IsNegative() || (s.HoldDeadline != 0 && !backed.IsZero()) {
+		return "", "", errors.New("invalid NFT backing for the Gateway DEL position")
+	}
 	owner, err := address.NewBech32Codec(identity.Bech32PrefixAccAddr).BytesToString(s.Beneficiary[:])
 	if err != nil {
 		return "", "", err
@@ -48,12 +54,24 @@ func (s GatewayDELStake) nativePair() (string, string, error) {
 	return owner, operator, err
 }
 
-func (s GatewayDELStake) binding(amount sdkmath.Int, created, updated int64) types.EVMStakeBinding {
+func (s GatewayDELStake) nftBackedAmount() sdkmath.Int {
+	if s.NFTBacked.IsNil() {
+		return sdkmath.ZeroInt()
+	}
+	return s.NFTBacked
+}
+
+func (s GatewayDELStake) binding(direct sdkmath.Int, created, updated int64) (types.EVMStakeBinding, error) {
+	backed := s.nftBackedAmount()
+	gross := new(big.Int).Add(direct.BigInt(), backed.BigInt())
+	if gross.BitLen() > 256 {
+		return types.EVMStakeBinding{}, errors.New("Gateway DEL direct amount plus NFT backing exceeds 256 bits")
+	}
 	row := types.EVMStakeBinding{
 		Gateway: s.Gateway.Bytes(), Kind: gatewayDELCoinBinding, StakeID: s.StakeID.Bytes(),
 		Validator: s.Validator.Bytes(), Beneficiary: s.Beneficiary.Bytes(), TokenContract: s.WrappedDEL.Bytes(),
 		TokenID: make([]byte, 32), HoldTimestamp: make([]byte, 32), RawHoldStartTime: make([]byte, 32),
-		PenaltyCursor: s.PenaltyCursor.Bytes(), RawAmount: amount, RawNftBackedAmount: sdkmath.ZeroInt(),
+		PenaltyCursor: s.PenaltyCursor.Bytes(), RawAmount: sdkmath.NewIntFromBigInt(gross), RawNftBackedAmount: backed,
 		ReportedReserveAmount: sdkmath.ZeroInt(), Active: true, CreatedHeight: created, UpdatedHeight: updated,
 		ReserveAsset: &types.EVMReserveAsset{ReserveKind: 1, Token: make([]byte, 20), NativeDenom: identity.BaseDenom},
 		NativeTarget: &types.NativeStakeTarget{StakeType: types.StakeType_Coin, ID: identity.BaseDenom},
@@ -64,12 +82,16 @@ func (s GatewayDELStake) binding(amount sdkmath.Int, created, updated int64) typ
 		row.NativeHoldStartTime = s.HoldStartTime
 		row.NativeTarget.StakeType = types.StakeType_CoinHold
 	}
-	return row
+	return row, nil
 }
 
 func (k *StateKeeper) checkGatewayDELBinding(ctx sdk.Context, next GatewayDELStake, amount sdkmath.Int) (*types.EVMStakeBinding, error) {
+	expected, err := next.binding(amount, 0, 0)
+	if err != nil {
+		return nil, err
+	}
 	active, err := k.GetEVMStakeBinding(ctx, gatewayDELCoinBinding, next.Gateway[:], next.StakeID[:])
-	if amount.IsZero() {
+	if expected.RawAmount.IsZero() {
 		if errors.Is(err, ErrNotFound) {
 			return nil, nil
 		}
@@ -81,7 +103,7 @@ func (k *StateKeeper) checkGatewayDELBinding(ctx sdk.Context, next GatewayDELSta
 	if err != nil {
 		return nil, err
 	}
-	expected := next.binding(amount, active.CreatedHeight, active.UpdatedHeight)
+	expected.CreatedHeight, expected.UpdatedHeight = active.CreatedHeight, active.UpdatedHeight
 	actualBytes, err := types.CanonicalBindingBytes(&active)
 	if err != nil {
 		return nil, err
@@ -109,6 +131,14 @@ func (k *StateKeeper) checkGatewayDELPrestate(ctx sdk.Context, next GatewayDELSt
 		return nil, nil, nil
 	}
 	delegation, err := k.GetDelegation(ctx, owner, operator, types.StakeType_Coin, identity.BaseDenom)
+	if amount.IsZero() {
+		if errors.Is(err, ErrNotFound) {
+			return active, nil, nil
+		}
+		if err == nil {
+			return nil, nil, errors.New("NFT-only Gateway DEL binding has an unexpected native coin delegation")
+		}
+	}
 	if err != nil {
 		return nil, nil, err
 	}
@@ -137,7 +167,10 @@ func (k *StateKeeper) ApplyGatewayDELDelegation(ctx sdk.Context, next GatewayDEL
 	if active != nil {
 		created = active.CreatedHeight
 	}
-	row := next.binding(next.Amount, created, ctx.BlockHeight())
+	row, err := next.binding(next.Amount, created, ctx.BlockHeight())
+	if err != nil {
+		return err
+	}
 	plan, err := k.PrepareBindingPlan(child, []BindingMutation{{Stake: &row}})
 	if err != nil {
 		return err
@@ -215,10 +248,13 @@ func (k *StateKeeper) ApplyGatewayDELWithdrawal(ctx sdk.Context, next GatewayDEL
 		NativeEntryHash: entryHash, Active: true, CreatedHeight: ctx.BlockHeight(), UpdatedHeight: ctx.BlockHeight(),
 	}
 	var mutation BindingMutation
-	if next.Amount.IsZero() {
+	if next.Amount.IsZero() && next.nftBackedAmount().IsZero() {
 		mutation.Remove = &BindingReference{Kind: active.Kind, Gateway: active.Gateway, ID: active.StakeID}
 	} else {
-		row := next.binding(next.Amount, active.CreatedHeight, ctx.BlockHeight())
+		row, err := next.binding(next.Amount, active.CreatedHeight, ctx.BlockHeight())
+		if err != nil {
+			return err
+		}
 		mutation.Stake = &row
 	}
 	plan, err := k.PrepareBindingPlan(child, []BindingMutation{mutation, {Frozen: &frozen}})
