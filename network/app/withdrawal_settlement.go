@@ -46,6 +46,7 @@ type WithdrawalProfile struct {
 	WrappedDEL          common.Address `json:"wrapped_del"`
 	SettlementOnly      bool           `json:"settlement_only,omitempty"`
 	EnableDELDelegation bool           `json:"enable_del_delegation,omitempty"`
+	EnableDELHold       bool           `json:"enable_del_hold,omitempty"`
 }
 
 type withdrawalController struct {
@@ -91,6 +92,9 @@ func (app *App) LoadWithdrawalSettlement(ctx sdk.Context) error {
 }
 
 func (app *App) newWithdrawalController(profile WithdrawalProfile) (*withdrawalController, error) {
+	if profile.EnableDELHold && !profile.EnableDELDelegation {
+		return nil, errors.New("DEL hold requires DEL delegation admission")
+	}
 	if profile.EnableDELDelegation && !profile.SettlementOnly {
 		return nil, errors.New("DEL delegation requires restricted Gateway admission")
 	}
@@ -175,14 +179,31 @@ func (c *withdrawalController) isCompletionCall(msg core.Message) bool {
 		bytes.Equal(msg.Data[:4], c.abi.Methods["complete"].ID)
 }
 
+func (c *withdrawalController) isDELStakeCall(msg core.Message) bool {
+	if !c.profile.EnableDELDelegation || msg.To == nil || *msg.To != c.profile.Gateway || len(msg.Data) < 4 {
+		return false
+	}
+	method, err := c.abi.MethodById(msg.Data[:4])
+	if err != nil {
+		return false
+	}
+	switch method.Sig {
+	case "delegateDEL(address)", "withdraw(address,address,uint256)":
+		return true
+	case "delegateHoldDEL(address,uint256)", "withdrawHold(address,address,uint256,uint256)":
+		return c.profile.EnableDELHold
+	default:
+		return false
+	}
+}
+
 func (c *withdrawalController) PostTxProcessing(ctx sdk.Context, sender common.Address, msg core.Message, receipt *ethtypes.Receipt) error {
 	if receipt == nil || receipt.Status != ethtypes.ReceiptStatusSuccessful {
 		return nil
 	}
 	managed, completion := c.withdrawalActivity(ctx, msg, receipt.Logs)
 	if !completion {
-		if managed && c.profile.EnableDELDelegation && msg.To != nil && *msg.To == c.profile.Gateway && len(msg.Data) >= 4 &&
-			(bytes.Equal(msg.Data[:4], c.abi.Methods["delegateDEL"].ID) || bytes.Equal(msg.Data[:4], c.abi.Methods["withdraw"].ID)) {
+		if c.isDELStakeCall(msg) {
 			if sender != msg.From {
 				return errors.New("DEL stake requires the authenticated transaction sender")
 			}
@@ -219,6 +240,7 @@ func (c *withdrawalController) projectSignedDEL(ctx sdk.Context, msg core.Messag
 	position := validatorkeeper.GatewayDELStake{
 		Gateway: c.profile.Gateway, WrappedDEL: c.profile.WrappedDEL, Validator: result.Validator, Beneficiary: result.Beneficiary,
 		StakeID: result.StakeID, Amount: result.Remaining,
+		HoldDeadline: result.HoldDeadline, HoldStartTime: result.HoldStartTime,
 	}
 	if result.Deadline.IsZero() {
 		return c.keeper.ApplyGatewayDELDelegation(ctx, position, result.Amount)

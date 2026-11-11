@@ -14,12 +14,13 @@ import (
 	"github.com/ethereum/go-ethereum/crypto"
 )
 
-// DELTransition is the verified result of a direct, signed, unheld DEL call.
+// DELTransition is the verified result of a direct, signed DEL call.
 type DELTransition struct {
-	Validator, Beneficiary common.Address
-	StakeID, FrozenIndex   common.Hash
-	Amount, Remaining      sdkmath.Int // Call delta and active position after the call.
-	Deadline               time.Time   // Zero for a deposit.
+	Validator, Beneficiary      common.Address
+	StakeID, FrozenIndex        common.Hash
+	Amount, Remaining           sdkmath.Int // Call delta and active position after the call.
+	HoldDeadline, HoldStartTime int64       // Unix seconds, or zero for ordinary DEL.
+	Deadline                    time.Time   // Zero for a deposit.
 }
 
 // VerifySignedDEL proves the actual poststate and its exact logs in the signed
@@ -31,7 +32,20 @@ func (e *Executor) VerifySignedDEL(ctx sdk.Context, msg core.Message, receipt *e
 		return out, errors.New("DEL stake requires a direct signed Gateway call")
 	}
 	method, err := e.gateway.MethodById(msg.Data[:4])
-	if err != nil || (method.Sig != "delegateDEL(address)" && method.Sig != "withdraw(address,address,uint256)") {
+	if err != nil {
+		return out, errors.New("DEL profile admits only direct DEL delegation and withdrawal requests")
+	}
+	deposit := false
+	holdArg := -1
+	switch method.Sig {
+	case "delegateDEL(address)":
+		deposit = true
+	case "delegateHoldDEL(address,uint256)":
+		deposit, holdArg = true, 1
+	case "withdraw(address,address,uint256)":
+	case "withdrawHold(address,address,uint256,uint256)":
+		holdArg = 3
+	default:
 		return out, errors.New("DEL profile admits only direct DEL delegation and withdrawal requests")
 	}
 	args, err := method.Inputs.Unpack(msg.Data[4:])
@@ -43,7 +57,6 @@ func (e *Executor) VerifySignedDEL(ctx sdk.Context, msg core.Message, receipt *e
 		return out, errors.New("noncanonical DEL stake call")
 	}
 	out.Validator, out.Beneficiary = args[0].(common.Address), msg.From
-	deposit := method.Sig == "delegateDEL(address)"
 	amount := msg.Value
 	if !deposit {
 		if msg.Value.Sign() != 0 || args[1].(common.Address) != e.roles.WrappedDEL {
@@ -54,8 +67,18 @@ func (e *Executor) VerifySignedDEL(ctx sdk.Context, msg core.Message, receipt *e
 	if amount.Sign() <= 0 || amount.BitLen() > 255 || out.Validator == (common.Address{}) || out.Beneficiary == Sender() {
 		return out, errors.New("invalid DEL stake amount or source identity")
 	}
+	var holdWord, tokenID common.Hash
+	if holdArg >= 0 {
+		hold := args[holdArg].(*big.Int)
+		now := ctx.BlockTime().Unix()
+		if !hold.IsInt64() || hold.Sign() <= 0 || (deposit && hold.Int64() <= now) || (!deposit && hold.Int64() >= now) {
+			return out, errors.New("DEL hold deadline is invalid for this transition")
+		}
+		out.HoldDeadline = hold.Int64()
+		holdWord = common.BigToHash(hold)
+	}
 	out.Amount = sdkmath.NewIntFromBigInt(amount)
-	out.StakeID = crypto.Keccak256Hash(out.Validator.Bytes(), out.Beneficiary.Bytes(), e.roles.WrappedDEL.Bytes(), make([]byte, 2*common.HashLength))
+	out.StakeID = crypto.Keccak256Hash(out.Validator.Bytes(), out.Beneficiary.Bytes(), e.roles.WrappedDEL.Bytes(), tokenID[:], holdWord[:])
 	markers, err := e.completions(receipt)
 	if err != nil {
 		return out, err
@@ -84,23 +107,41 @@ func (e *Executor) VerifySignedDEL(ctx sdk.Context, msg core.Message, receipt *e
 	}
 	stake := [8]common.Hash{
 		common.BytesToHash(out.Validator.Bytes()), common.BytesToHash(out.Beneficiary.Bytes()), common.BytesToHash(e.roles.WrappedDEL.Bytes()),
-		{}, {}, smallWord(tokenDEL), {}, {},
+		{}, {}, smallWord(tokenDEL), holdWord, {},
 	}
-	post, err := e.read(ctx, e.roles.Gateway, e.gateway, "getStake", len(stake)*common.HashLength, out.Validator, out.Beneficiary, e.roles.WrappedDEL)
+	getter := "getStake"
+	getterArgs := []interface{}{out.Validator, out.Beneficiary, e.roles.WrappedDEL}
+	if holdArg >= 0 {
+		getter = "getHoldStake"
+		getterArgs = append(getterArgs, big.NewInt(out.HoldDeadline))
+	}
+	post, err := e.read(ctx, e.roles.Gateway, e.gateway, getter, len(stake)*common.HashLength, getterArgs...)
 	if err != nil {
 		return out, err
+	}
+	if holdArg >= 0 {
+		start := new(big.Int).SetBytes(post[7*common.HashLength:])
+		if !start.IsInt64() || start.Sign() <= 0 || start.Int64() >= out.HoldDeadline || start.Int64() > ctx.BlockTime().Unix() {
+			return out, errors.New("Gateway returned invalid DEL hold start time")
+		}
+		out.HoldStartTime = start.Int64()
+		stake[7] = common.BigToHash(start)
 	}
 	for i, word := range stake {
 		if i == 3 {
 			continue // The amount is compared with the stored native prestate.
 		}
 		if !bytes.Equal(word[:], post[i*common.HashLength:(i+1)*common.HashLength]) {
-			return out, errors.New("Gateway position is not ordinary unheld DEL")
+			return out, errors.New("Gateway position differs from the direct DEL call")
 		}
 	}
 	remaining := new(big.Int).SetBytes(post[3*common.HashLength : 4*common.HashLength])
 	if deposit && remaining.Cmp(amount) < 0 {
 		return out, errors.New("Gateway position is smaller than the DEL deposit")
+	}
+	isNew := deposit && remaining.Cmp(amount) == 0
+	if isNew && holdArg >= 0 && out.HoldStartTime != ctx.BlockTime().Unix() {
+		return out, errors.New("new DEL hold must start in the deposit block")
 	}
 	out.Remaining = sdkmath.NewIntFromBigInt(remaining)
 	state, err := e.payoutState(ctx, payout{asset: e.roles.WrappedDEL, beneficiary: out.Beneficiary}, common.Address{})
@@ -118,7 +159,7 @@ func (e *Executor) VerifySignedDEL(ctx sdk.Context, msg core.Message, receipt *e
 	if !deposit {
 		delta.Neg(delta)
 	}
-	if err := e.checkDELStakeLogs(receipt.Logs, out.StakeID, post, delta, deposit && remaining.Cmp(amount) == 0); err != nil {
+	if err := e.checkDELStakeLogs(receipt.Logs, out.StakeID, post, delta, isNew); err != nil {
 		return out, err
 	}
 	last := receipt.Logs[2]
@@ -177,9 +218,10 @@ func (e *Executor) verifyDELRequest(ctx sdk.Context, out DELTransition, log *eth
 	}
 	if words[0] != common.BytesToHash(out.Validator.Bytes()) || words[1] != common.BytesToHash(out.Beneficiary.Bytes()) ||
 		words[2] != common.BytesToHash(e.roles.WrappedDEL.Bytes()) || words[3] != common.BigToHash(out.Amount.BigInt()) ||
-		words[4] != (common.Hash{}) || words[5] != smallWord(tokenDEL) || words[6] != (common.Hash{}) || words[7] != (common.Hash{}) ||
+		words[4] != (common.Hash{}) || words[5] != smallWord(tokenDEL) || words[6] != common.BigToHash(big.NewInt(out.HoldDeadline)) ||
+		words[7] != common.BigToHash(big.NewInt(out.HoldStartTime)) ||
 		words[8] != smallWord(statusFrozen) || words[9] != smallWord(freezeWithdraw) {
-		return out, errors.New("frozen request differs from an ordinary DEL withdrawal")
+		return out, errors.New("frozen request differs from the direct DEL withdrawal")
 	}
 	deadline := words[10].Big()
 	if !deadline.IsInt64() || deadline.Int64() <= ctx.BlockTime().Unix() {
