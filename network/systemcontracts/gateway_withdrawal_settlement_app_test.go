@@ -68,8 +68,8 @@ type gatewayFrozenWithdrawal struct {
 
 func runGatewayWithdrawalSettlement(t *testing.T, e isolatedBackendEnv, gateway contracts.Artifact, target, wrapped, validator common.Address) {
 	t.Helper()
-	owner := crypto.PubkeyToAddress(e.keys[1].PublicKey)
 	beneficiary := crypto.PubkeyToAddress(e.keys[0].PublicKey)
+	executor := crypto.PubkeyToAddress(e.keys[2].PublicKey)
 	amount := sdkmath.NewInt(3_000_000_000_000_000_000)
 	signed := func(key int, method string, value *big.Int, args ...interface{}) *evmtypes.MsgEthereumTxResponse {
 		t.Helper()
@@ -104,7 +104,7 @@ func runGatewayWithdrawalSettlement(t *testing.T, e isolatedBackendEnv, gateway 
 	require.Equal(t, wrapped, freeze.Stake.Token)
 	require.Equal(t, amount.BigInt(), freeze.Stake.Amount)
 	require.Equal(t, uint8(1), freeze.FreezeStatus)
-	require.Equal(t, uint8(0), freeze.FreezeType)
+	require.Equal(t, uint8(1), freeze.FreezeType) // Solidity FreezeType.Withdraw.
 	deadline := created.BlockTime().Add(time.Minute)
 	require.Equal(t, big.NewInt(deadline.Unix()), freeze.UnfreezeTimestamp)
 
@@ -144,7 +144,7 @@ func runGatewayWithdrawalSettlement(t *testing.T, e isolatedBackendEnv, gateway 
 
 	const attemptGas, evmGas = 3_000_000, 500_000
 	apply := func(ctx sdk.Context, commit bool, data []byte) (*evmtypes.MsgEthereumTxResponse, error) {
-		message := core.Message{From: owner, To: &target, Value: new(big.Int), GasLimit: evmGas, GasPrice: new(big.Int), GasFeeCap: new(big.Int), GasTipCap: new(big.Int), Data: data, SkipNonceChecks: true, SkipFromEOACheck: true}
+		message := core.Message{From: executor, To: &target, Value: new(big.Int), GasLimit: evmGas, GasPrice: new(big.Int), GasFeeCap: new(big.Int), GasTipCap: new(big.Int), Data: data, SkipNonceChecks: true, SkipFromEOACheck: true}
 		return e.app.EVMKeeper.ApplyMessage(ctx, statedb.New(ctx, e.app.EVMKeeper, statedb.NewEmptyTxConfig()), message, nil, commit, false, true)
 	}
 	completion, err := gateway.ABI.Pack("complete", []*big.Int{frozenID})
