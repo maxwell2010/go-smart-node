@@ -23,6 +23,9 @@ import (
 func (app *App) ExportAppStateAndValidators(forZeroHeight bool, jailAllowedAddrs []string, modulesToExport []string) (servertypes.ExportedApp, error) {
 	// as if they could withdraw from the start of the next block
 	ctx := app.NewContextLegacy(true, tmproto.Header{ChainID: app.chainID, Height: app.LastBlockHeight()})
+	if app.withdrawals != nil {
+		return servertypes.ExportedApp{}, fmt.Errorf("genesis export of an active withdrawal profile requires authenticated financial genesis support")
+	}
 
 	// We export at last height + 1, because that's the height at which
 	// CometBFT will start InitChain.

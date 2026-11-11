@@ -280,6 +280,7 @@ func runIsolatedPositionReader(t *testing.T, e isolatedBackendEnv) {
 	t.Run("shared App withdrawal settlement", func(t *testing.T) {
 		profile := ownedapp.WithdrawalProfile{Registry: registryAddress, Gateway: gatewayAddress, Library: libraryAddress, NFTCenter: factoryAddress,
 			PositionVault: vaultAddress, MasterValidator: masterAddress, WrappedDEL: wrapped}
-		runSharedWithdrawalDEL(t, e, profile, gateway, master, govSetup)
+		validator := runSharedWithdrawalDEL(t, e, profile, gateway, master, govSetup)
+		runSharedWithdrawalNFT(t, e, profile, gateway, origin, vault, originAddress, validator)
 	})
 }

@@ -221,6 +221,7 @@ func runSharedWithdrawalNFT(t *testing.T, e isolatedBackendEnv, profile ownedapp
 			e.ctx().KVStore(nftStoreKey).Set(lineageKey, savedLineage)
 		}
 	})
+	e.nextGasLimit(15_000_000)
 	failed := call(2, gateway, profile.Gateway, zero, false, "complete", []*big.Int{frozenID})
 	require.Contains(t, failed.VmError, "project withdrawal assets", "the signed EVM transfer reached native projection before rejection")
 	require.Empty(t, failed.Logs)

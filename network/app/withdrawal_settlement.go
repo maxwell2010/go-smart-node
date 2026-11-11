@@ -140,7 +140,8 @@ func (c *withdrawalController) checkMessage(msg core.Message, index common.Hash)
 	if err != nil {
 		return err
 	}
-	if msg.To == nil || *msg.To != c.profile.Gateway || msg.Value == nil || msg.Value.Sign() != 0 || !bytes.Equal(expected, msg.Data) {
+	if msg.To == nil || *msg.To != c.profile.Gateway || msg.Value == nil || msg.Value.Sign() != 0 ||
+		len(msg.SetCodeAuthorizations) != 0 || !bytes.Equal(expected, msg.Data) {
 		return errors.New("withdrawal requires a direct completion of one admitted Gateway ID")
 	}
 	return nil
