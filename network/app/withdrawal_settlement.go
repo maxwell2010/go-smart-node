@@ -218,12 +218,11 @@ func (c *withdrawalController) projectSignedDEL(ctx sdk.Context, msg core.Messag
 	}
 	position := validatorkeeper.GatewayDELStake{
 		Gateway: c.profile.Gateway, WrappedDEL: c.profile.WrappedDEL, Validator: result.Validator, Beneficiary: result.Beneficiary,
-		StakeID: result.StakeID, Amount: result.Amount,
+		StakeID: result.StakeID, Amount: result.Remaining,
 	}
 	if result.Deadline.IsZero() {
 		return c.keeper.ApplyGatewayDELDelegation(ctx, position, result.Amount)
 	}
-	position.Amount = sdkmath.ZeroInt()
 	return c.keeper.ApplyGatewayDELWithdrawal(ctx, position, result.FrozenIndex, result.Amount, result.Deadline)
 }
 

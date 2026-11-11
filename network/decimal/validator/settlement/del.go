@@ -18,13 +18,13 @@ import (
 type DELTransition struct {
 	Validator, Beneficiary common.Address
 	StakeID, FrozenIndex   common.Hash
-	Amount                 sdkmath.Int
-	Deadline               time.Time // Zero for a new delegation.
+	Amount, Remaining      sdkmath.Int // Call delta and active position after the call.
+	Deadline               time.Time   // Zero for a deposit.
 }
 
 // VerifySignedDEL proves the actual poststate and its exact logs in the signed
 // transaction cache. The keeper checks the corresponding native prestate before
-// admitting a new position or moving the entire active position to the queue.
+// adding to the active position or moving part or all of it to the queue.
 func (e *Executor) VerifySignedDEL(ctx sdk.Context, msg core.Message, receipt *ethtypes.Receipt) (DELTransition, error) {
 	var out DELTransition
 	if msg.To == nil || *msg.To != e.roles.Gateway || msg.Value == nil || len(msg.Data) < 4 || len(msg.SetCodeAuthorizations) != 0 {
@@ -32,7 +32,7 @@ func (e *Executor) VerifySignedDEL(ctx sdk.Context, msg core.Message, receipt *e
 	}
 	method, err := e.gateway.MethodById(msg.Data[:4])
 	if err != nil || (method.Sig != "delegateDEL(address)" && method.Sig != "withdraw(address,address,uint256)") {
-		return out, errors.New("DEL profile admits only direct DEL delegation and full withdrawal requests")
+		return out, errors.New("DEL profile admits only direct DEL delegation and withdrawal requests")
 	}
 	args, err := method.Inputs.Unpack(msg.Data[4:])
 	if err != nil {
@@ -84,28 +84,41 @@ func (e *Executor) VerifySignedDEL(ctx sdk.Context, msg core.Message, receipt *e
 	}
 	stake := [8]common.Hash{
 		common.BytesToHash(out.Validator.Bytes()), common.BytesToHash(out.Beneficiary.Bytes()), common.BytesToHash(e.roles.WrappedDEL.Bytes()),
-		common.BigToHash(amount), {}, smallWord(tokenDEL), {}, {},
-	}
-	if !deposit {
-		stake[3] = common.Hash{}
+		{}, {}, smallWord(tokenDEL), {}, {},
 	}
 	post, err := e.read(ctx, e.roles.Gateway, e.gateway, "getStake", len(stake)*common.HashLength, out.Validator, out.Beneficiary, e.roles.WrappedDEL)
 	if err != nil {
 		return out, err
 	}
 	for i, word := range stake {
+		if i == 3 {
+			continue // The amount is compared with the stored native prestate.
+		}
 		if !bytes.Equal(word[:], post[i*common.HashLength:(i+1)*common.HashLength]) {
-			return out, errors.New("DEL position differs from a new delegation or full withdrawal")
+			return out, errors.New("Gateway position is not ordinary unheld DEL")
 		}
 	}
+	remaining := new(big.Int).SetBytes(post[3*common.HashLength : 4*common.HashLength])
+	if deposit && remaining.Cmp(amount) < 0 {
+		return out, errors.New("Gateway position is smaller than the DEL deposit")
+	}
+	out.Remaining = sdkmath.NewIntFromBigInt(remaining)
 	state, err := e.payoutState(ctx, payout{asset: e.roles.WrappedDEL, beneficiary: out.Beneficiary}, common.Address{})
 	if err != nil {
 		return out, err
 	}
-	if state.wrapped.Cmp(amount) < 0 {
-		return out, errors.New("Gateway has insufficient backed WDEL for this DEL position")
+	held := new(big.Int).Set(remaining)
+	if !deposit {
+		held.Add(held, amount)
 	}
-	if err := e.checkDELStakeLogs(receipt.Logs, out.StakeID, post, amount, deposit); err != nil {
+	if state.wrapped.Cmp(held) < 0 {
+		return out, errors.New("Gateway has insufficient backed WDEL for the affected DEL position and claim")
+	}
+	delta := new(big.Int).Set(amount)
+	if !deposit {
+		delta.Neg(delta)
+	}
+	if err := e.checkDELStakeLogs(receipt.Logs, out.StakeID, post, delta, deposit && remaining.Cmp(amount) == 0); err != nil {
 		return out, err
 	}
 	last := receipt.Logs[2]
@@ -120,12 +133,10 @@ func (e *Executor) VerifySignedDEL(ctx sdk.Context, msg core.Message, receipt *e
 	return e.verifyDELRequest(ctx, out, last)
 }
 
-func (e *Executor) checkDELStakeLogs(logs []*ethtypes.Log, id common.Hash, post []byte, amount *big.Int, deposit bool) error {
-	delta := new(big.Int).Set(amount)
-	flag := smallWord(1)
-	if !deposit {
-		delta.Neg(delta)
-		flag = common.Hash{}
+func (e *Executor) checkDELStakeLogs(logs []*ethtypes.Log, id common.Hash, post []byte, delta *big.Int, isNew bool) error {
+	var flag common.Hash
+	if isNew {
+		flag = smallWord(1)
 	}
 	changed := e.gateway.Events["StakeAmountUpdated"]
 	changeData, err := changed.Inputs.NonIndexed().Pack(id, delta)
