@@ -61,6 +61,24 @@ func (s GatewayDELStake) nftBackedAmount() sdkmath.Int {
 	return s.NFTBacked
 }
 
+// VerifyGenesisGatewayDEL checks the exact native row and delegation for an
+// ordinary active position. The caller separately attests its EVM escrow.
+func (k *StateKeeper) VerifyGenesisGatewayDEL(ctx sdk.Context, gateway, wrapped common.Address, row types.EVMStakeBinding) error {
+	if !row.Active || row.RawAmount.IsNil() || !row.RawAmount.IsPositive() {
+		return errors.New("native consensus genesis requires positive active DEL positions")
+	}
+	s := GatewayDELStake{
+		Gateway: gateway, WrappedDEL: wrapped, Beneficiary: common.BytesToAddress(row.Beneficiary),
+		Validator: common.BytesToAddress(row.Validator), StakeID: common.BytesToHash(row.StakeID), Amount: row.RawAmount,
+	}
+	owner, operator, err := s.nativePair()
+	if err != nil {
+		return err
+	}
+	_, _, err = k.checkGatewayDELPrestate(ctx, s, s.Amount, owner, operator)
+	return err
+}
+
 func (s GatewayDELStake) binding(direct sdkmath.Int, created, updated int64) (types.EVMStakeBinding, error) {
 	backed := s.nftBackedAmount()
 	gross := new(big.Int).Add(direct.BigInt(), backed.BigInt())

@@ -501,13 +501,14 @@ func NewApp(
 		panic("native burn precompile address collides with existing implementation")
 	}
 	nativePrecompiles[burnPrecompile.Address()] = burnPrecompile
+	app.guardSDKEconomicsPrecompiles(nativePrecompiles)
 	app.EVMKeeper = evmkeeper.NewKeeper(
 		// TODO: check why this is not adjusted to use the runtime module methods like SDK native keepers
 		appCodec, keys[evmtypes.StoreKey], tkeys[evmtypes.TransientKey], keys,
 		authtypes.NewModuleAddress(govtypes.ModuleName),
 		app.AccountKeeper,
 		app.BankKeeper,
-		app.StakingKeeper,
+		app.newConsensusEVMReader(),
 		app.FeeMarketKeeper,
 		&app.ConsensusParamsKeeper,
 		&app.Erc20Keeper,
@@ -713,6 +714,7 @@ func NewApp(
 	// app.ModuleManager.SetOrderMigrations(custom order)
 
 	app.configurator = module.NewConfigurator(app.appCodec, app.MsgServiceRouter(), app.GRPCQueryRouter())
+	app.SetCircuitBreaker(nativeConsensusCircuit{app: app})
 	if err = app.ModuleManager.RegisterServices(app.configurator); err != nil {
 		panic(fmt.Sprintf("failed to register services in module manager: %s", err.Error()))
 	}
@@ -858,11 +860,18 @@ func (app *App) Name() string { return app.BaseApp.Name() }
 
 // BeginBlocker application updates every begin block
 func (app *App) BeginBlocker(ctx sdk.Context) (sdk.BeginBlock, error) {
+	if app.usesNativeConsensus(ctx) {
+		manager := app.nativeConsensusBlockManager()
+		return manager.BeginBlock(ctx)
+	}
 	return app.ModuleManager.BeginBlock(ctx)
 }
 
 // EndBlocker application updates every end block
 func (app *App) EndBlocker(ctx sdk.Context) (sdk.EndBlock, error) {
+	if app.usesNativeConsensus(ctx) {
+		return app.endNativeConsensus(ctx)
+	}
 	result, err := app.ModuleManager.EndBlock(ctx)
 	if err != nil || app.withdrawals == nil {
 		return result, err

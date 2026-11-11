@@ -1,6 +1,7 @@
 package settlement
 
 import (
+	"bytes"
 	"errors"
 	"fmt"
 	"math/big"
@@ -8,6 +9,7 @@ import (
 	storetypes "cosmossdk.io/store/types"
 	sdk "github.com/cosmos/cosmos-sdk/types"
 	"github.com/ethereum/go-ethereum/common"
+	"github.com/ethereum/go-ethereum/crypto"
 	validatortypes "github.com/maxwell2010/go-smart-node/network/decimal/validator/types"
 	"github.com/maxwell2010/go-smart-node/network/identity"
 )
@@ -18,6 +20,7 @@ type GenesisLimits struct {
 	MaxRows       uint32
 	SDKGas        uint64
 	DELValidators []common.Address
+	ActiveDEL     []validatortypes.EVMStakeBinding
 	NFTOrigins    []NFTGenesisOrigin
 }
 
@@ -33,11 +36,12 @@ type GenesisLimits struct {
 func (e *Executor) AttestGenesis(ctx sdk.Context, rows []validatortypes.EVMFrozenBinding, limits GenesisLimits, attestNFT func(sdk.Context, validatortypes.EVMFrozenBinding) error) (err error) {
 	if e == nil || e.evm == nil || limits.MaxRows == 0 || limits.MaxRows > validatortypes.MaxBindingPageSize || limits.SDKGas == 0 ||
 		len(rows) > int(limits.MaxRows) || len(limits.DELValidators) > int(limits.MaxRows) || len(limits.NFTOrigins) > int(limits.MaxRows) ||
-		(len(limits.DELValidators) != 0 && len(rows) != 0) || (len(limits.NFTOrigins) != 0 && len(limits.DELValidators) == 0) {
+		(len(limits.DELValidators) != 0 && len(rows) != 0) || (len(limits.NFTOrigins) != 0 && len(limits.DELValidators) == 0) ||
+		len(limits.ActiveDEL) > int(limits.MaxRows) || (len(limits.ActiveDEL) != 0 && len(limits.DELValidators) == 0) {
 		return errors.New("invalid Gateway genesis attestation limits or row count")
 	}
 	if ctx.BlockHeight() < 0 || ctx.BlockTime().Unix() <= 0 || len(ctx.BlockHeader().ProposerAddress) != common.AddressLength {
-		return errors.New("Gateway genesis attestation requires a genesis time and an initialized SDK staking proposer")
+		return errors.New("Gateway genesis attestation requires a genesis time and an initialized consensus proposer")
 	}
 	child, _ := ctx.CacheContext()
 	meter := storetypes.NewGasMeter(limits.SDKGas)
@@ -131,7 +135,10 @@ func (e *Executor) AttestGenesis(ctx sdk.Context, rows []validatortypes.EVMFroze
 		}
 	}
 	if len(limits.DELValidators) != 0 {
-		if err := e.attestEmptyDELGenesis(child, limits.DELValidators); err != nil {
+		if len(limits.ActiveDEL) != 0 && count.Sign() != 0 {
+			return errors.New("active DEL genesis cannot import Gateway withdrawal history")
+		}
+		if err := e.attestDELGenesis(child, limits.DELValidators, limits.ActiveDEL); err != nil {
 			return err
 		}
 		if len(limits.NFTOrigins) != 0 {
@@ -142,13 +149,10 @@ func (e *Executor) AttestGenesis(ctx sdk.Context, rows []validatortypes.EVMFroze
 	return e.verifyGenesisBacking(child, claims)
 }
 
-func (e *Executor) attestEmptyDELGenesis(ctx sdk.Context, validators []common.Address) error {
+func (e *Executor) attestDELGenesis(ctx sdk.Context, validators []common.Address, positions []validatortypes.EVMStakeBinding) error {
 	state, err := e.payoutState(ctx, payout{asset: e.roles.WrappedDEL, beneficiary: Sender()}, common.Address{})
 	if err != nil {
 		return err
-	}
-	if state.wrapped.Sign() != 0 {
-		return errors.New("DEL delegation genesis requires empty Gateway WDEL custody")
 	}
 	queue, err := e.read(ctx, e.roles.Gateway, e.gateway, "autoUnbondQueueLength", common.HashLength)
 	if err != nil {
@@ -165,6 +169,51 @@ func (e *Executor) attestEmptyDELGenesis(ctx sdk.Context, validators []common.Ad
 	if !delay.IsInt64() || delay.Sign() == 0 {
 		return errors.New("DEL delegation genesis requires a positive withdrawal freeze time")
 	}
+	reserves := make(map[common.Address]*big.Int, len(validators))
+	for _, validator := range validators {
+		reserves[validator] = new(big.Int)
+	}
+	var total big.Int
+	seen := make(map[common.Hash]bool, len(positions))
+	for _, row := range positions {
+		validator, beneficiary := common.BytesToAddress(row.Validator), common.BytesToAddress(row.Beneficiary)
+		reserve, ok := reserves[validator]
+		if !ok || beneficiary == (common.Address{}) || beneficiary == Sender() || !row.Active || row.RawAmount.IsNil() || !row.RawAmount.IsPositive() {
+			return errors.New("invalid active DEL genesis position")
+		}
+		if err := e.requireInert(ctx, beneficiary); err != nil {
+			return fmt.Errorf("active DEL genesis beneficiary: %w", err)
+		}
+		var zero [2 * common.HashLength]byte
+		id := crypto.Keccak256Hash(validator[:], beneficiary[:], e.roles.WrappedDEL[:], zero[:])
+		if seen[id] || !bytes.Equal(id[:], row.StakeID) {
+			return errors.New("duplicate or inconsistent active DEL genesis position ID")
+		}
+		seen[id] = true
+		if err := e.verifyDELStakeCursor(ctx, id); err != nil {
+			return err
+		}
+		want := [8]common.Hash{common.BytesToHash(validator[:]), common.BytesToHash(beneficiary[:]),
+			common.BytesToHash(e.roles.WrappedDEL[:]), common.BigToHash(row.RawAmount.BigInt()), {}, smallWord(tokenDEL), {}, {}}
+		got, err := e.read(ctx, e.roles.Gateway, e.gateway, "getStake", len(want)*common.HashLength, validator, beneficiary, e.roles.WrappedDEL)
+		if err != nil {
+			return err
+		}
+		for i, word := range want {
+			if !bytes.Equal(word[:], got[i*common.HashLength:(i+1)*common.HashLength]) {
+				return errors.New("active DEL genesis position differs from deployed Gateway")
+			}
+		}
+		_, nft, err := e.directDELPoststate(ctx, validator, beneficiary, 0, row.RawAmount.BigInt())
+		if err != nil || nft.Sign() != 0 {
+			return errors.New("active DEL genesis position cannot contain NFT backing")
+		}
+		reserve.Add(reserve, row.RawAmount.BigInt())
+		total.Add(&total, row.RawAmount.BigInt())
+	}
+	if state.wrapped.Cmp(&total) != 0 {
+		return errors.New("DEL genesis Gateway WDEL custody differs from attested active positions")
+	}
 	for _, validator := range validators {
 		if err := e.verifyUnpenalizedValidator(ctx, validator); err != nil {
 			return err
@@ -173,8 +222,9 @@ func (e *Executor) attestEmptyDELGenesis(ctx sdk.Context, validators []common.Ad
 		if err != nil {
 			return err
 		}
-		if common.BytesToHash(reserve[:common.HashLength]) != (common.Hash{}) || common.BytesToHash(reserve[common.HashLength:]) != (common.Hash{}) {
-			return errors.New("DEL delegation genesis requires zero existing validator WDEL reserves")
+		if common.BytesToHash(reserve[:common.HashLength]) != (common.Hash{}) ||
+			new(big.Int).SetBytes(reserve[common.HashLength:]).Cmp(reserves[validator]) != 0 {
+			return errors.New("DEL genesis validator WDEL reserve differs from attested active positions")
 		}
 	}
 	return nil

@@ -38,18 +38,19 @@ const (
 // WithdrawalProfile pins the system addresses for the isolated-position profile.
 // It is read from consensus state, never from node-local operator settings.
 type WithdrawalProfile struct {
-	Registry            common.Address `json:"registry"`
-	Gateway             common.Address `json:"gateway"`
-	Library             common.Address `json:"library"`
-	NFTCenter           common.Address `json:"nft_center"`
-	PositionVault       common.Address `json:"position_vault"`
-	MasterValidator     common.Address `json:"master_validator"`
-	WrappedDEL          common.Address `json:"wrapped_del"`
-	SettlementOnly      bool           `json:"settlement_only,omitempty"`
-	EnableDELDelegation bool           `json:"enable_del_delegation,omitempty"`
-	EnableDELHold       bool           `json:"enable_del_hold,omitempty"`
-	EnableDELHoldReset  bool           `json:"enable_del_hold_reset,omitempty"`
-	EnableNFTDelegation bool           `json:"enable_nft_delegation,omitempty"`
+	Registry              common.Address `json:"registry"`
+	Gateway               common.Address `json:"gateway"`
+	Library               common.Address `json:"library"`
+	NFTCenter             common.Address `json:"nft_center"`
+	PositionVault         common.Address `json:"position_vault"`
+	MasterValidator       common.Address `json:"master_validator"`
+	WrappedDEL            common.Address `json:"wrapped_del"`
+	SettlementOnly        bool           `json:"settlement_only,omitempty"`
+	EnableDELDelegation   bool           `json:"enable_del_delegation,omitempty"`
+	EnableDELHold         bool           `json:"enable_del_hold,omitempty"`
+	EnableDELHoldReset    bool           `json:"enable_del_hold_reset,omitempty"`
+	EnableNFTDelegation   bool           `json:"enable_nft_delegation,omitempty"`
+	EnableNativeConsensus bool           `json:"enable_native_consensus,omitempty"`
 }
 
 type withdrawalController struct {
@@ -85,17 +86,20 @@ func (app *App) LoadWithdrawalSettlement(ctx sdk.Context) error {
 		if app.withdrawals.profile != profile {
 			return errors.New("withdrawal profile changed without a coordinated restart")
 		}
-		return nil
+		return app.verifyNativeConsensusState(ctx)
 	}
 	controller, err := app.newWithdrawalController(profile)
 	if err != nil {
 		return err
 	}
 	app.installWithdrawalController(controller)
-	return nil
+	return app.verifyNativeConsensusState(ctx)
 }
 
 func (app *App) newWithdrawalController(profile WithdrawalProfile) (*withdrawalController, error) {
+	if profile.EnableNativeConsensus && (!profile.SettlementOnly || !profile.EnableDELDelegation) {
+		return nil, errors.New("native consensus requires restricted DEL admission")
+	}
 	if profile.EnableNFTDelegation && !profile.EnableDELDelegation {
 		return nil, errors.New("NFT delegation requires the fresh DEL delegation profile")
 	}
@@ -214,18 +218,21 @@ func (c *withdrawalController) PostTxProcessing(ctx sdk.Context, sender common.A
 		return nil
 	}
 	managed, completion := c.withdrawalActivity(ctx, msg, receipt.Logs)
+	if c.profile.EnableNativeConsensus && (msg.To == nil || *msg.To != c.profile.Gateway || !managed) {
+		return errors.New("isolated native consensus admits only the approved Gateway EVM transactions")
+	}
 	if !completion {
 		if c.isDELStakeCall(msg) {
 			if sender != msg.From {
 				return errors.New("DEL stake requires the authenticated transaction sender")
 			}
-			return c.projectSignedDEL(ctx, msg, receipt)
+			return c.projectAndCheckConsensus(ctx, func(child sdk.Context) error { return c.projectSignedDEL(child, msg, receipt) })
 		}
 		if c.isNFTStakeCall(msg) {
 			if sender != msg.From {
 				return errors.New("NFT stake requires the authenticated transaction sender")
 			}
-			return c.projectSignedNFT(ctx, msg, receipt)
+			return c.projectAndCheckConsensus(ctx, func(child sdk.Context) error { return c.projectSignedNFT(child, msg, receipt) })
 		}
 		var signed *ethtypes.Receipt
 		if sender == msg.From {
@@ -289,6 +296,9 @@ type automaticWithdrawalKey struct{}
 func (c *withdrawalController) guardInternalCommit(ctx sdk.Context, msg core.Message, logs []*ethtypes.Log) error {
 	managed, completion := c.withdrawalActivity(ctx, msg, logs)
 	if !completion {
+		if c.profile.EnableNativeConsensus {
+			return errors.New("internal EVM commits are restricted to approved native consensus settlement")
+		}
 		if err := c.checkNFTAdmission(ctx, msg, logs, nil); err != nil {
 			return err
 		}

@@ -50,6 +50,9 @@ func parseWithdrawalGenesisProfile(raw json.RawMessage) (*WithdrawalProfile, err
 	if profile.EnableNFTDelegation && !profile.EnableDELDelegation {
 		return nil, errors.New("NFT delegation genesis requires the fresh DEL delegation profile")
 	}
+	if profile.EnableNativeConsensus && !profile.EnableDELDelegation {
+		return nil, errors.New("native consensus genesis requires DEL delegation admission")
+	}
 	seen := make(map[common.Address]bool)
 	for _, addr := range []common.Address{profile.Registry, profile.Gateway, profile.Library, profile.NFTCenter,
 		profile.PositionVault, profile.MasterValidator, profile.WrappedDEL} {
@@ -61,19 +64,29 @@ func parseWithdrawalGenesisProfile(raw json.RawMessage) (*WithdrawalProfile, err
 	return &profile, nil
 }
 
-// The cold profile imports only claims already frozen in the approved Gateway.
-// It does not admit active staking power or register unrelated native assets.
+// The cold profile admits only the financial rows independently attested
+// against the approved Gateway during InitChain.
 func validateWithdrawalGenesisSnapshot(profile WithdrawalProfile, nft *nfttypes.GenesisState, validators *validatortypes.GenesisState) error {
-	if validators.BindingDomain == nil || validators.BindingRevision != 0 || len(validators.Validators) > maxWithdrawalGenesisRows ||
+	if validators.BindingDomain == nil || len(validators.Validators) > maxWithdrawalGenesisRows ||
 		len(validators.EVMFrozenBindings) > maxWithdrawalGenesisRows ||
-		len(validators.Undelegations) > maxWithdrawalGenesisRows || len(validators.Delegations) != 0 || len(validators.Redelegations) != 0 ||
-		len(validators.EVMStakeBindings) != 0 || len(validators.ScheduledValidatorSets) != 0 ||
+		len(validators.Undelegations) > maxWithdrawalGenesisRows || len(validators.Redelegations) != 0 ||
+		len(validators.ScheduledValidatorSets) != 0 ||
 		len(validators.ValidatorOfflineSince) != 0 || len(validators.LastValidatorPowers) != 0 || validators.LastTotalPower != 0 {
 		return errors.New("withdrawal genesis is limited to a bounded pending settlement snapshot")
 	}
+	if profile.EnableNativeConsensus {
+		n := len(validators.EVMStakeBindings)
+		if n == 0 || n > maxWithdrawalGenesisRows || len(validators.Delegations) != n ||
+			len(validators.EVMFrozenBindings) != 0 || len(validators.Undelegations) != 0 {
+			return errors.New("native consensus genesis requires a bounded set of active ordinary DEL positions")
+		}
+	} else if validators.BindingRevision != 0 || len(validators.Delegations) != 0 || len(validators.EVMStakeBindings) != 0 {
+		return errors.New("withdrawal genesis cannot import active positions")
+	}
 	for _, val := range validators.Validators {
-		if val.Stake != 0 || val.Status != validatortypes.BondStatus_Unbonded || val.Online {
-			return errors.New("withdrawal genesis cannot activate native validator power")
+		if val.Stake != 0 || val.Status != validatortypes.BondStatus_Unbonded || val.Online != profile.EnableNativeConsensus ||
+			(profile.EnableNativeConsensus && val.Jailed) {
+			return errors.New("withdrawal genesis cannot import precomputed native power or mismatched eligibility")
 		}
 	}
 	if profile.EnableDELDelegation {
@@ -229,14 +242,25 @@ func (app *App) initWithdrawalGenesis(ctx sdk.Context, req *abci.RequestInitChai
 		}
 	}
 	child, commit := ctx.CacheContext()
+	if profile.EnableNativeConsensus {
+		if max(req.InitialHeight, 1) != 1 || len(req.Validators) != 0 {
+			return nil, errors.New("native consensus requires fresh height-one genesis with application-derived validators")
+		}
+		child = child.WithValue(nativeConsensusInitKey{}, true)
+	}
 	if err := app.UpgradeKeeper.SetModuleVersionMap(child, app.ModuleManager.GetVersionMap()); err != nil {
 		return nil, err
 	}
-	response, err := app.ModuleManager.InitGenesis(child, app.appCodec, genesis)
+	var response *abci.ResponseInitChain
+	if profile.EnableNativeConsensus {
+		response, err = app.initNativeConsensusModules(child, genesis, &validators, 1)
+	} else {
+		response, err = app.ModuleManager.InitGenesis(child, app.appCodec, genesis)
+	}
 	if err != nil {
 		return nil, err
 	}
-	// InitChain has no proposer. A deterministic initialized SDK validator
+	// InitChain has no proposer. A deterministic initialized validator
 	// supplies COINBASE for discarded EVM getter calls only.
 	var proposer []byte
 	for _, val := range response.Validators {
@@ -245,8 +269,10 @@ func (app *App) initWithdrawalGenesis(ctx sdk.Context, req *abci.RequestInitChai
 			return nil, fmt.Errorf("decode withdrawal genesis proposer: %w", err)
 		}
 		addr := key.Address()
-		if _, err := app.SlashingKeeper.GetValidatorSigningInfo(child, sdk.ConsAddress(addr)); err != nil {
-			return nil, fmt.Errorf("withdrawal genesis consensus validator signing state: %w", err)
+		if !profile.EnableNativeConsensus {
+			if _, err := app.SlashingKeeper.GetValidatorSigningInfo(child, sdk.ConsAddress(addr)); err != nil {
+				return nil, fmt.Errorf("withdrawal genesis consensus validator signing state: %w", err)
+			}
 		}
 		if len(proposer) == 0 || bytes.Compare(addr, proposer) < 0 {
 			proposer = bytes.Clone(addr)
@@ -263,6 +289,14 @@ func (app *App) initWithdrawalGenesis(ctx sdk.Context, req *abci.RequestInitChai
 	gasBefore := read.GasMeter().GasConsumed()
 	limits := settlement.GenesisLimits{
 		MaxRows: maxWithdrawalGenesisRows, SDKGas: withdrawalGenesisGas,
+	}
+	if profile.EnableNativeConsensus {
+		for _, row := range validators.EVMStakeBindings {
+			if err := app.NativeValidatorKeeper.VerifyGenesisGatewayDEL(read, profile.Gateway, profile.WrappedDEL, row); err != nil {
+				return nil, fmt.Errorf("authenticate native consensus genesis position: %w", err)
+			}
+		}
+		limits.ActiveDEL = validators.EVMStakeBindings
 	}
 	if profile.EnableDELDelegation {
 		for _, val := range validators.Validators {
