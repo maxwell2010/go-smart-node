@@ -1,0 +1,25 @@
+// This file is consumed only as a build overlay by the isolated process gate.
+package app
+
+import (
+	"context"
+	"time"
+
+	upgradetypes "cosmossdk.io/x/upgrade/types"
+	"github.com/cosmos/cosmos-sdk/types/module"
+)
+
+func (app *App) RegisterUpgradeHandlers() {
+	app.UpgradeKeeper.SetUpgradeHandler("ibc-client-proof-rehearsal",
+		func(ctx context.Context, _ upgradetypes.Plan, from module.VersionMap) (module.VersionMap, error) {
+			params, err := app.StakingKeeper.GetParams(ctx)
+			if err != nil {
+				return nil, err
+			}
+			params.UnbondingTime = 21*24*time.Hour + time.Hour
+			if err := app.StakingKeeper.SetParams(ctx, params); err != nil {
+				return nil, err
+			}
+			return app.ModuleManager.RunMigrations(ctx, app.configurator, from)
+		})
+}

@@ -18,6 +18,9 @@ import urllib.request
 
 HERMES_SHA256 = "ed8d57781f57a93e74259c12c8feee661b9633c882307f3a6236e41dbf5ffe35"
 A_ID, B_ID, EVM_ID = "mintcandy_990001-1", "ibc-reference-1", 990001
+UPGRADE_NAME = "ibc-client-proof-rehearsal"
+UPGRADE_UNBONDING = 21 * 24 * 60 * 60 + 60 * 60
+UPGRADE_DEPOSIT = 10**15
 HTTP = urllib.request.build_opener(urllib.request.ProxyHandler({}))
 
 
@@ -346,7 +349,7 @@ def patch_toml(path, changes):
     path.write_text("\n".join(lines) + "\n")
 
 
-def prepare_owned(lab, mcnd):
+def prepare_owned(lab, mcnd, upgrade=False):
     home = lab.root / "owned"
     common = ["--home", home, "--chain-id", A_ID, "--evm.evm-chain-id", EVM_ID]
     command([mcnd, "init", "disposable-owned", *common], lab.env, timeout=60)
@@ -363,6 +366,14 @@ def prepare_owned(lab, mcnd):
     command([mcnd, "genesis", "reconcile-native-allocation", *common], lab.env)
     command([mcnd, "genesis", "gentx", "lab", str(10**18) + "del", "--keyring-backend", "test", *common], lab.env)
     command([mcnd, "genesis", "collect-gentxs", *common], lab.env)
+    if upgrade:
+        genesis = home / "config/genesis.json"
+        document = json.loads(genesis.read_text())
+        params = document["app_state"]["gov"]["params"]
+        params["min_deposit"] = [{"denom": "del", "amount": str(UPGRADE_DEPOSIT)}]
+        params["voting_period"] = "10s"
+        params["expedited_voting_period"] = "5s"
+        genesis.write_text(json.dumps(document))
     command([mcnd, "genesis", "validate", *common], lab.env)
     ports = {name: lab.port() for name in ("rpc", "p2p", "grpc")}
     patch_toml(home / "config/config.toml", {
@@ -439,9 +450,9 @@ def phase_after(lab, label, a, b, before, native_a_delta=0):
     print(label + ": PASS", flush=True)
 
 
-def full_suite(lab, mcnd, reference, hermes):
+def connect_transfer(lab, mcnd, reference, hermes, upgrade=False):
     b, config = reference_probe(lab, reference, hermes)
-    a = prepare_owned(lab, mcnd)
+    a = prepare_owned(lab, mcnd, upgrade=upgrade)
     config.write_text("[global]\nlog_level = 'warn'\n" + chain_config(A_ID, a["rpc"], a["grpc"], "d0", "del", lab.root / "hermes-keys") + chain_config(B_ID, b["rpc"], b["grpc"], "cosmos", "stake", lab.root / "hermes-keys"))
     run = lambda *args: command([hermes, "--config", config, "--json", *args], lab.env, timeout=120)
     import_hermes_key(hermes, config, A_ID, a["mnemonic"], "m/44'/60'/0'/0/0", lab.env)
@@ -453,6 +464,11 @@ def full_suite(lab, mcnd, reference, hermes):
     require(a_counterparty == b_channel and b_counterparty == a_channel, "actual channel counterparties differ")
     phase_after(lab, "client_connection_channel_handshake", a, b, before)
     lab.report["channel"] = {"a": a_channel, "b": b_channel}
+    return a, b, run, a_channel, b_channel
+
+
+def full_suite(lab, mcnd, reference, hermes):
+    a, b, run, a_channel, b_channel = connect_transfer(lab, mcnd, reference, hermes)
     voucher = "ibc/" + hashlib.sha256(("transfer/" + b_channel + "/del").encode()).hexdigest().upper()
     value = 10**18
 
@@ -531,9 +547,172 @@ def full_suite(lab, mcnd, reference, hermes):
     lab.report["upgrade_scope"] = "Same-binary disk reopen only; no module migration, client upgrade or SDK major upgrade is verified."
 
 
+def client_upgrade_suite(lab, mcnd, replacement, reference, hermes):
+    a, b, run, a_channel, b_channel = connect_transfer(lab, mcnd, reference, hermes, upgrade=True)
+    source, host = a["rpc"], b["rpc"]
+    voucher = "ibc/" + hashlib.sha256(("transfer/" + b_channel + "/del").encode()).hexdigest().upper()
+    value = 10**18
+
+    def send(source_id, destination_id, channel, denom, receiver):
+        run("tx", "ft-transfer", "--src-chain", source_id, "--dst-chain", destination_id,
+            "--src-port", "transfer", "--src-channel", channel, "--denom", denom,
+            "--amount", value, "--receiver", receiver, "--timeout-seconds", 300)
+
+    def clear():
+        run("clear", "packets", "--chain", A_ID, "--port", "transfer", "--channel", a_channel)
+        lab.wait(lambda: not commitments(source, a_channel) and not commitments(host, b_channel),
+                 "real packet commitments must clear")
+
+    def app_height():
+        return int(rpc(source, "abci_info")["response"]["last_block_height"])
+
+    def proposal_state():
+        response = query(source, "/cosmos.gov.v1.Query/Proposals")
+        require(len(response.get(1, [])) == 1, "expected exactly one rehearsal proposal")
+        proposal = fields(response[1][0])
+        return proposal[1][0], proposal[3][0]
+
+    channel = fields(query(host, "/ibc.core.channel.v1.Query/Channel",
+                           field(1, "transfer") + field(2, b_channel))[1][0])
+    require(len(channel.get(4, [])) == 1, "expected one actual host connection")
+    connection = fields(query(host, "/ibc.core.connection.v1.Query/Connection", field(1, channel[4][0]))[1][0])
+    client = connection[1][0].decode()
+    require(re.fullmatch(r"07-tendermint-\d+", client) is not None, "unexpected host light client type")
+
+    def client_state():
+        any_state = fields(query(host, "/ibc.core.client.v1.Query/ClientState", field(1, client))[1][0])
+        require(any_state[1] == [b"/ibc.lightclients.tendermint.v1.ClientState"], "expected actual Tendermint client")
+        state = fields(any_state[2][0])
+        require(state[1] == [A_ID.encode()], "host client must track the original source chain")
+        return fields(state[7][0])[2][0], fields(state[4][0])[1][0]
+
+    _, old_unbonding = client_state()
+    require(old_unbonding == UPGRADE_UNBONDING - 3600, "rehearsal starts from the original unbonding period")
+    gov = fields(query(source, "/cosmos.auth.v1beta1.Query/ModuleAccountByName", field(1, "gov"))[1][0])
+    gov_account = fields(fields(gov[2][0])[1][0])[1][0].decode()
+    require(gov_account.startswith("d01"), "unexpected governance authority address")
+
+    before = phase_before(a, b)
+    send(A_ID, B_ID, a_channel, "del", b["address"])
+    lab.wait(lambda: len(commitments(source, a_channel)) == 1, "pending packet before governance")
+    pending = commitments(source, a_channel)
+
+    def assert_pending():
+        require(commitments(source, a_channel) == pending, "pending packet commitment or sequence changed")
+        require(escrow(source, "del") == value and amount(host, b["address"], voucher) == 0,
+                "principal moved while packet was still pending")
+
+    assert_pending()
+    lab.report["upgrade_phase"] = "governance"
+    run("tx", "upgrade-chain", "--reference-chain", A_ID, "--host-chain", B_ID, "--host-client", client,
+        "--gov-account", gov_account, "--amount", UPGRADE_DEPOSIT, "--denom", "del", "--height-offset", 45,
+        "--new-unbonding", UPGRADE_UNBONDING, "--upgrade-name", UPGRADE_NAME)
+    lab.wait(lambda: proposal_state()[1] == 2, "upgrade proposal must enter voting")
+    proposal_id, _ = proposal_state()
+    vote = json.loads(command([mcnd, "tx", "gov", "vote", proposal_id, "yes", "--home", a["home"],
+                               "--chain-id", A_ID, "--evm.evm-chain-id", EVM_ID, "--node", f"tcp://127.0.0.1:{source}",
+                               "--from", "lab", "--keyring-backend", "test", "--fees", "600000000000000del",
+                               "--gas", 600000, "--broadcast-mode", "sync", "--output", "json", "--yes"], lab.env))
+    require(int(vote.get("code", 0)) == 0 and vote.get("txhash"), "signed governance vote was rejected")
+    lab.wait(lambda: proposal_state()[1] == 3, "actual governance vote must approve the upgrade")
+    plan = fields(query(source, "/cosmos.upgrade.v1beta1.Query/CurrentPlan")[1][0])
+    require(plan[1] == [UPGRADE_NAME.encode()], "unexpected approved upgrade plan")
+    height = plan[3][0]
+    require(height > app_height(), "expected an upcoming halt height")
+    lab.report["upgrade"] = {"plan": UPGRADE_NAME, "height": height, "proposal_id": proposal_id,
+                             "vote_tx": vote["txhash"], "client": client, "preserved_packets": pending,
+                             "old_unbonding_seconds": old_unbonding, "new_unbonding_seconds": UPGRADE_UNBONDING}
+
+    lab.report["upgrade_phase"] = "old_daemon_halt"
+    hint_path = a["home"] / "data/upgrade-info.json"
+    lab.wait(lambda: hint_path.is_file() and app_height() == height - 1 and
+             int(rpc(source, "block", height=str(height))["block"]["header"]["height"]) == height,
+             "old daemon must halt before executing the signed boundary block", 90)
+    hint = json.loads(hint_path.read_text())
+    require(hint["name"] == UPGRADE_NAME and int(hint["height"]) == height, "on-disk upgrade hint differs from approved plan")
+    boundary = rpc(source, "block", height=str(height))
+    block_hash = boundary["block_id"]["hash"]
+    app_hash = boundary["block"]["header"]["app_hash"]
+    require(re.fullmatch(r"[0-9A-Fa-f]{64}", app_hash) and re.fullmatch(r"[0-9A-Fa-f]{64}", block_hash),
+            "missing boundary AppHash or block hash")
+    proof_values = {}
+    for name in ("upgradedClient", "upgradedConsState"):
+        key = f"upgradedIBCState/{height}/{name}".encode()
+        response = rpc(source, "abci_query", path="/store/upgrade/key", data=key.hex(),
+                       height=str(height - 1), prove=True)["response"]
+        proof = response.get("proofOps") or response.get("proof_ops")
+        require(int(response.get("code", 0)) == 0 and int(response["height"]) == height - 1 and
+                proof and len(proof["ops"]) == 2 and response.get("value"), "missing committed upgrade proof: " + name)
+        proof_values[name] = hashlib.sha256(base64.b64decode(response["value"], validate=True)).hexdigest()
+    lab.report["upgrade"].update({"old_application_height": height - 1, "boundary_block_hash": block_hash,
+                                  "boundary_app_hash": app_hash, "upgrade_value_sha256": proof_values})
+    assert_pending()
+
+    lab.report["upgrade_phase"] = "hermes_client_upgrade"
+    run("upgrade", "client", "--host-chain", B_ID, "--client", client, "--upgrade-height", height)
+    lab.wait(lambda: client_state() == (height + 1, UPGRADE_UNBONDING), "counterparty client must accept the committed proofs")
+    def upgrade_events():
+        return [event for event in new_events(b, before["b_tx"], "upgrade_client") if event.get("client_id") == client]
+
+    lab.wait(lambda: len(upgrade_events()) == 1, "expected one committed client upgrade receipt")
+    require(app_height() == height - 1, "old daemon must remain halted through proof-based client upgrade")
+    assert_pending()
+
+    lab.report["upgrade_phase"] = "replacement_replay"
+    lab.stop(a["process"])
+    a["process"] = lab.spawn([replacement, *a["start"][1:]], "owned-upgrade-replacement")
+    lab.wait(lambda: app_height() >= height + 2, "replacement must replay and advance the same application", 90)
+    completed = query(source, "/cosmos.upgrade.v1beta1.Query/AppliedPlan", field(1, UPGRADE_NAME))
+    require(completed.get(1) == [height], "replacement did not apply the plan at the scheduled height")
+    staking = fields(query(source, "/cosmos.staking.v1beta1.Query/Params")[1][0])
+    require(fields(staking[1][0])[1] == [UPGRADE_UNBONDING], "replacement staking parameter differs from upgraded client")
+    require(rpc(source, "block", height=str(height))["block_id"]["hash"] == block_hash,
+            "replacement changed the existing consensus boundary")
+    require(open_channel(source) == (a_channel, b_channel) and open_channel(host) == (b_channel, a_channel),
+            "original channel pair did not survive the replacement")
+    assert_pending()
+    run("update", "client", "--host-chain", B_ID, "--client", client)
+    lab.wait(lambda: client_state()[0] > height + 1, "Hermes must verify an actual post-upgrade header")
+
+    lab.report["upgrade_phase"] = "pending_packet_ack"
+    clear()
+    require(escrow(source, "del") == value and amount(host, b["address"], voucher) == value,
+            "pending packet must mint exactly one voucher and preserve native escrow")
+    phase_after(lab, "pending_packet_client_upgrade", a, b, before, -value)
+    acks = [event for event in new_events(b, before["b_tx"], "write_acknowledgement")
+            if event.get("packet_sequence") == str(pending[0]["sequence"])]
+    require(len(acks) == 1 and json.loads(bytes.fromhex(acks[0]["packet_ack_hex"])).get("result"),
+            "pending packet must have one committed success acknowledgement")
+
+    before = phase_before(a, b)
+    send(B_ID, A_ID, b_channel, voucher, a["address"])
+    clear()
+    require(escrow(source, "del") == 0 and amount(host, b["address"], voucher) == 0,
+            "voucher return must release the original principal exactly once")
+    phase_after(lab, "post_upgrade_voucher_return", a, b, before, value)
+
+    before = phase_before(a, b)
+    send(A_ID, B_ID, a_channel, "del", "not-a-valid-bech32-address")
+    lab.wait(lambda: len(commitments(source, a_channel)) == 1, "post-upgrade error ACK packet must be pending")
+    failed = commitments(source, a_channel)[0]["sequence"]
+    clear()
+    require(escrow(source, "del") == 0 and amount(host, b["address"], voucher) == 0,
+            "error acknowledgement did not refund principal")
+    phase_after(lab, "post_upgrade_error_ack_refund", a, b, before)
+    errors = [event for event in new_events(b, before["b_tx"], "write_acknowledgement")
+              if event.get("packet_sequence") == str(failed)]
+    require(len(errors) == 1 and json.loads(bytes.fromhex(errors[0]["packet_ack_hex"])).get("error"),
+            "post-upgrade refund must follow one actual error acknowledgement")
+    lab.report["upgrade_phase"] = "complete"
+    lab.report["status"] = "HERMES_CLIENT_UPGRADE_PASS"
+    lab.report["scope"] = "Same-family replacement and genuine proof-based Hermes upgrade in an isolated loopback lab."
+    lab.report["upgrade_scope"] = "Test-only handler changes a staking parameter; no production or SDK major migration is claimed."
+    print("signed governance, exact halt, Hermes client proof, replacement replay, packet return and refund: PASS", flush=True)
+
+
 def main(argv=None, signals=None):
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--mode", choices=["reference-probe", "full"], required=True)
+    parser.add_argument("--mode", choices=["reference-probe", "full", "client-upgrade"], required=True)
     parser.add_argument("--reference-binary", required=True)
     parser.add_argument("--reference-sha256", required=True)
     parser.add_argument("--reference-source-commit", required=True)
@@ -542,6 +721,8 @@ def main(argv=None, signals=None):
     parser.add_argument("--mcnd-binary")
     parser.add_argument("--mcnd-sha256")
     parser.add_argument("--mcnd-source-commit")
+    parser.add_argument("--replacement-binary")
+    parser.add_argument("--replacement-sha256")
     args = parser.parse_args(argv)
     report = {"status": "FAIL", "mode": args.mode, "release_gate": False}
     try:
@@ -551,10 +732,17 @@ def main(argv=None, signals=None):
         hermes, hermes_hash = binary(args.hermes_binary, HERMES_SHA256)
         report["binaries"] = {"reference": {"sha256": ref_hash, "source_commit": args.reference_source_commit}, "hermes": {"sha256": hermes_hash, "official_release": "v1.13.3"}}
         mcnd = None
-        if args.mode == "full":
+        if args.mode in ("full", "client-upgrade"):
             require(args.mcnd_binary and re.fullmatch(r"[0-9a-f]{40}", args.mcnd_source_commit or ""), "full mcnd binary/source commit required")
             mcnd, mcnd_hash = binary(args.mcnd_binary, args.mcnd_sha256)
             report["binaries"]["mcnd"] = {"sha256": mcnd_hash, "source_commit": args.mcnd_source_commit}
+        replacement = None
+        if args.mode == "client-upgrade":
+            require(args.replacement_binary and args.replacement_sha256, "explicit rehearsal binary and hash required")
+            replacement, replacement_hash = binary(args.replacement_binary, args.replacement_sha256)
+            require(replacement_hash != mcnd_hash, "rehearsal executable must differ from the default daemon")
+            report["binaries"]["replacement"] = {"sha256": replacement_hash, "source_commit": args.mcnd_source_commit,
+                                                "scope": "same-family lab-only handler"}
         with tempfile.TemporaryDirectory(prefix="mintcandy-hermes-lab-") as temp:
             root = Path(temp)
             env = private_environment(root)
@@ -563,6 +751,8 @@ def main(argv=None, signals=None):
                 report["hermes_version"] = command([hermes, "version"], env).strip()
                 if args.mode == "full":
                     full_suite(lab, mcnd, reference, hermes)
+                elif args.mode == "client-upgrade":
+                    client_upgrade_suite(lab, mcnd, replacement, reference, hermes)
                 else:
                     reference_probe(lab, reference, hermes)
                     report["status"] = "REFERENCE_PROBE_PASS"
@@ -577,7 +767,7 @@ def main(argv=None, signals=None):
         with open(args.report, "x", encoding="utf8") as output:
             json.dump(report, output, indent=2)
         print(report["status"])
-    return 0 if report["status"] in ("REFERENCE_PROBE_PASS", "TWO_PROCESS_HERMES_PASS") else 1
+    return 0 if report["status"] in ("REFERENCE_PROBE_PASS", "TWO_PROCESS_HERMES_PASS", "HERMES_CLIENT_UPGRADE_PASS") else 1
 
 
 if __name__ == "__main__":

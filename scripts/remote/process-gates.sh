@@ -10,6 +10,8 @@ withdrawal_genesis="${2:-off}"
 [[ "$withdrawal_genesis" == off || "$withdrawal_genesis" == withdrawal-genesis ]] || { echo 'Unsupported process gate option.' >&2; exit 2; }
 del_state_sync="${3:-off}"
 [[ "$del_state_sync" == off || ( "$del_state_sync" == del-state-sync && "$withdrawal_genesis" == withdrawal-genesis ) ]] || { echo 'Unsupported DEL state sync option.' >&2; exit 2; }
+ibc_client_upgrade="${4:-off}"
+[[ "$ibc_client_upgrade" == off || "$ibc_client_upgrade" == ibc-client-upgrade ]] || { echo 'Unsupported IBC client upgrade option.' >&2; exit 2; }
 for tool in sudo unshare ip gcc python3 go; do command -v "$tool" >/dev/null; done
 python="$(command -v python3)"
 "$python" -c 'import sys,tomllib; assert sys.version_info >= (3,11), "Python >=3.11 required"'
@@ -22,7 +24,7 @@ mkdir -- "$output"
 evidence_owner="$(id -u):$(id -g)"
 preserve_public_reports() {
   local file
-  for file in "$output/daemon.json" "$output/hermes.json" "$output/withdrawal-genesis.json" "$output/del-delegation.json"; do
+  for file in "$output/daemon.json" "$output/hermes.json" "$output/withdrawal-genesis.json" "$output/del-delegation.json" "$output/ibc-client-upgrade.json"; do
     if [[ -L "$file" ]]; then echo 'Refuse symbolic report file.' >&2; return 1; fi
     if [[ -f "$file" ]]; then
       sudo -n chown -- "$evidence_owner" "$file" || return 1
@@ -152,6 +154,53 @@ assert set(hermes['phases'])==required,hermes['phases']
 assert all(phase['status']=='PASS' for phase in hermes['phases'].values()),hermes['phases']
 print('Default daemon lifecycle and all six genuine Hermes phases passed.')
 PY
+
+if [[ "$ibc_client_upgrade" == ibc-client-upgrade ]]; then
+  overlay_handler="$root/network/internal/ibclab/rehearsal_handler.go.tmpl"
+  "$python" - "$root/network/app/upgrades.go" "$overlay_handler" "$work/ibc-upgrade-overlay.json" <<'PY'
+import json,sys
+from pathlib import Path
+original,replacement,output=map(Path,sys.argv[1:])
+with output.open('x') as stream:
+    json.dump({'Replace': {str(original.resolve(strict=True)):str(replacement.resolve(strict=True))}},stream)
+PY
+  go build -mod=readonly -tags= -buildvcs=true -p 2 -trimpath -overlay "$work/ibc-upgrade-overlay.json" \
+    -ldflags "-X main.buildCommit=$revision" -o "$work/mcnd-ibc-upgrade-rehearsal" ./cmd/mcnd
+  go version -m "$work/mcnd-ibc-upgrade-rehearsal" > "$output/ibc-upgrade-rehearsal-build.log"
+  replacement_sha="$(sha256sum "$work/mcnd-ibc-upgrade-rehearsal" | awk '{print $1}')"
+  overlay_sha="$(sha256sum "$overlay_handler" | awk '{print $1}')"
+  git diff --exit-code -- app/upgrades.go
+  sudo -n unshare --net -- bash -euc 'ip link set lo up; exec "$@"' _ \
+    env TMPDIR="$work" "$python" "$root/network/internal/ibclab/hermes_lab.py" --mode client-upgrade \
+    --reference-binary "$work/ibcreference" --reference-sha256 "$reference_sha" --reference-source-commit "$revision" \
+    --mcnd-binary "$work/mcnd" --mcnd-sha256 "$mcnd_sha" --mcnd-source-commit "$revision" \
+    --replacement-binary "$work/mcnd-ibc-upgrade-rehearsal" --replacement-sha256 "$replacement_sha" \
+    --hermes-binary "$work/hermes" --report "$output/ibc-client-upgrade.json" |& tee "$output/ibc-client-upgrade.log"
+  preserve_public_reports
+  "$python" - "$output" "$root" "$revision" "$replacement_sha" "$overlay_sha" <<'PY'
+import json,sys
+from pathlib import Path
+out,root=map(Path,sys.argv[1:3]);revision,replacement_sha,overlay_sha=sys.argv[3:]
+sys.path.insert(0,str(root/'network/tools'))
+from binary_provenance import parse_build_info
+default=parse_build_info((out/'mcnd-build.log').read_text())
+replacement=parse_build_info((out/'ibc-upgrade-rehearsal-build.log').read_text())
+for key in ('path','module','dependencies','goVersion'):
+    assert replacement[key]==default[key], key
+assert replacement['settings']['vcs.revision']==revision
+report=json.loads((out/'ibc-client-upgrade.json').read_text())
+assert report['status']=='HERMES_CLIENT_UPGRADE_PASS' and report['upgrade_phase']=='complete',report
+assert report['release_gate'] is False and 'error' not in report,report
+assert report['binaries']['replacement']['sha256']==replacement_sha,report
+required={'client_connection_channel_handshake','pending_packet_client_upgrade',
+          'post_upgrade_voucher_return','post_upgrade_error_ack_refund'}
+assert set(report['phases'])==required and all(phase['status']=='PASS' for phase in report['phases'].values()),report
+(out/'ibc-upgrade-rehearsal-provenance.json').write_text(json.dumps({
+    'sourceCommit':revision,'replacementSHA256':replacement_sha,'handlerOverlaySHA256':overlay_sha,
+    'sameModuleGraph':True,'scope':'Isolated rehearsal executable only'
+},indent=2)+'\n')
+PY
+fi
 
 if [[ "$withdrawal_genesis" == withdrawal-genesis ]]; then
   # No fixture document, key or raw generator/daemon log is uploaded. The
