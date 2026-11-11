@@ -60,7 +60,7 @@ can enable the direct DEL message routes described below.
 The separate DEL lifecycle now has signed EVM delegation, top-up, partial and
 full withdrawals and a common manual/automatic `complete` path. Native REST
 pair queries reconcile the active and queued records at committed heights.
-The [Linux process check](https://github.com/maxwell2010/go-smart-node/actions/runs/43031167097)
+The [Linux process check](https://github.com/maxwell2010/go-smart-node/actions/runs/43040767203)
 covered 3 + 2 DEL, payout of 1 DEL, rejection of a repeat and payout of the
 remaining 4 DEL after restart. It also checked a previously admitted 1024-unit
 isolated NFT withdrawal under the 24-million SDK gas ceiling and repeated the
@@ -99,8 +99,18 @@ executed a signed governance proposal, a scheduled SDK `x/upgrade` handler and
 a signed `MsgUpgradeClient` verified against both IAVL proofs. A pending packet
 was relayed and acknowledged on the existing channel, then the voucher was
 returned for its original DEL principal. The test uses the current SDK/IBC
-family in two application instances. Binary replacement with Hermes and a
-major-version upgrade require separate evidence.
+family in two application instances.
+
+The [isolated daemon rehearsal](https://github.com/maxwell2010/go-smart-node/actions/runs/43041499036)
+scheduled the upgrade at height 157 with a packet pending. The old daemon
+committed height 156, and Hermes upgraded the counterparty's Tendermint client
+from two proofs at that committed height. The replacement ran from the same
+home and replayed the boundary block with the same block hash. The existing
+channel carried the pending packet and acknowledgement. Voucher return and
+error acknowledgement refund reconciled principal and fees. This rehearsal
+uses the same SDK/IBC module graph in both binaries and an isolated upgrade
+handler. A major-version migration and the final release binary need their
+own evidence.
 
 The reviewed development commit `8cf619da1c77ee5efffc80a678272010fd2263dd`
 passes all four Linux workflows, including its actual default daemon archive,
@@ -119,10 +129,8 @@ Modern release blockers remain:
   final daemon, including the replacement Geth fork's upstream inheritance.
 - Authenticated system-contract bootstrap for a new genesis, with bank/EVM
   supply and reserve reconciliation and failure rollback.
-- Repeat the established guarded CLI and independent Hermes process gates on
-  the final integrated daemon, test clean installation, and exercise actual
-  client/module upgrade with packets pending in separate daemon processes.
-  Same-binary restart and the application-level proof test have passed.
+- Repeat the guarded CLI, clean installation, independent Hermes process
+  gates and pending-packet upgrade rehearsal on the final integrated daemon.
 - Validator-set and consensus-parameter transitions, full event reconciliation,
   bounded auto-unbond work, operator authority and asset policy, independent
   review and a tested rollback procedure.
