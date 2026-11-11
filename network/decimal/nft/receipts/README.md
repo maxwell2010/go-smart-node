@@ -1,10 +1,11 @@
 # NFT receipt planning staging
 
-`Execution.EntryPoint` is a typed route. Signed Ethereum execution and internal
-governance execution are the only admitted route types. IBC remains unsupported
-until the shared pipeline has actual callback entry-point coverage. Internal
-governance can have a zero transaction hash; transaction hash alone is never a
-deduplication key.
+`Execution.EntryPoint` is a typed route. The ownership planner admits signed
+Ethereum and internal governance execution. The withdrawal settlement projector
+uses a separate route for authenticated, completed Gateway withdrawals. IBC
+remains unsupported until the shared pipeline has actual callback coverage.
+Internal receipts can have a zero transaction hash. Transaction hash alone is
+never a deduplication key.
 
 The compiler-ABI decoder preserves full uint256 IDs, receipt slice order and
 ERC1155 batch item provenance. It validates exact topic/data layout, registered
