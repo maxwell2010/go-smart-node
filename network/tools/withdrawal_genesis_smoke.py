@@ -20,7 +20,7 @@ EVM_CHAIN = 990001
 COMET = 'http://127.0.0.1:28657'
 REST = 'http://127.0.0.1:1319'
 EVM = 'http://127.0.0.1:8645'
-ADDRESS = r'0x[0-9a-f]{40}'
+ADDRESS = r'0x[0-9a-fA-F]{40}'
 WORD = r'0x[0-9a-f]{64}'
 SHA256 = r'[0-9a-f]{64}'
 ALPHABET = 'qpzry9x8gf2tvdw0s3jn54khce6mua7l'
@@ -48,12 +48,14 @@ def expectations(path):
     check(type(expected['dueAt']) is int and 15 <= expected['dueAt'] - time.time() <= 150,
           'fixture deadline must allow startup and bounded settlement')
     check(re.fullmatch(ADDRESS, expected['gateway']), 'invalid Gateway address')
+    expected['gateway'] = expected['gateway'].lower()
     check(re.fullmatch(r'0x[0-9a-f]{72}', expected['delegateCallData']), 'invalid delegateDEL fixture calldata')
     check(isinstance(expected['invalidError'], str) and 8 <= len(expected['invalidError']) <= 240,
           'fixture must identify the expected authentication error')
     nft = expected['nft']
     check(re.fullmatch(WORD, nft['id']) and re.fullmatch(WORD, nft['tokenId']), 'NFT and frozen IDs must be full uint256 words')
     check(re.fullmatch(ADDRESS, nft['vault']) and re.fullmatch(ADDRESS, nft['beneficiary']), 'invalid NFT address')
+    nft['vault'], nft['beneficiary'] = nft['vault'].lower(), nft['beneficiary'].lower()
     check(len({expected['gateway'], nft['vault'], nft['beneficiary']}) == 3, 'fixture Gateway, vault and recipient must differ')
     check(re.fullmatch(r'[A-Za-z0-9_-]{1,128}', nft['nativeTokenId']), 'invalid native NFT ID')
     check(type(nft['nativeSubTokenId']) is int and 0 < nft['nativeSubTokenId'] < 2**32, 'invalid native NFT unit ID')
@@ -152,13 +154,17 @@ def completion_count(result, height, gateway, frozen_id):
 
 
 def check_nft(height, nft, expected_owner):
-    query = '/decimal/nft/v1/tokens/' + urllib.parse.quote(nft['nativeTokenId'], safe='') + '/' + str(nft['nativeSubTokenId'])
+    token_id = urllib.parse.quote(nft['nativeTokenId'], safe='')
+    query = '/decimal/nft/v1/tokens/' + token_id + '/' + str(nft['nativeSubTokenId'])
     unit = native(query, height)['sub_token']
     check(int(unit['id']) == nft['nativeSubTokenId'], 'native query returned the wrong NFT unit')
     native_owner = bech32_payload(unit['owner'])
     check(native_owner == expected_owner, 'native NFT owner differs from the expected withdrawal state')
-    reserve = unit['reserve']
+    token = native('/decimal/nft/v1/token/' + token_id, height)['token']
+    check(token['id'] == nft['nativeTokenId'] and token['isolated_receipt'] is True, 'native query returned the wrong receipt token')
+    reserve = token['reserve']
     check(reserve['denom'] == 'del' and reserve['amount'] == nft['reserveAtomic'], 'native receipt reserve changed')
+    check(unit.get('reserve') is None or unit['reserve'] == reserve, 'native receipt unit reserve differs from its token')
     owner_of = {'to': nft['vault'], 'data': '0x6352211e' + nft['tokenId'][2:], 'gas': '0x3d090'}
     owner_word = ethereum('eth_call', [owner_of, hex(height)])
     check(owner_word == '0x' + '00' * 12 + expected_owner[2:], 'EVM ownerOf differs from the expected withdrawal state')
@@ -184,7 +190,7 @@ def check_admission(height, expected):
 
 
 def scan_blocks(first, last, expected):
-    check(1 <= first <= last + 1 <= MAX_BLOCKS + 1, 'unexpected block range in disposable process')
+    check(1 <= first <= last + 1 and last - first + 1 <= MAX_BLOCKS, 'unexpected block range in disposable process')
     completions = []
     for height in range(first, last + 1):
         count = completion_count(comet(f'block_results?height={height}'), height, expected['gateway'], expected['nft']['id'])
@@ -229,11 +235,12 @@ def run_gate(args, binary, root, expected, genesis, invalid, validator, env, own
     run_command(binary, good, ['genesis', 'validate-genesis'], env)
 
     child, log_path = launch(good, 'start', domain)
-    start_height = wait_height(child, 3, time.monotonic() + 45)
+    initial_height = report['initialHeight']
+    start_height = wait_height(child, initial_height + 2, time.monotonic() + 45)
     check(int(ethereum('eth_chainId', []), 16) == EVM_CHAIN, 'EVM RPC chain mismatch')
     start_time = block_time(start_height)
     check(start_time.timestamp() < expected['dueAt'], 'first committed state did not precede the deadline')
-    check(not scan_blocks(1, start_height, expected), 'withdrawal completed before it was due')
+    check(not scan_blocks(initial_height, start_height, expected), 'withdrawal completed before it was due')
     report['before'] = check_nft(start_height, expected['nft'], expected['gateway'])
     report['before']['blockTime'] = start_time.isoformat()
     check_admission(start_height, expected)
@@ -244,6 +251,7 @@ def run_gate(args, binary, root, expected, genesis, invalid, validator, env, own
     completed = []
     while not completed:
         last = wait_height(child, height + 1, until)
+        check(last - initial_height < MAX_BLOCKS, 'withdrawal exceeded the disposable block budget')
         completed = scan_blocks(height + 1, last, expected)
         height = last
     check(len(completed) == 1, 'withdrawal completed more than once')
@@ -266,6 +274,7 @@ def run_gate(args, binary, root, expected, genesis, invalid, validator, env, own
 
     child, restart_log = launch(good, 'restart', [])
     restarted_height = wait_height(child, height + 2, time.monotonic() + 45)
+    check(restarted_height - initial_height < MAX_BLOCKS, 'restart exceeded the disposable block budget')
     check(int(ethereum('eth_chainId', []), 16) == EVM_CHAIN, 'restarted EVM RPC chain mismatch')
     check(not scan_blocks(completed_at + 1, restarted_height, expected), 'withdrawal repeated before or after disk restart')
     report['restart'] = check_nft(restarted_height, expected['nft'], expected['nft']['beneficiary'])
@@ -281,6 +290,17 @@ def run_gate(args, binary, root, expected, genesis, invalid, validator, env, own
     check(code != 0 and expected['invalidError'] in invalid_log.read_text(encoding='utf8'),
           'tampered genesis did not fail for the expected frozen-state authentication reason')
     report['invalidGenesis'] = {'status': 'REJECTED', 'exitCode': code, 'expectedAuthenticationFailure': True}
+
+
+def initial_height(genesis, invalid):
+    heights = []
+    for state in (genesis, invalid):
+        document = json.loads(state)
+        height = int(document['initial_height'])
+        check(document['chain_id'] == CHAIN and 1 <= height < 2**63 - MAX_BLOCKS, 'fixture genesis domain or initial height mismatch')
+        heights.append(height)
+    check(heights[0] == heights[1], 'negative control changed the initial height')
+    return heights[0]
 
 
 def main(argv=None, signals=None):
@@ -308,13 +328,12 @@ def main(argv=None, signals=None):
             invalid = private_bytes(fixture / 'invalid-genesis.json', 64 * 1024 * 1024)
             validator = private_bytes(fixture / 'priv_validator_key.json', 8192)
             check(genesis != invalid, 'negative control genesis must differ')
-            for state in (genesis, invalid):
-                document = json.loads(state)
-                check(document['chain_id'] == CHAIN and int(document.get('initial_height') or 1) == 1, 'fixture genesis domain or initial height mismatch')
+            height = initial_height(genesis, invalid)
             report.update(sourceCommit=args.source_commit, binarySha256=args.binary_sha256,
                           genesisSha256=hashlib.sha256(genesis).hexdigest(), invalidGenesisSha256=hashlib.sha256(invalid).hexdigest(),
                           chainID=CHAIN, evmChainID=EVM_CHAIN, gateway=expected['gateway'], frozenIndex=expected['nft']['id'],
-                          positionID=expected['nft']['tokenId'], originQuantity=expected['nft']['originQuantity'], dueAt=expected['dueAt'])
+                          positionID=expected['nft']['tokenId'], originQuantity=expected['nft']['originQuantity'], dueAt=expected['dueAt'],
+                          initialHeight=height)
             with tempfile.TemporaryDirectory(prefix='mcnd-withdrawal-', dir=args.home_parent) as directory:
                 root = pathlib.Path(directory)
                 env = private_environment(root)

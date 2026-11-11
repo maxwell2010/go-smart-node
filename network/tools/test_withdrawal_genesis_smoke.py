@@ -1,7 +1,7 @@
 import json
 import pathlib
 import unittest
-from unittest.mock import patch
+from unittest.mock import call, patch
 
 import withdrawal_genesis_smoke as smoke
 
@@ -38,6 +38,22 @@ class WithdrawalGenesisSmokeTests(unittest.TestCase):
             with self.assertRaises(ValueError):
                 smoke.expectations(path)
 
+    def test_checksums_and_exported_initial_height(self):
+        expected = fixture()
+        expected['gateway'] = '0x' + 'aB' * 20
+        expected['nft']['vault'] = '0x' + 'Bc' * 20
+        with patch.object(smoke, 'private_bytes', return_value=json.dumps(expected).encode()), patch.object(smoke.time, 'time', return_value=1000):
+            parsed = smoke.expectations(pathlib.Path('expectations.json'))
+        self.assertEqual(parsed['gateway'], expected['gateway'].lower())
+        self.assertEqual(parsed['nft']['vault'], expected['nft']['vault'].lower())
+        genesis = json.dumps({'chain_id': smoke.CHAIN, 'initial_height': '350'}).encode()
+        self.assertEqual(smoke.initial_height(genesis, genesis), 350)
+        changed = genesis.replace(b'350', b'351')
+        with self.assertRaisesRegex(ValueError, 'negative control changed'):
+            smoke.initial_height(genesis, changed)
+        with patch.object(smoke, 'comet', return_value={'height': '350', 'finalize_block_events': []}):
+            self.assertEqual(smoke.scan_blocks(350, 350, parsed), [])
+
     def test_completion_requires_exact_committed_endblock_marker(self):
         expected = fixture()
         event = {'type': smoke.COMPLETION, 'attributes': [
@@ -63,7 +79,8 @@ class WithdrawalGenesisSmokeTests(unittest.TestCase):
         # The daemon returns a valid address from its SDK query. This stub
         # substitutes only the payload and an unused checksum for parsing.
         bech32 = 'd01' + ''.join(smoke.ALPHABET[(payload >> shift) & 31] for shift in range(155, -1, -5)) + 'qqqqqq'
-        unit = {'id': 7, 'owner': bech32, 'reserve': {'denom': 'del', 'amount': nft['reserveAtomic']}}
+        unit = {'id': 7, 'owner': bech32, 'reserve': None}
+        token = {'id': nft['nativeTokenId'], 'isolated_receipt': True, 'reserve': {'denom': 'del', 'amount': nft['reserveAtomic']}}
 
         def eth(method, params):
             self.assertEqual(params[-1], '0x8')
@@ -75,11 +92,11 @@ class WithdrawalGenesisSmokeTests(unittest.TestCase):
             self.assertEqual(params[0]['data'], '0x6352211e' + nft['tokenId'][2:])
             return '0x' + '0' * 24 + owner[2:]
 
-        with patch.object(smoke, 'native', return_value={'sub_token': unit}) as native, patch.object(smoke, 'ethereum', side_effect=eth):
+        with patch.object(smoke, 'native', side_effect=lambda path, _: {'sub_token': unit} if '/tokens/' in path else {'token': token}) as native, patch.object(smoke, 'ethereum', side_effect=eth):
             result = smoke.check_nft(8, nft, owner)
             self.assertEqual(result['vaultBackingAtomic'], nft['reserveAtomic'])
-            native.assert_called_once_with('/decimal/nft/v1/tokens/receipt_1/7', 8)
-            unit['reserve']['amount'] = '1'
+            self.assertEqual(native.call_args_list, [call('/decimal/nft/v1/tokens/receipt_1/7', 8), call('/decimal/nft/v1/token/receipt_1', 8)])
+            token['reserve']['amount'] = '1'
             with self.assertRaisesRegex(ValueError, 'native receipt reserve'):
                 smoke.check_nft(8, nft, owner)
 
