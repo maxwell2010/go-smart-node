@@ -222,6 +222,67 @@ def committed_hash(height, observer_comet):
     return source_hash
 
 
+def observe_state_sync(log, observer_comet):
+    markers = {
+        'discovering snapshots': 'discovery',
+        'discovered new snapshot': 'discovered',
+        'offering snapshot to abci app': 'offered',
+        'snapshot accepted, restoring': 'accepted',
+        'applied snapshot chunk to abci app': 'chunkApplied',
+        'verified abci app': 'verified',
+        'snapshot restored': 'restored',
+        'state sync failed': 'syncFailed',
+        'snapshot rejected': 'rejected',
+        'timed out waiting for snapshot chunks': 'chunksTimedOut',
+        'no valid peers found for snapshot': 'noSnapshotPeers',
+        'failed to fetch and verify app hash': 'trustedHashFailed',
+        'failed to fetch and verify cometbft state': 'trustedStateFailed',
+        'failed to fetch and verify commit': 'trustedCommitFailed',
+        'state sync requires an empty application': 'nonemptyApplication',
+        'received unexpected state sync snapshot chunk': 'unexpectedChunk',
+        'state sync snapshot does not match the configured application': 'applicationMismatch',
+        'restored application height or hash differs': 'applicationHeightOrHashMismatch',
+        'restored withdrawal profile was not prepared': 'profileNotPrepared',
+        'restored withdrawal profile differs': 'profileMismatch',
+        'app version mismatch': 'applicationVersionMismatch',
+        'apphash verification failed': 'appHashVerificationFailed',
+        'abci app reported unexpected last block height': 'abciHeightMismatch',
+        'failed to bootstrap node with new state': 'bootstrapFailed',
+        'failed to store last seen commit': 'storeCommitFailed',
+        'failed to switch to block sync': 'blockSyncStartFailed',
+        'failed to apply block; error': 'blockApplicationFailed',
+        'time to switch to consensus reactor!': 'blockSyncFinished',
+    }
+    with log.open('rb') as stream:
+        head = stream.read(16384)
+        stream.seek(max(len(head), log.stat().st_size - 65536))
+        sample = (head + b'\n' + stream.read(65536)).decode('utf8', errors='replace')
+    observed = {}
+    for line in sample.lower().splitlines():
+        for marker, name in markers.items():
+            if marker in line:
+                observed[name] = observed.get(name, 0) + 1
+
+    # Persist only recognized categories, counts and bounded numeric RPC fields.
+    result = {'logMarkers': observed}
+    for method, fields in (
+        ('status', {'cometHeight': ('sync_info', 'latest_block_height')}),
+        ('abci_info', {'appHeight': ('response', 'last_block_height'), 'appVersion': ('response', 'app_version')}),
+        ('net_info', {'peerCount': ('n_peers',)}),
+    ):
+        try:
+            response = observer_comet(method)
+            for name, path in fields.items():
+                value = response
+                for key in path:
+                    value = value[key]
+                if re.fullmatch(r'[0-9]{1,19}', str(value)):
+                    result[name] = int(value)
+        except (OSError, ValueError, KeyError, RuntimeError):
+            continue
+    return result
+
+
 def start_state_sync(binary, root, genesis, env, owner, source_child, source_log, minimum_height, report):
     report['phase'] = 'snapshot-source'
     deadline = time.monotonic() + 45
@@ -267,7 +328,12 @@ def start_state_sync(binary, root, genesis, env, owner, source_child, source_log
     log = root / 'observer.log'
     observer = owner.spawn([binary, *start, *domain, '--home', str(home)], log, env)
     observer_comet = partial(comet, base=SYNC_COMET)
-    wait_height(observer, trust_height + 1, time.monotonic() + 120, log, report, read_comet=observer_comet)
+    report['stateSync'] = {'trustHeight': trust_height, 'trustHash': trust_hash, 'witnessesIndependent': False}
+    try:
+        wait_height(observer, trust_height + 1, time.monotonic() + 120, log, report, read_comet=observer_comet)
+    except (TimeoutError, RuntimeError):
+        report['stateSync']['observerDiagnostics'] = observe_state_sync(log, observer_comet)
+        raise
     restored = log_records(log, 'Snapshot restored')
     check(len(restored) == 1 and int(restored[0]['height']) >= minimum_height, 'observer did not restore the active DEL snapshot')
     check(int(ethereum('eth_chainId', [], base=SYNC_EVM), 16) == EVM_CHAIN, 'observer EVM signing domain mismatch')
@@ -276,9 +342,8 @@ def start_state_sync(binary, root, genesis, env, owner, source_child, source_log
     wait_height(observer, height + 1, time.monotonic() + 45, log, report, read_comet=observer_comet)
     check(int(observer_comet('status')['sync_info']['earliest_block_height']) >= snapshot_height,
           'observer retained block history older than the restored snapshot')
-    report['stateSync'] = {'trustHeight': trust_height, 'trustHash': trust_hash, 'snapshotHeight': snapshot_height,
-                           'activeStateHeight': height, 'activeStateAppHash': committed_hash(height, observer_comet),
-                           'witnessesIndependent': False}
+    report['stateSync'].update(snapshotHeight=snapshot_height, activeStateHeight=height,
+                               activeStateAppHash=committed_hash(height, observer_comet))
     return observer, log, observer_comet
 
 
