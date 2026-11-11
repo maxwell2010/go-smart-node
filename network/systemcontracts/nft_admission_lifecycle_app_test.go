@@ -87,6 +87,7 @@ func runSignedNFTAdmissionLifecycle(t *testing.T, e isolatedBackendEnv, genesis 
 		native, err := validatorKeeper.GetDelegation(e.ctx(), f.beneficiary, f.operator, validatortypes.StakeType_Coin, identity.BaseDenom)
 		require.NoError(t, err)
 		require.True(t, native.Stake.Equal(validatortypes.NewStakeCoin(sdk.NewCoin(identity.BaseDenom, direct))))
+		f.activeReserve(direct.Add(collateral))
 		f.backing(direct)
 	}
 	reportGas := func(route string, response *evmtypes.MsgEthereumTxResponse) {
@@ -98,6 +99,7 @@ func runSignedNFTAdmissionLifecycle(t *testing.T, e isolatedBackendEnv, genesis 
 
 	require.Empty(t, f.native().Delegations)
 	require.Empty(t, f.native().Undelegations)
+	f.activeReserve(zero)
 	require.Equal(t, one, f.read(vault, profile.PositionVault, "nextPositionId"))
 	emptyVault, err := nftKeeper.GetIsolatedVaultState(e.ctx(), profile.PositionVault.Bytes())
 	require.NoError(t, err)

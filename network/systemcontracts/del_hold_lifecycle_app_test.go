@@ -75,10 +75,12 @@ func runSignedDELHoldLifecycle(t *testing.T, f signedDELFixture) {
 		if len(expected) == 0 {
 			require.ErrorIs(t, err, validatorkeeper.ErrNotFound)
 			require.Empty(t, f.native().Delegations)
+			f.activeReserve(zero)
 			return
 		}
 		require.NoError(t, err)
 		assertHeld(held.Stake, expected...)
+		f.activeReserve(held.Stake.Stake.Amount)
 		require.Len(t, f.native().Delegations, 1, "held deposits must not also enter the unheld DEL row")
 	}
 	assertBucket := func(b bucket, start int64, amount sdkmath.Int) {
@@ -111,6 +113,7 @@ func runSignedDELHoldLifecycle(t *testing.T, f signedDELFixture) {
 		return item
 	}
 
+	assertActive()
 	f.backing(zero)
 	firstLot := deposit(firstBucket, three)
 	assertBucket(firstBucket, firstLot.start, three)

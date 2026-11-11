@@ -182,6 +182,19 @@ func (f signedDELFixture) backing(want sdkmath.Int) {
 	require.Zero(t, want.BigInt().Cmp(e.app.EVMKeeper.GetBalance(e.ctx(), f.wrapped).ToBig()))
 }
 
+func (f signedDELFixture) activeReserve(want sdkmath.Int) {
+	t, e := f.t, f.env
+	t.Helper()
+	native, err := e.app.NativeValidatorKeeper.GetActiveDELReserve(e.ctx(), f.operator)
+	require.NoError(t, err)
+	raw := f.read(f.gateway, f.target, "getValidatorReserve", f.validator, f.wrapped)
+	type validatorReserve struct{ PenaltyIndex, Reserve *big.Int }
+	gateway := abi.ConvertType(raw, new(validatorReserve)).(*validatorReserve)
+	require.Zero(t, gateway.PenaltyIndex.Sign())
+	require.True(t, want.Equal(native), "active native DEL excludes frozen claims and counts each reserve once")
+	require.Zero(t, native.BigInt().Cmp(gateway.Reserve), "active native DEL must match Gateway validator reserve")
+}
+
 func (f signedDELFixture) withdrawalIndex(response *evmtypes.MsgEthereumTxResponse, stakeID common.Hash) *big.Int {
 	t := f.t
 	t.Helper()
@@ -281,14 +294,17 @@ func runSignedDELDelegationLifecycle(t *testing.T, e isolatedBackendEnv, profile
 	require.Empty(t, f.native().EVMStakeBindings)
 
 	f.declareValidator()
+	f.activeReserve(zero)
 	createdHeight = e.ctx().BlockHeight()
 	f.signed("delegateDEL", three, true, validator)
 	f.eventOnce("decimal_del_delegated", map[string]string{"stake_id": stakeHash.Hex(), "amount": three.String()})
 	activeStake(three)
+	f.activeReserve(three)
 	f.backing(three)
 	f.signed("delegateDEL", two, true, validator)
 	f.eventOnce("decimal_del_delegated", map[string]string{"stake_id": stakeHash.Hex(), "amount": two.String()})
 	activeStake(five)
+	f.activeReserve(five)
 	f.backing(five)
 
 	beforeInvalid := f.native()
@@ -296,6 +312,7 @@ func runSignedDELDelegationLifecycle(t *testing.T, e isolatedBackendEnv, profile
 	f.signed("withdraw", zero, false, validator, wrapped, five.Add(one).BigInt())
 	require.Equal(t, beforeInvalid, f.native())
 	activeStake(five)
+	f.activeReserve(five)
 	f.backing(five)
 
 	type claim struct {
@@ -374,6 +391,7 @@ func runSignedDELDelegationLifecycle(t *testing.T, e isolatedBackendEnv, profile
 
 	first := request(one)
 	activeStake(five.Sub(one))
+	f.activeReserve(five.Sub(one))
 	f.backing(five)
 	rejectComplete(first)
 	e.advance()
@@ -381,23 +399,28 @@ func runSignedDELDelegationLifecycle(t *testing.T, e isolatedBackendEnv, profile
 	second := request(two)
 	require.NotEqual(t, common.BigToHash(first.index), common.BigToHash(second.index))
 	activeStake(two)
+	f.activeReserve(two)
 	f.backing(five)
 	checkQueue(first, second)
 	settle(first, five.Sub(one))
 	activeStake(two)
+	f.activeReserve(two)
 	checkQueue(second)
 	rejectComplete(second)
 	settle(second, two)
 	activeStake(two)
+	f.activeReserve(two)
 	checkQueue()
 
 	last := request(two)
 	activeStake(zero)
+	f.activeReserve(zero)
 	f.backing(two)
 	checkQueue(last)
 	settle(last, zero)
 	checkQueue()
 	activeStake(zero)
+	f.activeReserve(zero)
 	f.backing(zero)
 	require.Equal(t, bankSupply, e.app.BankKeeper.GetSupply(e.ctx(), identity.BaseDenom))
 	t.Log(delLifecyclePassed)

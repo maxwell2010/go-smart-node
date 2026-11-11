@@ -35,6 +35,7 @@ func runSignedDELHoldResetLifecycle(t *testing.T, f signedDELFixture) {
 	supply := e.app.BankKeeper.GetSupply(e.ctx(), identity.BaseDenom)
 	now := func() int64 { return e.ctx().BlockTime().Unix() }
 	f.declareValidator()
+	f.activeReserve(zero)
 
 	advanceTo := func(at int64) {
 		t.Helper()
@@ -100,6 +101,7 @@ func runSignedDELHoldResetLifecycle(t *testing.T, f signedDELFixture) {
 	assertBucket(0, two)
 	assertNative(validatortypes.StakeType_CoinHold, seven, siblingA, siblingB, selected, selected)
 	assertNative(validatortypes.StakeType_Coin, two)
+	f.activeReserve(total)
 	f.backing(total)
 
 	reject := func(key int, method string, deadlineArgument interface{}) {
@@ -107,6 +109,7 @@ func runSignedDELHoldResetLifecycle(t *testing.T, f signedDELFixture) {
 		before := f.native()
 		f.signedBy(key, method, zero, false, f.validator, f.user, f.wrapped, deadlineArgument)
 		require.Equal(t, before, f.native())
+		f.activeReserve(total)
 		f.backing(total)
 	}
 	reject(0, "resetHolds", []*big.Int{big.NewInt(selected)})
@@ -147,6 +150,7 @@ func runSignedDELHoldResetLifecycle(t *testing.T, f signedDELFixture) {
 	require.Empty(t, f.native().Undelegations)
 	require.Empty(t, f.native().EVMFrozenBindings)
 	require.Equal(t, supply, e.app.BankKeeper.GetSupply(e.ctx(), identity.BaseDenom))
+	f.activeReserve(total)
 	f.backing(total)
 	reject(0, "resetHolds", []*big.Int{big.NewInt(selected)})
 
@@ -159,6 +163,7 @@ func runSignedDELHoldResetLifecycle(t *testing.T, f signedDELFixture) {
 	require.Len(t, queue, 1)
 	require.Len(t, queue[0].Entries, 1)
 	require.True(t, seven.Equal(queue[0].Entries[0].Stake.Stake.Amount))
+	f.activeReserve(two)
 	f.backing(total)
 
 	advanceTo(maturity)
@@ -171,6 +176,7 @@ func runSignedDELHoldResetLifecycle(t *testing.T, f signedDELFixture) {
 	assertBucket(siblingB, one)
 	assertNative(validatortypes.StakeType_CoinHold, two, siblingA, siblingB)
 	require.Equal(t, supply, e.app.BankKeeper.GetSupply(e.ctx(), identity.BaseDenom))
+	f.activeReserve(two)
 	f.backing(two)
 	t.Log(delHoldResetPassed)
 }
