@@ -118,6 +118,8 @@ func TestWithdrawalSettlementRetriesWithoutBlockingOthersAcrossIAVLReopen(t *tes
 	require.Equal(t, WithdrawalSettlementResult{Settled: maxWithdrawalAttempts}, next)
 	require.Equal(t, wideID, seen[0])
 	require.Equal(t, stateWord(0), seen[1])
+	require.Len(t, ctx.EventManager().Events(), maxWithdrawalAttempts)
+	require.Equal(t, "decimal_withdrawal_completed", ctx.EventManager().Events()[0].Type)
 	exported, err := k.ExportGenesis(ctx)
 	require.NoError(t, err)
 	require.Len(t, exported.Undelegations, 1)

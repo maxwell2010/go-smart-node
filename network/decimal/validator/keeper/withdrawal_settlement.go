@@ -179,6 +179,11 @@ func (k *StateKeeper) attemptWithdrawal(ctx sdk.Context, gas uint64, row *bindin
 	if err = k.removeSettledUndelegation(child, row.frozen); err != nil {
 		return err
 	}
+	child.EventManager().EmitEvent(sdk.NewEvent(
+		"decimal_withdrawal_completed",
+		sdk.NewAttribute("gateway", fmt.Sprintf("0x%x", row.frozen.Gateway)),
+		sdk.NewAttribute("frozen_index", fmt.Sprintf("0x%x", row.frozen.FrozenIndex)),
+	))
 	commit()
 	return nil
 }
