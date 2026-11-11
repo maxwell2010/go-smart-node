@@ -9,6 +9,7 @@ import (
 
 	sdkmath "cosmossdk.io/math"
 	storetypes "cosmossdk.io/store/types"
+	abci "github.com/cometbft/cometbft/abci/types"
 	sdk "github.com/cosmos/cosmos-sdk/types"
 	"github.com/cosmos/evm/x/vm/statedb"
 	evmtypes "github.com/cosmos/evm/x/vm/types"
@@ -31,15 +32,21 @@ func runSharedWithdrawalNFT(t *testing.T, e isolatedBackendEnv, profile ownedapp
 	t.Helper()
 	for _, quantity := range []uint32{1, nfttypes.MaxIsolatedOriginUnits} {
 		t.Run(fmt.Sprintf("NFT_%d_origin_units", quantity), func(t *testing.T) {
-			runSharedWithdrawalNFTQuantity(t, e, profile, gateway, origin, vault, originAddress, validator, quantity)
+			runSharedWithdrawalNFTQuantity(t, e, profile, gateway, origin, vault, originAddress, validator, quantity, false)
 		})
 	}
+	t.Run(fmt.Sprintf("NFT_%d_origin_units_signed", nfttypes.MaxIsolatedOriginUnits), func(t *testing.T) {
+		runSharedWithdrawalNFTQuantity(t, e, profile, gateway, origin, vault, originAddress, validator, nfttypes.MaxIsolatedOriginUnits, true)
+	})
 }
 
-func runSharedWithdrawalNFTQuantity(t *testing.T, e isolatedBackendEnv, profile ownedapp.WithdrawalProfile, gateway, origin, vault contracts.Artifact, originAddress, validator common.Address, quantity uint32) {
+func runSharedWithdrawalNFTQuantity(t *testing.T, e isolatedBackendEnv, profile ownedapp.WithdrawalProfile, gateway, origin, vault contracts.Artifact, originAddress, validator common.Address, quantity uint32, signed bool) {
 	t.Helper()
 	require.NotNil(t, e.advance)
-	if quantity == nfttypes.MaxIsolatedOriginUnits {
+	require.NotNil(t, e.blockEvents)
+	require.NotNil(t, e.deferrals)
+	exportFixture := quantity == nfttypes.MaxIsolatedOriginUnits && !signed
+	if exportFixture {
 		prepareWithdrawalGenesisFixtureClock(t, e)
 	}
 	beneficiary := crypto.PubkeyToAddress(e.keys[0].PublicKey)
@@ -48,7 +55,13 @@ func runSharedWithdrawalNFTQuantity(t *testing.T, e isolatedBackendEnv, profile 
 	unitReserve := sdkmath.NewIntWithDecimal(2, 18)
 	mintQuantity := big.NewInt(int64(quantity))
 	mintReserve := unitReserve.MulRaw(int64(quantity))
-	originID := new(big.Int).Add(new(big.Int).Lsh(big.NewInt(1), 224), big.NewInt(650+int64(quantity)))
+	originSuffix := 650 + int64(quantity)
+	nativeIDSuffix := fmt.Sprint(quantity)
+	if signed {
+		originSuffix++
+		nativeIDSuffix += "_signed"
+	}
+	originID := new(big.Int).Add(new(big.Int).Lsh(big.NewInt(1), 224), big.NewInt(originSuffix))
 	zero := new(big.Int)
 	call := func(key int, artifact contracts.Artifact, target common.Address, value *big.Int, success bool, method string, args ...interface{}) *evmtypes.MsgEthereumTxResponse {
 		t.Helper()
@@ -147,8 +160,8 @@ func runSharedWithdrawalNFTQuantity(t *testing.T, e isolatedBackendEnv, profile 
 	nextPosition := common.BigToHash(read(vault, profile.PositionVault, "nextPositionId").(*big.Int))
 	domain, ok := e.app.NativeValidatorKeeper.ConfiguredEVMSourceDomain()
 	require.True(t, ok)
-	originName := fmt.Sprintf("withdrawal_origin_%d", quantity)
-	receiptName := fmt.Sprintf("withdrawal_receipt_%d", quantity)
+	originName := "withdrawal_origin_" + nativeIDSuffix
+	receiptName := "withdrawal_receipt_" + nativeIDSuffix
 	const originDenom, receiptDenom = "withdrawal_origin", "withdrawal_vault"
 	vaultCreator := sdk.AccAddress(e.govOwner.Bytes()).String()
 	reserve := sdk.NewCoin(identity.BaseDenom, amount)
@@ -221,7 +234,7 @@ func runSharedWithdrawalNFTQuantity(t *testing.T, e isolatedBackendEnv, profile 
 	validators.Undelegations = []validatortypes.Undelegation{{Delegator: beneficiaryNative, Validator: operator, Entries: []validatortypes.UndelegationEntry{entry}}}
 	validators.EVMFrozenBindings = append(validators.EVMFrozenBindings, binding)
 	replaceWithdrawalFixtureStore(t, e, validatortypes.StoreKey, func(ctx sdk.Context) error { return e.app.NativeValidatorKeeper.InitGenesis(ctx, validators) })
-	if quantity == nfttypes.MaxIsolatedOriginUnits {
+	if exportFixture {
 		exportWithdrawalGenesisFixture(t, e, profile, binding, beneficiary, deadline)
 	}
 
@@ -235,10 +248,10 @@ func runSharedWithdrawalNFTQuantity(t *testing.T, e isolatedBackendEnv, profile 
 		require.Equal(t, status, actualFrozen.FreezeStatus)
 		require.Equal(t, backing, vaultBank())
 	}
-	completions := func() int {
+	completions := func(events []abci.Event) int {
 		t.Helper()
 		count := 0
-		for _, event := range e.events() {
+		for _, event := range events {
 			if event.Type != "decimal_withdrawal_completed" {
 				continue
 			}
@@ -253,7 +266,7 @@ func runSharedWithdrawalNFTQuantity(t *testing.T, e isolatedBackendEnv, profile 
 	for i := 0; e.ctx().BlockTime().Before(deadline); i++ {
 		require.Less(t, i, int(frozenFor/time.Second), "the fixture clock must advance one second per block")
 		e.advance()
-		require.Zero(t, completions())
+		require.Zero(t, completions(e.events()))
 	}
 	require.Equal(t, deadline, e.ctx().BlockTime())
 	assertEVM(profile.Gateway, 1)
@@ -272,11 +285,17 @@ func runSharedWithdrawalNFTQuantity(t *testing.T, e isolatedBackendEnv, profile 
 			e.ctx().KVStore(nftStoreKey).Set(lineageKey, savedLineage)
 		}
 	})
+	previousDeferrals := len(e.deferrals())
 	e.nextGasLimit(15_000_000)
 	failed := call(2, gateway, profile.Gateway, zero, false, "complete", []*big.Int{frozenID})
 	require.Contains(t, failed.VmError, "project withdrawal assets", "the signed EVM transfer reached native projection before rejection")
 	require.Empty(t, failed.Logs)
-	require.Zero(t, completions())
+	require.Zero(t, completions(e.events()))
+	deferrals := e.deferrals()
+	require.Len(t, deferrals, previousDeferrals+1, "EndBlock must independently attempt the due claim while the fault is active")
+	require.Contains(t, deferrals[previousDeferrals], fmt.Sprintf("%x", index[:]))
+	require.Contains(t, deferrals[previousDeferrals], "project withdrawal assets")
+	t.Logf("NFT withdrawal id=%s origin_units=%d signed rollback gas_used=%d max_used_gas=%d", index.Hex(), quantity, failed.GasUsed, failed.MaxUsedGas)
 	assertEVM(profile.Gateway, 1)
 	require.Equal(t, savedSub, e.ctx().KVStore(nftStoreKey).Get(subKey))
 	pending, err := e.app.NativeValidatorKeeper.GetEVMFrozenBinding(e.ctx(), binding.Gateway, binding.FrozenIndex)
@@ -288,8 +307,30 @@ func runSharedWithdrawalNFTQuantity(t *testing.T, e isolatedBackendEnv, profile 
 
 	e.ctx().KVStore(nftStoreKey).Set(lineageKey, savedLineage)
 	restored = true
-	e.advance()
-	require.Equal(t, 1, completions(), "automatic retry completes the same ID once")
+	if signed {
+		const gasLimit = 24_000_000
+		e.nextGasLimit(gasLimit)
+		completed := call(2, gateway, profile.Gateway, zero, true, "complete", []*big.Int{frozenID})
+		require.LessOrEqual(t, completed.GasUsed, uint64(gasLimit))
+		require.LessOrEqual(t, completed.MaxUsedGas, uint64(gasLimit))
+		topic := gateway.ABI.Events["WithdrawCompleted"].ID
+		var receipts int
+		for _, log := range completed.Logs {
+			if log != nil && common.HexToAddress(log.Address) == profile.Gateway && len(log.Topics) > 0 && common.HexToHash(log.Topics[0]) == topic {
+				require.Len(t, log.Topics, 1)
+				require.Equal(t, index.Bytes(), log.Data)
+				receipts++
+			}
+		}
+		require.Equal(t, 1, receipts)
+		require.Zero(t, completions(e.blockEvents()), "EndBlock must not settle the same claim after signed completion")
+		t.Logf("NFT withdrawal id=%s origin_units=%d signed success gas_used=%d max_used_gas=%d", index.Hex(), quantity, completed.GasUsed, completed.MaxUsedGas)
+	} else {
+		e.advance()
+		require.Equal(t, 1, completions(e.blockEvents()), "automatic retry completes the same ID in EndBlock")
+	}
+	require.Equal(t, 1, completions(e.events()), "retry completes the same ID once")
+	require.Len(t, e.deferrals(), previousDeferrals+1)
 	assertEVM(beneficiary, 0)
 	nativeSub, err := e.app.NativeNFTKeeper.GetSubToken(e.ctx(), receiptName, 1)
 	require.NoError(t, err)
@@ -309,8 +350,8 @@ func runSharedWithdrawalNFTQuantity(t *testing.T, e isolatedBackendEnv, profile 
 	require.NoError(t, err)
 	require.Empty(t, exported.Undelegations)
 	e.advance()
-	require.Zero(t, completions())
+	require.Zero(t, completions(e.events()))
 	call(2, gateway, profile.Gateway, zero, false, "complete", []*big.Int{frozenID})
-	require.Zero(t, completions())
+	require.Zero(t, completions(e.events()))
 	assertEVM(beneficiary, 0)
 }
