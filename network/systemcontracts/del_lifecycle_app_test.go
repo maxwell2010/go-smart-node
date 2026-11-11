@@ -131,16 +131,16 @@ func runSignedDELDelegationLifecycle(t *testing.T, e isolatedBackendEnv, profile
 	}
 	backing := func(want sdkmath.Int) {
 		t.Helper()
-		require.Equal(t, want.BigInt(), read(wrapper, wrapped, "totalSupply"))
-		require.Equal(t, want.BigInt(), read(wrapper, wrapped, "balanceOf", target))
-		require.Equal(t, want, e.app.BankKeeper.GetBalance(e.ctx(), sdk.AccAddress(wrapped.Bytes()), identity.BaseDenom).Amount)
-		require.Equal(t, want.BigInt(), e.app.EVMKeeper.GetBalance(e.ctx(), wrapped).ToBig())
+		require.Zero(t, want.BigInt().Cmp(read(wrapper, wrapped, "totalSupply").(*big.Int)))
+		require.Zero(t, want.BigInt().Cmp(read(wrapper, wrapped, "balanceOf", target).(*big.Int)))
+		require.True(t, want.Equal(e.app.BankKeeper.GetBalance(e.ctx(), sdk.AccAddress(wrapped.Bytes()), identity.BaseDenom).Amount))
+		require.Zero(t, want.BigInt().Cmp(e.app.EVMKeeper.GetBalance(e.ctx(), wrapped).ToBig()))
 	}
 	activeStake := func(want sdkmath.Int) {
 		t.Helper()
 		raw := read(gateway, target, "getStake", validator, user, wrapped)
 		row := abi.ConvertType(raw, new(gatewayDELStake)).(*gatewayDELStake)
-		require.Equal(t, want.BigInt(), row.Amount)
+		require.Zero(t, want.BigInt().Cmp(row.Amount))
 		if want.IsPositive() {
 			require.Equal(t, validator, row.Validator)
 			require.Equal(t, user, row.Delegator)
