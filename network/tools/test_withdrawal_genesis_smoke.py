@@ -115,6 +115,13 @@ class WithdrawalGenesisSmokeTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, 'expected admission reason'):
                 smoke.check_admission(8, expected)
 
+    def test_private_startup_diagnostics_do_not_publish_raw_lines(self):
+        synthetic = ('failed to unmarshal gov genesis: unable to resolve type URL /example.FixtureMsg\n'
+                     '/private/path/withdrawal_genesis.go:172:15\nDO_NOT_PUBLISH_TEST_MARKER')
+        public = smoke.safe_diagnostic(synthetic)
+        self.assertEqual(public, 'failed to unmarshal, /example.FixtureMsg, withdrawal_genesis.go:172:15')
+        self.assertNotIn('DO_NOT_PUBLISH_TEST_MARKER', public)
+
 
 if __name__ == '__main__':
     unittest.main()
