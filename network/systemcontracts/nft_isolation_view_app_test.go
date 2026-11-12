@@ -134,7 +134,12 @@ func runIsolatedPositionReader(t *testing.T, e isolatedBackendEnv) {
 			PositionVault: vaultAddress, MasterValidator: masterAddress, WrappedDEL: wrapped,
 			SettlementOnly: true, EnableDELDelegation: true,
 		}
-		exportNativeConsensusDaemonFixture(t, e, dir, profile, gateway, master, wrapper, govSetup)
+		var nft *nativeNFTDowntimeFixture
+		if os.Getenv(nativeConsensusNFTDowntimeEnv) == "1" {
+			origin := mintNativeNFTDowntimeFixture(t, e, origin, originAddress, crypto.PubkeyToAddress(e.keys[3].PublicKey))
+			nft = &origin
+		}
+		exportNativeConsensusDaemonFixture(t, e, dir, profile, gateway, master, wrapper, vault, nft, govSetup)
 		return
 	}
 	if os.Getenv(signedNFTAdmissionPhaseEnv) == "seed" {

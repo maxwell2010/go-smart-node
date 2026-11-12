@@ -53,7 +53,7 @@ type nativeConsensusFixtureValidator struct {
 }
 
 func exportNativeConsensusDaemonFixture(t *testing.T, e isolatedBackendEnv, dir string, profile ownedapp.WithdrawalProfile,
-	gateway, master, wrapper contracts.Artifact, gov func(contracts.Artifact, common.Address, string, ...interface{})) {
+	gateway, master, wrapper, vault contracts.Artifact, nft *nativeNFTDowntimeFixture, gov func(contracts.Artifact, common.Address, string, ...interface{})) {
 	t.Helper()
 	require.True(t, filepath.IsAbs(dir))
 	info, err := os.Lstat(dir)
@@ -77,6 +77,7 @@ func exportNativeConsensusDaemonFixture(t *testing.T, e isolatedBackendEnv, dir 
 	require.False(t, jailRecovery && !downtime, "the jail recovery fixture requires the downtime profile")
 	require.False(t, heldDowntime && (!downtime || jailRecovery), "held downtime has its own isolated fixture")
 	require.False(t, upgradeGovernance && (feeRewards || ibcV1 || downtime), "the upgrade governance fixture has a separate profile")
+	require.False(t, nft != nil && (!downtime || jailRecovery || heldDowntime), "NFT downtime has its own isolated fixture")
 	initial, after := [3]int64{2, 1, 0}, [3]int64{2, 0, 3}
 	keyScope := "mintcandy native consensus process fixture "
 	if downtime {
@@ -91,6 +92,10 @@ func exportNativeConsensusDaemonFixture(t *testing.T, e isolatedBackendEnv, dir 
 	if heldDowntime {
 		initial, after = [3]int64{3, 3, 0}, [3]int64{3, 3, 2}
 		keyScope = "mintcandy native held del downtime process fixture "
+	}
+	if nft != nil {
+		initial, after = [3]int64{3, 3, 0}, [3]int64{3, 3, 2}
+		keyScope = "mintcandy native NFT downtime process fixture "
 	}
 	commission := sdkmath.LegacyZeroDec()
 	if feeRewards {
@@ -234,6 +239,11 @@ func exportNativeConsensusDaemonFixture(t *testing.T, e isolatedBackendEnv, dir 
 		profile.EnableNativeUpgradeGovernance = true
 		governanceFixture = nativeGovernanceUpgradeFixture(t, e, genesis)
 	}
+	if nft != nil {
+		profile.EnableNFTDelegation = true
+		profile.EnableNativeNFTDowntime = true
+		nft.addGenesis(t, e, profile, genesis, beneficiary)
+	}
 	genesis[ownedapp.WithdrawalGenesisKey], err = json.Marshal(profile)
 	require.NoError(t, err)
 	require.NoError(t, ownedapp.ReconcileNativeGenesisAllocation(cdc, genesis))
@@ -291,6 +301,9 @@ func exportNativeConsensusDaemonFixture(t *testing.T, e isolatedBackendEnv, dir 
 		expectations["master"] = profile.MasterValidator.Hex()
 		expectations["masterStateData"] = masterState
 		expectations["stakePenaltyData"] = hexData(pack(gateway, "getStakePenaltyIndex", stakeID))
+		if nft != nil {
+			nft.expectations(t, e, profile, gateway, vault, target, actor, key, expectations)
+		}
 		if heldDowntime {
 			nonce := e.app.EVMKeeper.GetNonce(ctx, actor)
 			price := big.NewInt(1_000_000_000_000)

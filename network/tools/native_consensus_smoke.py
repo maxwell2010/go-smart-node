@@ -28,6 +28,7 @@ DOWNTIME_BURN = ATOMS // 50
 DOWNTIME_WINDOW = 3
 JAIL_RECOVERED = (3, 3, 1)
 UNJAILED = 'decimal_native_downtime_unjailed'
+NFT_DELEGATED = 'decimal_nft_delegated'
 
 
 @dataclass
@@ -92,7 +93,7 @@ def decode_pubkey(record):
     return value
 
 
-def load_fixture(directory, fee_rewards, downtime, jail_recovery, held_downtime):
+def load_fixture(directory, fee_rewards, downtime, jail_recovery, held_downtime, nft_downtime):
     info = directory.lstat()
     check(stat.S_ISDIR(info.st_mode) and stat.S_IMODE(info.st_mode) & 0o077 == 0, 'private fixture directory required')
     expected = json.loads(private_bytes(directory / 'expectations.json', 8192))
@@ -124,7 +125,7 @@ def load_fixture(directory, fee_rewards, downtime, jail_recovery, held_downtime)
         check(re.fullmatch(fr'0x[0-9a-f]{{{8 + words * 64}}}', expected[name]), 'invalid fixture WDEL calldata')
     validators = expected['validators']
     initial, after = (DOWNTIME_INITIAL, DOWNTIME_AFTER) if downtime else (INITIAL, AFTER)
-    if held_downtime:
+    if held_downtime or nft_downtime:
         initial, after = DOWNTIME_AFTER, DOWNTIME_INITIAL
     check([row['name'] for row in validators] == ['a', 'b', 'c'] and
           tuple(row['initialPower'] for row in validators) == initial and
@@ -166,11 +167,31 @@ def load_fixture(directory, fee_rewards, downtime, jail_recovery, held_downtime)
     check(profile.get('enable_native_fee_rewards', False) is fee_rewards, 'fixture genesis fee rewards mode differs')
     check(profile.get('enable_native_ordinary_del_downtime', False) is downtime, 'fixture genesis downtime mode differs')
     check(profile.get('enable_native_held_del_downtime', False) is held_downtime, 'fixture genesis held downtime mode differs')
+    check(profile.get('enable_native_nft_downtime', False) is nft_downtime, 'fixture genesis NFT downtime mode differs')
     if downtime:
         check(profile['master_validator'].lower() == expected['master'] and
               profile.get('enable_del_hold', False) is held_downtime and
-              not any(profile.get(flag, False) for flag in ('enable_nft_delegation', 'enable_native_ibc_v1')),
+              profile.get('enable_nft_delegation', False) is nft_downtime and not profile.get('enable_native_ibc_v1', False),
               'downtime fixture permits only its declared DEL routes')
+    if nft_downtime:
+        for address, native_name in (('nftOrigin', 'originNative'), ('nftVault', 'vaultNative'), ('gateway', 'gatewayNative')):
+            expected[address] = expected[address].lower()
+            check(re.fullmatch(ADDRESS, expected[address]) and bech32_payload(expected[native_name]) == expected[address],
+                  'fixture NFT bank and EVM addresses differ')
+        check(profile['position_vault'].lower() == expected['nftVault'] and
+              len({expected[name] for name in ('nftOrigin', 'nftVault', 'gateway', 'wrapped', 'actor', 'master')}) == 6,
+              'fixture NFT vault identity or address separation differs')
+        for field in ('originTokenNative', 'receiptTokenNative'):
+            check(re.fullmatch(r'[A-Za-z0-9_-]{1,120}', expected[field]), 'invalid native NFT fixture ID')
+        check(expected['originTokenNative'] != expected['receiptTokenNative'], 'duplicate native NFT fixture ID')
+        for field, words in (('nftOwnerData', 1), ('nftReserveData', 1), ('originSupplyData', 1), ('originBalanceData', 2)):
+            check(re.fullmatch(fr'0x[0-9a-f]{{{8 + 64 * words}}}', expected[field]), 'invalid NFT fixture getter calldata')
+        check(type(expected['nftNonce']) is int and 0 <= expected['nftNonce'] < 2**32 - 1, 'invalid NFT fixture nonce')
+        for route in ('nftApprove', 'nftDelegate'):
+            signed = expected[route]
+            check(re.fullmatch(WORD, signed['hash']) and re.fullmatch(r'0x(?:[0-9a-f]{2}){100,512}', signed['raw']),
+                  'invalid signed NFT fixture transaction')
+        check(expected['nftApprove']['hash'] != expected['nftDelegate']['hash'], 'duplicate NFT fixture transaction')
     if held_downtime:
         check(type(expected['holdDeadline']) is int and expected['holdDeadline'] > 0 and
               type(expected['heldNonce']) is int and 0 <= expected['heldNonce'] < 2**32 - 1,
@@ -361,10 +382,46 @@ def read_held_frozen(node, expected, height, amount, status):
     return words[10]
 
 
+def check_nft_position(node, expected, height, active):
+    validator = expected['validators'][2]
+    origin, vault = expected['nftOrigin'], expected['nftVault']
+    remaining = int(not active)
+    check(read_words(origin, expected['originSupplyData'], height, 1, node.evm) == [remaining] and
+          read_words(origin, expected['originBalanceData'], height, 1, node.evm) == [remaining],
+          f'origin ERC1155 supply or owner balance differs on {node.label}')
+    check(balance(origin, expected['originNative'], height, node.evm, node.rest) == 2 * ATOMS * remaining and
+          balance(vault, expected['vaultNative'], height, node.evm, node.rest) == active,
+          f'NFT origin and Vault bank backing differ on {node.label}')
+    origin_token = native('/decimal/nft/v1/token/' + expected['originTokenNative'], height, base=node.rest)['token']
+    check(int(origin_token['minted']) == 1 and int(origin_token.get('burnt', 0)) == 1 - remaining,
+          f'native origin unit lifecycle differs on {node.label}')
+    if not active:
+        native_positions({**expected, 'validatorNative': validator['operator']}, height, 0, 0, None, node.rest)
+        return
+    check(read_words(vault, expected['nftOwnerData'], height, 1, node.evm) == [int(expected['gateway'], 16)] and
+          read_words(vault, expected['nftReserveData'], height, 3, node.evm) == [0, active, 1],
+          f'Vault receipt custody or DEL reserve differs on {node.label}')
+    receipt_id = expected['receiptTokenNative']
+    token = native('/decimal/nft/v1/token/' + receipt_id, height, base=node.rest)['token']
+    owner = native('/decimal/nft/v1/tokens/' + receipt_id + '/1', height, base=node.rest)['sub_token']['owner']
+    check(token['id'] == receipt_id and token['reserve'] == {'denom': 'del', 'amount': str(active)} and
+          int(token['minted']) == 1 and not int(token.get('burnt', 0)) and owner == expected['gatewayNative'],
+          f'native NFT receipt reserve or owner differs on {node.label}')
+    pair = f'/decimal/validator/v1/validators/{validator["operator"]}/delegations/{expected["actorNative"]}'
+    rows = native(pair, height, base=node.rest).get('delegations') or []
+    check(len(rows) == 1 and rows[0]['validator'] == validator['operator'] and rows[0]['delegator'] == expected['actorNative'],
+          f'expected one NFT-only native delegation on {node.label}')
+    stake = rows[0]['stake']
+    check(stake['id'] == receipt_id and stake['type'] == 'STAKE_TYPE_NFT' and
+          stake['stake'] == {'denom': 'del', 'amount': str(active)} and stake['sub_token_ids'] == [1],
+          f'native NFT stake reserve or lineage differs on {node.label}')
+
+
 def check_ledger(replicas, expected, height, c_reserve, *, wallet=None, collector=None, previous=None, rewards=None,
                  downtime=False, burned=0, pending_held=0):
     reserves = (3 * ATOMS, 3 * ATOMS, c_reserve) if downtime else (2 * ATOMS, ATOMS, c_reserve)
-    total = sum(reserves) + pending_held
+    nft_collateral = c_reserve if 'nftOrigin' in expected else 0
+    total = sum(reserves) + pending_held - nft_collateral
     wallet_value, collector_value = wallet, collector
     reward_values = {} if previous is None else {key: int(value) for key, value in previous['rewardAtomic'].items()}
     if rewards is not None:
@@ -375,6 +432,8 @@ def check_ledger(replicas, expected, height, c_reserve, *, wallet=None, collecto
             try:
                 if validator['name'] == 'c' and 'holdDeadline' in expected:
                     check_held_position(node, expected, height, value, pending_held)
+                elif validator['name'] == 'c' and 'nftOrigin' in expected:
+                    check_nft_position(node, expected, height, value)
                 else:
                     native_positions({**expected, 'validatorNative': validator['operator']}, height, value, 0, None, node.rest)
             except ValueError as error:
@@ -402,10 +461,13 @@ def check_ledger(replicas, expected, height, c_reserve, *, wallet=None, collecto
         if bank_supply is None:
             bank_supply = int(supply['amount'])
         check(int(supply['amount']) == bank_supply, f'native bank supply differs on {node.label}')
-    return {'height': height, 'walletAtomic': str(wallet_value), 'feeCollectorAtomic': str(collector_value),
+    result = {'height': height, 'walletAtomic': str(wallet_value), 'feeCollectorAtomic': str(collector_value),
             'wrappedAtomic': str(total), 'bankSupplyAtomic': str(bank_supply),
             'rewardAtomic': {name: str(value) for name, value in reward_values.items()},
             'activeReservesAtomic': {row['name']: str(value) for row, value in zip(expected['validators'], reserves, strict=True)}}
+    if 'nftOrigin' in expected:
+        result['nftCollateralAtomic'] = str(nft_collateral)
+    return result
 
 
 def settle_fees(replicas, expected, collected, powers, c_reserve, fee):
@@ -447,10 +509,23 @@ def downtime_events(result):
     return [event for event in result['finalize_block_events'] or [] if event['type'] == 'decimal_native_downtime_applied']
 
 
+def wait_downtime_activation(replicas, expected, report, height):
+    validators = expected['validators']
+    ready = wait_replicas(replicas, height + 5, 60, report)
+    for node in replicas:
+        updates = node.rpc(f'block_results?height={height}').get('validator_updates') or []
+        check(len(updates) == 1 and int(updates[0].get('power', 0)) == 2 and
+              decode_pubkey(updates[0]['pub_key']) == decode_pubkey(validators[2]['publicKey']),
+              f'funding must add only C with power 2 on {node.label}')
+    effective_set(replicas, validators, height, DOWNTIME_AFTER)
+    effective_set(replicas, validators, height + 1, DOWNTIME_AFTER)
+    effective_set(replicas, validators, height + 2, DOWNTIME_INITIAL)
+    return ready
+
+
 def activate_held_del(replicas, expected, report, first):
     report['phase'] = 'signed-held-del-delegation'
     source = replicas[0]
-    validators = expected['validators']
     before = check_ledger(replicas, expected, first - 1, 0, downtime=True)
     amount = 2 * ATOMS
     receipt = submit(source.child, source.log, report, expected, 'heldDelegate', True, expected['heldNonce'], DELEGATED,
@@ -458,20 +533,38 @@ def activate_held_del(replicas, expected, report, first):
     height = receipt['height']
     expected['holdStart'] = int(block_time(height).timestamp())
     check(expected['holdStart'] < expected['holdDeadline'], 'signed hold was created after its deadline')
-    ready = wait_replicas(replicas, height + 5, 60, report)
-    for node in replicas:
-        updates = node.rpc(f'block_results?height={height}').get('validator_updates') or []
-        check(len(updates) == 1 and int(updates[0].get('power', 0)) == 2 and
-              decode_pubkey(updates[0]['pub_key']) == decode_pubkey(validators[2]['publicKey']),
-              f'held funding must add only C with power 2 on {node.label}')
-    effective_set(replicas, validators, height, DOWNTIME_AFTER)
-    effective_set(replicas, validators, height + 1, DOWNTIME_AFTER)
-    effective_set(replicas, validators, height + 2, DOWNTIME_INITIAL)
+    ready = wait_downtime_activation(replicas, expected, report, height)
     fee = int(receipt['feeAtomic'])
     state = check_ledger(replicas, expected, height, amount, downtime=True, previous=before,
                          wallet=int(before['walletAtomic']) - amount - fee, collector=int(before['feeCollectorAtomic']) + fee)
     report['heldFunding'] = {**state, **receipt, 'holdStart': expected['holdStart'], 'holdDeadline': expected['holdDeadline'],
                              'effectiveHeight': height + 2}
+    return ready
+
+
+def activate_nft_del(replicas, expected, report, first):
+    report['phase'] = 'signed-nft-origin-approval'
+    source = replicas[0]
+    before = check_ledger(replicas, expected, first - 1, 0, downtime=True)
+    approved = submit(source.child, source.log, report, dict(expected, gateway=expected['nftOrigin']),
+                      'nftApprove', True, expected['nftNonce'], NFT_DELEGATED, {})
+    height = approved['height']
+    wait_replicas(replicas, height, 40, report)
+    fee = int(approved['feeAtomic'])
+    baseline = check_ledger(replicas, expected, height, 0, downtime=True, previous=before,
+                            wallet=int(before['walletAtomic']) - fee, collector=int(before['feeCollectorAtomic']) + fee)
+    report['nftApproval'] = {**baseline, **approved}
+
+    report['phase'] = 'signed-del-backed-nft-delegation'
+    amount = 2 * ATOMS
+    receipt = submit(source.child, source.log, report, expected, 'nftDelegate', True, expected['nftNonce'] + 1,
+                     NFT_DELEGATED, {'stake_id': expected['stakeId'], 'position_id': '0x' + '0' * 63 + '1', 'reserve': str(amount)})
+    height = receipt['height']
+    ready = wait_downtime_activation(replicas, expected, report, height)
+    fee = int(receipt['feeAtomic'])
+    funded = check_ledger(replicas, expected, height, amount, downtime=True, previous=baseline,
+                          wallet=int(baseline['walletAtomic']) - fee, collector=int(baseline['feeCollectorAtomic']) + fee)
+    report['nftFunding'] = {**funded, **receipt, 'effectiveHeight': height + 2}
     return ready
 
 
@@ -725,12 +818,14 @@ def run_gate(args, binary, root, expected, genesis, keys, env, owner, report):
         check(status['node_info']['id'] == node.node_id and status['validator_info']['address'] == validator['consensusAddress'],
               'replica did not start with its distinct configured signing key')
     initial_powers = DOWNTIME_INITIAL if args.downtime else INITIAL
-    if args.held_downtime:
+    if args.held_downtime or args.nft_downtime:
         initial_powers = DOWNTIME_AFTER
     report['initialPower'] = effective_set(replicas, validators, initial, initial_powers)
     if args.downtime:
         if args.held_downtime:
             first = activate_held_del(replicas, expected, report, first)
+        if args.nft_downtime:
+            first = activate_nft_del(replicas, expected, report, first)
         run_downtime_gate(binary, expected, replicas, env, owner, report, first, jail_recovery=args.jail_recovery)
         return
     report['initialSigners'] = check_signatures(replicas, validators, initial, INITIAL)
@@ -833,8 +928,9 @@ def main(argv=None, signals=None):
     mode.add_argument('--downtime', action='store_true')
     mode.add_argument('--jail-recovery', action='store_true')
     mode.add_argument('--held-downtime', action='store_true')
+    mode.add_argument('--nft-downtime', action='store_true')
     args = parser.parse_args(argv)
-    args.downtime |= args.jail_recovery or args.held_downtime
+    args.downtime |= args.jail_recovery or args.held_downtime or args.nft_downtime
     report = {'status': 'FAIL', 'phase': 'fixture-provenance', 'scope': 'three loopback processes with native consensus and a signed DEL stake'}
     with pathlib.Path(args.report).open('x', encoding='utf8') as stream:
         try:
@@ -844,7 +940,7 @@ def main(argv=None, signals=None):
             with open(binary, 'rb') as binary_stream:
                 check(hashlib.file_digest(binary_stream, 'sha256').hexdigest() == args.binary_sha256, 'daemon SHA256 mismatch')
             expected, genesis, keys, initial = load_fixture(pathlib.Path(args.fixture), args.fee_rewards, args.downtime,
-                                                            args.jail_recovery, args.held_downtime)
+                                                            args.jail_recovery, args.held_downtime, args.nft_downtime)
             report.update(sourceCommit=args.source_commit, binarySha256=args.binary_sha256, initialHeight=initial,
                           genesisSha256=hashlib.sha256(genesis).hexdigest(), chainID=CHAIN, evmChainID=EVM_CHAIN, feeRewards=args.fee_rewards)
             if args.downtime:
@@ -853,6 +949,8 @@ def main(argv=None, signals=None):
                 report['scope'] = 'three loopback processes with ordinary DEL downtime and signed validator jail recovery'
             if args.held_downtime:
                 report['scope'] = 'three loopback processes with a held DEL downtime penalty and automatic payout'
+            if args.nft_downtime:
+                report['scope'] = 'three loopback processes with one DEL-backed NFT downtime penalty'
             with tempfile.TemporaryDirectory(prefix='mcnd-native-consensus-', dir=args.home_parent) as directory:
                 root = pathlib.Path(directory)
                 owner = ProcessOwner(signals)
