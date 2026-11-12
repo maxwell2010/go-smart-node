@@ -54,7 +54,7 @@ func TestNativeDowntimePlanRequiresFullAuthenticatedWindow(t *testing.T) {
 					}
 				}
 				latest = ctx.WithExecMode(sdk.ExecModeFinalize).WithBlockHeader(cmtproto.Header{
-					Height: h, Time: time.Unix(2000+h, 0).UTC(),
+					ChainID: "native-downtime-test", Height: h, Time: time.Unix(2000+h, 0).UTC(),
 					NextValidatorsHash: set.Hash(), ProposerAddress: set.Validators[0].Address,
 				}).WithHeaderHash(bytes.Repeat([]byte{byte(h)}, 32)).WithVoteInfos(commit.Votes)
 				_, err = k.PlanNativeDowntimePenalties(latest)
