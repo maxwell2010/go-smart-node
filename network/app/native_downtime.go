@@ -176,14 +176,32 @@ func (c *withdrawalController) validateOrdinaryDowntimeAdmission(ctx sdk.Context
 	return nil
 }
 
-func (app *App) applyOrdinaryDELDowntime(ctx sdk.Context) error {
+func (app *App) applyOrdinaryDELDowntime(ctx sdk.Context) (bool, error) {
 	candidates, err := app.NativeValidatorKeeper.PlanNativeDowntimePenalties(ctx)
 	if err != nil || len(candidates) == 0 {
-		return err
+		return false, err
+	}
+	rotationHeight := ctx.BlockHeight()
+	if app.usesNativeDuplicateVote() {
+		rotationHeight /= 2
+		eligible := candidates[:0]
+		for _, candidate := range candidates {
+			pending, err := app.NativeValidatorKeeper.HasPendingNativeDuplicateVotePenalty(ctx, candidate.Operator)
+			if err != nil {
+				return false, err
+			}
+			if !pending {
+				eligible = append(eligible, candidate)
+			}
+		}
+		candidates = eligible
+		if len(candidates) == 0 {
+			return false, nil
+		}
 	}
 	// One attempt per block, rotating across candidates if an operation
 	// cannot be completed within its bounded work budget.
-	candidate := candidates[ctx.BlockHeight()%int64(len(candidates))]
+	candidate := candidates[rotationHeight%int64(len(candidates))]
 	beforeGas := ctx.GasMeter().GasConsumed()
 	if err := app.executeOrdinaryDELDowntime(ctx, candidate); err != nil {
 		gas := ctx.GasMeter().GasConsumed() - beforeGas
@@ -191,7 +209,7 @@ func (app *App) applyOrdinaryDELDowntime(ctx sdk.Context) error {
 		ctx.EventManager().EmitEvent(sdk.NewEvent("decimal_native_downtime_deferred",
 			sdk.NewAttribute("operator", candidate.Operator), sdk.NewAttribute("gas_used", strconv.FormatUint(gas, 10))))
 	}
-	return nil
+	return true, nil
 }
 
 func (app *App) executeOrdinaryDELDowntime(ctx sdk.Context, candidate validatorkeeper.NativeDowntimeCandidate) (err error) {

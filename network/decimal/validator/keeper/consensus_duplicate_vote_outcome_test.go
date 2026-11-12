@@ -47,6 +47,6 @@ func TestNativeDuplicateVotePermanentlyExcludesExactKey(t *testing.T) {
 	old.Jailed = false
 	require.ErrorIs(t, reopened.SetValidator(ctx, old), ErrNativeConsensusKeyPermanentlyExcluded)
 	old.OperatorAddress = addr(t, identity.Bech32PrefixValAddr, 6)
-	require.ErrorContains(t, reopened.SetValidator(ctx, old), "consensus address belongs to another validator")
+	require.ErrorIs(t, reopened.SetValidator(ctx, old), ErrNativeConsensusKeyPermanentlyExcluded)
 	require.NoError(t, reopened.SetValidator(ctx, validator(t, 6, 0)))
 }

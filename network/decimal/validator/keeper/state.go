@@ -286,6 +286,13 @@ func (k *StateKeeper) SetValidator(ctx sdk.Context, v types.Validator) error {
 	if e != nil {
 		return e
 	}
+	if previous == nil {
+		if _, err := k.GetNativeDuplicateVoteExclusion(child, consensus); err == nil {
+			return ErrNativeConsensusKeyPermanentlyExcluded
+		} else if !errors.Is(err, ErrNotFound) {
+			return err
+		}
+	}
 	index := append([]byte{consensusPrefix}, consensus...)
 	stored, e := k.service.OpenKVStore(child).Get(index)
 	if e != nil {

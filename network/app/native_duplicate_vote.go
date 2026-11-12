@@ -56,6 +56,29 @@ func (app *App) preBlockNativeDuplicateVote(ctx sdk.Context) (*sdk.ResponsePreBl
 	return result, nil
 }
 
+// One financial attempt per block shares the existing penalty work budget.
+// Pending history takes precedence for its operator. Alternating priority
+// allows other operators' downtime to progress even while a job is deferred.
+func (app *App) applyNativePenalties(ctx sdk.Context) error {
+	if !app.usesNativeDuplicateVote() {
+		_, err := app.applyOrdinaryDELDowntime(ctx)
+		return err
+	}
+	ordinaryFirst := ctx.BlockHeight()%2 == 0
+	if ordinaryFirst {
+		attempted, err := app.applyOrdinaryDELDowntime(ctx)
+		if err != nil || attempted {
+			return err
+		}
+	}
+	attempted, err := app.applyNativeDuplicateVotePenalty(ctx)
+	if err != nil || attempted || ordinaryFirst {
+		return err
+	}
+	_, err = app.applyOrdinaryDELDowntime(ctx)
+	return err
+}
+
 func (app *App) applyNativeDuplicateVotePenalty(ctx sdk.Context) (bool, error) {
 	job, err := app.NativeValidatorKeeper.NextNativeDuplicateVotePenalty(ctx)
 	if errors.Is(err, validatorkeeper.ErrNotFound) {
