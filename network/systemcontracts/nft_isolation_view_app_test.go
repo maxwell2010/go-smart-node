@@ -301,12 +301,16 @@ func runIsolatedPositionReader(t *testing.T, e isolatedBackendEnv) {
 	call(0, vault, vaultAddress, new(big.Int), true, "redeemPosition", newPosition, owner)
 	t.Logf("actual isolated StakeSource authentication SDKgas=%d; native capture/pipeline costs separate", cost)
 	if mode := os.Getenv(delLifecycleFixtureEnv); mode == "1" || mode == "hold" || mode == "reset" ||
-		mode == "penalty" || mode == "frozen-penalty-partial" || mode == "frozen-penalty-full" {
+		mode == "penalty" || mode == "held-penalty" || mode == "frozen-penalty-partial" || mode == "frozen-penalty-full" {
 		profile := ownedapp.WithdrawalProfile{Registry: registryAddress, Gateway: gatewayAddress, Library: libraryAddress, NFTCenter: factoryAddress,
 			PositionVault: vaultAddress, MasterValidator: masterAddress, WrappedDEL: wrapped, SettlementOnly: true, EnableDELDelegation: true,
 			EnableDELHold: mode == "hold" || mode == "reset", EnableDELHoldReset: mode == "reset"}
 		if mode == "penalty" {
 			runSignedOrdinaryDELPenalty(t, e, profile, gateway, master, wrapper, sourceReader, govSetup)
+			return
+		}
+		if mode == "held-penalty" {
+			runSignedHeldDELPenalty(t, e, profile, gateway, master, wrapper, sourceReader, govSetup)
 			return
 		}
 		if mode == "frozen-penalty-partial" || mode == "frozen-penalty-full" {

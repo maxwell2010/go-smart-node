@@ -18,25 +18,37 @@ import (
 	"github.com/maxwell2010/go-smart-node/network/nativeburn"
 )
 
-// OrdinaryDELPenaltyProof binds the projected amount and cursor to a realized
-// Gateway penalty. A zero remaining balance deactivates the native binding.
-type OrdinaryDELPenaltyProof struct {
+// ActiveDELPenaltyProof binds the projected amount, hold identity and cursor
+// to a realized Gateway penalty. Zero remaining DEL deactivates the binding.
+type ActiveDELPenaltyProof struct {
 	Before, After validatortypes.EVMStakeBinding
 	Burned        sdkmath.Int
 }
 
-type ordinaryDELPenaltyKey struct{}
-type ordinaryDELPenaltyCall struct {
+type OrdinaryDELPenaltyProof = ActiveDELPenaltyProof
+
+type activeDELPenaltyKey struct{}
+type activeDELPenaltyCall struct {
 	executor *Executor
 	height   int64
 	id       common.Hash
+	held     bool
 }
 
 // AuthorizeOrdinaryDELPenalty is for the internal EVM commit guard only. A
 // signed call or a different executor cannot obtain this cache capability.
 func (e *Executor) AuthorizeOrdinaryDELPenalty(ctx sdk.Context, msg core.Message) bool {
-	call, ok := ctx.Value(ordinaryDELPenaltyKey{}).(ordinaryDELPenaltyCall)
-	if !ok || e == nil || call.executor != e || call.height != ctx.BlockHeight() ||
+	return e.authorizeActiveDELPenalty(ctx, msg, false)
+}
+
+// AuthorizeHeldDELPenalty scopes the internal capability to the held route.
+func (e *Executor) AuthorizeHeldDELPenalty(ctx sdk.Context, msg core.Message) bool {
+	return e.authorizeActiveDELPenalty(ctx, msg, true)
+}
+
+func (e *Executor) authorizeActiveDELPenalty(ctx sdk.Context, msg core.Message, held bool) bool {
+	call, ok := ctx.Value(activeDELPenaltyKey{}).(activeDELPenaltyCall)
+	if !ok || e == nil || call.executor != e || call.height != ctx.BlockHeight() || call.held != held ||
 		ctx.ExecMode() != sdk.ExecModeFinalize || msg.From != Sender() ||
 		msg.To == nil || *msg.To != e.roles.Gateway || msg.Value == nil ||
 		msg.Value.Sign() != 0 || len(msg.SetCodeAuthorizations) != 0 {
@@ -54,21 +66,36 @@ func (e *Executor) AuthorizeOrdinaryDELPenalty(ctx sdk.Context, msg core.Message
 func (e *Executor) ApplyOrdinaryDELPenalty(ctx sdk.Context, row validatortypes.EVMStakeBinding, percentage uint16,
 	nativeSupply func(sdk.Context) sdkmath.Int, project func(sdk.Context, OrdinaryDELPenaltyProof) error,
 ) error {
+	return e.applyActiveDELPenalty(ctx, row, percentage, nativeSupply, project, false)
+}
+
+// ApplyHeldDELPenalty realizes one announced penalty in the exact active
+// ordinary DEL hold bucket. The native projector must reconcile the lots in
+// that bucket and preserve all unrelated holds in the same cache.
+func (e *Executor) ApplyHeldDELPenalty(ctx sdk.Context, row validatortypes.EVMStakeBinding, percentage uint16,
+	nativeSupply func(sdk.Context) sdkmath.Int, project func(sdk.Context, ActiveDELPenaltyProof) error,
+) error {
+	return e.applyActiveDELPenalty(ctx, row, percentage, nativeSupply, project, true)
+}
+
+func (e *Executor) applyActiveDELPenalty(ctx sdk.Context, row validatortypes.EVMStakeBinding, percentage uint16,
+	nativeSupply func(sdk.Context) sdkmath.Int, project func(sdk.Context, ActiveDELPenaltyProof) error, held bool,
+) error {
 	if e == nil || e.evm == nil || nativeSupply == nil || project == nil ||
 		ctx.ExecMode() != sdk.ExecModeFinalize || ctx.BlockHeight() <= 0 || percentage == 0 || percentage > 100 {
-		return errors.New("ordinary DEL penalty requires finalized block, approved percentage, supply and native projection")
+		return errors.New("active DEL penalty requires finalized block, approved percentage, supply and native projection")
 	}
 	if err := row.Validate(); err != nil {
 		return err
 	}
-	id, validator, owner, err := e.ordinaryPenaltyIdentity(ctx, row)
+	id, validator, _, err := e.activePenaltyIdentity(ctx, row, held)
 	if err != nil {
 		return err
 	}
 	beforeCursor := common.BytesToHash(row.PenaltyCursor)
 	next := new(big.Int).Add(beforeCursor.Big(), big.NewInt(1))
 	if next.BitLen() > 256 {
-		return errors.New("ordinary DEL penalty cursor overflow")
+		return errors.New("active DEL penalty cursor overflow")
 	}
 	afterCursor := common.BigToHash(next)
 	child, write := ctx.CacheContext()
@@ -83,7 +110,7 @@ func (e *Executor) ApplyOrdinaryDELPenalty(ctx sdk.Context, row validatortypes.E
 	if err != nil {
 		return err
 	}
-	before, err := e.ordinaryPenaltyState(child, validator, owner, id, row.RawAmount, beforeCursor, nativeSupply)
+	before, err := e.activePenaltyState(child, row, row.RawAmount, beforeCursor, nativeSupply)
 	if err != nil {
 		return err
 	}
@@ -94,7 +121,7 @@ func (e *Executor) ApplyOrdinaryDELPenalty(ctx sdk.Context, row validatortypes.E
 	if err != nil {
 		return err
 	}
-	authorized := child.WithValue(ordinaryDELPenaltyKey{}, ordinaryDELPenaltyCall{executor: e, height: child.BlockHeight(), id: id})
+	authorized := child.WithValue(activeDELPenaltyKey{}, activeDELPenaltyCall{executor: e, height: child.BlockHeight(), id: id, held: held})
 	result, err := e.invokePenalty(authorized, Sender(), e.roles.Gateway, data)
 	if err != nil {
 		return err
@@ -102,15 +129,15 @@ func (e *Executor) ApplyOrdinaryDELPenalty(ctx sdk.Context, row validatortypes.E
 	if len(result.Ret) != 0 {
 		return errors.New("Gateway penalty returned unexpected data")
 	}
-	after, err := e.ordinaryPenaltyState(child, validator, owner, id, remaining, afterCursor, nativeSupply)
+	after, err := e.activePenaltyState(child, row, remaining, afterCursor, nativeSupply)
 	if err != nil {
 		return err
 	}
 	receipt := &ethtypes.Receipt{Status: ethtypes.ReceiptStatusSuccessful, Logs: evmtypes.LogsToEthereum(result.Logs)}
-	if err := e.verifyOrdinaryPenaltyLogs(receipt, id, afterCursor, after.stake, burned); err != nil {
+	if err := e.verifyActiveDELPenaltyLogs(receipt, id, afterCursor, after.stake, burned); err != nil {
 		return err
 	}
-	if err := verifyOrdinaryPenaltyDeltas(before, after, burned); err != nil {
+	if err := verifyActiveDELPenaltyDeltas(before, after, burned); err != nil {
 		return err
 	}
 	afterSource, err := e.auth.AuthenticateStakeProfile(child)
@@ -118,14 +145,14 @@ func (e *Executor) ApplyOrdinaryDELPenalty(ctx sdk.Context, row validatortypes.E
 		return err
 	}
 	if afterSource != source {
-		return errors.New("Gateway source changed during ordinary DEL penalty")
+		return errors.New("Gateway source changed during active DEL penalty")
 	}
 	afterStatus, err := e.verifyAnnouncedPenalty(child, validator, beforeCursor, afterCursor, percentage)
 	if err != nil {
 		return err
 	}
 	if afterStatus != status {
-		return errors.New("ordinary DEL penalty changed the Master validator status")
+		return errors.New("active DEL penalty changed the Master validator status")
 	}
 	encoded, err := validatortypes.CanonicalBindingBytes(&row)
 	if err != nil {
@@ -142,28 +169,43 @@ func (e *Executor) ApplyOrdinaryDELPenalty(ctx sdk.Context, row validatortypes.E
 	post.Active = remaining.IsPositive()
 	post.PenaltyCursor = afterCursor.Bytes()
 	post.UpdatedHeight = child.BlockHeight()
-	proof := OrdinaryDELPenaltyProof{Before: pre, After: post, Burned: sdkmath.NewIntFromBigInt(burned)}
+	proof := ActiveDELPenaltyProof{Before: pre, After: post, Burned: sdkmath.NewIntFromBigInt(burned)}
 	if err := project(child, proof); err != nil {
-		return fmt.Errorf("project ordinary DEL penalty: %w", err)
+		return fmt.Errorf("project active DEL penalty: %w", err)
 	}
 	write()
 	return nil
 }
 
 func (e *Executor) ordinaryPenaltyIdentity(ctx sdk.Context, row validatortypes.EVMStakeBinding) (common.Hash, common.Address, common.Address, error) {
+	return e.activePenaltyIdentity(ctx, row, false)
+}
+
+func (e *Executor) activePenaltyIdentity(ctx sdk.Context, row validatortypes.EVMStakeBinding, held bool) (common.Hash, common.Address, common.Address, error) {
 	id := common.BytesToHash(row.StakeID)
 	validator, owner := common.BytesToAddress(row.Validator), common.BytesToAddress(row.Beneficiary)
-	var zero [2 * common.HashLength]byte
+	deadline, start := common.BytesToHash(row.HoldTimestamp), common.BytesToHash(row.RawHoldStartTime)
+	stakeType := validatortypes.StakeType_Coin
+	if held {
+		stakeType = validatortypes.StakeType_CoinHold
+		until, since := deadline.Big(), start.Big()
+		if !until.IsInt64() || !since.IsInt64() || since.Sign() <= 0 || until.Cmp(since) <= 0 ||
+			since.Int64() > ctx.BlockTime().Unix() || since.Int64() != row.NativeHoldStartTime {
+			return id, validator, owner, errors.New("held DEL penalty requires the exact valid hold start and deadline")
+		}
+	} else if deadline != (common.Hash{}) || start != (common.Hash{}) {
+		return id, validator, owner, errors.New("ordinary DEL penalty cannot consume a held position")
+	}
+	var tokenID common.Hash
 	if !row.Active || !row.RawAmount.IsPositive() || row.RawAmount.BigInt().BitLen() > 255 ||
 		row.Kind != validatortypes.EVMStakeBindingKind_EVM_STAKE_BINDING_COIN ||
-		row.NativeTarget.StakeType != validatortypes.StakeType_Coin || row.NativeTarget.ID != identity.BaseDenom ||
+		row.NativeTarget.StakeType != stakeType || row.NativeTarget.ID != identity.BaseDenom ||
 		row.ReserveAsset.ReserveKind != 1 || row.ReserveAsset.NativeDenom != identity.BaseDenom ||
-		!row.RawNftBackedAmount.IsZero() || common.BytesToHash(row.HoldTimestamp) != (common.Hash{}) ||
-		common.BytesToHash(row.RawHoldStartTime) != (common.Hash{}) ||
+		!row.RawNftBackedAmount.IsZero() ||
 		common.BytesToAddress(row.Gateway) != e.roles.Gateway || common.BytesToAddress(row.TokenContract) != e.roles.WrappedDEL ||
 		owner == Sender() || row.UpdatedHeight > ctx.BlockHeight() ||
-		id != crypto.Keccak256Hash(validator[:], owner[:], e.roles.WrappedDEL[:], zero[:]) {
-		return id, validator, owner, errors.New("penalty requires one active ordinary unshared DEL binding")
+		id != crypto.Keccak256Hash(validator[:], owner[:], e.roles.WrappedDEL[:], tokenID[:], deadline[:]) {
+		return id, validator, owner, errors.New("penalty requires one active direct DEL binding without NFT backing")
 	}
 	return id, validator, owner, nil
 }
@@ -191,20 +233,29 @@ func (e *Executor) verifyAnnouncedPenalty(ctx sdk.Context, validator common.Addr
 	return status, nil
 }
 
-type ordinaryDELPenaltyState struct {
+type activeDELPenaltyState struct {
 	payoutState
 	stake               []byte
 	reserve, bankSupply *big.Int
 	reserveCursor       common.Hash
 }
 
-func (e *Executor) ordinaryPenaltyState(ctx sdk.Context, validator, owner common.Address, id common.Hash,
+func (e *Executor) activePenaltyState(ctx sdk.Context, row validatortypes.EVMStakeBinding,
 	amount sdkmath.Int, cursor common.Hash, nativeSupply func(sdk.Context) sdkmath.Int,
-) (ordinaryDELPenaltyState, error) {
-	var out ordinaryDELPenaltyState
+) (activeDELPenaltyState, error) {
+	var out activeDELPenaltyState
+	validator, owner := common.BytesToAddress(row.Validator), common.BytesToAddress(row.Beneficiary)
+	deadline, start := common.BytesToHash(row.HoldTimestamp), common.BytesToHash(row.RawHoldStartTime)
+	id := common.BytesToHash(row.StakeID)
 	want := [8]common.Hash{common.BytesToHash(validator[:]), common.BytesToHash(owner[:]),
-		common.BytesToHash(e.roles.WrappedDEL[:]), common.BigToHash(amount.BigInt()), {}, smallWord(tokenDEL), {}, {}}
-	stake, err := e.read(ctx, e.roles.Gateway, e.gateway, "getStake", len(want)*common.HashLength, validator, owner, e.roles.WrappedDEL)
+		common.BytesToHash(e.roles.WrappedDEL[:]), common.BigToHash(amount.BigInt()), {}, smallWord(tokenDEL), deadline, start}
+	getter := "getStake"
+	args := []interface{}{validator, owner, e.roles.WrappedDEL}
+	if deadline != (common.Hash{}) {
+		getter = "getHoldStake"
+		args = append(args, deadline.Big())
+	}
+	stake, err := e.read(ctx, e.roles.Gateway, e.gateway, getter, len(want)*common.HashLength, args...)
 	if err != nil {
 		return out, err
 	}
@@ -217,7 +268,7 @@ func (e *Executor) ordinaryPenaltyState(ctx sdk.Context, validator, owner common
 	if err != nil {
 		return out, err
 	}
-	_, nft, err := e.directDELPoststate(ctx, validator, owner, 0, amount.BigInt())
+	_, nft, err := e.directDELPoststate(ctx, validator, owner, deadline.Big().Int64(), amount.BigInt())
 	if err != nil {
 		return out, err
 	}
@@ -237,13 +288,13 @@ func (e *Executor) ordinaryPenaltyState(ctx sdk.Context, validator, owner common
 	if supply.IsNil() || supply.IsNegative() || reserveAmount.Cmp(amount.BigInt()) < 0 || balance.wrapped.Cmp(amount.BigInt()) < 0 {
 		return out, errors.New("invalid reserve, WDEL custody or native DEL supply for penalty")
 	}
-	return ordinaryDELPenaltyState{payoutState: balance, stake: stake, reserve: reserveAmount,
+	return activeDELPenaltyState{payoutState: balance, stake: stake, reserve: reserveAmount,
 		bankSupply: supply.BigInt(), reserveCursor: common.BytesToHash(reserve[:common.HashLength])}, nil
 }
 
-func verifyOrdinaryPenaltyDeltas(before, after ordinaryDELPenaltyState, burned *big.Int) error {
+func verifyActiveDELPenaltyDeltas(before, after activeDELPenaltyState, burned *big.Int) error {
 	if before.reserveCursor != after.reserveCursor || new(big.Int).Sub(before.reserve, after.reserve).Cmp(burned) != 0 {
-		return errors.New("ordinary DEL penalty reserve amount or cursor changed unexpectedly")
+		return errors.New("active DEL penalty reserve amount or cursor changed unexpectedly")
 	}
 	return verifyDELBurnDeltas(before.payoutState, after.payoutState, before.bankSupply, after.bankSupply, burned)
 }
@@ -261,7 +312,7 @@ func verifyDELBurnDeltas(before, after payoutState, bankBefore, bankAfter, burne
 	return nil
 }
 
-func (e *Executor) verifyOrdinaryPenaltyLogs(receipt *ethtypes.Receipt, id, cursor common.Hash, stake []byte, burned *big.Int) error {
+func (e *Executor) verifyActiveDELPenaltyLogs(receipt *ethtypes.Receipt, id, cursor common.Hash, stake []byte, burned *big.Int) error {
 	markers, err := e.completions(receipt)
 	if err != nil {
 		return err
@@ -271,7 +322,7 @@ func (e *Executor) verifyOrdinaryPenaltyLogs(receipt *ethtypes.Receipt, id, curs
 		expected += 2
 	}
 	if len(markers) != 0 || len(receipt.Logs) != expected {
-		return errors.New("unexpected logs for one ordinary DEL penalty")
+		return errors.New("unexpected logs for one active DEL penalty")
 	}
 	logs := receipt.Logs
 	if burned.Sign() > 0 {
