@@ -86,7 +86,7 @@ func (k *StateKeeper) initEVMGenesis(ctx sdk.Context, g *types.GenesisState) err
 			return err
 		}
 		if row.active() {
-			claims, err := row.allClaimKeys()
+			claims, err := row.allClaimKeys(true)
 			if err != nil {
 				return err
 			}
@@ -104,6 +104,9 @@ func (k *StateKeeper) initEVMGenesis(ctx sdk.Context, g *types.GenesisState) err
 			}
 		}
 	}
+	if err := state.Set([]byte{validatorFrozenIndexMarker}, []byte{1}); err != nil {
+		return err
+	}
 	var revision [8]byte
 	binary.BigEndian.PutUint64(revision[:], g.BindingRevision)
 	return state.Set([]byte{bindingRevisionKey}, revision[:])
@@ -120,7 +123,7 @@ func (k *StateKeeper) checkEVMExportDomain(ctx sdk.Context) error {
 		return ErrBindingDomain
 	}
 	found := false
-	for _, prefix := range []byte{bindingRevisionKey, stakeBindingPrefix, frozenBindingPrefix, custodyUnitBindingPrefix, custodyAssetBindingPrefix, nativeQueueBindingPrefix, activePenaltyBindingPrefix, withdrawalDuePrefix, withdrawalCursorKey} {
+	for _, prefix := range []byte{bindingRevisionKey, stakeBindingPrefix, frozenBindingPrefix, custodyUnitBindingPrefix, custodyAssetBindingPrefix, nativeQueueBindingPrefix, activePenaltyBindingPrefix, withdrawalDuePrefix, withdrawalCursorKey, validatorFrozenBindingPrefix, validatorFrozenIndexMarker} {
 		if err := k.scan(ctx, prefix, func(_, _ []byte) error { found = true; return nil }); err != nil {
 			return err
 		}
@@ -136,6 +139,9 @@ func (k *StateKeeper) exportEVMGenesis(ctx sdk.Context, g *types.GenesisState) e
 	}
 	if k.bindingDomain == nil {
 		return nil
+	}
+	if _, err := k.hasValidatorFrozenIndex(ctx); err != nil {
+		return err
 	}
 	domain := *k.bindingDomain
 	g.BindingDomain = &domain
@@ -160,7 +166,7 @@ func (k *StateKeeper) exportEVMGenesis(ctx sdk.Context, g *types.GenesisState) e
 				g.EVMFrozenBindings = append(g.EVMFrozenBindings, *row.frozen)
 			}
 			if row.active() {
-				claims, err := row.allClaimKeys()
+				claims, err := k.bindingClaimKeys(ctx, row)
 				if err != nil {
 					return err
 				}
@@ -177,7 +183,7 @@ func (k *StateKeeper) exportEVMGenesis(ctx sdk.Context, g *types.GenesisState) e
 		}
 	}
 	actual := 0
-	for _, prefix := range []byte{custodyUnitBindingPrefix, custodyAssetBindingPrefix, nativeQueueBindingPrefix, activePenaltyBindingPrefix, withdrawalDuePrefix} {
+	for _, prefix := range []byte{custodyUnitBindingPrefix, custodyAssetBindingPrefix, nativeQueueBindingPrefix, activePenaltyBindingPrefix, withdrawalDuePrefix, validatorFrozenBindingPrefix} {
 		if err := k.scan(ctx, prefix, func(key, data []byte) error {
 			want, exists := expected[string(key)]
 			if !exists || !bytes.Equal(want, data) {

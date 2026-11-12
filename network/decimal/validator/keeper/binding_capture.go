@@ -75,7 +75,7 @@ func (k *StateKeeper) bindingCaptureDigest(ctx sdk.Context, prefix []byte, keys 
 			return [32]byte{}, err
 		}
 		out = bindingFrame(out, row.data)
-		claims, err := row.allClaimKeys()
+		claims, err := k.bindingClaimKeys(ctx, row)
 		if err != nil {
 			return [32]byte{}, err
 		}

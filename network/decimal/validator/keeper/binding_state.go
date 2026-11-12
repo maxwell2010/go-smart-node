@@ -173,7 +173,7 @@ func (r *bindingRecord) nft() *types.NFTPositionIdentity {
 	}
 	return r.frozen.NFTPosition
 }
-func (r *bindingRecord) allClaimKeys() ([][]byte, error) {
+func (r *bindingRecord) allClaimKeys(frozenIndex bool) ([][]byte, error) {
 	if r == nil {
 		return nil, nil
 	}
@@ -186,6 +186,12 @@ func (r *bindingRecord) allClaimKeys() ([][]byte, error) {
 		result = append(result, append(key, r.key...))
 		if r.frozen.FreezeType == 1 {
 			result = append(result, withdrawalDueKey(r))
+		}
+		if frozenIndex {
+			result = append(result, validatorFrozenBindingKey(r.frozen.SourceValidator, r.key))
+			if r.frozen.FreezeType == 2 {
+				result = append(result, validatorFrozenBindingKey(r.frozen.DestinationValidator, r.key))
+			}
 		}
 	}
 	p := r.nft()
@@ -202,6 +208,18 @@ func (r *bindingRecord) allClaimKeys() ([][]byte, error) {
 	key := append([]byte{custodyAssetBindingPrefix}, p.Custody.Contract...)
 	result = append(result, append(key, p.Custody.TokenID...))
 	return result, nil
+}
+
+func (k *StateKeeper) bindingClaimKeys(ctx sdk.Context, r *bindingRecord) ([][]byte, error) {
+	var frozenIndex bool
+	if r != nil && r.frozen != nil {
+		var err error
+		frozenIndex, err = k.hasValidatorFrozenIndex(ctx)
+		if err != nil {
+			return nil, err
+		}
+	}
+	return r.allClaimKeys(frozenIndex)
 }
 func recordFromStake(value *types.EVMStakeBinding) (*bindingRecord, error) {
 	if err := value.Validate(); err != nil {
@@ -285,7 +303,7 @@ func (k *StateKeeper) readBindingRow(ctx sdk.Context, key []byte) (*bindingRecor
 	return decodeBindingRecord(key, data)
 }
 func (k *StateKeeper) checkBindingIndexes(ctx sdk.Context, r *bindingRecord) error {
-	keys, err := r.allClaimKeys()
+	keys, err := k.bindingClaimKeys(ctx, r)
 	if err != nil {
 		return err
 	}
@@ -359,7 +377,7 @@ func (k *StateKeeper) lookupBindingIndex(ctx sdk.Context, key []byte) (BindingAs
 	if err = k.checkBindingIndexes(ctx, r); err != nil {
 		return BindingAssignment{}, err
 	}
-	claims, err := r.allClaimKeys()
+	claims, err := k.bindingClaimKeys(ctx, r)
 	if err != nil {
 		return BindingAssignment{}, err
 	}
@@ -518,7 +536,7 @@ func (k *StateKeeper) PrepareBindingPlan(ctx sdk.Context, mutations []BindingMut
 			if record == nil {
 				continue
 			}
-			claims, err := record.allClaimKeys()
+			claims, err := k.bindingClaimKeys(ctx, record)
 			if err != nil {
 				return nil, err
 			}
@@ -539,7 +557,7 @@ func (k *StateKeeper) PrepareBindingPlan(ctx sdk.Context, mutations []BindingMut
 	for _, key := range sortedBindingKeys(p.afterRows) {
 		r := oldRecords[key]
 		if r != nil && r.active() {
-			claims, err := r.allClaimKeys()
+			claims, err := k.bindingClaimKeys(ctx, r)
 			if err != nil {
 				return nil, err
 			}
@@ -554,7 +572,7 @@ func (k *StateKeeper) PrepareBindingPlan(ctx sdk.Context, mutations []BindingMut
 		if r == nil || !r.active() {
 			continue
 		}
-		claims, err := r.allClaimKeys()
+		claims, err := k.bindingClaimKeys(ctx, r)
 		if err != nil {
 			return nil, err
 		}

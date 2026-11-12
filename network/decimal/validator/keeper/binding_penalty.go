@@ -6,6 +6,7 @@ import (
 
 	storetypes "cosmossdk.io/store/types"
 	sdk "github.com/cosmos/cosmos-sdk/types"
+	"github.com/maxwell2010/go-smart-node/network/decimal/validator/types"
 )
 
 var ErrPendingStakePenalties = errors.New("active native stake bindings still require penalty catchup")
@@ -27,7 +28,7 @@ func (k *StateKeeper) extremeActivePenaltyCursor(ctx sdk.Context, validator []by
 	if err = k.checkBindingDomain(ctx); err != nil {
 		return nil, false, err
 	}
-	if len(validator) != 20 || bytes.Equal(validator, make([]byte, 20)) {
+	if !validBindingValidator(validator) {
 		return nil, false, errors.New("invalid native source validator address")
 	}
 	prefix := append([]byte{activePenaltyBindingPrefix}, validator...)
@@ -54,17 +55,52 @@ func (k *StateKeeper) extremeActivePenaltyCursor(ctx sdk.Context, validator []by
 	if err = it.Error(); err != nil {
 		return nil, false, err
 	}
-	if len(key) != 1+20+32+54 || len(sourceKey) != 54 || !bytes.HasPrefix(key, prefix) || !bytes.Equal(key[53:], sourceKey) {
-		return nil, false, errors.New("corrupt active penalty cursor index")
-	}
-	row, err := k.readBindingRow(ctx, sourceKey)
+	row, err := k.loadActivePenaltyRow(ctx, validator, key, sourceKey)
 	if err != nil {
 		return nil, false, err
 	}
-	if row.stake == nil || !row.stake.Active || !bytes.Equal(row.stake.Validator, validator) || !bytes.Equal(activePenaltyBindingKey(row.stake.Validator, row.stake.PenaltyCursor, row.key), key) {
-		return nil, false, errors.New("active penalty cursor index/source row mismatch")
-	}
 	return bytes.Clone(row.stake.PenaltyCursor), true, nil
+}
+
+const activePenaltySourceOffset = 1 + 20 + 32
+
+func (k *StateKeeper) loadActivePenaltyRow(ctx sdk.Context, validator, key, sourceKey []byte) (*bindingRecord, error) {
+	if len(key) != activePenaltySourceOffset+54 || len(sourceKey) != 54 || !bytes.Equal(key[activePenaltySourceOffset:], sourceKey) {
+		return nil, errors.New("corrupt active penalty cursor index")
+	}
+	row, err := k.readBindingRow(ctx, sourceKey)
+	if err != nil {
+		return nil, err
+	}
+	if row.stake == nil || !row.stake.Active || !bytes.Equal(row.stake.Validator, validator) || !bytes.Equal(activePenaltyBindingKey(row.stake.Validator, row.stake.PenaltyCursor, row.key), key) {
+		return nil, errors.New("active penalty cursor index/source row mismatch")
+	}
+	return row, nil
+}
+
+// GetActiveStakePenaltyPage returns active coin and NFT sources for one
+// validator, in full-word cursor and source-key order. Use the continuation
+// only in the same state snapshot. A nil continuation exhausts the prefix.
+func (k *StateKeeper) GetActiveStakePenaltyPage(ctx sdk.Context, validator, after []byte, limit uint32) ([]types.EVMStakeBinding, []byte, error) {
+	if err := k.checkBindingDomain(ctx); err != nil {
+		return nil, nil, err
+	}
+	if !validBindingValidator(validator) {
+		return nil, nil, errors.New("invalid native source validator address")
+	}
+	prefix := append([]byte{activePenaltyBindingPrefix}, validator...)
+	rows, cursor, err := k.validatorBindingPage(ctx, prefix, after, activePenaltySourceOffset, 54, limit,
+		func(key, source []byte) (*bindingRecord, error) {
+			return k.loadActivePenaltyRow(ctx, validator, key, source)
+		})
+	if err != nil {
+		return nil, nil, err
+	}
+	var out []types.EVMStakeBinding
+	for _, row := range rows {
+		out = append(out, *row.stake)
+	}
+	return out, cursor, nil
 }
 
 // GetMinActiveStakePenaltyCursor returns the lowest full uint256 cursor among
