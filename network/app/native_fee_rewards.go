@@ -19,6 +19,10 @@ func (app *App) nativeFeeRewardRecipientPolicy(profile WithdrawalProfile) func(s
 		profile.NFTCenter: true, profile.PositionVault: true, profile.MasterValidator: true,
 		profile.WrappedDEL: true, common.BytesToAddress(authtypes.NewModuleAddress(authtypes.FeeCollectorName)): true,
 	}
+	if profile.customCollateralEnabled() {
+		reserved[profile.TokenCenter] = true
+		reserved[profile.CurveConverter] = true
+	}
 	return func(addr sdk.AccAddress) bool {
 		return len(addr) == common.AddressLength && !reserved[common.BytesToAddress(addr)] && !app.BankKeeper.BlockedAddr(addr)
 	}
