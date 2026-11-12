@@ -92,12 +92,19 @@ func runMasterHistoricalPenalty(t *testing.T, e isolatedBackendEnv, profile owne
 	status := readMaster(ctx(), "getValidatorState", f.validator)[0]
 	assertState := func(ctx sdk.Context, paused bool, count int64) {
 		t.Helper()
-		require.Equal(t, []interface{}{status, paused, big.NewInt(count)}, readMaster(ctx, "getValidatorState", f.validator))
+		state := readMaster(ctx, "getValidatorState", f.validator)
+		require.Len(t, state, 3)
+		require.Equal(t, status, state[0])
+		require.Equal(t, paused, state[1])
+		require.Zero(t, state[2].(*big.Int).Cmp(big.NewInt(count)))
 	}
 	const rate uint16 = 5
 	assertEntry := func(ctx sdk.Context, index, height int64) {
 		t.Helper()
-		require.Equal(t, []interface{}{big.NewInt(height), rate}, readMaster(ctx, "getDuplicateVotePenalty", f.validator, big.NewInt(index)))
+		entry := readMaster(ctx, "getDuplicateVotePenalty", f.validator, big.NewInt(index))
+		require.Len(t, entry, 2)
+		require.Zero(t, entry[0].(*big.Int).Cmp(big.NewInt(height)))
+		require.Equal(t, rate, entry[1])
 	}
 	historicalCommits, ordinaryCommits := 0, 0
 	e.app.EVMKeeper.SetInternalCommitGuard(func(ctx sdk.Context, msg core.Message, _ []*ethtypes.Log) error {

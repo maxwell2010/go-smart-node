@@ -308,7 +308,8 @@ func runIsolatedPositionReader(t *testing.T, e isolatedBackendEnv) {
 	call(0, vault, vaultAddress, new(big.Int), true, "redeemPosition", newPosition, owner)
 	t.Logf("actual isolated StakeSource authentication SDKgas=%d; native capture/pipeline costs separate", cost)
 	if mode := os.Getenv(delLifecycleFixtureEnv); mode == "1" || mode == "hold" || mode == "reset" ||
-		mode == "penalty" || mode == masterHistoricalPenaltyMode || mode == "recovered-deposits" || mode == "recovered-nft-deposit" ||
+		mode == "penalty" || mode == masterHistoricalPenaltyMode || mode == activeHistoricalDELPenaltyMode ||
+		mode == "recovered-deposits" || mode == "recovered-nft-deposit" ||
 		mode == heldPenaltyMode || mode == heldLotBudgetMode || mode == mixedLotBudgetMode ||
 		mode == "frozen-penalty-partial" || mode == "frozen-penalty-full" ||
 		mode == "frozen-held-penalty" || mode == "frozen-held-penalty-full" || mode == frozenHeldLotBudgetMode ||
@@ -322,6 +323,9 @@ func runIsolatedPositionReader(t *testing.T, e isolatedBackendEnv) {
 			return
 		case masterHistoricalPenaltyMode:
 			runMasterHistoricalPenalty(t, e, profile, gateway, master, wrapper, sourceReader, govSetup)
+			return
+		case activeHistoricalDELPenaltyMode:
+			runActiveHistoricalDELPenalty(t, e, profile, gateway, master, wrapper, sourceReader, govSetup)
 			return
 		case "recovered-deposits":
 			runSignedOrdinaryDELPenalty(t, e, profile, gateway, master, wrapper, sourceReader, govSetup, verifyRecoveredDELDeposits)
