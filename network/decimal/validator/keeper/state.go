@@ -13,6 +13,7 @@ import (
 	coreaddress "cosmossdk.io/core/address"
 	"cosmossdk.io/core/store"
 	sdkmath "cosmossdk.io/math"
+	storetypes "cosmossdk.io/store/types"
 	"github.com/cosmos/cosmos-sdk/codec/address"
 	sdk "github.com/cosmos/cosmos-sdk/types"
 	"github.com/cosmos/gogoproto/proto"
@@ -146,7 +147,11 @@ func (k *StateKeeper) put(ctx sdk.Context, key []byte, message proto.Message) er
 	return k.service.OpenKVStore(ctx).Set(key, data)
 }
 func (k *StateKeeper) scan(ctx sdk.Context, prefix byte, visit func([]byte, []byte) error) error {
-	it, e := k.service.OpenKVStore(ctx).Iterator([]byte{prefix}, []byte{prefix + 1})
+	return k.scanPrefix(ctx, []byte{prefix}, visit)
+}
+
+func (k *StateKeeper) scanPrefix(ctx sdk.Context, prefix []byte, visit func([]byte, []byte) error) error {
+	it, e := k.service.OpenKVStore(ctx).Iterator(prefix, storetypes.PrefixEndBytes(prefix))
 	if e != nil {
 		return e
 	}
