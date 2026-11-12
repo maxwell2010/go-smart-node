@@ -2,6 +2,7 @@
 
 import argparse
 import base64
+from collections import Counter
 import hashlib
 import json
 from pathlib import Path
@@ -150,16 +151,49 @@ def allocation_report(data):
     }
 
 
+def verify_launch_plan(report, plan):
+    """Check the economic plan independently of the fixture signing domain."""
+    check(report['denom'] == plan['denom'] and int(report['atomsPerDel']) == 10**plan['decimals'],
+          'allocation plan denomination differs from the launch genesis')
+    total = uint(plan['initial_supply_atoms'], 'planned DEL supply')
+    check(int(report['initialSupplyAtomic']) == total, 'launch DEL supply differs from the plan')
+    reserve_categories = {
+        'initial_wdel_backing': 'wrapped_del_backing',
+        'approved_drc20_reserve': 'drc20_backing',
+        'approved_erc1155_origin_reserve': 'nft_origin_backing',
+    }
+    planned = Counter()
+    for row in plan['bank_allocation']:
+        planned[reserve_categories.get(row['purpose'], 'other_bank_balances')] += uint(row['amount_atoms'], 'planned balance')
+    actual = {key: int(value) for key, value in report['allocationTotalsAtomic'].items()}
+    check(dict(planned) == actual and sum(planned.values()) == total, 'launch reserve and wallet balances differ from the plan')
+
+    expected_stakes = Counter(uint(row['amount_atoms'], 'planned stake') for row in plan['initial_delegations_within_wdel_backing'])
+    expected_backing = sum(expected_stakes.elements())
+    check(expected_backing == planned['wrapped_del_backing'] == int(report['initialStakingAtomicAlreadyInBankSupply']),
+          'launch initial stake must use exactly the planned WDEL backing')
+    check(expected_stakes == Counter(int(row['amountAtomic']) for row in report['genesisDelegations']) and
+          expected_stakes == Counter(int(row['initialStakeAtomic']) for row in report['validators']),
+          'launch delegation and validator stakes differ from the plan')
+    check(all(row['commission'] == plan['validator_commission_fraction'] for row in report['validators']),
+          'launch validator commission differs from the plan')
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--genesis', required=True, type=Path, help='Public genesis previously validated by mcnd')
     parser.add_argument('--output', required=True, type=Path, help='Create a new public allocation report')
+    parser.add_argument('--allocation-plan', type=Path, help='Compare the fixture with a draft DEL allocation plan')
     args = parser.parse_args()
     try:
         with args.genesis.open('rb') as source:
             data = source.read(MAX_GENESIS_BYTES + 1)
         check(0 < len(data) <= MAX_GENESIS_BYTES, 'invalid genesis byte count')
         report = allocation_report(data)
+        if args.allocation_plan:
+            plan = json.loads(args.allocation_plan.read_bytes(), object_pairs_hook=unique_object)
+            verify_launch_plan(report, plan)
+            report['draftAllocationVerified'] = True
         with args.output.open('x', encoding='utf8') as destination:
             json.dump(report, destination, indent=2, sort_keys=True)
             destination.write('\n')

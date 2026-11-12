@@ -6,6 +6,7 @@ import ipaddress
 import json
 from pathlib import Path
 import re
+import signal
 import stat
 import subprocess
 import tempfile
@@ -14,18 +15,21 @@ import time
 from configure_history import validate_fresh_home
 from del_delegation_smoke import balance, write_config
 from mcnd_process_smoke import ProcessOwner, SignalGuard, private_environment, private_namespace, run_command
-from native_consensus_smoke import committed_header, create_replica, decode_pubkey, effective_set, wait_peer_pair, wait_replicas
+from native_consensus_smoke import (
+    check_signatures, committed_header, create_replica, decode_pubkey, effective_set, wait_peer_pair, wait_replicas,
+)
 from withdrawal_genesis_smoke import ADDRESS, SHA256, bech32_payload, check, ethereum, private_bytes, safe_diagnostic
 
 
-CHAIN_ID = "mintcandy_990011-1"
-EVM_CHAIN_ID = 990011
-LABELS = ("a", "b", "c")
-POWERS = (4, 4, 2)
 GENESIS_LIMIT = 64 * 1024 * 1024
 
 
-def load_fixture(directory):
+def load_fixture(directory, *, four_validators=False):
+    if four_validators:
+        evm_id, labels, powers = 990012, ("a", "b", "c", "d"), (10000, 10000, 10000, 10000)
+    else:
+        evm_id, labels, powers = 990011, ("a", "b", "c"), (4, 4, 2)
+    chain_id = f"mintcandy_{evm_id}-1"
     info = directory.lstat()
     check(stat.S_ISDIR(info.st_mode) and stat.S_IMODE(info.st_mode) & 0o077 == 0, "private fixture directory required")
     genesis = private_bytes(directory / "genesis.json", GENESIS_LIMIT)
@@ -34,19 +38,19 @@ def load_fixture(directory):
     doc = json.loads(genesis)
     state = doc["app_state"]
     profile = state["withdrawal_settlement"]
-    check(doc["chain_id"] == CHAIN_ID and int(doc["initial_height"]) == 1 and not doc.get("validators"),
+    check(doc["chain_id"] == chain_id and int(doc["initial_height"]) == 1 and not doc.get("validators"),
           "launch rehearsal requires its CI-only height-one chain and application-derived validators")
     check(all(profile.get(flag) is True for flag in (
         "enable_del_delegation", "enable_del_hold", "enable_nft_delegation", "enable_native_consensus",
         "enable_native_fee_rewards", "enable_native_ibc_v1", "enable_native_governance", "enable_native_duplicate_vote",
     )), "the fixture must enable the full native launch profile")
     expected = json.loads(private_bytes(directory / "expectations.json", 8192))
-    check(expected["chainId"] == CHAIN_ID and expected["evmChainId"] == EVM_CHAIN_ID, "fixture signing domain mismatch")
+    check(expected["chainId"] == chain_id and expected["evmChainId"] == evm_id, "fixture signing domain mismatch")
     check(re.fullmatch(ADDRESS, expected["actor"]) and bech32_payload(expected["actorNative"]) == expected["actor"].lower(),
           "invalid public balance query account")
     validators = expected["validators"]
-    check(tuple(row["name"] for row in validators) == LABELS and
-          tuple(row["initialPower"] for row in validators) == POWERS, "unexpected initial native validator set")
+    check(tuple(row["name"] for row in validators) == labels and
+          tuple(row["initialPower"] for row in validators) == powers, "unexpected initial native validator set")
     keys = []
     identities = set()
     for row in validators:
@@ -79,21 +83,27 @@ def loopback_address(address):
     return f"{parsed.compressed}:{int(port)}" if parsed.version == 4 else f"[{parsed.compressed}]:{int(port)}"
 
 
-def verify_network(nodes, follower, configured, env):
+def listener_addresses(node):
+    ports = (node.p2p, node.p2p + 1, node.grpc)
+    addresses = {f"127.0.0.1:{port}" for port in ports}
+    addresses.update((node.rest.removeprefix("http://"), node.evm.removeprefix("http://")))
+    return addresses
+
+
+def verify_network(nodes, follower, configured, env, *, stopped=None):
     result = subprocess.run(["ss", "-H", "-ltn"], check=True, capture_output=True, text=True, timeout=10, env=env)
     listeners = {loopback_address(line.split()[3]) for line in result.stdout.splitlines() if line.strip()}
+    if stopped is not None:
+        check(not (listeners & listener_addresses(stopped)), "the stopped validator still has a P2P or RPC listener")
     members = {node.node_id: node for node in nodes}
     observed = {}
     for node in nodes:
-        ports = (node.p2p, node.p2p + 1, node.grpc)
-        expected = {f"127.0.0.1:{port}" for port in ports}
-        expected.update((node.rest.removeprefix("http://"), node.evm.removeprefix("http://")))
-        check(expected <= listeners, f"{node.label} is missing a required loopback P2P or RPC listener")
+        check(listener_addresses(node) <= listeners, f"{node.label} is missing a required loopback P2P or RPC listener")
         observations = []
         for peer in node.rpc("net_info")["peers"] or []:
             info = peer["node_info"]
             peer_node = members.get(info["id"])
-            check(peer_node is not None and peer_node is not node and info["network"] == CHAIN_ID,
+            check(peer_node is not None and peer_node is not node and info["network"] == node.chain_id,
                   "unexpected P2P identity in the private network")
             peer_address = loopback_address(info["listen_addr"])
             remote_ip = ipaddress.ip_address(peer["remote_ip"])
@@ -107,10 +117,11 @@ def verify_network(nodes, follower, configured, env):
     return {"listeners": sorted(listeners), "configuredPersistentPeers": configured, "observedPeers": observed}
 
 
-def check_signing(nodes, validators, height):
+def check_signing(nodes, validators, first_height, last_height):
     powers = {row["consensusAddress"]: row["initialPower"] for row in validators}
+    total_power = sum(powers.values())
     seen = set()
-    for at in range(height - 3, height + 1):
+    for at in range(first_height, last_height + 1):
         signers = []
         for node in nodes:
             result = node.rpc(f"commit?height={at}")
@@ -118,12 +129,12 @@ def check_signing(nodes, validators, height):
             check(result["canonical"] is True and int(commit["height"]) == at, "expected canonical Comet commits")
             signed = {row["validator_address"] for row in commit["signatures"]
                       if int(row["block_id_flag"]) == 2 and row["signature"]}
-            check(signed <= powers.keys() and sum(powers[addr] for addr in signed) * 3 > sum(POWERS) * 2,
+            check(signed <= powers.keys() and sum(powers[addr] for addr in signed) * 3 > total_power * 2,
                   "commit must have a quorum of admitted genesis signers")
             signers.append(signed)
         check(all(signed == signers[0] for signed in signers), "nodes disagree on committed signatures")
         seen.update(signers[0])
-    check(seen == powers.keys(), "all three admitted validators must sign after the ordinary peer catches up")
+    check(seen == powers.keys(), "each admitted validator must sign a block during the startup sample")
     return [row["name"] for row in validators if row["consensusAddress"] in seen]
 
 
@@ -133,7 +144,7 @@ def verify_first_block(nodes):
         result = node.rpc("block?height=1")
         header = result["block"]["header"]
         block_hash = result["block_id"]["hash"]
-        check(header["chain_id"] == CHAIN_ID and int(header["height"]) == 1 and re.fullmatch(r"[A-Fa-f0-9]{64}", block_hash),
+        check(header["chain_id"] == node.chain_id and int(header["height"]) == 1 and re.fullmatch(r"[A-Fa-f0-9]{64}", block_hash),
               "missing block 1 in a node's P2P history")
         check(int(node.rpc("status")["sync_info"]["earliest_block_height"]) == 1, "node did not keep history from block 1")
         first.append(block_hash)
@@ -141,14 +152,42 @@ def verify_first_block(nodes):
     return first[0]
 
 
-def run_launch(binary, root, genesis, expected, keys, env, owner, report):
-    options = {"chain_id": CHAIN_ID, "evm_chain_id": EVM_CHAIN_ID}
+def confirm_outage(validators, stopped, rows, powers, owner, report):
+    report["phase"] = "quorum-after-validator-stop"
+    check(stopped.child.poll() is None, "validator exited before the planned stop")
+    owner.stop(stopped.child)
+    check(stopped.child.returncode in (0, -signal.SIGINT), "validator did not exit normally after the planned stop")
+    stop_height = max(int(node.rpc("abci_info")["response"]["last_block_height"]) for node in validators)
+    # A vote for the next height may have been in flight when the process stopped.
+    first_height, last_height = stop_height + 2, stop_height + 4
+    wait_replicas(validators, last_height + 1, 100, report)
+    members = effective_set(validators, rows, last_height, powers)
+    for height in range(first_height, last_height + 1):
+        signers = check_signatures(validators, rows, height, powers, missing=(stopped.label,))
+    signed_power = sum(members[label] for label in signers)
+    total_power = sum(members.values())
+    check(signed_power * 3 > total_power * 2, "the live validators did not sign with more than two thirds of total power")
+    report["outage"] = {
+        "stoppedValidator": stopped.label, "stopExitCode": stopped.child.returncode,
+        "highestCommittedHeightAfterStop": stop_height, "firstCanonicalCommitHeight": first_height,
+        "lastCanonicalCommitHeight": last_height, "signers": signers, "signedPower": signed_power,
+        "totalValidatorPower": total_power, "stoppedValidatorPower": members[stopped.label],
+    }
+
+
+def run_launch(binary, root, genesis, expected, keys, env, owner, report, *, four_validators=False):
+    rows = expected["validators"]
+    powers = tuple(row["initialPower"] for row in rows)
+    options = {"chain_id": expected["chainId"], "evm_chain_id": expected["evmChainId"]}
     validators = [create_replica(binary, root, label, index, genesis, key, env, **options)
-                  for index, (label, key) in enumerate(zip(LABELS, keys, strict=True))]
+                  for index, (label, key) in enumerate(zip((row["name"] for row in rows), keys, strict=True))]
     follower = create_replica(binary, root, "follower", len(validators), genesis, None, env, **options)
     nodes = [*validators, follower]
     check(len({node.node_id for node in nodes}) == len(nodes), "duplicate launch P2P identity")
-    configured = {node.label: configure_peers(node, [peer for peer in validators if peer is not node]) for node in nodes}
+    stopped = validators[-1] if four_validators else None
+    live_validators = [node for node in validators if node is not stopped]
+    configured = {node.label: configure_peers(node, [peer for peer in validators if peer is not node]) for node in validators}
+    configured[follower.label] = configure_peers(follower, live_validators)
     try:
         run_command(binary, validators[0].home, ["genesis", "validate-genesis"], env)
     except RuntimeError as error:
@@ -158,16 +197,22 @@ def run_launch(binary, root, genesis, expected, keys, env, owner, report):
     report["phase"] = "initial-native-consensus"
     for node in validators:
         node.start(binary, env, owner, "launch-validator")
-    wait_replicas(validators, 8, 100, report)
-    effective_set(validators, expected["validators"], 1, POWERS)
+    started_at = wait_replicas(validators, 8, 100, report)
+    effective_set(validators, rows, 1, powers)
+    if stopped is not None:
+        last_startup_height = wait_replicas(validators, started_at + 4, 60, report) - 1
+        report["initialConfirmedSigners"] = check_signing(validators, rows, 1, last_startup_height)
+        report["lastStartupCanonicalCommitHeight"] = last_startup_height
+        confirm_outage(live_validators, stopped, rows, powers, owner, report)
     # The ordinary peer has its own node and signing keys and a clean home.
     # It starts after the validators have committed a history to replay.
     validate_fresh_home(follower.home)
-    tip = min(int(node.rpc("abci_info")["response"]["last_block_height"]) for node in validators)
+    tip = min(int(node.rpc("abci_info")["response"]["last_block_height"]) for node in live_validators)
     report["validatorHeightBeforeJoin"] = tip
     report["phase"] = "ordinary-peer-p2p-catchup"
     follower.start(binary, env, owner, "launch-follower")
-    wait_peer_pair(validators[0], follower, 60, report)
+    nodes = [*live_validators, follower]
+    wait_peer_pair(live_validators[0], follower, 60, report)
     observed_height = wait_replicas(nodes, tip + 5, 150, report)
     deadline = time.monotonic() + 30
     while follower.rpc("status")["sync_info"]["catching_up"]:
@@ -178,8 +223,11 @@ def run_launch(binary, root, genesis, expected, keys, env, owner, report):
     report["block1Hash"] = verify_first_block(nodes)
     report["verifiedHeight"] = height
     report["appHash"] = committed_header(nodes, height + 1)["app_hash"]
-    report["validators"] = effective_set(nodes, expected["validators"], height, POWERS)
-    report["confirmedSigners"] = check_signing(nodes, expected["validators"], height)
+    report["validators"] = effective_set(nodes, rows, height, powers)
+    if stopped is None:
+        report["confirmedSigners"] = check_signing(nodes, rows, height - 3, height)
+    else:
+        report["confirmedSigners"] = check_signatures(nodes, rows, height, powers, missing=(stopped.label,))
     info = follower.rpc("status")["validator_info"]
     check(int(info["voting_power"]) == 0 and info["address"] not in {row["consensusAddress"] for row in expected["validators"]},
           "ordinary peer unexpectedly participates in validator consensus")
@@ -187,19 +235,20 @@ def run_launch(binary, root, genesis, expected, keys, env, owner, report):
     report["phase"] = "rpc-and-peer-evidence"
     values = set()
     for node in nodes:
-        check(int(ethereum("eth_chainId", [], base=node.evm), 16) == EVM_CHAIN_ID, "wrong JSON-RPC signing domain")
+        check(int(ethereum("eth_chainId", [], base=node.evm), 16) == expected["evmChainId"], "wrong JSON-RPC signing domain")
         values.add(balance(expected["actor"], expected["actorNative"], height, node.evm, node.rest))
     check(len(values) == 1 and next(iter(values)) > 0, "nodes disagree on the positive native and EVM balance")
     first_balance = balance(expected["actor"], expected["actorNative"], 1, follower.evm, follower.rest)
     check(first_balance == next(iter(values)), "ordinary peer cannot query the same funded state at block 1")
     report["rpc"] = {"historicalHeight": 1, "verifiedHeight": height, "delAtomic": str(first_balance)}
-    report.update(verify_network(nodes, follower, configured, env))
+    report.update(verify_network(nodes, follower, configured, env, stopped=stopped))
 
 
 def main(argv=None, signals=None):
     parser = argparse.ArgumentParser(description=__doc__)
     for flag in ("binary", "binary-sha256", "archive-sha256", "source-commit", "fixture", "home-parent", "report"):
         parser.add_argument("--" + flag, required=True)
+    parser.add_argument("--four-validators", action="store_true", help="check quorum and peer catchup after stopping one of four validators")
     args = parser.parse_args(argv)
     report = {"status": "FAIL", "phase": "fixture-provenance", "initialHeight": 1}
     with Path(args.report).open("x", encoding="utf8") as stream:
@@ -211,9 +260,9 @@ def main(argv=None, signals=None):
             binary = str(Path(args.binary).resolve(strict=True))
             with open(binary, "rb") as daemon:
                 check(hashlib.file_digest(daemon, "sha256").hexdigest() == args.binary_sha256, "packaged daemon hash differs")
-            genesis, expected, keys = load_fixture(Path(args.fixture))
+            genesis, expected, keys = load_fixture(Path(args.fixture), four_validators=args.four_validators)
             report.update(sourceCommit=args.source_commit, binarySha256=args.binary_sha256, archiveSha256=args.archive_sha256,
-                          genesisSha256=hashlib.sha256(genesis).hexdigest(), chainId=CHAIN_ID, evmChainId=EVM_CHAIN_ID)
+                          genesisSha256=hashlib.sha256(genesis).hexdigest(), chainId=expected["chainId"], evmChainId=expected["evmChainId"])
             with tempfile.TemporaryDirectory(prefix="mcnd-native-launch-", dir=args.home_parent) as directory:
                 root = Path(directory)
                 env = private_environment(root)
@@ -221,7 +270,7 @@ def main(argv=None, signals=None):
                 check(version["server_name"] == "mcnd" and version["commit"] == args.source_commit, "packaged daemon revision differs")
                 owner = ProcessOwner(signals)
                 try:
-                    run_launch(binary, root, genesis, expected, keys, env, owner, report)
+                    run_launch(binary, root, genesis, expected, keys, env, owner, report, four_validators=args.four_validators)
                 finally:
                     owner.close()
             report.update(status="PASS", phase="complete")

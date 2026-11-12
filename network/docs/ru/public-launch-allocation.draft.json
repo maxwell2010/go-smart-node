@@ -1,0 +1,115 @@
+{
+  "status": "draft_unapproved",
+  "chain_id": "mintcandy_9905401-1",
+  "evm_chain_id": "9905401",
+  "denom": "del",
+  "decimals": 18,
+  "initial_supply_atoms": "100000000000000000000000",
+  "bank_allocation": [
+    {
+      "purpose": "initial_wdel_backing",
+      "amount_atoms": "40000000000000000000000",
+      "bank_address": null
+    },
+    {
+      "purpose": "community_recipient_wallets",
+      "amount_atoms": "45000000000000000000000",
+      "approved_recipients": null
+    },
+    {
+      "purpose": "operating_treasury",
+      "amount_atoms": "14000000000000000000000",
+      "bank_address": null,
+      "proposed_threshold": 3,
+      "proposed_signers": 5
+    },
+    {
+      "purpose": "validator_fee_wallet",
+      "validator_slot": "V1",
+      "amount_atoms": "100000000000000000000",
+      "bank_address": null
+    },
+    {
+      "purpose": "validator_fee_wallet",
+      "validator_slot": "V2",
+      "amount_atoms": "100000000000000000000",
+      "bank_address": null
+    },
+    {
+      "purpose": "validator_fee_wallet",
+      "validator_slot": "V3",
+      "amount_atoms": "100000000000000000000",
+      "bank_address": null
+    },
+    {
+      "purpose": "validator_fee_wallet",
+      "validator_slot": "V4",
+      "amount_atoms": "100000000000000000000",
+      "bank_address": null
+    },
+    {
+      "purpose": "ibc_relayer_fee_wallet",
+      "relayer_slot": "R1",
+      "amount_atoms": "100000000000000000000",
+      "bank_address": null
+    },
+    {
+      "purpose": "ibc_relayer_fee_wallet",
+      "relayer_slot": "R2",
+      "amount_atoms": "100000000000000000000",
+      "bank_address": null
+    },
+    {
+      "purpose": "approved_drc20_reserve",
+      "amount_atoms": "300000000000000000000",
+      "bank_address": null,
+      "contract_address": null,
+      "asset_parameters": null
+    },
+    {
+      "purpose": "approved_erc1155_origin_reserve",
+      "amount_atoms": "100000000000000000000",
+      "bank_address": null,
+      "contract_address": null,
+      "token_id": null,
+      "units": 100,
+      "reserve_per_unit_atoms": "1000000000000000000",
+      "approved_owners": null
+    }
+  ],
+  "initial_delegations_within_wdel_backing": [
+    {
+      "validator_slot": "V1",
+      "operator_address": null,
+      "beneficiary_address": null,
+      "amount_atoms": "10000000000000000000000",
+      "expected_voting_power": "10000"
+    },
+    {
+      "validator_slot": "V2",
+      "operator_address": null,
+      "beneficiary_address": null,
+      "amount_atoms": "10000000000000000000000",
+      "expected_voting_power": "10000"
+    },
+    {
+      "validator_slot": "V3",
+      "operator_address": null,
+      "beneficiary_address": null,
+      "amount_atoms": "10000000000000000000000",
+      "expected_voting_power": "10000"
+    },
+    {
+      "validator_slot": "V4",
+      "operator_address": null,
+      "beneficiary_address": null,
+      "amount_atoms": "10000000000000000000000",
+      "expected_voting_power": "10000"
+    }
+  ],
+  "validator_commission_fraction": "0.050000000000000000",
+  "fee_collector_atoms": "0",
+  "isolated_position_vault_atoms": "0",
+  "reward_source": "collected_del_transaction_fees",
+  "issuance_after_genesis": false
+}

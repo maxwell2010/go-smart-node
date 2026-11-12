@@ -3,7 +3,7 @@ import hashlib
 import json
 import unittest
 
-from native_launch_allocation import allocation_report
+from native_launch_allocation import allocation_report, verify_launch_plan
 from withdrawal_genesis_smoke import ALPHABET
 
 
@@ -87,6 +87,29 @@ class LaunchAllocationTest(unittest.TestCase):
     def test_rejects_ambiguous_json(self):
         with self.assertRaisesRegex(ValueError, 'duplicate field'):
             allocation_report(b'{"chain_id":"a","chain_id":"b"}')
+
+    def test_checks_draft_against_exact_reserves_and_validator_stakes(self):
+        state = self.doc['app_state']
+        state['bank']['balances'] = [row for row in state['bank']['balances']
+                                     if row['address'] not in (address(0), address(7))]
+        state['bank']['supply'] = [coin(143)]
+        state['coin']['params']['base_volume'] = '143'
+        state['validator']['delegations'][0]['stake']['stake'] = coin(20)
+        report = allocation_report(self.encode())
+        plan = {
+            'denom': 'del', 'decimals': 18, 'initial_supply_atoms': '143',
+            'bank_allocation': [{'purpose': purpose, 'amount_atoms': str(amount)} for purpose, amount in (
+                ('initial_wdel_backing', 20), ('approved_erc1155_origin_reserve', 8),
+                ('approved_drc20_reserve', 25), ('community_recipient_wallets', 90),
+            )],
+            'initial_delegations_within_wdel_backing': [{'amount_atoms': '20'}],
+            'validator_commission_fraction': '0.000000000000000000',
+        }
+        verify_launch_plan(report, plan)
+        report['allocationTotalsAtomic']['drc20_backing'] = '26'
+        report['allocationTotalsAtomic']['nft_origin_backing'] = '7'
+        with self.assertRaisesRegex(ValueError, 'reserve and wallet balances'):
+            verify_launch_plan(report, plan)
 
 
 if __name__ == '__main__':

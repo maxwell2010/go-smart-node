@@ -91,9 +91,9 @@ func (h nativeBurnReceiptControl) PostTxProcessing(_ sdk.Context, _ common.Addre
 // process-global EVM configuration, patches storage or broadcasts transactions.
 func TestOwnedAppSignedRegistryBootstrap(t *testing.T) {
 	chainID, evmChainID := "mintcandy_990001-1", uint64(990001)
-	launchRehearsal := os.Getenv(nativeLaunchRehearsalEnv) == "1"
+	launch, launchRehearsal := nativeLaunchSpecForMode(os.Getenv(nativeLaunchRehearsalEnv))
 	if launchRehearsal {
-		chainID, evmChainID = nativeLaunchChainID, nativeLaunchEVMChainID
+		chainID, evmChainID = launch.chainID, launch.evmID
 		require.NotEmpty(t, os.Getenv(nativeConsensusDaemonFixtureEnv), "launch rehearsal requires a private fixture directory")
 	}
 	nftFixturePhase := os.Getenv(signedNFTAdmissionPhaseEnv)
@@ -107,15 +107,19 @@ func TestOwnedAppSignedRegistryBootstrap(t *testing.T) {
 	var rejectedNativeBurns uint64
 	require.False(t, a.EVMKeeper.HasHooks(), "the control must not overwrite production hooks")
 	a.EVMKeeper.SetHooks(nativeBurnReceiptControl{reject: &rejectNativeBurn, rejected: &rejectedNativeBurns, topic: primitiveABI.Events["NativeBurn"].ID})
-	keys := make([]*ecdsa.PrivateKey, 5)
-	accounts := make([]authtypes.GenesisAccount, 5)
-	balances := make([]banktypes.Balance, 5)
-	funds := sdk.NewCoins(sdk.NewCoin(identity.BaseDenom, math.NewInt(10000).Mul(math.NewInt(1_000_000_000_000_000_000))))
+	accountCount, funding := 5, int64(10_000)
+	if launch.fourValidators() {
+		accountCount, funding = launch.accountCount, 20_000
+	}
+	keys := make([]*ecdsa.PrivateKey, accountCount)
+	accounts := make([]authtypes.GenesisAccount, accountCount)
+	balances := make([]banktypes.Balance, accountCount)
+	funds := sdk.NewCoins(sdk.NewCoin(identity.BaseDenom, math.NewIntWithDecimal(funding, 18)))
 	for i := range keys {
 		key, err := registryFixtureKey(i, deterministicAccounts)
 		require.NoError(t, err)
 		if launchRehearsal {
-			key = nativeLaunchAccountKey(i)
+			key = nativeLaunchAccountKey(i, launch.fourValidators())
 		}
 		keys[i], err = crypto.ToECDSA(key.Bytes())
 		require.NoError(t, err)
@@ -123,12 +127,20 @@ func TestOwnedAppSignedRegistryBootstrap(t *testing.T) {
 		require.Equal(t, crypto.PubkeyToAddress(keys[i].PublicKey).Bytes(), accounts[i].GetAddress().Bytes())
 		balances[i] = banktypes.Balance{Address: accounts[i].GetAddress().String(), Coins: funds}
 	}
+	if launch.fourValidators() {
+		key := nativeFourLaunchTreasury()
+		accounts = append(accounts, authtypes.NewBaseAccount(sdk.AccAddress(key.Address()), key, uint64(accountCount), 0))
+	}
 	signer := cmted25519.GenPrivKey()
 	if nftFixturePhase != "" {
 		signer = cmted25519.GenPrivKeyFromSecret([]byte("MintCandy isolated NFT fixture consensus signer"))
 	}
 	if launchRehearsal {
-		signer = cmted25519.GenPrivKeyFromSecret([]byte("MintCandy isolated launch rehearsal deployment signer"))
+		scope := "MintCandy isolated launch rehearsal deployment signer"
+		if launch.fourValidators() {
+			scope = launch.keyScope + "deployment signer"
+		}
+		signer = cmted25519.GenPrivKeyFromSecret([]byte(scope))
 	}
 	validator := cmttypes.NewValidator(signer.PubKey(), 1)
 	vals := cmttypes.NewValidatorSet([]*cmttypes.Validator{validator})

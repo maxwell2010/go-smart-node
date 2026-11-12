@@ -70,7 +70,7 @@ func exportNativeConsensusDaemonFixture(t *testing.T, e isolatedBackendEnv, dir 
 	key := e.keys[3]
 	actor := crypto.PubkeyToAddress(key.PublicKey)
 	beneficiary := sdk.AccAddress(actor.Bytes()).String()
-	launchRehearsal := os.Getenv(nativeLaunchRehearsalEnv) == "1"
+	launch, launchRehearsal := nativeLaunchSpecForMode(os.Getenv(nativeLaunchRehearsalEnv))
 	fullUpgrade := launchRehearsal || os.Getenv(nativeConsensusFullUpgradeEnv) == "1"
 	feeRewards := fullUpgrade || os.Getenv(nativeConsensusFeeRewardsEnv) == "1"
 	ibcV1 := fullUpgrade || os.Getenv(nativeConsensusIBCV1Env) == "1"
@@ -86,18 +86,18 @@ func exportNativeConsensusDaemonFixture(t *testing.T, e isolatedBackendEnv, dir 
 	if fullUpgrade {
 		require.True(t, upgradeGovernance && nft != nil && !downtime && !jailRecovery && !heldDowntime, "full upgrade requires its own fixture and approved NFT origin")
 	}
-	initial, after := [3]int64{2, 1, 0}, [3]int64{2, 0, 3}
+	initial, after := []int64{2, 1, 0}, []int64{2, 0, 3}
 	keyScope := "mintcandy native consensus process fixture "
 	if fullUpgrade {
 		keyScope = "mintcandy full profile upgrade process fixture "
 	}
 	if launchRehearsal {
-		initial, after = nativeLaunchInitialPowers, nativeLaunchInitialPowers
-		keyScope = nativeLaunchConsensusKeyScope
+		initial, after = launch.powers, launch.powers
+		keyScope = launch.keyScope
 	}
 	if downtime {
 		require.False(t, feeRewards || ibcV1, "the ordinary DEL downtime fixture has a separate profile")
-		initial, after = [3]int64{3, 3, 2}, [3]int64{3, 3, 0}
+		initial, after = []int64{3, 3, 2}, []int64{3, 3, 0}
 		keyScope = "mintcandy native ordinary del downtime process fixture "
 	}
 	const jailRecoveryDuration = 60 * time.Second
@@ -105,11 +105,11 @@ func exportNativeConsensusDaemonFixture(t *testing.T, e isolatedBackendEnv, dir 
 		keyScope = "mintcandy native ordinary del jail recovery process fixture "
 	}
 	if heldDowntime {
-		initial, after = [3]int64{3, 3, 0}, [3]int64{3, 3, 2}
+		initial, after = []int64{3, 3, 0}, []int64{3, 3, 2}
 		keyScope = "mintcandy native held del downtime process fixture "
 	}
 	if nft != nil && !fullUpgrade {
-		initial, after = [3]int64{3, 3, 0}, [3]int64{3, 3, 2}
+		initial, after = []int64{3, 3, 0}, []int64{3, 3, 2}
 		keyScope = "mintcandy native NFT downtime process fixture "
 	}
 	if historical {
@@ -117,20 +117,23 @@ func exportNativeConsensusDaemonFixture(t *testing.T, e isolatedBackendEnv, dir 
 		if nft != nil {
 			require.True(t, os.Getenv(nativeHistoricalMaxNFTPhaseEnv) == "seed" || os.Getenv(nativeCustomNFTPhaseEnv) == "seed")
 		}
-		initial, after = [3]int64{4, 4, 2}, [3]int64{4, 4, 0}
+		initial, after = []int64{4, 4, 2}, []int64{4, 4, 0}
 		keyScope = nativeHistoricalConsensusKeyScope
 	}
 	commission := sdkmath.LegacyZeroDec()
 	if feeRewards {
 		commission = sdkmath.LegacyMustNewDecFromStr("0.25")
 	}
+	if launch.fourValidators() {
+		commission = sdkmath.LegacyMustNewDecFromStr("0.05")
+	}
 	collector := authtypes.NewModuleAddress(authtypes.FeeCollectorName)
 	nativeKeeper := e.app.NativeValidatorKeeper
 	domain, ok := nativeKeeper.ConfiguredEVMSourceDomain()
 	require.True(t, ok)
 	if launchRehearsal {
-		require.Equal(t, nativeLaunchChainID, domain.ChainID)
-		require.Equal(t, nativeLaunchEVMChainID, domain.EVMChainID)
+		require.Equal(t, launch.chainID, domain.ChainID)
+		require.Equal(t, launch.evmID, domain.EVMChainID)
 	}
 	var custom *nativeCustomCollateralGenesisFixture
 	if launchRehearsal || os.Getenv(nativeCustomCollateralGenesisPhaseEnv) == "seed" {
@@ -139,8 +142,11 @@ func exportNativeConsensusDaemonFixture(t *testing.T, e isolatedBackendEnv, dir 
 		if os.Getenv(nativeCustomNFTMaxEnv) == "1" && nft != nil {
 			fixtureVolume = 2*int64(nft.units) + 8
 		}
+		if launch.fourValidators() {
+			fixtureVolume = launch.drc20Reserve
+		}
 		custom = seedNativeCustomCollateralGenesis(t, e, profile, gov, fixtureVolume)
-		if launchRehearsal || os.Getenv(nativeCustomNFTPhaseEnv) == "seed" {
+		if (launchRehearsal && !launch.fourValidators()) || os.Getenv(nativeCustomNFTPhaseEnv) == "seed" {
 			require.NotNil(t, nft)
 			nft.mintCustom(t, e, custom, actor)
 		}
@@ -153,7 +159,8 @@ func exportNativeConsensusDaemonFixture(t *testing.T, e isolatedBackendEnv, dir 
 	}
 	var masterValidators []masterValidator
 	var validators []nativeConsensusFixtureValidator
-	for i, name := range []string{"a", "b", "c"} {
+	for i := range initial {
+		name := string("abcd"[i])
 		// Reproducible keys scoped to the isolated CI chain and private homes.
 		signer := cmted25519.GenPrivKeyFromSecret([]byte(keyScope + name))
 		pub := signer.PubKey()
@@ -162,11 +169,16 @@ func exportNativeConsensusDaemonFixture(t *testing.T, e isolatedBackendEnv, dir 
 			address = crypto.PubkeyToAddress(e.keys[2].PublicKey)
 			require.NotEqual(t, common.BytesToAddress(pub.Address()), address)
 		}
+		reward := crypto.PubkeyToAddress(e.keys[i].PublicKey)
+		if launch.fourValidators() {
+			reward = crypto.PubkeyToAddress(nativeFourLaunchStakeKey(e.keys, i).PublicKey)
+			address = reward
+			require.NotEqual(t, common.BytesToAddress(pub.Address()), address)
+		}
 		operator, err := nativeKeeper.ValidatorAddressCodec().BytesToString(address.Bytes())
 		require.NoError(t, err)
 		moniker := "native-consensus-fixture-" + name
 		publicKey := base64.StdEncoding.EncodeToString(pub.Bytes())
-		reward := crypto.PubkeyToAddress(e.keys[i].PublicKey)
 		rewardNative := sdk.AccAddress(reward.Bytes()).String()
 		meta, err := json.Marshal(map[string]interface{}{
 			"operator_address": operator, "reward_address": reward.Hex(), "consensus_pubkey": publicKey,
@@ -211,12 +223,16 @@ func exportNativeConsensusDaemonFixture(t *testing.T, e isolatedBackendEnv, dir 
 		return data
 	}
 	var seeded int
-	for _, validator := range validators {
+	for i, validator := range validators {
 		if validator.Initial == 0 {
 			continue
 		}
 		e.nextGasLimit(gasLimit)
-		e.send(key, &profile.Gateway, amount(validator.Initial).BigInt(),
+		stakeKey := key
+		if launch.fourValidators() {
+			stakeKey = nativeFourLaunchStakeKey(e.keys, i)
+		}
+		e.send(stakeKey, &profile.Gateway, amount(validator.Initial).BigInt(),
 			pack(gateway, "delegateDEL", common.HexToAddress(validator.EVM)), true)
 		seeded++
 	}
@@ -237,6 +253,13 @@ func exportNativeConsensusDaemonFixture(t *testing.T, e isolatedBackendEnv, dir 
 	nativeGenesis.Params.MaxValidators = 2
 	if launchRehearsal {
 		nativeGenesis.Params.MaxValidators = uint32(len(validators))
+	}
+	if launch.fourValidators() {
+		nativeGenesis.Params.MaxValidators = 16
+		nativeGenesis.Params.SignedBlocksWindow = 1000
+		nativeGenesis.Params.MinSignedPerWindow = sdkmath.LegacyMustNewDecFromStr("0.50")
+		nativeGenesis.Params.SlashFractionDowntime = sdkmath.LegacyMustNewDecFromStr("0.01")
+		nativeGenesis.Params.DowntimeJailDuration = time.Hour
 	}
 	if downtime {
 		nativeGenesis.Params.MaxValidators = 3
@@ -283,6 +306,11 @@ func exportNativeConsensusDaemonFixture(t *testing.T, e isolatedBackendEnv, dir 
 		}
 	}
 	bank.Balances = balances
+	if launch.fourValidators() {
+		require.NotNil(t, custom)
+		require.NotNil(t, nft)
+		applyNativeFourLaunchAllocation(t, &bank, profile.WrappedDEL, common.HexToAddress(custom.coin.DRC20Contract), nft.address)
+	}
 	genesis[banktypes.ModuleName] = cdc.MustMarshalJSON(&bank)
 	profile.EnableNativeConsensus = true
 	profile.EnableNativeFeeRewards = feeRewards
@@ -366,7 +394,7 @@ func exportNativeConsensusDaemonFixture(t *testing.T, e isolatedBackendEnv, dir 
 	}
 	write("genesis.json", body)
 	if launchRehearsal {
-		checkNativeLaunchPublicGenesis(t, body)
+		checkNativeLaunchPublicGenesis(t, body, launch)
 		require.NoError(t, os.Mkdir(filepath.Join(dir, "public"), 0700))
 		write("public/genesis.json", body)
 	}

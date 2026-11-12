@@ -24,6 +24,7 @@ type nativeNFTDowntimeFixture struct {
 	address      common.Address
 	tokenID      common.Hash
 	units        uint32
+	unitReserve  int64
 	reserveDenom string
 }
 
@@ -32,16 +33,21 @@ const nativeConsensusNFTDowntimeEnv = "MCND_NATIVE_CONSENSUS_NFT_DOWNTIME"
 func mintNativeNFTDowntimeFixture(t *testing.T, e isolatedBackendEnv, origin contracts.Artifact, address, beneficiary common.Address, units uint32) nativeNFTDowntimeFixture {
 	t.Helper()
 	fixture := newNativeNFTFixture(origin, address, units)
-	input, err := origin.ABI.Pack("mintByDEL", beneficiary, fixture.tokenID.Big(), big.NewInt(int64(units)), "ipfs://native-nft-downtime")
+	fixture.mintDEL(t, e, beneficiary)
+	return fixture
+}
+
+func (f nativeNFTDowntimeFixture) mintDEL(t *testing.T, e isolatedBackendEnv, beneficiary common.Address) {
+	t.Helper()
+	input, err := f.origin.ABI.Pack("mintByDEL", beneficiary, f.tokenID.Big(), big.NewInt(int64(f.units)), "ipfs://native-nft-downtime")
 	require.NoError(t, err)
 	e.nextGasLimit(24_000_000)
-	e.send(e.keys[0], &address, sdkmath.NewIntWithDecimal(2*int64(units), 18).BigInt(), input, true)
-	return fixture
+	e.send(e.keys[0], &f.address, sdkmath.NewIntWithDecimal(f.unitReserve*int64(f.units), 18).BigInt(), input, true)
 }
 
 func newNativeNFTFixture(origin contracts.Artifact, address common.Address, units uint32) nativeNFTDowntimeFixture {
 	tokenID := common.BigToHash(new(big.Int).Add(new(big.Int).Lsh(big.NewInt(1), 224), big.NewInt(401)))
-	return nativeNFTDowntimeFixture{origin: origin, address: address, tokenID: tokenID, units: units, reserveDenom: identity.BaseDenom}
+	return nativeNFTDowntimeFixture{origin: origin, address: address, tokenID: tokenID, units: units, unitReserve: 2, reserveDenom: identity.BaseDenom}
 }
 
 func (f *nativeNFTDowntimeFixture) mintCustom(t *testing.T, e isolatedBackendEnv, custom *nativeCustomCollateralGenesisFixture, beneficiary common.Address) {
@@ -49,7 +55,7 @@ func (f *nativeNFTDowntimeFixture) mintCustom(t *testing.T, e isolatedBackendEnv
 	token := e.load("DRC20")
 	currency := common.HexToAddress(custom.coin.DRC20Contract)
 	creator := crypto.PubkeyToAddress(e.keys[0].PublicKey)
-	reserve := sdkmath.NewIntWithDecimal(2*int64(f.units), 18).BigInt()
+	reserve := sdkmath.NewIntWithDecimal(f.unitReserve*int64(f.units), 18).BigInt()
 	send := func(signer int, artifact contracts.Artifact, target common.Address, method string, args ...interface{}) {
 		t.Helper()
 		data, err := artifact.ABI.Pack(method, args...)
@@ -82,7 +88,7 @@ func (f nativeNFTDowntimeFixture) addGenesis(t *testing.T, e isolatedBackendEnv,
 	nft.Collections = []nfttypes.Collection{
 		{Creator: beneficiary, Denom: signedNFTNativeOriginDenom, Supply: 1, TypeNft: nfttypes.NftType_NFT1155,
 			AddressDRC: f.address.Hex(), Tokens: nfttypes.Tokens{{Creator: beneficiary, Denom: signedNFTNativeOriginDenom,
-				ID: signedNFTNativeOriginID, URI: "ipfs://native-nft-downtime", Reserve: sdk.NewCoin(f.reserveDenom, sdkmath.NewIntWithDecimal(2, 18)),
+				ID: signedNFTNativeOriginID, URI: "ipfs://native-nft-downtime", Reserve: sdk.NewCoin(f.reserveDenom, sdkmath.NewIntWithDecimal(f.unitReserve, 18)),
 				Minted: f.units, SubTokens: units}}},
 		{Creator: creator, Denom: signedNFTNativeVaultDenom, TypeNft: nfttypes.NftType_NFT721, AddressDRC: profile.PositionVault.Hex()},
 	}
