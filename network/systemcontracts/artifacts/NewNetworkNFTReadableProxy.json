@@ -161,9 +161,9 @@
     "NewNetworkReserveNFTs.sol": "033a39be984b2f5271899b93ac054618a66ad84ca4bcc039e02bb9a496d6c894",
     "NewNetworkTokenCenter.sol": "c2d89afa513c9cb9ad8702c25b2553ac73590d85c47cd7df014f573bb721f593"
   },
-  "freshValidatorSourceSha256": "6843a80ea4c04421cdcc8fe0235000cd0a90667219829ba482f520f51ccca4a1",
+  "freshValidatorSourceSha256": "e07f194686532a2b5616e2eab0d15905a55f4a14b5155957314c56fa5b45c60c",
   "immutableReferences": {
-    "18577": [
+    "18674": [
       {
         "length": 32,
         "start": 321
@@ -173,7 +173,7 @@
         "start": 589
       }
     ],
-    "7413": [
+    "7510": [
       {
         "length": 32,
         "start": 63
@@ -187,7 +187,7 @@
         "start": 467
       }
     ],
-    "7415": [
+    "7512": [
       {
         "length": 32,
         "start": 249
@@ -199,15 +199,15 @@
     ]
   },
   "immutableVariables": {
-    "18577": {
+    "18674": {
       "key": "owned/DecimalNFTCenter.sol:BeaconProxy._beacon",
       "type": "address"
     },
-    "7413": {
+    "7510": {
       "key": "NewNetworkReadableProxies.sol:NewNetworkNFTReadableProxy.FACTORY",
       "type": "address"
     },
-    "7415": {
+    "7512": {
       "key": "NewNetworkReadableProxies.sol:NewNetworkNFTReadableProxy.FAMILY",
       "type": "uint8"
     }

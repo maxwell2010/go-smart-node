@@ -1125,7 +1125,7 @@
     "NewNetworkReserveNFTs.sol": "033a39be984b2f5271899b93ac054618a66ad84ca4bcc039e02bb9a496d6c894",
     "NewNetworkTokenCenter.sol": "c2d89afa513c9cb9ad8702c25b2553ac73590d85c47cd7df014f573bb721f593"
   },
-  "freshValidatorSourceSha256": "6843a80ea4c04421cdcc8fe0235000cd0a90667219829ba482f520f51ccca4a1",
+  "freshValidatorSourceSha256": "e07f194686532a2b5616e2eab0d15905a55f4a14b5155957314c56fa5b45c60c",
   "immutableReferences": {},
   "immutableVariables": {},
   "pauseSourcePatchesSha256": "e2a23d7c26ce7c94b098eb20554e2b27aa1a7dd5ee101263efb4d452b1e6fd06",
