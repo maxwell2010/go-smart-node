@@ -8,6 +8,24 @@ contract NewNetworkMasterValidator is DecimalMasterValidator {
     error InvalidFreshInitialization();
     error InvalidPenaltyReadRange();
 
+    error InvalidDuplicateVotePenalty();
+
+    event ValidatorDuplicateVotePenalty(
+        address indexed validator, uint256 indexed penaltyIndex, uint256 indexed infractionHeight, uint16 percentage
+    );
+
+    struct DuplicateVoteStorage {
+        mapping(address => mapping(uint256 => uint256)) heightByIndex;
+        mapping(address => mapping(uint256 => bool)) recordedHeight;
+    }
+
+    bytes32 private constant DUPLICATE_VOTE_STORAGE = keccak256("mintcandy.master-validator.duplicate-vote.v1");
+
+    function _duplicateVoteStorage() private pure returns (DuplicateVoteStorage storage state) {
+        bytes32 slot = DUPLICATE_VOTE_STORAGE;
+        assembly { state.slot := slot }
+    }
+
     constructor() { _disableInitializers(); }
 
     // Executed by NewNetworkProxyBootstrap while its constructor-only
@@ -36,6 +54,30 @@ contract NewNetworkMasterValidator is DecimalMasterValidator {
     /// @notice Bounded readers for native reconciliation; no monetary change.
     function getPenaltyCount(address validator) external view returns (uint256) {
         return _getValidatorStorage()._validators[validator].penaltyPercantages.length;
+    }
+
+    /// @notice Records the height supplied by the native evidence coordinator.
+    /// The Gateway must reconcile this typed entry against historical exposure.
+    function appendDuplicateVotePenalty(
+        address validator, uint256 expectedCount, uint256 infractionHeight, uint16 percentage
+    ) external onlyOwner whenNotPaused {
+        Validator storage state = _getValidatorStorage()._validators[validator];
+        DuplicateVoteStorage storage evidence = _duplicateVoteStorage();
+        if ((state.status != ValidatorStatus.Candidate && state.status != ValidatorStatus.Approved) ||
+            percentage == 0 || percentage > 100 || infractionHeight == 0 || infractionHeight >= block.number ||
+            state.penaltyPercantages.length != expectedCount || evidence.recordedHeight[validator][infractionHeight]) {
+            revert InvalidDuplicateVotePenalty();
+        }
+        if (!state.paused) _setPause(validator, true);
+        state.penaltyPercantages.push(percentage);
+        evidence.heightByIndex[validator][expectedCount] = infractionHeight;
+        evidence.recordedHeight[validator][infractionHeight] = true;
+        emit ValidatorDuplicateVotePenalty(validator, expectedCount, infractionHeight, percentage);
+    }
+
+    /// @notice Zero identifies a legacy percentage entry at a known index.
+    function getDuplicateVotePenaltyHeight(address validator, uint256 penaltyIndex) external view returns (uint256) {
+        return _duplicateVoteStorage().heightByIndex[validator][penaltyIndex];
     }
 
     function getPenaltiesRange(
