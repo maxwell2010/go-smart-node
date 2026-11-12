@@ -10,6 +10,7 @@ import (
 	sdk "github.com/cosmos/cosmos-sdk/types"
 	evmtypes "github.com/cosmos/evm/x/vm/types"
 	"github.com/ethereum/go-ethereum/common"
+	"github.com/ethereum/go-ethereum/core"
 	ethtypes "github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/crypto"
 	"github.com/maxwell2010/go-smart-node/network/decimal/nft/evmview"
@@ -28,11 +29,42 @@ type FrozenNFTPenaltyProof struct {
 	Eligible                  bool
 }
 
+type frozenHistoricalNFTPenalty struct {
+	master   MasterPenaltyProof
+	eligible bool
+}
+
+// AuthorizeFrozenHistoricalNFTPenalty scopes the exact typed Gateway call
+// produced for one NFT still in withdrawal custody.
+func (e *Executor) AuthorizeFrozenHistoricalNFTPenalty(ctx sdk.Context, msg core.Message) bool {
+	return e.authorizeFrozenPenalty(ctx, msg, frozenPenaltyHistoricalNFT)
+}
+
 // ApplyFrozenNFTPenalty realizes or checkpoints one announced penalty in
 // the exact frozen NFT reserve. The caller reconciles the native queue and
 // receipt in the same cache before the native burn can be committed.
 func (e *Executor) ApplyFrozenNFTPenalty(ctx sdk.Context, row validatortypes.EVMFrozenBinding, infractionHeight int64,
 	percentage uint16, nativeSupply func(sdk.Context) sdkmath.Int, project func(sdk.Context, FrozenNFTPenaltyProof) error,
+) error {
+	return e.applyFrozenNFTPenalty(ctx, row, infractionHeight, percentage, nativeSupply, project, nil)
+}
+
+// ApplyFrozenHistoricalNFTPenalty realizes a typed Master penalty using the
+// native planner's eligibility result. A mature claim remains slashable while
+// its exact receipt is still frozen in Gateway custody.
+func (e *Executor) ApplyFrozenHistoricalNFTPenalty(ctx sdk.Context, row validatortypes.EVMFrozenBinding, master MasterPenaltyProof,
+	eligible bool, nativeSupply func(sdk.Context) sdkmath.Int, project func(sdk.Context, FrozenNFTPenaltyProof) error,
+) error {
+	if !e.hasHistoricalPenaltyScope(ctx, master, common.BytesToAddress(row.SourceValidator)) {
+		return errors.New("frozen historical NFT penalty requires the active typed Master reconciliation")
+	}
+	return e.applyFrozenNFTPenalty(ctx, row, master.InfractionHeight, master.Percentage, nativeSupply, project,
+		&frozenHistoricalNFTPenalty{master: master, eligible: eligible})
+}
+
+func (e *Executor) applyFrozenNFTPenalty(ctx sdk.Context, row validatortypes.EVMFrozenBinding, infractionHeight int64,
+	percentage uint16, nativeSupply func(sdk.Context) sdkmath.Int, project func(sdk.Context, FrozenNFTPenaltyProof) error,
+	historical *frozenHistoricalNFTPenalty,
 ) error {
 	if nativeSupply == nil || project == nil || ctx.ExecMode() != sdk.ExecModeFinalize ||
 		infractionHeight <= 0 || infractionHeight > ctx.BlockHeight() || percentage == 0 || percentage > 100 {
@@ -46,14 +78,20 @@ func (e *Executor) ApplyFrozenNFTPenalty(ctx sdk.Context, row validatortypes.EVM
 	if !row.Active || row.SourceKind != validatortypes.EVMStakeBindingKind_EVM_STAKE_BINDING_NFT ||
 		row.NativeTarget.StakeType != validatortypes.StakeType_NFT || row.ReserveAsset.ReserveKind != nfttypes.IsolatedReserveDEL ||
 		row.ReserveAsset.NativeDenom != identity.BaseDenom || row.CreatedHeight <= 0 || row.UpdatedHeight > ctx.BlockHeight() || now <= 0 ||
-		common.BytesToHash(row.CompletionTimestamp).Big().Cmp(big.NewInt(now)) <= 0 {
+		(historical == nil && common.BytesToHash(row.CompletionTimestamp).Big().Cmp(big.NewInt(now)) <= 0) {
+		if historical != nil {
+			return errors.New("historical penalty requires a custodied ordinary isolated NFT claim backed by native DEL")
+		}
 		return errors.New("penalty requires an unmatured ordinary isolated NFT claim backed by native DEL")
 	}
 	child, commit := ctx.CacheContext()
 	validator := common.BytesToAddress(row.SourceValidator)
-	source, err := e.authenticatePenaltySource(child, validator, percentage)
-	if err != nil {
-		return err
+	var source *evmview.StakeSource
+	if historical == nil {
+		source, err = e.authenticatePenaltySource(child, validator, percentage)
+		if err != nil {
+			return err
+		}
 	}
 	sender := masterPenaltySender()
 	if err := e.requireInert(child, sender); err != nil {
@@ -82,7 +120,15 @@ func (e *Executor) ApplyFrozenNFTPenalty(ctx sdk.Context, row validatortypes.EVM
 	}
 	proof := FrozenNFTPenaltyProof{Index: index, BeforeCursor: checkpoint.cursor, AfterCursor: common.BigToHash(next),
 		InfractionHeight: infractionHeight, Eligible: row.CreatedHeight >= infractionHeight}
-	status, err := e.verifyAnnouncedPenalty(child, validator, checkpoint.cursor, proof.AfterCursor, percentage)
+	announcement := MasterPenaltyProof{Validator: validator, BeforeCursor: proof.BeforeCursor, AfterCursor: proof.AfterCursor, Percentage: percentage}
+	if historical != nil {
+		announcement.InfractionHeight = infractionHeight
+		if announcement != historical.master || (historical.eligible && !proof.Eligible) {
+			return errors.New("frozen NFT claim differs from the typed Master entry or eligible exposure")
+		}
+		proof.Eligible = historical.eligible
+	}
+	status, err := e.verifyMasterPenaltyAppend(child, announcement)
 	if err != nil {
 		return err
 	}
@@ -101,11 +147,20 @@ func (e *Executor) ApplyFrozenNFTPenalty(ctx sdk.Context, row validatortypes.EVM
 	}
 	proof.Burned = sdkmath.NewIntFromBigInt(burned)
 	proof.RemainingReserve = row.ReportedReserveAmount.Sub(proof.Burned)
-	data, err := e.gateway.Pack("applyFrozenDELPenalty", index.Big(), big.NewInt(infractionHeight), row.ReportedReserveAmount.BigInt(), checkpoint.cursor.Big())
+	var data []byte
+	route := frozenPenaltyRegular
+	if historical == nil {
+		data, err = e.gateway.Pack("applyFrozenDELPenalty", index.Big(), big.NewInt(infractionHeight), row.ReportedReserveAmount.BigInt(), checkpoint.cursor.Big())
+	} else {
+		route = frozenPenaltyHistoricalNFT
+		data, err = e.gateway.Pack("applyHistoricalPenaltyToNFT", true, index, big.NewInt(infractionHeight), proof.Eligible)
+	}
 	if err != nil {
 		return err
 	}
-	authorized := child.WithValue(frozenDELPenaltyKey{}, frozenDELPenaltyCall{executor: e, height: child.BlockHeight(), data: bytes.Clone(data)})
+	authorized := child.WithValue(frozenPenaltyKey{}, frozenPenaltyCall{
+		executor: e, height: child.BlockHeight(), data: bytes.Clone(data), route: route,
+	})
 	result, err := e.invokePenaltyWithGas(authorized, sender, e.roles.Gateway, data, nftPenaltyEVMGas)
 	if err != nil {
 		return err
@@ -149,7 +204,7 @@ func (e *Executor) ApplyFrozenNFTPenalty(ctx sdk.Context, row validatortypes.EVM
 	if err := e.confirmPenaltySource(child, source); err != nil {
 		return err
 	}
-	afterStatus, err := e.verifyAnnouncedPenalty(child, validator, checkpoint.cursor, proof.AfterCursor, percentage)
+	afterStatus, err := e.verifyMasterPenaltyAppend(child, announcement)
 	if err != nil {
 		return err
 	}
