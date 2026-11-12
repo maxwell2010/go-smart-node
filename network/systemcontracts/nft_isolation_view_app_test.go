@@ -308,7 +308,7 @@ func runIsolatedPositionReader(t *testing.T, e isolatedBackendEnv) {
 	if mode := os.Getenv(delLifecycleFixtureEnv); mode == "1" || mode == "hold" || mode == "reset" ||
 		mode == "penalty" || mode == "held-penalty" || mode == "frozen-penalty-partial" || mode == "frozen-penalty-full" ||
 		mode == "frozen-held-penalty" || mode == "frozen-held-penalty-full" ||
-		mode == "nft-penalty" || mode == "nft-penalty-zero-exit" || mode == "frozen-nft-penalty" || mode == "frozen-nft-penalty-max-units" {
+		mode == "nft-penalty" || mode == "nft-penalty-zero-exit" || mode == "frozen-nft-penalty" || mode == frozenNFTMaxUnitsMode || mode == frozenNFTBothEligibleMode {
 		profile := ownedapp.WithdrawalProfile{Registry: registryAddress, Gateway: gatewayAddress, Library: libraryAddress, NFTCenter: factoryAddress,
 			PositionVault: vaultAddress, MasterValidator: masterAddress, WrappedDEL: wrapped, SettlementOnly: true, EnableDELDelegation: true,
 			EnableDELHold: mode == "hold" || mode == "reset", EnableDELHoldReset: mode == "reset"}
@@ -326,7 +326,7 @@ func runIsolatedPositionReader(t *testing.T, e isolatedBackendEnv) {
 			runSignedFrozenDELPenalty(t, e, profile, gateway, master, wrapper, sourceReader, govSetup, full, held)
 			return
 		}
-		if mode == "nft-penalty" || mode == "nft-penalty-zero-exit" || mode == "frozen-nft-penalty" || mode == "frozen-nft-penalty-max-units" {
+		if mode == "nft-penalty" || mode == "nft-penalty-zero-exit" || mode == "frozen-nft-penalty" || mode == frozenNFTMaxUnitsMode || mode == frozenNFTBothEligibleMode {
 			runSignedActiveNFTPenalty(t, e, profile, gateway, master, wrapper, origin, vault, originAddress, sourceReader, govSetup, mode)
 			return
 		}
