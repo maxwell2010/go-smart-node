@@ -4065,7 +4065,8 @@ pragma solidity 0.8.20;
  * signatures keep the same topic0, so off-chain consumers are unaffected.
  */
 interface IMintCandyIsolationOrigin {
-    function isolate(uint256 tokenId, uint256 quantity, address recipient) external returns (uint256);
+    function isolateForDelegation(uint256 tokenId, uint256 quantity, address recipient,
+        uint256 minimumNativeOutput, uint256 deadline) external returns (uint256);
     function isolationVault() external view returns (address);
 }
 interface IMintCandyIsolationVault {
@@ -4969,7 +4970,8 @@ library DelegationNFTLib {
     function delegateIsolatedNFT1155(
         IDecimalDelegationCommon.DelegationStorage storage $,
         address delegator, address validator, address originContract,
-        uint256 originTokenId, uint256 quantity, uint256 holdTimestamp
+        uint256 originTokenId, uint256 quantity, uint256 holdTimestamp,
+        uint256 minimumNativeOutput, uint256 deadline
     ) public {
         if (!_isValidatorActive($, validator)) revert IDecimalDelegationCommon.InvalidValidator();
         // Origins must still be approved factory-created reserve collections.
@@ -4986,7 +4988,8 @@ library DelegationNFTLib {
         if (expectedId == 0) revert IDecimalDelegationCommon.InvalidAmount();
         emit NFTIsolationStarted(expectedId, delegator, originContract, originTokenId, quantity);
         IERC1155(originContract).safeTransferFrom(delegator, address(this), originTokenId, quantity, "");
-        uint256 actualId = IMintCandyIsolationOrigin(originContract).isolate(originTokenId, quantity, address(this));
+        uint256 actualId = IMintCandyIsolationOrigin(originContract).isolateForDelegation(
+            originTokenId, quantity, address(this), minimumNativeOutput, deadline);
         if (actualId != expectedId) revert IDecimalDelegationCommon.InvalidAmount();
         _delegateReceipt($, delegator, validator, vault, actualId, holdTimestamp, true);
     }
@@ -7502,12 +7505,19 @@ contract MintCandyIsolatedDelegation is DecimalDelegation {
     function delegateNFT1155(address validator, address originContract, uint256 tokenId, uint256 quantity)
         public override whenNotPaused {
         DelegationNFTLib.delegateIsolatedNFT1155(_getDelegationStorage(), msg.sender,
-            validator, originContract, tokenId, quantity, 0);
+            validator, originContract, tokenId, quantity, 0, 0, 0);
     }
     function delegateNFT1155Hold(address validator, address originContract, uint256 tokenId,
         uint256 quantity, uint256 holdTimestamp) public override whenNotPaused {
         if (holdTimestamp == 0) revert InvalidHoldTimestamp(0);
         DelegationNFTLib.delegateIsolatedNFT1155(_getDelegationStorage(), msg.sender,
-            validator, originContract, tokenId, quantity, holdTimestamp);
+            validator, originContract, tokenId, quantity, holdTimestamp, 0, 0);
+    }
+
+    function delegateNFT1155WithConversion(address validator, address originContract, uint256 tokenId,
+        uint256 quantity, uint256 minimumNativeOutput, uint256 deadline) external whenNotPaused {
+        if (minimumNativeOutput == 0 || deadline == 0) revert InvalidAmount();
+        DelegationNFTLib.delegateIsolatedNFT1155(_getDelegationStorage(), msg.sender,
+            validator, originContract, tokenId, quantity, 0, minimumNativeOutput, deadline);
     }
 }

@@ -18,6 +18,10 @@ interface IMintCandyPositionFactory {
     function getContractCenter() external view returns (address);
     function getNFTState(address nft) external view returns (NFTState memory);
 }
+interface IMintCandyNFTCollateralConverter {
+    function convert(address token, uint256 amount, uint256 minimumNativeOutput,
+        uint256 deadline) external returns (uint256 nativeOutput);
+}
 
 /// @notice One ERC721 receipt represents one independently backed origin position.
 /// @dev Fresh-network contract. It never remints a slashed claim into an origin ID.
@@ -148,6 +152,33 @@ contract MintCandyNFTPositionVault is ERC721Upgradeable, OwnableUpgradeable {
     }
 
     function mintFromOrigin(uint256 originId, uint256 quantity, address recipient) external payable financial returns (uint256 id) {
+        Position memory position = _originPosition(originId, quantity, recipient);
+        _fund(position.reserve, msg.sender);
+        return _mintOriginPosition(position, recipient);
+    }
+
+    function mintFromOriginConverted(uint256 originId, uint256 quantity, address recipient,
+        uint256 minimumNativeOutput, uint256 deadline) external financial returns (uint256 id) {
+        if (recipient != _controller() || minimumNativeOutput == 0 || deadline == 0) revert InvalidFunding();
+        Position memory position = _originPosition(originId, quantity, recipient);
+        if (!position.refundable || !position.burnable) revert PositionBurnDisabled();
+        IDecimalContractCenter registry = IDecimalContractCenter(_vault().registry);
+        address converter = registry.getContractAddress("curve-converter");
+        address inputToken = position.reserve.token;
+        uint256 inputAmount = position.reserve.amount;
+        if (position.reserve.reserveType != INFTReserve.ReserveType.DRC20 ||
+            inputToken == registry.getContractAddress("wdel") || converter.code.length == 0 || inputAmount == 0) revert InvalidCurrency();
+        uint256 beforeNative = address(this).balance;
+        _pull(inputToken, msg.sender, inputAmount);
+        if (!IERC20(inputToken).approve(converter, inputAmount)) revert InvalidFunding();
+        uint256 output = IMintCandyNFTCollateralConverter(converter).convert(inputToken, inputAmount, minimumNativeOutput, deadline);
+        if (output < minimumNativeOutput || address(this).balance != beforeNative + output ||
+            !IERC20(inputToken).approve(converter, 0)) revert InvalidFunding();
+        position.reserve = INFTReserve.Reserve(address(0), output, INFTReserve.ReserveType.DEL);
+        return _mintOriginPosition(position, recipient);
+    }
+
+    function _originPosition(uint256 originId, uint256 quantity, address recipient) private view returns (Position memory) {
         if (quantity == 0 || quantity > MAX_ISOLATED_ORIGIN_UNITS) revert InvalidQuantity();
         if (recipient == address(0) || recipient == address(this)) revert InvalidRecipient();
         NFTState memory origin = IMintCandyPositionFactory(_vault().factory).getNFTState(msg.sender);
@@ -157,12 +188,15 @@ contract MintCandyNFTPositionVault is ERC721Upgradeable, OwnableUpgradeable {
         INFTReserve.Reserve memory reserve = IMintCandyOrigin1155(msg.sender).getIsolationUnitReserve(originId);
         reserve.amount *= quantity;
         _validateCurrency(reserve);
-        _fund(reserve, msg.sender);
-        Position memory position = Position(msg.sender, originId, quantity, reserve, 0, refundable, burnable);
+        return Position(msg.sender, originId, quantity, reserve, 0, refundable, burnable);
+    }
+
+    function _mintOriginPosition(Position memory position, address recipient) private returns (uint256 id) {
+        INFTReserve.Reserve memory reserve = position.reserve;
         _vault().totals[reserve.reserveType][reserve.token] += reserve.amount;
         id = _create(position, recipient);
-        emit PositionIsolated(id, msg.sender, originId, recipient, quantity,
-            uint8(reserve.reserveType), reserve.token, reserve.amount, refundable, burnable);
+        emit PositionIsolated(id, position.originContract, position.originTokenId, recipient, position.originQuantity,
+            uint8(reserve.reserveType), reserve.token, reserve.amount, position.refundable, position.burnable);
         _emitReserve(id);
     }
 
