@@ -27,6 +27,9 @@ interface IMintCandyReserveCurve {
 interface IMintCandyUnwrapDEL {
     function withdraw(uint256 amount) external;
 }
+interface IMintCandyConvertedDelegation {
+    function delegateDELTo(address delegator, address validator) external payable;
+}
 
 /// @notice Explicit entry conversion only. Every caller must fund its own input.
 /// @dev Raw receive is deliberately stipend-safe for the pinned curve's transfer.
@@ -57,13 +60,16 @@ contract MintCandyCurveConverter is ReentrancyGuard {
         if (IMintCandyConversionRegistry(REGISTRY).getContractAddress("curve-converter") != address(this)) revert ConversionNotConfigured();
         return IMintCandyConversionRegistry(REGISTRY);
     }
+    function _gateway(IMintCandyConversionRegistry registry) private view returns (address gateway) {
+        gateway = registry.getContractAddress("delegation");
+        if (gateway.code.length == 0 || gateway != registry.getContractAddress("delegation-nft"))
+            revert UnauthorizedController();
+    }
     function _controller() private view {
         IMintCandyConversionRegistry registry = _registry();
-        address gateway = registry.getContractAddress("delegation");
+        address gateway = _gateway(registry);
         address vault = registry.getContractAddress("nft-position-vault");
-        if (gateway.code.length == 0 || vault.code.length == 0 ||
-            gateway != registry.getContractAddress("delegation-nft") ||
-            (msg.sender != gateway && msg.sender != vault)) revert UnauthorizedController();
+        if (vault.code.length == 0 || (msg.sender != gateway && msg.sender != vault)) revert UnauthorizedController();
     }
 
     function preview(address token, uint256 amount, uint256 minimumNativeOutput,
@@ -128,10 +134,8 @@ contract MintCandyCurveConverter is ReentrancyGuard {
             token.balance != beforeState.reserve - nativeOutput) revert UnexpectedConversionDelta();
     }
 
-    function convert(address token, uint256 amount, uint256 minimumNativeOutput,
-        uint256 deadline) external nonReentrant returns (uint256 nativeOutput) {
-        _controller();
-        ConversionSnapshot memory beforeState;
+    function _convert(address token, uint256 amount, uint256 minimumNativeOutput,
+        uint256 deadline) private returns (ConversionSnapshot memory beforeState, uint256 nativeOutput) {
         (beforeState.quote, beforeState.center, beforeState.wrapped) = _preview(token, amount, minimumNativeOutput, deadline);
         beforeState.inputBalance = IERC20(token).balanceOf(address(this));
         beforeState.callerBalance = IERC20(token).balanceOf(msg.sender);
@@ -142,10 +146,37 @@ contract MintCandyCurveConverter is ReentrancyGuard {
         if (beforeState.wrapped) IMintCandyUnwrapDEL(token).withdraw(amount);
         else IMintCandyReserveCurve(token).sellExactTokensForDEL(amount, minimumNativeOutput, address(this));
         nativeOutput = _validateResult(token, amount, minimumNativeOutput, beforeState);
-        (bool sent,) = payable(msg.sender).call{value:nativeOutput}("");
-        if (!sent || address(this).balance != beforeState.nativeBalance) revert ConversionNativeTransferFailed();
+    }
+
+    function _finishConversion(address token, uint256 amount, uint256 minimumNativeOutput, uint256 deadline,
+        ConversionSnapshot memory beforeState, uint256 nativeOutput) private {
+        if (address(this).balance != beforeState.nativeBalance) revert ConversionNativeTransferFailed();
         emit CollateralConverted(msg.sender, token, beforeState.center, amount, nativeOutput,
             minimumNativeOutput, deadline, beforeState.wrapped);
+    }
+
+    function convert(address token, uint256 amount, uint256 minimumNativeOutput,
+        uint256 deadline) external nonReentrant returns (uint256 nativeOutput) {
+        _controller();
+        ConversionSnapshot memory beforeState;
+        (beforeState, nativeOutput) = _convert(token, amount, minimumNativeOutput, deadline);
+        (bool sent,) = payable(msg.sender).call{value:nativeOutput}("");
+        if (!sent) revert ConversionNativeTransferFailed();
+        _finishConversion(token, amount, minimumNativeOutput, deadline, beforeState, nativeOutput);
+    }
+
+    /// @notice Sell the caller's approved DRC20 and delegate the received DEL for that caller.
+    /// @dev App admission must separately attest this route and project the signed receipt.
+    function convertAndDelegate(address validator, address token, uint256 amount, uint256 minimumNativeOutput,
+        uint256 deadline) external nonReentrant returns (uint256 nativeOutput) {
+        if (validator == address(0)) revert InvalidConversionLimits();
+        IMintCandyConversionRegistry registry = _registry();
+        if (token == registry.getContractAddress("wdel")) revert UnapprovedReserveCurve();
+        address gateway = _gateway(registry);
+        ConversionSnapshot memory beforeState;
+        (beforeState, nativeOutput) = _convert(token, amount, minimumNativeOutput, deadline);
+        IMintCandyConvertedDelegation(gateway).delegateDELTo{value:nativeOutput}(msg.sender, validator);
+        _finishConversion(token, amount, minimumNativeOutput, deadline, beforeState, nativeOutput);
     }
     receive() external payable {}
 }

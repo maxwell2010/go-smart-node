@@ -341,5 +341,71 @@ func runCurveConverterFinancial(t *testing.T, e isolatedBackendEnv) {
 		requireError(result, "UnapprovedReserveCurve")
 		require.Equal(t, before, snapshot(coin, duplicate, controllers[0]))
 	})
+	t.Run("signed conversion funds the same caller's ordinary delegation", func(t *testing.T) {
+		user := crypto.PubkeyToAddress(e.keys[2].PublicKey)
+		validator := crypto.PubkeyToAddress(e.keys[1].PublicKey)
+		gateway := controllers[0]
+		currency := mintCurve("stakecx", amount(10), amount(5), 100)
+		call(0, coin, currency, new(big.Int), true, "transfer", user, amount(6))
+		call(2, coin, currency, new(big.Int), true, "approve", converterAddress, amount(6))
+
+		type delegatedState struct {
+			Conversion state
+			GatewayDEL *big.Int
+			StakeDEL   *big.Int
+		}
+		delegation := func() delegatedState {
+			conversion := snapshot(coin, currency, user)
+			conversion.CallerNative = nil // Signed failed and successful calls still pay their transaction fee.
+			return delegatedState{conversion, native(gateway), integer(controller, gateway, "delegated", user, validator)}
+		}
+		delegate := func(input, minimum, expires *big.Int, success bool) *evmtypes.MsgEthereumTxResponse {
+			return call(2, converter, converterAddress, new(big.Int), success, "convertAndDelegate", validator, currency, input, minimum, expires)
+		}
+		before := delegation()
+		require.Zero(t, before.Conversion.ConverterToken.Sign())
+		require.Zero(t, before.StakeDEL.Sign())
+		requireError(delegate(amount(2), new(big.Int).Add(amount(2), big.NewInt(1)), deadline(), false), "ConversionLiquidityUnavailable")
+		requireError(delegate(amount(6), amount(1), deadline(), false), "ConversionLiquidityUnavailable")
+		requireError(delegate(amount(2), amount(2), big.NewInt(1), false), "ConversionDeadlineExpired")
+		require.Equal(t, before, delegation())
+
+		call(0, controller, gateway, new(big.Int), true, "setRejectNative", true)
+		rejected := delegate(amount(2), amount(2), deadline(), false)
+		rejection := controller.ABI.Errors["DelegationRejected"].ID
+		require.NotEqual(t, common.Hash{}, rejection)
+		require.Equal(t, rejection.Bytes()[:4], rejected.Ret)
+		require.Empty(t, rejected.Logs)
+		require.Equal(t, before, delegation(), "a Gateway failure rolls back the token pull, sale and stake together")
+		call(0, controller, gateway, new(big.Int), true, "setRejectNative", false)
+
+		expires := deadline()
+		result := delegate(amount(2), amount(2), expires, true)
+		decoded, err := converter.ABI.Unpack("convertAndDelegate", result.Ret)
+		require.NoError(t, err)
+		require.Equal(t, amount(2), decoded[0])
+		noNativeBurn(result)
+		after := delegation()
+		require.Equal(t, amount(8), after.Conversion.Supply)
+		require.Equal(t, amount(8), after.Conversion.CurveNative)
+		require.Equal(t, amount(4), after.Conversion.CallerToken)
+		require.Equal(t, amount(4), after.Conversion.Allowance)
+		require.Equal(t, before.Conversion.ConverterToken, after.Conversion.ConverterToken)
+		require.Equal(t, before.Conversion.ConverterNative, after.Conversion.ConverterNative)
+		require.Equal(t, new(big.Int).Add(before.GatewayDEL, amount(2)), after.GatewayDEL)
+		require.Equal(t, amount(2), after.StakeDEL)
+		converted := 0
+		for _, entry := range result.Logs {
+			if common.HexToAddress(entry.Address) != converterAddress {
+				continue
+			}
+			require.Equal(t, []string{event.ID.Hex(), common.BytesToHash(user[:]).Hex(), common.BytesToHash(currency[:]).Hex(), common.BytesToHash(centerAddress[:]).Hex()}, entry.Topics)
+			values, err := event.Inputs.NonIndexed().Unpack(entry.Data)
+			require.NoError(t, err)
+			require.Equal(t, []interface{}{amount(2), amount(2), amount(2), expires, false}, values)
+			converted++
+		}
+		require.Equal(t, 1, converted)
+	})
 	t.Log("actual registered curve and WDEL converter: exact deltas, slippage/liquidity/expiry/access guards, receiver rollback and outer rollback passed")
 }
