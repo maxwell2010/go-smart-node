@@ -2750,6 +2750,7 @@ interface IPagedDecimalMasterValidator {
     function getValidatorState(address validator) external view returns (uint8 status, bool paused, uint256 penaltyCount);
     function getPenaltyCount(address validator) external view returns (uint256);
     function getPenaltiesRange(address validator, uint256 start, uint256 limit) external view returns (uint16[] memory);
+    function getDuplicateVotePenalty(address validator, uint256 penaltyIndex) external view returns (uint256 height, uint16 percentage);
 }
 
 interface IDecimalDelegationCommon {
@@ -4074,6 +4075,7 @@ interface IMintCandyIsolationVault {
 
 library DelegationNFTLib {
     error InvalidFrozenDELPenalty();
+    error InvalidHistoricalPenalty();
 
     event FrozenDELPenaltyApplied(
         uint256 indexed index, uint256 indexed penaltyCursor, uint256 infractionHeight,
@@ -4650,6 +4652,39 @@ library DelegationNFTLib {
         return _applyPenaltiesToStake($, stakeId);
     }
 
+    function applyHistoricalPenaltyToDELStake(
+        IDecimalDelegationCommon.DelegationStorage storage $,
+        bytes32 stakeId,
+        uint256 infractionHeight,
+        uint256 eligibleAmount
+    ) public {
+        IDecimalDelegationCommon.Stake storage stake = _getStake($, stakeId);
+        if (stake.tokenType != IDecimalDelegationCommon.TokenType.DEL || stake.token != address(WETH($)) ||
+            stake.tokenId != 0 || stake.amount == 0 || stake.amount < $._nftBackedAmounts[stakeId] ||
+            eligibleAmount > stake.amount - $._nftBackedAmounts[stakeId]) {
+            revert InvalidHistoricalPenalty();
+        }
+        uint256 cursor = getStakePenaltyIndex($, stakeId);
+        uint256 count = _requireHistoricalPenalty($, stake.validator, cursor, infractionHeight);
+        _realizeCoinStakePenalty($, stake, stakeId, count, eligibleAmount / 20);
+    }
+
+    function _requireHistoricalPenalty(
+        IDecimalDelegationCommon.DelegationStorage storage $,
+        address validator,
+        uint256 cursor,
+        uint256 infractionHeight
+    ) private view returns (uint256 count) {
+        IPagedDecimalMasterValidator master = IPagedDecimalMasterValidator(address(_masterValidator($)));
+        (uint8 status, bool paused, uint256 actualCount) = master.getValidatorState(validator);
+        if ((status != 1 && status != 2) || !paused || actualCount <= cursor || actualCount - cursor != 1) {
+            revert InvalidHistoricalPenalty();
+        }
+        (uint256 recordedHeight, uint16 percentage) = master.getDuplicateVotePenalty(validator, cursor);
+        if (recordedHeight == 0 || recordedHeight != infractionHeight || percentage != 5) revert InvalidHistoricalPenalty();
+        return actualCount;
+    }
+
     function _applyPenaltiesToStake(
         IDecimalDelegationCommon.DelegationStorage storage $,
         bytes32 stakeId
@@ -4671,23 +4706,28 @@ library DelegationNFTLib {
         for (uint256 i; i < percentages.length; i++) {
             currentAmount -= _getAmountToPenalty(currentAmount, percentages[i]);
         }
-        currentPenaltyIndex += percentages.length;
-        _setStakePenaltyIndex($, stakeId, currentPenaltyIndex);
+        _realizeCoinStakePenalty($, stake, stakeId, currentPenaltyIndex + percentages.length,
+            (stake.amount - nftBackedAmount) - currentAmount);
+        return true;
+    }
 
-        uint256 amountToRemove = (stake.amount - nftBackedAmount) - currentAmount;
-
-        stake.amount = currentAmount + nftBackedAmount;
+    function _realizeCoinStakePenalty(
+        IDecimalDelegationCommon.DelegationStorage storage $,
+        IDecimalDelegationCommon.Stake storage stake,
+        bytes32 stakeId,
+        uint256 penaltyIndex,
+        uint256 amountToRemove
+    ) private {
+        _setStakePenaltyIndex($, stakeId, penaltyIndex);
+        stake.amount -= amountToRemove;
         if (amountToRemove != 0) {
             _reduceValidatorReserve($, stake, amountToRemove);
             _burnToken($, stake.token, amountToRemove);
         }
 
-        bool isNewStake = false;
         emit StakeAmountUpdated(stakeId, -int256(amountToRemove));
-        emit StakeUpdated(stakeId, _getStake($, stakeId), isNewStake);
-
-        emit PenaltyAppliedToStake(stakeId, currentPenaltyIndex);
-        return true;
+        emit StakeUpdated(stakeId, stake, false);
+        emit PenaltyAppliedToStake(stakeId, penaltyIndex);
     }
 
     function _applyPenaltiesToValidator(
@@ -7352,6 +7392,7 @@ contract DecimalDelegation is
 /// @dev Historical shared-pool artifact remains separately named MintCandyDelegation.
 contract MintCandyIsolatedDelegation is DecimalDelegation {
     error InvalidFrozenDELPenalty();
+    error InvalidHistoricalPenalty();
 
     event FrozenDELPenaltyApplied(
         uint256 indexed index, uint256 indexed penaltyCursor, uint256 infractionHeight,
@@ -7372,6 +7413,11 @@ contract MintCandyIsolatedDelegation is DecimalDelegation {
     function applyFrozenDELPenalty(uint256 index, uint256 infractionHeight, uint256 expectedAmount, uint256 beforeCursor)
         external onlyOwner whenNotPaused nonReentrant {
         DelegationNFTLib.applyFrozenDELPenalty(_getDelegationStorage(), index, infractionHeight, expectedAmount, beforeCursor);
+    }
+
+    function applyHistoricalPenaltyToDELStake(bytes32 stakeId, uint256 infractionHeight, uint256 eligibleAmount)
+        external onlyOwner whenNotPaused nonReentrant {
+        DelegationNFTLib.applyHistoricalPenaltyToDELStake(_getDelegationStorage(), stakeId, infractionHeight, eligibleAmount);
     }
 
     function delegateNFT1155(address validator, address originContract, uint256 tokenId, uint256 quantity)
