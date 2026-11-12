@@ -18,6 +18,10 @@ on:
         description: Check two and three signatures on a DEL transfer from the four-validator test treasury
         default: false
         type: boolean
+      launch_signed_package:
+        description: Sign and verify a test launch package before starting its daemon and genesis
+        default: false
+        type: boolean
   push:
     branches: ['integration/**', 'release/**']
     paths: ['network/**', '.github/workflows/modern-network-development.yml']
@@ -83,11 +87,12 @@ jobs:
           "$install_dir/mcnd" init config-check --home "$install_dir/home" --chain-id mintcandy_990003-1 --evm.evm-chain-id 990003 > /dev/null 2>&1
           python3 network/tools/configure_history.py --home "$install_dir/home" --apply --role rpc-ibc
       - name: Rehearse fresh launch using the exact packaged daemon
-        if: inputs.launch_rehearsal || inputs.launch_four_validators || inputs.launch_treasury
+        if: inputs.launch_rehearsal || inputs.launch_four_validators || inputs.launch_treasury || inputs.launch_signed_package
         shell: bash
         env:
           LAUNCH_FOUR_VALIDATORS: ${{ inputs.launch_four_validators }}
           LAUNCH_TREASURY: ${{ inputs.launch_treasury }}
+          LAUNCH_SIGNED_PACKAGE: ${{ inputs.launch_signed_package }}
         run: |
           set -euo pipefail
           umask 077
@@ -107,7 +112,7 @@ jobs:
           export MCND_NATIVE_LAUNCH_REHEARSAL=1
           launch_options=()
           allocation_options=()
-          if [[ "$LAUNCH_FOUR_VALIDATORS" == true || "$LAUNCH_TREASURY" == true ]]; then
+          if [[ "$LAUNCH_FOUR_VALIDATORS" == true || "$LAUNCH_TREASURY" == true || "$LAUNCH_SIGNED_PACKAGE" == true ]]; then
             export MCND_NATIVE_LAUNCH_REHEARSAL=4
             launch_options+=(--four-validators)
             allocation_options+=(--allocation-plan network/docs/ru/public-launch-allocation.draft.json)
@@ -127,10 +132,40 @@ jobs:
             sed -nE 's/.*([ /])(native_(consensus|launch|treasury)[[:alnum:]_]*\.go:[0-9]+).*/\2/p' "$launch_work/fixture.log" | sort -u
             exit 1
           fi
+          launch_binary="$launch_work/mcnd"
+          launch_genesis="$fixture/public/genesis.json"
+          if [[ "$LAUNCH_SIGNED_PACKAGE" == true ]]; then
+            signer_home=$(mktemp -d "$launch_work/gnupg.XXXXXXXX")
+            gpg --homedir "$signer_home" --batch --no-tty --pinentry-mode loopback --passphrase '' \
+              --quick-generate-key "MintCandy launch CI ${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}" ed25519 sign 0
+            signer_fingerprint=$(gpg --homedir "$signer_home" --batch --with-colons --list-keys | awk -F: '$1 == "fpr" {print $10}')
+            [[ "$signer_fingerprint" =~ ^[A-F0-9]{40}$ ]]
+            trusted_keyring="$launch_work/trusted-keyring.gpg"
+            gpg --homedir "$signer_home" --batch --export "$signer_fingerprint" > "$trusted_keyring"
+            printf 'Trusted test signing fingerprint: %s\n' "$signer_fingerprint"
+            signed_archive="$evidence/mcnd-test-launch-linux-amd64.tar.gz"
+            verified_package="$launch_work/verified-package"
+            python3 -B network/tools/native_launch_package.py build \
+              --binary "$launch_binary" --genesis "$launch_genesis" --source-commit "$GITHUB_SHA" \
+              --output "$signed_archive" --signer-home "$signer_home" --signer-fingerprint "$signer_fingerprint"
+            python3 -B network/tools/native_launch_package.py verify \
+              --archive "$signed_archive" --trusted-keyring "$trusted_keyring" --signer-fingerprint "$signer_fingerprint" \
+              --output-dir "$verified_package" > "$evidence/package.json"
+            launch_binary="$verified_package/bin/mcnd"
+            archive_sha=$(sha256sum "$signed_archive" | awk '{print $1}')
+            genesis_sha=$(sha256sum "$launch_genesis" | awk '{print $1}')
+            jq -e --arg commit "$GITHUB_SHA" --arg signer "$signer_fingerprint" --arg binary "$binary_sha" \
+              --arg genesis "$genesis_sha" --arg archive "$archive_sha" \
+              '.sourceCommit == $commit and .signerFingerprint == $signer and .binarySha256 == $binary and
+               .genesisSha256 == $genesis and .archiveSha256 == $archive' "$evidence/package.json" > /dev/null
+            cat "$evidence/package.json"
+            launch_genesis="$verified_package/genesis.json"
+            launch_options+=(--package-genesis "$launch_genesis")
+          fi
           launch_status=0
           sudo -n unshare --net -- bash -euc 'ip link set lo up; exec "$@"' _ \
               env TMPDIR="$launch_work" "$(command -v python3)" -B "$GITHUB_WORKSPACE/network/tools/native_launch_rehearsal.py" \
-              --binary "$launch_work/mcnd" --binary-sha256 "$binary_sha" --archive-sha256 "$archive_sha" \
+              --binary "$launch_binary" --binary-sha256 "$binary_sha" --archive-sha256 "$archive_sha" \
               --source-commit "$GITHUB_SHA" --fixture "$fixture" --home-parent "$launch_work" \
               --report "$evidence/network.json" "${launch_options[@]}" || launch_status=$?
           if [[ -f "$evidence/network.json" ]]; then
@@ -138,17 +173,26 @@ jobs:
             chmod 600 "$evidence/network.json"
           fi
           (( launch_status == 0 )) || exit "$launch_status"
-          install -m 600 -- "$fixture/public/genesis.json" "$evidence/genesis.json"
+          install -m 600 -- "$launch_genesis" "$evidence/genesis.json"
           python3 -B network/tools/native_launch_allocation.py --genesis "$evidence/genesis.json" \
             --output "$evidence/allocation.json" "${allocation_options[@]}"
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
-        if: always() && (inputs.launch_rehearsal || inputs.launch_four_validators || inputs.launch_treasury)
+        if: always() && (inputs.launch_rehearsal || inputs.launch_four_validators || inputs.launch_treasury || inputs.launch_signed_package)
         with:
           name: mcnd-launch-${{ github.sha }}-${{ github.run_attempt }}
           path: |
             ${{ runner.temp }}/mcnd-launch-evidence/genesis.json
             ${{ runner.temp }}/mcnd-launch-evidence/allocation.json
             ${{ runner.temp }}/mcnd-launch-evidence/network.json
+            ${{ runner.temp }}/mcnd-launch-evidence/package.json
+          retention-days: 14
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+        if: inputs.launch_signed_package
+        with:
+          name: mcnd-signed-test-launch-${{ github.sha }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/mcnd-launch-evidence/mcnd-test-launch-linux-amd64.tar.gz
+          compression-level: 0
+          if-no-files-found: error
           retention-days: 14
       - name: Audit default daemon source and compiled binary
         if: inputs.security_audit

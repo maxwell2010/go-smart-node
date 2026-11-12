@@ -333,6 +333,7 @@ def main(argv=None, signals=None):
         parser.add_argument("--" + flag, required=True)
     parser.add_argument("--four-validators", action="store_true", help="check quorum and peer catchup after stopping one of four validators")
     parser.add_argument("--treasury-transfer", action="store_true", help="check the signed transfer pair on the four-validator fixture")
+    parser.add_argument("--package-genesis", type=Path, help="use genesis extracted from the verified launch package")
     args = parser.parse_args(argv)
     if args.treasury_transfer and not args.four_validators:
         parser.error("--treasury-transfer requires --four-validators")
@@ -347,6 +348,10 @@ def main(argv=None, signals=None):
             with open(binary, "rb") as daemon:
                 check(hashlib.file_digest(daemon, "sha256").hexdigest() == args.binary_sha256, "packaged daemon hash differs")
             genesis, expected, keys = load_fixture(Path(args.fixture), four_validators=args.four_validators)
+            if args.package_genesis:
+                packaged_genesis = private_bytes(args.package_genesis, GENESIS_LIMIT)
+                check(packaged_genesis == genesis, "verified package genesis differs from the cold-init fixture")
+                genesis = packaged_genesis
             treasury = json.loads(private_bytes(Path(args.fixture) / "treasury.json", 8192)) if args.treasury_transfer else None
             report.update(sourceCommit=args.source_commit, binarySha256=args.binary_sha256, archiveSha256=args.archive_sha256,
                           genesisSha256=hashlib.sha256(genesis).hexdigest(), chainId=expected["chainId"], evmChainId=expected["evmChainId"])
