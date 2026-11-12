@@ -300,10 +300,14 @@ func runIsolatedPositionReader(t *testing.T, e isolatedBackendEnv) {
 	e.credit.Set(unit)
 	call(0, vault, vaultAddress, new(big.Int), true, "redeemPosition", newPosition, owner)
 	t.Logf("actual isolated StakeSource authentication SDKgas=%d; native capture/pipeline costs separate", cost)
-	if mode := os.Getenv(delLifecycleFixtureEnv); mode == "1" || mode == "hold" || mode == "reset" {
+	if mode := os.Getenv(delLifecycleFixtureEnv); mode == "1" || mode == "hold" || mode == "reset" || mode == "penalty" {
 		profile := ownedapp.WithdrawalProfile{Registry: registryAddress, Gateway: gatewayAddress, Library: libraryAddress, NFTCenter: factoryAddress,
 			PositionVault: vaultAddress, MasterValidator: masterAddress, WrappedDEL: wrapped, SettlementOnly: true, EnableDELDelegation: true,
-			EnableDELHold: mode != "1", EnableDELHoldReset: mode == "reset"}
+			EnableDELHold: mode == "hold" || mode == "reset", EnableDELHoldReset: mode == "reset"}
+		if mode == "penalty" {
+			runSignedOrdinaryDELPenalty(t, e, profile, gateway, master, wrapper, sourceReader, govSetup)
+			return
+		}
 		runSignedDELDelegationLifecycle(t, e, profile, gateway, master, wrapper, govSetup)
 		return
 	}
