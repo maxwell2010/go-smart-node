@@ -14,11 +14,13 @@ import (
 
 // NFTGenesisOrigin describes the complete live census of one origin token.
 type NFTGenesisOrigin struct {
-	Contract    common.Address
-	TokenID     common.Hash
-	Supply      uint32
-	UnitReserve sdkmath.Int
-	Owners      []NFTGenesisOwner
+	Contract     common.Address
+	TokenID      common.Hash
+	Supply       uint32
+	UnitReserve  sdkmath.Int
+	ReserveDenom string
+	ReserveToken common.Address
+	Owners       []NFTGenesisOwner
 }
 
 type NFTGenesisOwner struct {
@@ -49,10 +51,15 @@ func (e *Executor) attestFreshNFTGenesis(ctx sdk.Context, origins []NFTGenesisOr
 			return errors.New("NFT admission genesis requires an empty deployed vault at position ID 1")
 		}
 	}
-	type collectionTotals struct {
-		address common.Address
-		units   uint64
+	type collateralTotal struct {
+		token   common.Address
 		reserve big.Int
+	}
+	type collectionTotals struct {
+		address    common.Address
+		units      uint64
+		collateral []collateralTotal
+		byToken    map[common.Address]int
 	}
 	var collections []collectionTotals
 	byAddress := make(map[common.Address]int)
@@ -70,28 +77,65 @@ func (e *Executor) attestFreshNFTGenesis(ctx sdk.Context, origins []NFTGenesisOr
 			}
 			index = len(collections)
 			byAddress[origin.Contract] = index
-			collections = append(collections, collectionTotals{address: origin.Contract})
+			collections = append(collections, collectionTotals{address: origin.Contract,
+				collateral: []collateralTotal{{}}, byToken: map[common.Address]int{{}: 0}})
 		}
 		pool, err := e.attestGenesisNFTOrigin(ctx, origin)
 		if err != nil {
 			return fmt.Errorf("attest NFT origin %s: %w", origin.TokenID.Hex(), err)
 		}
-		collections[index].units += uint64(origin.Supply)
-		collections[index].reserve.Add(&collections[index].reserve, pool)
+		collection := &collections[index]
+		collection.units += uint64(origin.Supply)
+		position, found := collection.byToken[origin.ReserveToken]
+		if !found {
+			position = len(collection.collateral)
+			collection.byToken[origin.ReserveToken] = position
+			collection.collateral = append(collection.collateral, collateralTotal{token: origin.ReserveToken})
+		}
+		total := &collection.collateral[position].reserve
+		total.Add(total, pool)
 	}
 	for _, origin := range collections {
 		supply, err := e.read(ctx, origin.address, e.origin, "totalSupply", common.HashLength)
 		if err != nil {
 			return err
 		}
-		reserve, err := e.read(ctx, origin.address, e.origin, "declaredReserve", common.HashLength, uint8(nfttypes.IsolatedReserveDEL), common.Address{})
+		if new(big.Int).SetBytes(supply).Cmp(new(big.Int).SetUint64(origin.units)) != 0 {
+			return errors.New("NFT genesis collection has untracked supply")
+		}
+		for _, collateral := range origin.collateral {
+			if err := e.attestOriginReserveTotal(ctx, origin.address, collateral.token, &collateral.reserve); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
+func (e *Executor) attestOriginReserveTotal(ctx sdk.Context, origin, token common.Address, expected *big.Int) error {
+	kind := nfttypes.IsolatedReserveDEL
+	if token != (common.Address{}) {
+		kind = nfttypes.IsolatedReserveERC20
+	}
+	reserve, err := e.read(ctx, origin, e.origin, "declaredReserve", common.HashLength, uint8(kind), token)
+	if err != nil {
+		return err
+	}
+	if new(big.Int).SetBytes(reserve).Cmp(expected) != 0 {
+		return errors.New("NFT genesis collection has an untracked collateral reserve")
+	}
+	if kind == nfttypes.IsolatedReserveDEL {
+		held := e.evm.GetBalance(ctx, origin)
+		if held == nil || held.ToBig().Cmp(expected) < 0 {
+			return errors.New("NFT genesis collection has insufficient DEL collateral")
+		}
+	} else {
+		held, err := e.read(ctx, token, e.wrapper, "balanceOf", common.HashLength, origin)
 		if err != nil {
 			return err
 		}
-		held := e.evm.GetBalance(ctx, origin.address)
-		if new(big.Int).SetBytes(supply).Cmp(new(big.Int).SetUint64(origin.units)) != 0 ||
-			new(big.Int).SetBytes(reserve).Cmp(&origin.reserve) != 0 || held == nil || held.ToBig().Cmp(&origin.reserve) < 0 {
-			return errors.New("NFT genesis collection has untracked supply or insufficient DEL collateral")
+		if new(big.Int).SetBytes(held).Cmp(expected) < 0 {
+			return errors.New("NFT genesis collection has insufficient custom collateral")
 		}
 	}
 	return nil
@@ -122,7 +166,7 @@ func (e *Executor) attestGenesisNFTOrigin(ctx sdk.Context, origin NFTGenesisOrig
 		return nil, errors.New("invalid NFT genesis owner list, supply or reserve")
 	}
 	id := origin.TokenID.Big()
-	supply, pool, err := e.isolationOriginPoststate(ctx, origin.Contract, id)
+	supply, pool, err := e.isolationOriginCollateralPoststate(ctx, origin.Contract, id, origin.ReserveToken)
 	if err != nil {
 		return nil, err
 	}
@@ -134,7 +178,21 @@ func (e *Executor) attestGenesisNFTOrigin(ctx sdk.Context, origin NFTGenesisOrig
 	if err != nil {
 		return nil, err
 	}
-	if !matchesNFTWords(unit, common.Hash{}, common.BigToHash(origin.UnitReserve.BigInt()), smallWord(byte(nfttypes.IsolatedReserveDEL))) {
+	kind := nfttypes.IsolatedReserveDEL
+	if origin.ReserveToken != (common.Address{}) {
+		if origin.ReserveToken == e.roles.WrappedDEL {
+			return nil, errors.New("NFT genesis conversion collateral cannot be WDEL")
+		}
+		kind = nfttypes.IsolatedReserveERC20
+		policy, err := e.read(ctx, origin.Contract, e.origin, "getIsolationPolicy", 3*common.HashLength, id)
+		if err != nil {
+			return nil, err
+		}
+		if !matchesNFTWords(policy, boolWord(true), boolWord(true), boolWord(true)) {
+			return nil, errors.New("custom NFT genesis origin must be refundable and burnable")
+		}
+	}
+	if !matchesNFTWords(unit, common.BytesToHash(origin.ReserveToken[:]), common.BigToHash(origin.UnitReserve.BigInt()), smallWord(byte(kind))) {
 		return nil, errors.New("NFT genesis origin per-unit reserve differs from EVM")
 	}
 	var units uint64
