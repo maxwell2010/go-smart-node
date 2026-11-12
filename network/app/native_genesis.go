@@ -122,6 +122,11 @@ func ValidateNativeGenesisAllocation(cdc codec.JSONCodec, genesis map[string]jso
 		return errors.New("native validator base denomination must be del")
 	}
 	if profile != nil {
+		if profile.customCollateralEnabled() && profile.EnableNativeFeeRewards {
+			if err := validateCustomCollateralFeeRecipients(coin.Coins, validators); err != nil {
+				return err
+			}
+		}
 		return validateWithdrawalGenesisSnapshot(*profile, &nft, &validators)
 	}
 	if len(validators.Validators) != 0 || len(validators.Delegations) != 0 || len(validators.Undelegations) != 0 || len(validators.Redelegations) != 0 || len(validators.LastValidatorPowers) != 0 || validators.LastTotalPower != 0 || len(validators.ValidatorOfflineSince) != 0 || len(validators.ScheduledValidatorSets) != 0 || len(validators.EVMStakeBindings) != 0 || len(validators.EVMFrozenBindings) != 0 || validators.BindingRevision != 0 {

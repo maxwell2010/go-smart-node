@@ -11,8 +11,38 @@ import (
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/crypto"
 	cointypes "github.com/maxwell2010/go-smart-node/network/decimal/coin/types"
+	validatortypes "github.com/maxwell2010/go-smart-node/network/decimal/validator/types"
 	"github.com/maxwell2010/go-smart-node/network/identity"
 )
+
+func validateCustomCollateralFeeRecipients(coins []cointypes.Coin, validators validatortypes.GenesisState) error {
+	reserves := make(map[common.Address]bool, len(coins))
+	for _, coin := range coins {
+		reserves[common.HexToAddress(coin.DRC20Contract)] = true
+	}
+	codec := address.NewBech32Codec(identity.Bech32PrefixAccAddr)
+	check := func(recipient string) error {
+		raw, err := codec.StringToBytes(recipient)
+		if err != nil {
+			return err
+		}
+		if reserves[common.BytesToAddress(raw)] {
+			return errors.New("native fee reward recipient cannot be an approved DRC20 reserve")
+		}
+		return nil
+	}
+	for _, validator := range validators.Validators {
+		if err := check(validator.RewardAddress); err != nil {
+			return err
+		}
+	}
+	for _, delegation := range validators.Delegations {
+		if err := check(delegation.Delegator); err != nil {
+			return err
+		}
+	}
+	return nil
+}
 
 func (r *customCollateralRegistry) attestGenesis(ctx sdk.Context) error {
 	if r == nil {

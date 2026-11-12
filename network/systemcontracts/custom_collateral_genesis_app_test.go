@@ -2,6 +2,7 @@ package systemcontracts_test
 
 import (
 	"encoding/json"
+	"maps"
 	"math/big"
 	"os"
 	"os/exec"
@@ -20,6 +21,7 @@ import (
 	"github.com/ethereum/go-ethereum/crypto"
 	ownedapp "github.com/maxwell2010/go-smart-node/network/app"
 	cointypes "github.com/maxwell2010/go-smart-node/network/decimal/coin/types"
+	validatortypes "github.com/maxwell2010/go-smart-node/network/decimal/validator/types"
 	"github.com/maxwell2010/go-smart-node/network/identity"
 	contracts "github.com/maxwell2010/go-smart-node/network/systemcontracts"
 	"github.com/stretchr/testify/require"
@@ -131,6 +133,18 @@ func checkNativeDRC20Genesis(t *testing.T, dir, phase string) {
 	require.Len(t, coins.Coins, 1)
 	want := coins.Coins[0]
 	if phase == "reject" {
+		rewardGenesis := maps.Clone(state)
+		var profile ownedapp.WithdrawalProfile
+		require.NoError(t, json.Unmarshal(rewardGenesis[ownedapp.WithdrawalGenesisKey], &profile))
+		profile.EnableNativeFeeRewards = true
+		rewardGenesis[ownedapp.WithdrawalGenesisKey], err = json.Marshal(profile)
+		require.NoError(t, err)
+		var validators validatortypes.GenesisState
+		require.NoError(t, app.AppCodec().UnmarshalJSON(rewardGenesis[validatortypes.ModuleName], &validators))
+		validators.Validators[0].RewardAddress = sdk.AccAddress(common.HexToAddress(want.DRC20Contract).Bytes()).String()
+		rewardGenesis[validatortypes.ModuleName] = app.AppCodec().MustMarshalJSON(&validators)
+		require.ErrorContains(t, ownedapp.ValidateNativeGenesisAllocation(app.AppCodec(), rewardGenesis), "fee reward recipient cannot be an approved DRC20 reserve")
+
 		coins.Coins[0].Reserve = want.Reserve.AddRaw(1)
 		state[cointypes.ModuleName] = app.AppCodec().MustMarshalJSON(&coins)
 		doc.AppState, err = json.Marshal(state)
