@@ -206,11 +206,15 @@ def load_fixture(directory, fee_rewards, downtime, jail_recovery, held_downtime,
     if jail_recovery:
         check(expected['jailSeconds'] == 60 and type(expected['unjailNonce']) is int and
               0 <= expected['unjailNonce'] < 2**32 - 1, 'invalid jail recovery duration or nonce')
-        for route in ('earlyUnpause', 'unpause'):
+        check(type(expected['recoveredTopUpNonce']) is int and 0 <= expected['recoveredTopUpNonce'] < 2**32 - 1,
+              'invalid recovered deposit nonce')
+        recovery_calls = ('earlyUnpause', 'unpause', 'recoveredTopUp')
+        for route in recovery_calls:
             signed = expected[route]
             check(re.fullmatch(WORD, signed['hash']) and re.fullmatch(r'0x(?:[0-9a-f]{2}){100,512}', signed['raw']),
-                  'invalid signed unpause fixture transaction')
-        check(expected['earlyUnpause']['hash'] != expected['unpause']['hash'], 'duplicate signed unpause transaction')
+                  'invalid signed recovery fixture transaction')
+        check(len({expected[route]['hash'] for route in recovery_calls}) == len(recovery_calls),
+              'duplicate signed recovery transaction')
     check(not doc['app_state']['staking'].get('validators') and not doc['app_state']['staking'].get('delegations'),
           'fixture requires empty SDK staking genesis')
     return expected, genesis, keys, height
@@ -721,6 +725,48 @@ def verify_jail_recovery(replicas, expected, report, jail_until):
     # The next Comet header carries the app hash of this committed ledger.
     report['final'] = {**final, **check_downtime_state(replicas, expected, final_height, False, penalty_count=1),
                        'appHashHeight': final_height + 1, **committed_header(replicas, final_height + 1)}
+    verify_recovered_top_up(replicas, expected, report)
+
+
+def verify_recovered_top_up(replicas, expected, report):
+    source = replicas[0]
+    validators = expected['validators']
+    report['phase'] = 'signed-post-jail-del-top-up'
+    amount = ATOMS // 4
+    prior = report['final']
+    receipt = submit(source.child, source.log, report, expected, 'recoveredTopUp', True, expected['recoveredTopUpNonce'],
+                     DELEGATED, {'stake_id': expected['stakeId'], 'amount': str(amount)})
+    height = receipt['height']
+    check(height > prior['height'], 'recovered top-up must follow the committed reentry ledger')
+    wait_replicas(replicas, height + 2 + DOWNTIME_WINDOW, 65, report)
+    for node in replicas:
+        updates = node.rpc(f'block_results?height={height}').get('validator_updates') or []
+        check(len(updates) == 1 and int(updates[0].get('power', 0)) == 2 and
+              decode_pubkey(updates[0]['pub_key']) == decode_pubkey(validators[2]['publicKey']),
+              f'after recovery the top-up must raise only C to power 2 on {node.label}')
+        aggregate_cursor = read_words(expected['gateway'], validators[2]['reserveData'], height, 2, node.evm)[0]
+        check(aggregate_cursor == 1, f'unexpected aggregate Gateway penalty cursor on {node.label}')
+    for offset in (0, 1):
+        effective_set(replicas, validators, height + offset, JAIL_RECOVERED)
+    powers = effective_set(replicas, validators, height + 2, DOWNTIME_INITIAL)
+    signed_height = None
+    for current in range(height + 2, height + 2 + DOWNTIME_WINDOW):
+        signatures = source.rpc(f'commit?height={current}')['signed_header']['commit']['signatures']
+        if any(int(signature['block_id_flag']) == 2 and signature['validator_address'] == validators[2]['consensusAddress']
+               and signature['signature'] for signature in signatures):
+            signed_height = current
+            break
+    check(signed_height is not None, 'C did not sign after its recovered power increase')
+    signers = check_signatures(replicas, validators, signed_height, DOWNTIME_INITIAL)
+    check(all(not downtime_events(source.rpc(f'block_results?height={current}'))
+              for current in range(prior['height'] + 1, signed_height + 1)), 'recovered deposit triggered another penalty')
+    fee = int(receipt['feeAtomic'])
+    state = check_ledger(replicas, expected, height, 2 * ATOMS - DOWNTIME_BURN + amount, downtime=True, previous=prior,
+                         wallet=int(prior['walletAtomic']) - amount - fee, collector=int(prior['feeCollectorAtomic']) + fee)
+    report['postJailTopUp'] = {**state, **receipt, **check_downtime_state(replicas, expected, height, False, penalty_count=1),
+                              'amountAtomic': str(amount), 'effectiveHeight': height + 2, 'powers': powers, 'signers': signers,
+                              'cSignedHeight': signed_height,
+                              'appHashHeight': height + 1, **committed_header(replicas, height + 1)}
 
 
 def run_downtime_gate(binary, expected, replicas, env, owner, report, first, *, jail_recovery=False):
