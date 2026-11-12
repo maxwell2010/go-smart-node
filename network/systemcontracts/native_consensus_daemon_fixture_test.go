@@ -70,10 +70,11 @@ func exportNativeConsensusDaemonFixture(t *testing.T, e isolatedBackendEnv, dir 
 	key := e.keys[3]
 	actor := crypto.PubkeyToAddress(key.PublicKey)
 	beneficiary := sdk.AccAddress(actor.Bytes()).String()
-	fullUpgrade := os.Getenv(nativeConsensusFullUpgradeEnv) == "1"
+	launchRehearsal := os.Getenv(nativeLaunchRehearsalEnv) == "1"
+	fullUpgrade := launchRehearsal || os.Getenv(nativeConsensusFullUpgradeEnv) == "1"
 	feeRewards := fullUpgrade || os.Getenv(nativeConsensusFeeRewardsEnv) == "1"
 	ibcV1 := fullUpgrade || os.Getenv(nativeConsensusIBCV1Env) == "1"
-	upgradeGovernance := os.Getenv(nativeConsensusUpgradeGovernanceEnv) == "1"
+	upgradeGovernance := launchRehearsal || os.Getenv(nativeConsensusUpgradeGovernanceEnv) == "1"
 	historical := os.Getenv(nativeHistoricalConsensusPhaseEnv) == "seed"
 	downtime := os.Getenv(nativeConsensusDowntimeEnv) == "1" || historical
 	jailRecovery := os.Getenv(nativeConsensusJailRecoveryEnv) == "1"
@@ -89,6 +90,10 @@ func exportNativeConsensusDaemonFixture(t *testing.T, e isolatedBackendEnv, dir 
 	keyScope := "mintcandy native consensus process fixture "
 	if fullUpgrade {
 		keyScope = "mintcandy full profile upgrade process fixture "
+	}
+	if launchRehearsal {
+		initial, after = nativeLaunchInitialPowers, nativeLaunchInitialPowers
+		keyScope = nativeLaunchConsensusKeyScope
 	}
 	if downtime {
 		require.False(t, feeRewards || ibcV1, "the ordinary DEL downtime fixture has a separate profile")
@@ -121,15 +126,21 @@ func exportNativeConsensusDaemonFixture(t *testing.T, e isolatedBackendEnv, dir 
 	}
 	collector := authtypes.NewModuleAddress(authtypes.FeeCollectorName)
 	nativeKeeper := e.app.NativeValidatorKeeper
+	domain, ok := nativeKeeper.ConfiguredEVMSourceDomain()
+	require.True(t, ok)
+	if launchRehearsal {
+		require.Equal(t, nativeLaunchChainID, domain.ChainID)
+		require.Equal(t, nativeLaunchEVMChainID, domain.EVMChainID)
+	}
 	var custom *nativeCustomCollateralGenesisFixture
-	if os.Getenv(nativeCustomCollateralGenesisPhaseEnv) == "seed" {
-		require.True(t, historical)
+	if launchRehearsal || os.Getenv(nativeCustomCollateralGenesisPhaseEnv) == "seed" {
+		require.True(t, historical || launchRehearsal)
 		var fixtureVolume int64
 		if os.Getenv(nativeCustomNFTMaxEnv) == "1" && nft != nil {
 			fixtureVolume = 2*int64(nft.units) + 8
 		}
 		custom = seedNativeCustomCollateralGenesis(t, e, profile, gov, fixtureVolume)
-		if os.Getenv(nativeCustomNFTPhaseEnv) == "seed" {
+		if launchRehearsal || os.Getenv(nativeCustomNFTPhaseEnv) == "seed" {
 			require.NotNil(t, nft)
 			nft.mintCustom(t, e, custom, actor)
 		}
@@ -224,6 +235,9 @@ func exportNativeConsensusDaemonFixture(t *testing.T, e isolatedBackendEnv, dir 
 	require.Empty(t, nativeGenesis.EVMFrozenBindings)
 	require.Empty(t, nativeGenesis.Undelegations)
 	nativeGenesis.Params.MaxValidators = 2
+	if launchRehearsal {
+		nativeGenesis.Params.MaxValidators = uint32(len(validators))
+	}
 	if downtime {
 		nativeGenesis.Params.MaxValidators = 3
 		nativeGenesis.Params.SignedBlocksWindow = 3
@@ -286,7 +300,9 @@ func exportNativeConsensusDaemonFixture(t *testing.T, e isolatedBackendEnv, dir 
 	if upgradeGovernance {
 		profile.EnableNativeGovernance = true
 		profile.EnableNativeUpgradeGovernance = true
-		governanceFixture = nativeGovernanceUpgradeFixture(t, e, genesis, fullUpgrade)
+		if !launchRehearsal {
+			governanceFixture = nativeGovernanceUpgradeFixture(t, e, genesis, fullUpgrade)
+		}
 	}
 	if nft != nil {
 		profile.EnableNFTDelegation = true
@@ -307,6 +323,9 @@ func exportNativeConsensusDaemonFixture(t *testing.T, e isolatedBackendEnv, dir 
 	require.NoError(t, ownedapp.ValidateNativeGenesisAllocation(cdc, genesis))
 
 	genesisTime := time.Now().UTC().Truncate(time.Second).Add(-time.Second)
+	if launchRehearsal {
+		genesisTime = nativeLaunchGenesisTime
+	}
 	if downtime {
 		// Let all three processes connect before the first three-sample window.
 		genesisTime = genesisTime.Add(15 * time.Second)
@@ -346,7 +365,12 @@ func exportNativeConsensusDaemonFixture(t *testing.T, e isolatedBackendEnv, dir 
 		require.NoError(t, closeErr)
 	}
 	write("genesis.json", body)
-	if upgradeGovernance {
+	if launchRehearsal {
+		checkNativeLaunchPublicGenesis(t, body)
+		require.NoError(t, os.Mkdir(filepath.Join(dir, "public"), 0700))
+		write("public/genesis.json", body)
+	}
+	if len(governanceFixture) != 0 {
 		write("governance.json", governanceFixture)
 	}
 
@@ -363,11 +387,17 @@ func exportNativeConsensusDaemonFixture(t *testing.T, e isolatedBackendEnv, dir 
 		validators[i].ReserveData = hexData(pack(gateway, "getValidatorReserve", common.HexToAddress(validators[i].EVM), profile.WrappedDEL))
 	}
 	expectations := map[string]interface{}{
-		"chainId": ctx.ChainID(), "evmChainId": 990001, "gateway": profile.Gateway.Hex(), "wrapped": profile.WrappedDEL.Hex(),
+		"chainId": ctx.ChainID(), "evmChainId": domain.EVMChainID, "gateway": profile.Gateway.Hex(), "wrapped": profile.WrappedDEL.Hex(),
 		"actor": actor.Hex(), "actorNative": beneficiary, "wrappedNative": sdk.AccAddress(profile.WrappedDEL.Bytes()).String(),
 		"feeCollector": common.BytesToAddress(collector).Hex(), "feeCollectorNative": collector.String(), "feeRewards": feeRewards,
 		"validators": validators, "stakeId": stakeID.Hex(),
 		"supplyData": hexData(pack(wrapper, "totalSupply")), "escrowData": hexData(pack(wrapper, "balanceOf", profile.Gateway)),
+	}
+	if launchRehearsal {
+		expect, err := json.Marshal(expectations)
+		require.NoError(t, err)
+		write("expectations.json", expect)
+		return
 	}
 	if downtime {
 		masterState := make(map[string]string, len(validators))

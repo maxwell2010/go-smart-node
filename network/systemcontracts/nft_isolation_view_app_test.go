@@ -137,7 +137,7 @@ func runIsolatedPositionReader(t *testing.T, e isolatedBackendEnv) {
 			SettlementOnly: true, EnableDELDelegation: true,
 		}
 		var nft *nativeNFTDowntimeFixture
-		if os.Getenv(nativeCustomNFTPhaseEnv) == "seed" {
+		if os.Getenv(nativeCustomNFTPhaseEnv) == "seed" || os.Getenv(nativeLaunchRehearsalEnv) == "1" {
 			minted, _ := nativeCustomNFTDimensions()
 			fixture := newNativeNFTFixture(origin, originAddress, minted)
 			nft = &fixture

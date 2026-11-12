@@ -90,11 +90,16 @@ func (h nativeBurnReceiptControl) PostTxProcessing(_ sdk.Context, _ common.Addre
 // This test binary owns exactly one production-tag App. It never resets the
 // process-global EVM configuration, patches storage or broadcasts transactions.
 func TestOwnedAppSignedRegistryBootstrap(t *testing.T) {
-	const chainID = "mintcandy_990001-1"
+	chainID, evmChainID := "mintcandy_990001-1", uint64(990001)
+	launchRehearsal := os.Getenv(nativeLaunchRehearsalEnv) == "1"
+	if launchRehearsal {
+		chainID, evmChainID = nativeLaunchChainID, nativeLaunchEVMChainID
+		require.NotEmpty(t, os.Getenv(nativeConsensusDaemonFixtureEnv), "launch rehearsal requires a private fixture directory")
+	}
 	nftFixturePhase := os.Getenv(signedNFTAdmissionPhaseEnv)
 	deterministicAccounts := nftFixturePhase != "" || os.Getenv(nativeHistoricalConsensusPhaseEnv) == "seed"
 	var withdrawalDeferrals []string
-	a := ownedapp.NewApp(log.NewLogger(withdrawalFixtureLog{t: t, deferrals: &withdrawalDeferrals}), dbm.NewMemDB(), true, appOptions{flags.FlagHome: t.TempDir(), flags.FlagChainID: chainID, srvflags.EVMChainID: uint64(990001)})
+	a := ownedapp.NewApp(log.NewLogger(withdrawalFixtureLog{t: t, deferrals: &withdrawalDeferrals}), dbm.NewMemDB(), true, appOptions{flags.FlagHome: t.TempDir(), flags.FlagChainID: chainID, srvflags.EVMChainID: evmChainID})
 	t.Cleanup(func() { require.NoError(t, a.Close()) })
 	primitiveABI, err := contracts.CompiledABI("IMintCandyNativeBurn")
 	require.NoError(t, err)
@@ -109,6 +114,9 @@ func TestOwnedAppSignedRegistryBootstrap(t *testing.T) {
 	for i := range keys {
 		key, err := registryFixtureKey(i, deterministicAccounts)
 		require.NoError(t, err)
+		if launchRehearsal {
+			key = nativeLaunchAccountKey(i)
+		}
 		keys[i], err = crypto.ToECDSA(key.Bytes())
 		require.NoError(t, err)
 		accounts[i] = authtypes.NewBaseAccount(key.PubKey().Address().Bytes(), key.PubKey(), uint64(i), 0)
@@ -118,6 +126,9 @@ func TestOwnedAppSignedRegistryBootstrap(t *testing.T) {
 	signer := cmted25519.GenPrivKey()
 	if nftFixturePhase != "" {
 		signer = cmted25519.GenPrivKeyFromSecret([]byte("MintCandy isolated NFT fixture consensus signer"))
+	}
+	if launchRehearsal {
+		signer = cmted25519.GenPrivKeyFromSecret([]byte("MintCandy isolated launch rehearsal deployment signer"))
 	}
 	validator := cmttypes.NewValidator(signer.PubKey(), 1)
 	vals := cmttypes.NewValidatorSet([]*cmttypes.Validator{validator})
@@ -170,6 +181,9 @@ func TestOwnedAppSignedRegistryBootstrap(t *testing.T) {
 	if os.Getenv(withdrawalGenesisFixtureEnv) != "" || os.Getenv(nativeConsensusDaemonFixtureEnv) != "" {
 		now = time.Now().UTC().Truncate(time.Second).Add(-time.Hour)
 	}
+	if launchRehearsal {
+		now = nativeLaunchGenesisTime.Add(-time.Hour)
+	}
 	var nftFixture signedNFTAdmissionGenesis
 	genesisTime, initialHeight := now, int64(0)
 	if nftFixturePhase == "verify" {
@@ -203,7 +217,7 @@ func TestOwnedAppSignedRegistryBootstrap(t *testing.T) {
 			gasLimit, nextGasLimit = nextGasLimit, 0
 		}
 		raw := ethtypes.NewTx(&ethtypes.LegacyTx{Nonce: nonce, To: to, Value: value, Gas: gasLimit, GasPrice: price, Data: input})
-		signer := ethtypes.NewEIP155Signer(big.NewInt(990001))
+		signer := ethtypes.NewEIP155Signer(new(big.Int).SetUint64(evmChainID))
 		signed, err := ethtypes.SignTx(raw, signer, key)
 		require.NoError(t, err)
 		msg := &evmtypes.MsgEthereumTx{}
