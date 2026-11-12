@@ -68,8 +68,9 @@ func exportNativeConsensusDaemonFixture(t *testing.T, e isolatedBackendEnv, dir 
 	key := e.keys[3]
 	actor := crypto.PubkeyToAddress(key.PublicKey)
 	beneficiary := sdk.AccAddress(actor.Bytes()).String()
-	feeRewards := os.Getenv(nativeConsensusFeeRewardsEnv) == "1"
-	ibcV1 := os.Getenv(nativeConsensusIBCV1Env) == "1"
+	fullUpgrade := os.Getenv(nativeConsensusFullUpgradeEnv) == "1"
+	feeRewards := fullUpgrade || os.Getenv(nativeConsensusFeeRewardsEnv) == "1"
+	ibcV1 := fullUpgrade || os.Getenv(nativeConsensusIBCV1Env) == "1"
 	upgradeGovernance := os.Getenv(nativeConsensusUpgradeGovernanceEnv) == "1"
 	historical := os.Getenv(nativeHistoricalConsensusPhaseEnv) == "seed"
 	downtime := os.Getenv(nativeConsensusDowntimeEnv) == "1" || historical
@@ -77,10 +78,16 @@ func exportNativeConsensusDaemonFixture(t *testing.T, e isolatedBackendEnv, dir 
 	heldDowntime := os.Getenv(nativeConsensusHeldDowntimeEnv) == "1"
 	require.False(t, jailRecovery && !downtime, "the jail recovery fixture requires the downtime profile")
 	require.False(t, heldDowntime && (!downtime || jailRecovery), "held downtime has its own isolated fixture")
-	require.False(t, upgradeGovernance && (feeRewards || ibcV1 || downtime), "the upgrade governance fixture has a separate profile")
-	require.False(t, nft != nil && (!downtime || jailRecovery || heldDowntime), "NFT downtime has its own isolated fixture")
+	require.False(t, upgradeGovernance && !fullUpgrade && (feeRewards || ibcV1 || downtime), "the basic upgrade governance fixture has a separate profile")
+	require.False(t, nft != nil && !fullUpgrade && (!downtime || jailRecovery || heldDowntime), "NFT downtime has its own isolated fixture")
+	if fullUpgrade {
+		require.True(t, upgradeGovernance && nft != nil && !downtime && !jailRecovery && !heldDowntime, "full upgrade requires its own fixture and approved NFT origin")
+	}
 	initial, after := [3]int64{2, 1, 0}, [3]int64{2, 0, 3}
 	keyScope := "mintcandy native consensus process fixture "
+	if fullUpgrade {
+		keyScope = "mintcandy full profile upgrade process fixture "
+	}
 	if downtime {
 		require.False(t, feeRewards || ibcV1, "the ordinary DEL downtime fixture has a separate profile")
 		initial, after = [3]int64{3, 3, 2}, [3]int64{3, 3, 0}
@@ -212,7 +219,7 @@ func exportNativeConsensusDaemonFixture(t *testing.T, e isolatedBackendEnv, dir 
 	if jailRecovery {
 		nativeGenesis.Params.DowntimeJailDuration = jailRecoveryDuration
 	}
-	if historical {
+	if historical || fullUpgrade {
 		nativeGenesis.Params.SlashFractionDoubleSign = sdkmath.LegacyMustNewDecFromStr("0.05")
 		for i := range nativeGenesis.EVMStakeBindings {
 			row := &nativeGenesis.EVMStakeBindings[i]
@@ -251,19 +258,20 @@ func exportNativeConsensusDaemonFixture(t *testing.T, e isolatedBackendEnv, dir 
 	profile.EnableNativeConsensus = true
 	profile.EnableNativeFeeRewards = feeRewards
 	profile.EnableNativeIBCV1 = ibcV1
-	profile.EnableNativeOrdinaryDELDowntime = downtime
-	profile.EnableNativeDuplicateVote = historical
+	profile.EnableNativeOrdinaryDELDowntime = downtime || fullUpgrade
+	profile.EnableNativeDuplicateVote = historical || fullUpgrade
 	if historical {
 		profile.EnableNativeGovernance = true
 		configureNativeRegistrationGovernance(t, e, genesis)
 	}
-	profile.EnableDELHold = heldDowntime
-	profile.EnableNativeHeldDELDowntime = heldDowntime
+	profile.EnableDELHold = heldDowntime || fullUpgrade
+	profile.EnableDELHoldReset = fullUpgrade
+	profile.EnableNativeHeldDELDowntime = heldDowntime || fullUpgrade
 	var governanceFixture []byte
 	if upgradeGovernance {
 		profile.EnableNativeGovernance = true
 		profile.EnableNativeUpgradeGovernance = true
-		governanceFixture = nativeGovernanceUpgradeFixture(t, e, genesis)
+		governanceFixture = nativeGovernanceUpgradeFixture(t, e, genesis, fullUpgrade)
 	}
 	if nft != nil {
 		profile.EnableNFTDelegation = true
@@ -282,8 +290,10 @@ func exportNativeConsensusDaemonFixture(t *testing.T, e isolatedBackendEnv, dir 
 	}
 	doc := cmttypes.GenesisDoc{ChainID: ctx.ChainID(), InitialHeight: ctx.BlockHeight(),
 		GenesisTime: genesisTime, ConsensusParams: cmttypes.DefaultConsensusParams()}
-	if historical {
+	if historical || fullUpgrade {
 		doc.InitialHeight = 1
+	}
+	if historical {
 		doc.ConsensusParams.Evidence.MaxAgeNumBlocks = 5
 		doc.ConsensusParams.Evidence.MaxAgeDuration = 4 * time.Second
 	}
@@ -417,6 +427,24 @@ func exportNativeConsensusDaemonFixture(t *testing.T, e isolatedBackendEnv, dir 
 	expectations["amount"], expectations["topUpAmount"] = deposit.String(), topUp.String()
 	expectations["gasPrice"], expectations["gasLimit"], expectations["nonce"] = price.String(), gasLimit, nonce
 	expectations["delegate"], expectations["topUp"] = sign(nonce, deposit.BigInt()), sign(nonce+1, topUp.BigInt())
+	if fullUpgrade {
+		target := validators[0]
+		principal := amount(1).QuoRaw(4)
+		// The governance scenario commits two proposals and two votes before
+		// the same actor submits this EVM withdrawal using the shared nonce.
+		withdraw := ethtypes.NewTx(&ethtypes.LegacyTx{Nonce: nonce + 4, To: &profile.Gateway, Value: new(big.Int),
+			Gas: gasLimit, GasPrice: price, Data: pack(gateway, "withdraw", common.HexToAddress(target.EVM), profile.WrappedDEL, principal.BigInt())})
+		signed, err := ethtypes.SignTx(withdraw, signer, key)
+		require.NoError(t, err)
+		raw, err := signed.MarshalBinary()
+		require.NoError(t, err)
+		expectations["upgradeWithdrawal"] = map[string]interface{}{
+			"raw": hexData(raw), "hash": signed.Hash().Hex(), "nonce": nonce + 4,
+			"validator": target.EVM, "validatorNative": target.Operator,
+			"pendingAtomic": principal.String(), "activeAtomic": amount(target.Initial).Sub(principal).String(),
+			"frozenData": []string{hexData(pack(gateway, "getFrozenStake", new(big.Int)))},
+		}
+	}
 	expect, err := json.Marshal(expectations)
 	require.NoError(t, err)
 	write("expectations.json", expect)

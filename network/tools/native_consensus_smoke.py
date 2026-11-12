@@ -93,7 +93,7 @@ def decode_pubkey(record):
     return value
 
 
-def load_fixture(directory, fee_rewards, downtime, jail_recovery, held_downtime, nft_downtime):
+def load_fixture(directory, fee_rewards, downtime, jail_recovery, held_downtime, nft_downtime, *, full_upgrade=False):
     info = directory.lstat()
     check(stat.S_ISDIR(info.st_mode) and stat.S_IMODE(info.st_mode) & 0o077 == 0, 'private fixture directory required')
     expected = json.loads(private_bytes(directory / 'expectations.json', 8192))
@@ -165,9 +165,9 @@ def load_fixture(directory, fee_rewards, downtime, jail_recovery, held_downtime,
           profile['gateway'].lower() == expected['gateway'] and profile['wrapped_del'].lower() == expected['wrapped'],
           'fixture genesis native consensus and financial profile differ')
     check(profile.get('enable_native_fee_rewards', False) is fee_rewards, 'fixture genesis fee rewards mode differs')
-    check(profile.get('enable_native_ordinary_del_downtime', False) is downtime, 'fixture genesis downtime mode differs')
-    check(profile.get('enable_native_held_del_downtime', False) is held_downtime, 'fixture genesis held downtime mode differs')
-    check(profile.get('enable_native_nft_downtime', False) is nft_downtime, 'fixture genesis NFT downtime mode differs')
+    check(profile.get('enable_native_ordinary_del_downtime', False) is (downtime or full_upgrade), 'fixture genesis downtime mode differs')
+    check(profile.get('enable_native_held_del_downtime', False) is (held_downtime or full_upgrade), 'fixture genesis held downtime mode differs')
+    check(profile.get('enable_native_nft_downtime', False) is (nft_downtime or full_upgrade), 'fixture genesis NFT downtime mode differs')
     if downtime:
         check(profile['master_validator'].lower() == expected['master'] and
               profile.get('enable_del_hold', False) is held_downtime and

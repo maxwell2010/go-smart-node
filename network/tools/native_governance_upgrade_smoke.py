@@ -2,6 +2,7 @@
 
 import argparse
 import base64
+from datetime import datetime
 import hashlib
 import json
 import pathlib
@@ -9,9 +10,10 @@ import re
 import tempfile
 import time
 
+from del_delegation_smoke import GAS_LIMIT, GAS_PRICE, balance, native_positions, read_frozen, read_words
 from mcnd_process_smoke import ProcessOwner, SignalGuard, private_environment, private_namespace, run_command
-from native_consensus_smoke import INITIAL, check_signatures, committed_header, create_replicas, effective_set, load_fixture, wait_replicas
-from withdrawal_genesis_smoke import CHAIN, EVM_CHAIN, MAX_BLOCKS, SHA256, check, native, private_bytes, readiness_diagnostic, request, safe_diagnostic
+from native_consensus_smoke import ATOMS, INITIAL, check_signatures, committed_header, create_replicas, effective_set, load_fixture, wait_replicas
+from withdrawal_genesis_smoke import CHAIN, EVM_CHAIN, MAX_BLOCKS, SHA256, WORD, check, ethereum, native, private_bytes, readiness_diagnostic, request, safe_diagnostic
 
 
 PLAN = 'mintcandy-native-sdk-migrations-v1'
@@ -21,14 +23,16 @@ UPGRADE_API = '/cosmos/upgrade/v1beta1'
 PROPOSALS_API = '/cosmos/gov/v1/proposals'
 VOTING = 'PROPOSAL_STATUS_VOTING_PERIOD'
 VOTING_WEIGHT = '3000000000000000000'
+UNBONDING_SECONDS = 28 * 24 * 60 * 60
 TX_FAILURES = ('account sequence mismatch', 'incorrect account sequence', 'signature verification failed',
                'insufficient fee', 'gas prices too low', 'out of gas', 'proposal not found',
                'not in voting period', 'circuit breaker', 'native sdk upgrade proposal')
 
 
-def load_governance_fixture(directory):
+def load_governance_fixture(directory, *, full_profile=False):
     expected, genesis, keys, initial = load_fixture(
-        directory, fee_rewards=False, downtime=False, jail_recovery=False, held_downtime=False, nft_downtime=False)
+        directory, fee_rewards=full_profile, downtime=False, jail_recovery=False, held_downtime=False,
+        nft_downtime=False, full_upgrade=full_profile)
     doc = json.loads(genesis)['app_state']
     profile = doc['withdrawal_settlement']
     check(profile.get('enable_native_governance') is True and profile.get('enable_native_upgrade_governance') is True,
@@ -57,6 +61,23 @@ def load_governance_fixture(directory):
               hashlib.sha256(raw).hexdigest() == signed['hash'], 'invalid signed Cosmos governance fixture transaction')
         hashes.add(signed['hash'])
     check(len(hashes) == 4, 'fixture signed Cosmos transactions must be distinct')
+    if full_profile:
+        check(initial == 1 and all(profile.get(flag) is True for flag in (
+            'enable_native_duplicate_vote', 'enable_native_ibc_v1', 'enable_del_hold', 'enable_del_hold_reset',
+            'enable_nft_delegation',
+        )), 'combined fixture requires a fresh historical profile with native IBC, hold and NFT admission')
+        claim = expected['upgradeWithdrawal']
+        first = expected['validators'][0]
+        check(claim['validator'].lower() == first['evm'] and claim['validatorNative'] == first['operator'] and
+              claim['nonce'] == action['sequence'] + len(hashes) and
+              int(claim['activeAtomic']) == 7 * ATOMS // 4 and int(claim['pendingAtomic']) == ATOMS // 4 and
+              len(claim['frozenData']) == 1 and re.fullmatch(r'0x[0-9a-f]{72}', claim['frozenData'][0]) and
+              re.fullmatch(WORD, claim['hash']) and re.fullmatch(r'0x(?:[0-9a-f]{2}){100,512}', claim['raw']),
+              'invalid signed full-profile withdrawal fixture')
+        claim['validator'] = first['evm']
+    else:
+        check('upgradeWithdrawal' not in expected and not profile.get('enable_native_duplicate_vote'),
+              'basic fixture must use its original profile')
     return expected, genesis, keys, initial, action
 
 
@@ -198,6 +219,59 @@ def wait_predecessor_halt(replicas, action, report):
     raise TimeoutError('predecessors did not reach the exact SDK upgrade boundary')
 
 
+def withdraw_for_handoff(node, expected):
+    claim = expected['upgradeWithdrawal']
+
+    def evm(method, params):
+        return ethereum(method, params, base=node.evm)
+
+    check(int(evm('eth_chainId', []), 16) == EVM_CHAIN and
+          int(evm('eth_getTransactionCount', [expected['actor'], 'latest']), 16) == claim['nonce'],
+          'signed withdrawal has the wrong EVM domain or account nonce')
+    tx_hash = evm('eth_sendRawTransaction', [claim['raw']])
+    check(tx_hash == claim['hash'], 'unexpected withdrawal transaction hash')
+    deadline = time.monotonic() + 40
+    while time.monotonic() < deadline:
+        check(node.child.poll() is None, 'predecessor exited before withdrawal committed')
+        try:
+            receipt = evm('eth_getTransactionReceipt', [tx_hash])
+        except OSError:
+            receipt = None
+        if receipt is not None:
+            check(receipt['transactionHash'] == tx_hash and receipt['from'].lower() == expected['actor'] and
+                  receipt['to'].lower() == expected['gateway'] and int(receipt['status'], 16) == 1 and
+                  0 < int(receipt['gasUsed'], 16) <= GAS_LIMIT and int(receipt['effectiveGasPrice'], 16) == GAS_PRICE,
+                  'predecessor withdrawal receipt differs from the successful signed fixture')
+            return int(receipt['blockNumber'], 16), tx_hash
+        time.sleep(0.25)
+    raise TimeoutError('predecessor did not index the signed withdrawal')
+
+
+def check_pending_withdrawal(replicas, expected, height, due):
+    claim = expected['upgradeWithdrawal']
+    asset = {**expected, **claim}
+    active, pending = int(claim['activeAtomic']), int(claim['pendingAtomic'])
+    native_supply = set()
+    for node in replicas:
+        check(read_frozen(asset, height, 0, pending, 1, node.evm) == due, 'EVM frozen claim deadline changed')
+        native_positions(asset, height, active, pending, due, node.rest)
+        sdk_params = native('/cosmos/staking/v1beta1/params', height, base=node.rest)['params']
+        check(sdk_params['unbonding_time'] == f'{UNBONDING_SECONDS}s', 'IBC unbonding query no longer matches the 28-day Gateway duration')
+        reserve = read_words(expected['gateway'], expected['validators'][0]['reserveData'], height, 2, node.evm)[1]
+        supply = read_words(expected['wrapped'], expected['supplyData'], height, 1, node.evm)[0]
+        escrow = read_words(expected['wrapped'], expected['escrowData'], height, 1, node.evm)[0]
+        backing = balance(expected['wrapped'], expected['wrappedNative'], height, node.evm, node.rest)
+        check(reserve == active and supply == escrow == backing == 3 * ATOMS,
+              'Gateway reserve or exact DEL backing differs across the binary handoff')
+        bank_supply = native('/cosmos/bank/v1beta1/supply/by_denom?denom=del', height, base=node.rest)['amount']
+        check(bank_supply['denom'] == 'del' and int(bank_supply['amount']) >= backing, 'invalid native DEL supply')
+        native_supply.add(bank_supply['amount'])
+    check(len(native_supply) == 1, 'replicas disagree on native DEL supply')
+    return {'height': height, 'pendingAtomic': str(pending), 'activeAtomic': str(active), 'dueAt': due,
+            'wrappedBackingAtomic': str(3 * ATOMS), 'nativeSupplyAtomic': native_supply.pop(),
+            'appHash': committed_header(replicas, height + 1)['app_hash']}
+
+
 def run_gate(args, binary, replacement, root, expected, genesis, keys, action, env, owner, report):
     report['phase'] = 'create-replicas'
     replicas = create_replicas(binary, root, genesis, keys, env)
@@ -259,12 +333,22 @@ def run_gate(args, binary, replacement, root, expected, genesis, keys, action, e
     check_schedule(replicas, action, scheduled_at)
     report['schedule'] = {'proposalID': proposal_id, 'name': PLAN, 'scheduledAt': scheduled_at, 'targetHeight': target}
 
+    if args.full_profile:
+        report['phase'] = 'predecessor-signed-withdrawal'
+        withdrawn_at, withdrawal_hash = withdraw_for_handoff(source, expected)
+        check(tally_height < withdrawn_at and withdrawn_at + 2 <= target - 1, 'withdrawal missed the predecessor boundary')
+        header = source.rpc(f'block?height={withdrawn_at}')['block']['header']
+        due = int(datetime.fromisoformat(header['time'].replace('Z', '+00:00')).timestamp()) + UNBONDING_SECONDS
+        report['withdrawal'] = {'height': withdrawn_at, 'txHash': withdrawal_hash, 'unbondingSeconds': UNBONDING_SECONDS}
+
     report['phase'] = 'predecessor-halt-at-upgrade'
     wait_predecessor_halt(replicas, action, report)
     check_schedule(replicas, action, target - 1)
     before = committed_header(replicas, target - 1)
     boundary = committed_header(replicas, target)
     report['predecessor'] = {'committedHeight': target - 1, 'boundaryHeight': target, 'boundary': boundary}
+    if args.full_profile:
+        report['withdrawal']['before'] = check_pending_withdrawal(replicas, expected, target - 1, due)
     for node in reversed(replicas):
         owner.stop(node.child)
         check(node.child.poll() is not None, 'predecessor is still running')
@@ -282,10 +366,14 @@ def run_gate(args, binary, replacement, root, expected, genesis, keys, action, e
               applied_height(node, final) == target and current_plan(node, final) is None,
               'SDK handler did not finish at its exact PreBlock height')
     check(all(node.child.poll() is None for node in replicas), 'one successor did not remain running')
+    powers = INITIAL
+    if args.full_profile:
+        report['withdrawal']['after'] = check_pending_withdrawal(replicas, expected, final, due)
+        powers = (1, 1, 0)
     report['application'] = {'name': PLAN, 'appliedHeight': target, 'sameBinary': False, 'processRestarted': True,
                              'before': before, 'block': boundary}
-    report['progress'] = {'height': final, 'powers': effective_set(replicas, expected['validators'], final, INITIAL),
-                          'signers': check_signatures(replicas, expected['validators'], final, INITIAL),
+    report['progress'] = {'height': final, 'powers': effective_set(replicas, expected['validators'], final, powers),
+                          'signers': check_signatures(replicas, expected['validators'], final, powers),
                           **committed_header(replicas, final)}
 
 
@@ -295,6 +383,7 @@ def main(argv=None, signals=None):
         parser.add_argument('--' + name, required=True)
     parser.add_argument('--replacement-binary', required=True)
     parser.add_argument('--replacement-sha256', required=True)
+    parser.add_argument('--full-profile', action='store_true', help='Use the fresh historical, IBC and fee-enabled fixture with a pending DEL claim')
     args = parser.parse_args(argv)
     report = {'status': 'FAIL', 'phase': 'fixture-provenance',
               'scope': 'three loopback replicas across a native governance SDK binary upgrade'}
@@ -309,10 +398,13 @@ def main(argv=None, signals=None):
             for executable, expected_hash in ((binary, args.binary_sha256), (replacement, args.replacement_sha256)):
                 with open(executable, 'rb') as binary_stream:
                     check(hashlib.file_digest(binary_stream, 'sha256').hexdigest() == expected_hash, 'daemon SHA256 mismatch')
-            expected, genesis, keys, initial, action = load_governance_fixture(pathlib.Path(args.fixture))
+            expected, genesis, keys, initial, action = load_governance_fixture(pathlib.Path(args.fixture), full_profile=args.full_profile)
             report.update(sourceCommit=args.source_commit, binarySha256=args.binary_sha256,
                           replacementSha256=args.replacement_sha256, initialHeight=initial,
-                          genesisSha256=hashlib.sha256(genesis).hexdigest(), chainID=CHAIN, evmChainID=EVM_CHAIN)
+                          genesisSha256=hashlib.sha256(genesis).hexdigest(), chainID=CHAIN, evmChainID=EVM_CHAIN,
+                          fullProfile=args.full_profile, planKind='same-source-handler-rehearsal')
+            if args.full_profile:
+                report['ibcCoverage'] = 'unbonding-state-only'
             with tempfile.TemporaryDirectory(prefix='mcnd-native-governance-upgrade-', dir=args.home_parent) as directory:
                 root = pathlib.Path(directory)
                 owner = ProcessOwner(signals)

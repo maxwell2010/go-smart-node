@@ -24,8 +24,9 @@ import (
 )
 
 const nativeConsensusUpgradeGovernanceEnv = "MCND_NATIVE_CONSENSUS_UPGRADE_GOVERNANCE"
+const nativeConsensusFullUpgradeEnv = "MCND_NATIVE_CONSENSUS_FULL_PROFILE_UPGRADE"
 
-func nativeGovernanceUpgradeFixture(t *testing.T, e isolatedBackendEnv, genesis map[string]json.RawMessage) []byte {
+func nativeGovernanceUpgradeFixture(t *testing.T, e isolatedBackendEnv, genesis map[string]json.RawMessage, fullUpgrade bool) []byte {
 	t.Helper()
 	ctx, cdc := e.ctx(), e.app.AppCodec()
 	var gov govv1.GenesisState
@@ -87,6 +88,11 @@ func nativeGovernanceUpgradeFixture(t *testing.T, e isolatedBackendEnv, genesis 
 
 	const planName = "mintcandy-native-sdk-migrations-v1"
 	height := ctx.BlockHeight() + 32
+	if fullUpgrade {
+		// Give the genesis-at-height-one fixture time to commit the signed
+		// withdrawal after approval and still finish before the handoff.
+		height = 64
+	}
 	metadata := fmt.Sprintf(`mintcandy-sdk-upgrade/v1:{"name":"%s","height":%d}`, planName, height)
 	propose := func(title string) sdk.Msg {
 		t.Helper()

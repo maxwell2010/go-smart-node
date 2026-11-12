@@ -23,7 +23,7 @@ native_del_jail_recovery="${8:-off}"
 native_held_del_downtime="${9:-off}"
 [[ "$native_held_del_downtime" == off || "$native_held_del_downtime" == native-held-del-downtime ]] || { echo 'Unsupported native held DEL downtime option.' >&2; exit 2; }
 native_upgrade_governance="${10:-off}"
-[[ "$native_upgrade_governance" == off || "$native_upgrade_governance" == native-upgrade-governance ]] || { echo 'Unsupported native upgrade governance option.' >&2; exit 2; }
+[[ "$native_upgrade_governance" == off || "$native_upgrade_governance" == native-upgrade-governance || "$native_upgrade_governance" == native-full-profile-upgrade ]] || { echo 'Unsupported native upgrade governance option.' >&2; exit 2; }
 native_nft_downtime="${11:-off}"
 [[ "$native_nft_downtime" == off || "$native_nft_downtime" == native-nft-downtime ]] || { echo 'Unsupported native NFT downtime option.' >&2; exit 2; }
 for tool in sudo unshare ip gcc python3 go; do command -v "$tool" >/dev/null; done
@@ -465,8 +465,14 @@ if [[ "$native_nft_downtime" == native-nft-downtime ]]; then
   run_native_del_downtime native-nft-downtime --nft-downtime 0 0 1
 fi
 
-if [[ "$native_upgrade_governance" == native-upgrade-governance ]]; then
+if [[ "$native_upgrade_governance" != off ]]; then
   fixture="$work/native-governance-upgrade-fixture"
+  full_profile=0
+  profile_args=()
+  if [[ "$native_upgrade_governance" == native-full-profile-upgrade ]]; then
+    full_profile=1
+    profile_args=(--full-profile)
+  fi
   successor="$work/mcnd-native-sdk-migration-v1"
   go build -mod=readonly -tags=mcnd_native_sdk_migration_v1 -buildvcs=true -p 2 -trimpath \
     -ldflags "-X main.buildCommit=$revision" -o "$successor" ./cmd/mcnd
@@ -474,6 +480,7 @@ if [[ "$native_upgrade_governance" == native-upgrade-governance ]]; then
   successor_sha="$(sha256sum "$successor" | awk '{print $1}')"
   mkdir -m 700 -- "$fixture"
   if ! MCND_NATIVE_CONSENSUS_FIXTURE_DIR="$fixture" MCND_NATIVE_CONSENSUS_UPGRADE_GOVERNANCE=1 \
+      MCND_NATIVE_CONSENSUS_FULL_PROFILE_UPGRADE="$full_profile" \
       go test -mod=readonly -tags= -trimpath -p 2 -count=1 -timeout 8m -json \
       -run '^TestOwnedAppSignedRegistryBootstrap$/^authenticated_isolated_position_reader$' ./systemcontracts \
       > "$work/native-governance-upgrade-fixture.log" 2>&1; then
@@ -484,13 +491,13 @@ if [[ "$native_upgrade_governance" == native-upgrade-governance ]]; then
     env TMPDIR="$work" "$python" -B "$root/network/tools/native_governance_upgrade_smoke.py" \
     --binary "$work/mcnd" --binary-sha256 "$mcnd_sha" --source-commit "$revision" \
     --replacement-binary "$successor" --replacement-sha256 "$successor_sha" \
-    --fixture "$fixture" --home-parent "$work" --report "$output/native-governance-upgrade.json" \
+    --fixture "$fixture" --home-parent "$work" --report "$output/native-governance-upgrade.json" "${profile_args[@]}" \
     |& tee "$output/native-governance-upgrade.log"
   preserve_public_reports
-  "$python" - "$output" "$root" "$revision" "$mcnd_sha" "$successor_sha" <<'PY'
+  "$python" - "$output" "$root" "$revision" "$mcnd_sha" "$successor_sha" "$full_profile" <<'PY'
 import json,sys
 from pathlib import Path
-out,root=map(Path,sys.argv[1:3]); revision,predecessor_sha,successor_sha=sys.argv[3:]
+out,root=map(Path,sys.argv[1:3]); revision,predecessor_sha,successor_sha,full_profile=sys.argv[3:]
 sys.path.insert(0,str(root/'network/tools'))
 from binary_provenance import parse_build_info
 predecessor=parse_build_info((out/'mcnd-build.log').read_text())
@@ -501,11 +508,24 @@ report=json.loads((out/'native-governance-upgrade.json').read_text())
 assert report['status']=='PASS' and 'error' not in report,report
 assert report['sourceCommit']==revision and report['binarySha256']==predecessor_sha,report
 assert report['replacementSha256']==successor_sha and successor_sha!=predecessor_sha,report
+assert report['fullProfile'] is (full_profile == '1') and report['planKind']=='same-source-handler-rehearsal',report
 assert report['rejected']['status']=='PROPOSAL_STATUS_REJECTED' and report['passed']['status']=='PROPOSAL_STATUS_PASSED',report
 plan,application,progress=report['schedule'],report['application'],report['progress']
 assert plan['scheduledAt'] < plan['targetHeight'] == application['appliedHeight'] <= progress['height']-3,report
 assert report['predecessor']['committedHeight']+1==plan['targetHeight']==report['predecessor']['boundaryHeight'],report
 assert application['sameBinary'] is False and application['processRestarted'] is True,report
+if full_profile == '1':
+    assert report['ibcCoverage']=='unbonding-state-only',report
+    claim=report['withdrawal']
+    before,after=claim['before'],claim['after']
+    assert claim['unbondingSeconds']==28*24*60*60,report
+    assert claim['height']<before['height']==plan['targetHeight']-1<after['height']==progress['height'],report
+    assert before['appHash']==application['block']['app_hash'],report
+    for field,value in {'pendingAtomic':'250000000000000000','activeAtomic':'1750000000000000000',
+                        'wrappedBackingAtomic':'3000000000000000000','dueAt':before['dueAt'],
+                        'nativeSupplyAtomic':before['nativeSupplyAtomic']}.items():
+        assert before[field]==after[field]==value,report
+    assert progress['powers']=={'a':1,'b':1} and progress['signers']==['a','b'],report
 print('Native governance tally, exact predecessor halt, successor migration and continued three-node consensus passed.')
 PY
 fi
