@@ -46,7 +46,18 @@ func (e *Executor) AuthorizeFrozenHistoricalNFTPenalty(ctx sdk.Context, msg core
 func (e *Executor) ApplyFrozenNFTPenalty(ctx sdk.Context, row validatortypes.EVMFrozenBinding, infractionHeight int64,
 	percentage uint16, nativeSupply func(sdk.Context) sdkmath.Int, project func(sdk.Context, FrozenNFTPenaltyProof) error,
 ) error {
-	return e.applyFrozenNFTPenalty(ctx, row, infractionHeight, percentage, nativeSupply, project, nil)
+	return e.applyFrozenNFTPenalty(ctx, row, infractionHeight, percentage, nativeSupply, project, nil, false)
+}
+
+// ApplyCustodiedNFTCheckpoint advances an ordinary penalty cursor for a
+// mature NFT claim that left active stake before the infraction.
+func (e *Executor) ApplyCustodiedNFTCheckpoint(ctx sdk.Context, row validatortypes.EVMFrozenBinding, infractionHeight int64, percentage uint16,
+	nativeSupply func(sdk.Context) sdkmath.Int, project func(sdk.Context, FrozenNFTPenaltyProof) error,
+) error {
+	if err := requireCustodiedOrdinaryCheckpoint(ctx, row, infractionHeight); err != nil {
+		return err
+	}
+	return e.applyFrozenNFTPenalty(ctx, row, infractionHeight, percentage, nativeSupply, project, nil, true)
 }
 
 // ApplyFrozenHistoricalNFTPenalty realizes a typed Master penalty using the
@@ -59,12 +70,12 @@ func (e *Executor) ApplyFrozenHistoricalNFTPenalty(ctx sdk.Context, row validato
 		return errors.New("frozen historical NFT penalty requires the active typed Master reconciliation")
 	}
 	return e.applyFrozenNFTPenalty(ctx, row, master.InfractionHeight, master.Percentage, nativeSupply, project,
-		&frozenHistoricalNFTPenalty{master: master, eligible: eligible})
+		&frozenHistoricalNFTPenalty{master: master, eligible: eligible}, false)
 }
 
 func (e *Executor) applyFrozenNFTPenalty(ctx sdk.Context, row validatortypes.EVMFrozenBinding, infractionHeight int64,
 	percentage uint16, nativeSupply func(sdk.Context) sdkmath.Int, project func(sdk.Context, FrozenNFTPenaltyProof) error,
-	historical *frozenHistoricalNFTPenalty,
+	historical *frozenHistoricalNFTPenalty, custodiedCheckpoint bool,
 ) error {
 	if nativeSupply == nil || project == nil || ctx.ExecMode() != sdk.ExecModeFinalize ||
 		infractionHeight <= 0 || infractionHeight > ctx.BlockHeight() || percentage == 0 || percentage > 100 {
@@ -78,7 +89,7 @@ func (e *Executor) applyFrozenNFTPenalty(ctx sdk.Context, row validatortypes.EVM
 	if !row.Active || row.SourceKind != validatortypes.EVMStakeBindingKind_EVM_STAKE_BINDING_NFT ||
 		row.NativeTarget.StakeType != validatortypes.StakeType_NFT || row.ReserveAsset.ReserveKind != nfttypes.IsolatedReserveDEL ||
 		row.ReserveAsset.NativeDenom != identity.BaseDenom || row.CreatedHeight <= 0 || row.UpdatedHeight > ctx.BlockHeight() || now <= 0 ||
-		(historical == nil && common.BytesToHash(row.CompletionTimestamp).Big().Cmp(big.NewInt(now)) <= 0) {
+		(historical == nil && !custodiedCheckpoint && common.BytesToHash(row.CompletionTimestamp).Big().Cmp(big.NewInt(now)) <= 0) {
 		if historical != nil {
 			return errors.New("historical penalty requires a custodied ordinary isolated NFT claim backed by native DEL")
 		}
