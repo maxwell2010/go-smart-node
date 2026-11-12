@@ -9,7 +9,6 @@ import (
 	sdkmath "cosmossdk.io/math"
 	sdk "github.com/cosmos/cosmos-sdk/types"
 	evmtypes "github.com/cosmos/evm/x/vm/types"
-	"github.com/cosmos/gogoproto/proto"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core"
 	ethtypes "github.com/ethereum/go-ethereum/core/types"
@@ -128,12 +127,22 @@ func (e *Executor) ApplyOrdinaryDELPenalty(ctx sdk.Context, row validatortypes.E
 	if afterStatus != status {
 		return errors.New("ordinary DEL penalty changed the Master validator status")
 	}
-	post := proto.Clone(&row).(*validatortypes.EVMStakeBinding)
+	encoded, err := validatortypes.CanonicalBindingBytes(&row)
+	if err != nil {
+		return err
+	}
+	var pre, post validatortypes.EVMStakeBinding
+	if err := pre.Unmarshal(encoded); err != nil {
+		return err
+	}
+	if err := post.Unmarshal(encoded); err != nil {
+		return err
+	}
 	post.RawAmount = remaining
 	post.Active = remaining.IsPositive()
 	post.PenaltyCursor = afterCursor.Bytes()
 	post.UpdatedHeight = child.BlockHeight()
-	proof := OrdinaryDELPenaltyProof{Before: *proto.Clone(&row).(*validatortypes.EVMStakeBinding), After: *post, Burned: sdkmath.NewIntFromBigInt(burned)}
+	proof := OrdinaryDELPenaltyProof{Before: pre, After: post, Burned: sdkmath.NewIntFromBigInt(burned)}
 	if err := project(child, proof); err != nil {
 		return fmt.Errorf("project ordinary DEL penalty: %w", err)
 	}
