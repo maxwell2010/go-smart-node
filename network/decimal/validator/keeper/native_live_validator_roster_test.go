@@ -1,6 +1,7 @@
 package keeper
 
 import (
+	"strings"
 	"testing"
 	"time"
 
@@ -9,6 +10,28 @@ import (
 	"github.com/maxwell2010/go-smart-node/network/identity"
 	"github.com/stretchr/testify/require"
 )
+
+func TestNativeLiveValidatorRosterRequiresCanonicalOperatorAddress(t *testing.T) {
+	ctx, keeper, _ := delProvenanceGenesis(t)
+	upper := validator(t, 3, 0)
+	upper.OperatorAddress = strings.ToUpper(upper.OperatorAddress)
+	legacy, _ := ctx.CacheContext()
+	require.NoError(t, keeper.SetValidator(legacy, upper))
+	saved, err := keeper.GetValidator(legacy, upper.OperatorAddress)
+	require.NoError(t, err)
+	require.Equal(t, upper.OperatorAddress, saved.OperatorAddress)
+	require.ErrorContains(t, keeper.InitializeNativeLiveValidatorRoster(legacy.WithBlockHeight(0)), "must use canonical Bech32")
+	_, err = keeper.NativeLiveValidatorOperators(legacy)
+	require.ErrorIs(t, err, ErrNotFound)
+
+	require.NoError(t, keeper.InitializeNativeLiveValidatorRoster(ctx.WithBlockHeight(0)))
+	require.ErrorContains(t, keeper.SetValidator(ctx, upper), "must use canonical Bech32")
+	_, err = keeper.GetValidator(ctx, upper.OperatorAddress)
+	require.ErrorIs(t, err, ErrNotFound)
+	live, err := keeper.NativeLiveValidatorOperators(ctx)
+	require.NoError(t, err)
+	require.Len(t, live, 2)
+}
 
 func TestNativeLiveValidatorRosterIsOptInAtGenesis(t *testing.T) {
 	ctx, _, keeper := bindingEnvironment(t, false)

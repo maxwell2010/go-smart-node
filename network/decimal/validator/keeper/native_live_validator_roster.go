@@ -54,7 +54,7 @@ func (k *StateKeeper) InitializeNativeLiveValidatorRoster(ctx sdk.Context) error
 	}
 	operators := make([]nativeLiveOperatorID, 0, len(validators))
 	for _, validator := range validators {
-		key, err := operatorKey(nativeLiveValidatorRosterKey, validator.OperatorAddress)
+		id, err := k.nativeLiveOperatorID(validator.OperatorAddress)
 		if err != nil {
 			return err
 		}
@@ -68,7 +68,7 @@ func (k *StateKeeper) InitializeNativeLiveValidatorRoster(ctx sdk.Context) error
 			}
 			return ErrNativeConsensusKeyPermanentlyExcluded
 		}
-		operators = append(operators, nativeLiveOperatorID(key[1:]))
+		operators = append(operators, id)
 	}
 	slices.SortFunc(operators, compareNativeLiveOperators)
 	if err := k.writeNativeLiveValidatorRoster(child, operators); err != nil {
@@ -100,6 +100,22 @@ func (k *StateKeeper) NativeLiveValidatorOperators(ctx sdk.Context) ([]string, e
 
 func compareNativeLiveOperators(a, b nativeLiveOperatorID) int {
 	return bytes.Compare(a[:], b[:])
+}
+
+func (k *StateKeeper) nativeLiveOperatorID(operator string) (nativeLiveOperatorID, error) {
+	key, err := operatorKey(nativeLiveValidatorRosterKey, operator)
+	if err != nil {
+		return nativeLiveOperatorID{}, err
+	}
+	raw := key[1:]
+	canonical, err := k.ValidatorAddressCodec().BytesToString(raw)
+	if err != nil {
+		return nativeLiveOperatorID{}, err
+	}
+	if operator != canonical {
+		return nativeLiveOperatorID{}, errors.New("native live validator operator address must use canonical Bech32")
+	}
+	return nativeLiveOperatorID(raw), nil
 }
 
 func (k *StateKeeper) readNativeLiveValidatorRoster(ctx sdk.Context) ([]nativeLiveOperatorID, error) {
@@ -142,11 +158,10 @@ func (k *StateKeeper) updateNativeLiveValidatorRoster(ctx sdk.Context, operator 
 	if err != nil {
 		return err
 	}
-	key, err := operatorKey(nativeLiveValidatorRosterKey, operator)
+	id, err := k.nativeLiveOperatorID(operator)
 	if err != nil {
 		return err
 	}
-	id := nativeLiveOperatorID(key[1:])
 	i, found := slices.BinarySearchFunc(ids, id, compareNativeLiveOperators)
 	if register {
 		if found {
