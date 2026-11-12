@@ -39,6 +39,8 @@ class Replica:
     node_id: str
     child: object = None
     log: pathlib.Path = None
+    chain_id: str = CHAIN
+    evm_chain_id: int = EVM_CHAIN
 
     @property
     def p2p(self):
@@ -63,7 +65,7 @@ class Replica:
     def start(self, binary, env, owner, label):
         evm = 8645 + self.index * 100
         args = [
-            'start', '--home', str(self.home), '--chain-id', CHAIN, '--evm.evm-chain-id', str(EVM_CHAIN),
+            'start', '--home', str(self.home), '--chain-id', self.chain_id, '--evm.evm-chain-id', str(self.evm_chain_id),
             '--rpc.laddr', f'tcp://127.0.0.1:{self.p2p + 1}',
             '--p2p.laddr', f'tcp://127.0.0.1:{self.p2p}', '--grpc.address', f'127.0.0.1:{self.grpc}',
             '--api.enable=true', '--grpc-web.enable=false', '--json-rpc.enable=true',
@@ -221,19 +223,24 @@ def load_fixture(directory, fee_rewards, downtime, jail_recovery, held_downtime,
 
 
 
-def create_replicas(binary, root, genesis, keys, env, *, full_mesh=False):
-    replicas = []
-    for index, (label, key) in enumerate(zip(('a', 'b', 'c'), keys, strict=True)):
-        home = root / label
-        run_command(binary, home, ['init', f'native-consensus-{label}', '--chain-id', CHAIN, '--evm.evm-chain-id', str(EVM_CHAIN)], env, secret=True)
-        validate_fresh_home(home)
-        private_write(home / 'config/genesis.json', genesis)
+def create_replica(binary, root, label, index, genesis, key, env, *, chain_id=CHAIN, evm_chain_id=EVM_CHAIN):
+    home = root / label
+    run_command(binary, home, ['init', f'native-consensus-{label}', '--chain-id', chain_id,
+                               '--evm.evm-chain-id', str(evm_chain_id)], env, secret=True)
+    validate_fresh_home(home)
+    private_write(home / 'config/genesis.json', genesis)
+    if key is not None:
         private_write(home / 'config/priv_validator_key.json', key)
-        node_id = run_command(binary, home, ['comet', 'show-node-id'], env, secret=True).strip()
-        check(re.fullmatch(r'[0-9a-f]{40}', node_id), 'invalid disposable P2P node identity')
-        replica = Replica(label, index, home, node_id)
-        write_config(home, 'app.toml', {('api', 'address'): json.dumps(replica.rest.replace('http:', 'tcp:'))})
-        replicas.append(replica)
+    node_id = run_command(binary, home, ['comet', 'show-node-id'], env, secret=True).strip()
+    check(re.fullmatch(r'[0-9a-f]{40}', node_id), 'invalid disposable P2P node identity')
+    replica = Replica(label, index, home, node_id, chain_id=chain_id, evm_chain_id=evm_chain_id)
+    write_config(home, 'app.toml', {('api', 'address'): json.dumps(replica.rest.replace('http:', 'tcp:'))})
+    return replica
+
+
+def create_replicas(binary, root, genesis, keys, env, *, full_mesh=False):
+    replicas = [create_replica(binary, root, label, index, genesis, key, env)
+                for index, (label, key) in enumerate(zip(('a', 'b', 'c'), keys, strict=True))]
     check(len({node.node_id for node in replicas}) == 3, 'P2P node identities must be unique')
     source = replicas[0]
     for replica in replicas:
@@ -266,12 +273,13 @@ def wait_peer_pair(first, second, seconds, report):
         if linked:
             return
         time.sleep(0.25)
-    raise RuntimeError('startup peers A and C did not connect on loopback')
+    raise RuntimeError(f'startup peers {first.label} and {second.label} did not connect on loopback')
 
 
 def wait_replicas(replicas, minimum, seconds, report):
     deadline = time.monotonic() + seconds
-    heights = [wait_height(node.child, minimum, deadline, node.log, report, read_comet=node.rpc) for node in replicas]
+    heights = [wait_height(node.child, minimum, deadline, node.log, report, read_comet=node.rpc,
+                           chain_id=node.chain_id) for node in replicas]
     height = min(heights)
     check(height - report['initialHeight'] < MAX_BLOCKS, 'native consensus exceeded the disposable block budget')
     return height
@@ -297,7 +305,7 @@ def committed_header(replicas, height):
         header = response['block']['header']
         fields = {key: header[key] for key in ('validators_hash', 'next_validators_hash', 'app_hash')}
         fields['block_hash'] = response['block_id']['hash']
-        check(header['chain_id'] == CHAIN and int(header['height']) == height and
+        check(header['chain_id'] == node.chain_id and int(header['height']) == height and
               all(re.fullmatch(r'[0-9A-Fa-f]{64}', value) for value in fields.values()) and
               re.fullmatch(r'[0-9A-F]{40}', header['proposer_address']), 'invalid Comet header identity')
         fields['proposer_address'] = header['proposer_address']

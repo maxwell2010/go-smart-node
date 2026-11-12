@@ -6,6 +6,10 @@ on:
         description: Check the exact daemon and source with pinned govulncheck
         default: false
         type: boolean
+      launch_rehearsal:
+        description: Start packaged validators and replay block 1 on an ordinary peer in a private network
+        default: false
+        type: boolean
   push:
     branches: ['integration/**', 'release/**']
     paths: ['network/**', '.github/workflows/modern-network-development.yml']
@@ -70,6 +74,54 @@ jobs:
           "$install_dir/mcnd" version
           "$install_dir/mcnd" init config-check --home "$install_dir/home" --chain-id mintcandy_990003-1 --evm.evm-chain-id 990003 > /dev/null 2>&1
           python3 network/tools/configure_history.py --home "$install_dir/home" --apply --role rpc-ibc
+      - name: Rehearse fresh launch using the exact packaged daemon
+        if: inputs.launch_rehearsal
+        shell: bash
+        run: |
+          set -euo pipefail
+          umask 077
+          launch_work=$(mktemp -d "$RUNNER_TEMP/mcnd-launch.XXXXXXXX")
+          fixture="$launch_work/fixture"
+          evidence="$RUNNER_TEMP/mcnd-launch-evidence"
+          mkdir -m 700 -- "$fixture" "$evidence"
+          archive_name=mcnd-development-linux-amd64.tar.gz
+          archive="$GITHUB_WORKSPACE/development-artifacts/$archive_name"
+          (cd development-artifacts && sha256sum --check --strict "$archive_name.sha256")
+          archive_sha=$(sha256sum "$archive" | awk '{print $1}')
+          tar -xOzf "$archive" bin/mcnd > "$launch_work/mcnd"
+          cmp "$RUNNER_TEMP/mcnd" "$launch_work/mcnd"
+          chmod 0755 "$launch_work/mcnd"
+          binary_sha=$(sha256sum "$launch_work/mcnd" | awk '{print $1}')
+          if ! (cd network && MCND_NATIVE_CONSENSUS_FIXTURE_DIR="$fixture" MCND_NATIVE_LAUNCH_REHEARSAL=1 \
+              go test -mod=readonly -tags= -p 2 -count=1 -timeout 8m -json \
+              -run '^TestOwnedAppSignedRegistryBootstrap$/^authenticated_isolated_position_reader$' ./systemcontracts \
+              > "$launch_work/fixture.log" 2>&1); then
+            echo 'Private launch genesis fixture failed.'
+            sed -nE 's/.*(native_(consensus|launch)[[:alnum:]_]*\.go:[0-9]+):.*/\1/p' "$launch_work/fixture.log" | sort -u
+            exit 1
+          fi
+          launch_status=0
+          sudo -n unshare --net -- bash -euc 'ip link set lo up; exec "$@"' _ \
+              env TMPDIR="$launch_work" "$(command -v python3)" -B "$GITHUB_WORKSPACE/network/tools/native_launch_rehearsal.py" \
+              --binary "$launch_work/mcnd" --binary-sha256 "$binary_sha" --archive-sha256 "$archive_sha" \
+              --source-commit "$GITHUB_SHA" --fixture "$fixture" --home-parent "$launch_work" \
+              --report "$evidence/network.json" || launch_status=$?
+          if [[ -f "$evidence/network.json" ]]; then
+            sudo -n chown "$(id -u):$(id -g)" "$evidence/network.json"
+            chmod 600 "$evidence/network.json"
+          fi
+          (( launch_status == 0 )) || exit "$launch_status"
+          install -m 600 -- "$fixture/public/genesis.json" "$evidence/genesis.json"
+          python3 -B network/tools/native_launch_allocation.py --genesis "$evidence/genesis.json" --output "$evidence/allocation.json"
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+        if: always() && inputs.launch_rehearsal
+        with:
+          name: mcnd-launch-${{ github.sha }}-${{ github.run_attempt }}
+          path: |
+            ${{ runner.temp }}/mcnd-launch-evidence/genesis.json
+            ${{ runner.temp }}/mcnd-launch-evidence/allocation.json
+            ${{ runner.temp }}/mcnd-launch-evidence/network.json
+          retention-days: 14
       - name: Audit default daemon source and compiled binary
         if: inputs.security_audit
         working-directory: network

@@ -228,7 +228,7 @@ def readiness_diagnostic(path, report):
     return safe_diagnostic(text)
 
 
-def wait_height(child, minimum, deadline, log_path, report, *, read_comet=None):
+def wait_height(child, minimum, deadline, log_path, report, *, read_comet=None, chain_id=CHAIN):
     read_comet = comet if read_comet is None else read_comet
     last_heights = ''
     while time.monotonic() < deadline:
@@ -237,7 +237,7 @@ def wait_height(child, minimum, deadline, log_path, report, *, read_comet=None):
             raise RuntimeError(f'daemon exited ({code}) before committed height {minimum}: ' + readiness_diagnostic(log_path, report))
         try:
             status = read_comet('status')
-            check(status['node_info']['network'] == CHAIN, 'Comet RPC chain mismatch')
+            check(status['node_info']['network'] == chain_id, 'Comet RPC chain mismatch')
             advertised = int(status['sync_info']['latest_block_height'])
             committed = int(read_comet('abci_info')['response'].get('last_block_height', '0'))
         except (OSError, json.JSONDecodeError):
