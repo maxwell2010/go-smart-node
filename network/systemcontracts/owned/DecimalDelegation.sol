@@ -4080,6 +4080,10 @@ library DelegationNFTLib {
         uint256 amountBefore, uint256 amountAfter, bool eligible
     );
     event FrozenDELClaimExtinguished(uint256 indexed index, uint256 indexed penaltyCursor);
+    event FrozenNFTPenaltyApplied(
+        uint256 indexed index, uint256 indexed penaltyCursor, uint256 infractionHeight,
+        uint256 reserveBefore, uint256 reserveAfter, bool eligible
+    );
     event WithdrawCompleted(uint256 stakeIndex);
 
     struct FrozenDELCheckpoint {
@@ -4126,11 +4130,15 @@ library DelegationNFTLib {
     ) public {
         IDecimalDelegationCommon.FrozenStake storage claim = $._frozenStakes[index];
         FrozenDELCheckpoint storage checkpoint = _frozenDELPenaltyStorage().checkpoints[index];
-        if (!_isFrozenDEL($, claim) || claim.stake.amount != expectedAmount ||
-            checkpoint.creationHeight == 0 || checkpoint.penaltyCursor != beforeCursor ||
+        if (checkpoint.creationHeight == 0 || checkpoint.penaltyCursor != beforeCursor ||
             checkpoint.creationHeight > block.number ||
             infractionHeight == 0 || infractionHeight > block.number ||
             block.timestamp >= claim.unfreezeTimestamp) {
+            revert InvalidFrozenDELPenalty();
+        }
+        bool isNFT = claim.stake.tokenType == IDecimalDelegationCommon.TokenType.DRC721;
+        if (isNFT ? _frozenNFTReserve($, claim) != expectedAmount
+            : (!_isFrozenDEL($, claim) || claim.stake.amount != expectedAmount)) {
             revert InvalidFrozenDELPenalty();
         }
         IPagedDecimalMasterValidator master = IPagedDecimalMasterValidator(address(_masterValidator($)));
@@ -4143,9 +4151,19 @@ library DelegationNFTLib {
             revert InvalidFrozenDELPenalty();
         }
         bool eligible = checkpoint.creationHeight >= infractionHeight;
+        checkpoint.penaltyCursor = count;
+        if (isNFT) {
+            uint256 nftLoss;
+            if (eligible && expectedAmount != 0) {
+                // The Vault computes the exact reserve loss with full precision.
+                // The receipt itself stays in Gateway custody, even at zero.
+                nftLoss = IDRC721(claim.stake.token).penalty(claim.stake.tokenId, percentages[0]);
+            }
+            emit FrozenNFTPenaltyApplied(index, count, infractionHeight, expectedAmount, expectedAmount - nftLoss, eligible);
+            return;
+        }
         uint256 loss = eligible ? _getAmountToPenalty(expectedAmount, percentages[0]) : 0;
         uint256 afterAmount = expectedAmount - loss;
-        checkpoint.penaltyCursor = count;
         if (loss != 0) {
             claim.stake.amount = afterAmount;
             if (afterAmount == 0) {
@@ -4171,6 +4189,34 @@ library DelegationNFTLib {
             stake.tokenType == IDecimalDelegationCommon.TokenType.DEL &&
             stake.tokenId == 0 && validHold &&
             stake.amount != 0 && stake.token == address(WETH($));
+    }
+
+    function _frozenNFTReserve(
+        IDecimalDelegationCommon.DelegationStorage storage $,
+        IDecimalDelegationCommon.FrozenStake storage claim
+    ) private view returns (uint256) {
+        IDecimalDelegationCommon.Stake storage stake = claim.stake;
+        if (claim.freezeType != IDecimalDelegationCommon.FreezeType.Withdraw ||
+            claim.freezeStatus != IDecimalDelegationCommon.FreezeStatus.Frozen ||
+            stake.tokenType != IDecimalDelegationCommon.TokenType.DRC721 || stake.amount != 1 ||
+            stake.tokenId == 0 || stake.holdStartTime != 0 ||
+            (stake.holdTimestamp != 0 && stake.holdTimestamp >= block.timestamp) ||
+            stake.token == address(0) || stake.token != _getAddress($, "nft-position-vault")) {
+            revert InvalidFrozenDELPenalty();
+        }
+        bytes32 sourceID = _getNFTStakeId(stake.token, stake.tokenId, stake.delegator, stake.validator, stake.holdTimestamp);
+        IDecimalDelegationCommon.NFTStake storage source = $._nftStakes[sourceID];
+        if (source.isActive || source.nftType != IDecimalDelegationCommon.TokenType.DRC721 || source.amount != 1 ||
+            source.nftContract != stake.token || source.tokenId != stake.tokenId || source.delegator != stake.delegator ||
+            source.validator != stake.validator || source.holdTimestamp != stake.holdTimestamp ||
+            source.reserveToken != address(WETH($)) || IERC721(stake.token).ownerOf(stake.tokenId) != address(this)) {
+            revert InvalidFrozenDELPenalty();
+        }
+        INFTReserve.Reserve memory reserve = IDRC721(stake.token).getReserve(stake.tokenId);
+        if (reserve.reserveType != INFTReserve.ReserveType.DEL || reserve.token != address(0)) {
+            revert InvalidFrozenDELPenalty();
+        }
+        return reserve.amount;
     }
 
     function completeWithdrawal(IDecimalDelegationCommon.DelegationStorage storage $, uint256 stakeIndex) public {
@@ -5139,6 +5185,18 @@ library DelegationNFTLib {
         // Add to frozen stakes
         $._frozenStakes.push(frozenStake);
         uint256 stakeIndex = $._frozenStakes.length - 1;
+
+        if (nftContract == _getAddress($, "nft-position-vault")) {
+            INFTReserve.Reserve memory reserve = IDRC721(nftContract).getReserve(tokenId);
+            if (reserve.reserveType == INFTReserve.ReserveType.DEL && reserve.token == address(0)) {
+                FrozenDELCheckpoint storage checkpoint = _frozenDELPenaltyStorage().checkpoints[stakeIndex];
+                if (block.number == 0 || checkpoint.creationHeight != 0 || reserve.amount != currentReserveAmount) {
+                    revert InvalidFrozenDELPenalty();
+                }
+                checkpoint.creationHeight = block.number;
+                checkpoint.penaltyCursor = $._nftStakePenaltyIndex[nftStakeId];
+            }
+        }
 
         emit WithdrawRequest(coinStakeId, stakeIndex, frozenStake);
         emit NFTUndelegated(nftStakeId, stakeIndex);
