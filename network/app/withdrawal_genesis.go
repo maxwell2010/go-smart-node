@@ -25,14 +25,27 @@ const (
 	WithdrawalGenesisKey     = "withdrawal_settlement"
 	maxWithdrawalGenesisRows = 16
 	withdrawalGenesisGas     = 192_000_000
+	maxWithdrawalProfileJSON = 1024
 )
 
 func parseWithdrawalGenesisProfile(raw json.RawMessage) (*WithdrawalProfile, error) {
 	if raw == nil {
 		return nil, nil
 	}
-	if len(raw) > 1024 {
+	if len(raw) > 4*maxWithdrawalProfileJSON {
 		return nil, errors.New("withdrawal genesis profile exceeds size limit")
+	}
+	// Comet and SDK genesis writers can indent the embedded profile. Keep the
+	// original content bound and separately bound work on the raw input.
+	if len(raw) > maxWithdrawalProfileJSON {
+		var compact bytes.Buffer
+		if err := json.Compact(&compact, raw); err != nil {
+			return nil, fmt.Errorf("decode withdrawal genesis profile: %w", err)
+		}
+		if compact.Len() > maxWithdrawalProfileJSON {
+			return nil, errors.New("withdrawal genesis profile exceeds size limit")
+		}
+		raw = compact.Bytes()
 	}
 	decoder := json.NewDecoder(bytes.NewReader(raw))
 	decoder.DisallowUnknownFields()

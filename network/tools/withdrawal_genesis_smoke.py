@@ -155,6 +155,8 @@ def native(path, height, *, base=REST):
 
 def safe_diagnostic(text):
     categories = ('authenticate withdrawal genesis', 'genesis signing domain', 'failed to unmarshal',
+                  'withdrawal genesis profile exceeds size limit', 'decode withdrawal genesis profile',
+                  'consensus genesis cannot be nil', 'cosmos and evm chain ids do not match',
                   'failed to initialize', 'validator set', 'priv-validator', 'no space left on device',
                   'failed init node', 'failed start cometbft server', 'invalid cachemergeiterator',
                   'native fee rewards require an empty genesis del fee collector',

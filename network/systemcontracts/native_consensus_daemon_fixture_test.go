@@ -1,6 +1,7 @@
 package systemcontracts_test
 
 import (
+	"bytes"
 	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
@@ -301,6 +302,18 @@ func exportNativeConsensusDaemonFixture(t *testing.T, e isolatedBackendEnv, dir 
 	require.NoError(t, err)
 	body, err := cmtjson.MarshalIndent(doc, "", "  ")
 	require.NoError(t, err)
+	if fullUpgrade {
+		// Validate the exact serialized envelope through the same SDK and
+		// application validation used by mcnd genesis validate.
+		saved, err := genutiltypes.AppGenesisFromReader(bytes.NewReader(body))
+		require.NoError(t, err)
+		require.NoError(t, saved.ValidateAndComplete())
+		var serializedState map[string]json.RawMessage
+		require.NoError(t, json.Unmarshal(saved.AppState, &serializedState))
+		require.JSONEq(t, string(genesis[ownedapp.WithdrawalGenesisKey]), string(serializedState[ownedapp.WithdrawalGenesisKey]))
+		require.NoError(t, ownedapp.ValidateNativeGenesisAllocation(cdc, serializedState))
+		require.NoError(t, ownedapp.NewBasicModuleManager().ValidateGenesis(cdc, e.app.TxConfig(), serializedState))
+	}
 	write := func(name string, data []byte) {
 		t.Helper()
 		file, err := os.OpenFile(filepath.Join(dir, name), os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0600)
