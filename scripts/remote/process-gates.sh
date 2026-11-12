@@ -13,7 +13,7 @@ del_state_sync="${3:-off}"
 ibc_client_upgrade="${4:-off}"
 [[ "$ibc_client_upgrade" == off || "$ibc_client_upgrade" == ibc-client-upgrade ]] || { echo 'Unsupported IBC client upgrade option.' >&2; exit 2; }
 native_consensus="${5:-off}"
-[[ "$native_consensus" == off || "$native_consensus" == native-consensus ]] || { echo 'Unsupported native consensus option.' >&2; exit 2; }
+[[ "$native_consensus" == off || "$native_consensus" == native-consensus || "$native_consensus" == native-consensus-fee-rewards ]] || { echo 'Unsupported native consensus option.' >&2; exit 2; }
 for tool in sudo unshare ip gcc python3 go; do command -v "$tool" >/dev/null; done
 python="$(command -v python3)"
 "$python" -c 'import sys,tomllib; assert sys.version_info >= (3,11), "Python >=3.11 required"'
@@ -304,9 +304,15 @@ PY
 fi
 
 
-if [[ "$native_consensus" == native-consensus ]]; then
+if [[ "$native_consensus" != off ]]; then
   mkdir -m 700 -- "$work/native-consensus-fixture"
-  if ! MCND_NATIVE_CONSENSUS_FIXTURE_DIR="$work/native-consensus-fixture" \
+  fee_rewards=0
+  fee_args=()
+  if [[ "$native_consensus" == native-consensus-fee-rewards ]]; then
+    fee_rewards=1
+    fee_args+=(--fee-rewards)
+  fi
+  if ! MCND_NATIVE_CONSENSUS_FIXTURE_DIR="$work/native-consensus-fixture" MCND_NATIVE_CONSENSUS_FEE_REWARDS="$fee_rewards" \
       go test -mod=readonly -tags= -trimpath -p 2 -count=1 -timeout 8m -json \
       -run '^TestOwnedAppSignedRegistryBootstrap$/^authenticated_isolated_position_reader$' ./systemcontracts \
       > "$work/native-consensus-fixture.log" 2>&1; then
@@ -316,10 +322,10 @@ if [[ "$native_consensus" == native-consensus ]]; then
   sudo -n unshare --net -- bash -euc 'ip link set lo up; exec "$@"' _ \
     env TMPDIR="$work" "$python" -B "$root/network/tools/native_consensus_smoke.py" \
     --binary "$work/mcnd" --binary-sha256 "$mcnd_sha" --source-commit "$revision" \
-    --fixture "$work/native-consensus-fixture" --home-parent "$work" --report "$output/native-consensus.json" \
+    --fixture "$work/native-consensus-fixture" --home-parent "$work" --report "$output/native-consensus.json" "${fee_args[@]}" \
     |& tee "$output/native-consensus.log"
   preserve_public_reports
-  "$python" - "$output/native-consensus.json" "$revision" "$mcnd_sha" <<'PY'
+  "$python" - "$output/native-consensus.json" "$revision" "$mcnd_sha" "$fee_rewards" <<'PY'
 import json,sys
 from pathlib import Path
 report=json.loads(Path(sys.argv[1]).read_text())
@@ -335,8 +341,19 @@ assert report['restart']['height']>report['restart']['checkpointHeight'],report
 assert report['before']['wrappedAtomic']=='3000000000000000000' and report['funded']['wrappedAtomic']=='6000000000000000000',report
 assert report['topUp']['success'] and report['topUp']['height']>report['transition']['H+2']['height'],report
 assert report['cProposed']['height']>=report['topUp']['height'] and report['final']['wrappedAtomic']=='6250000000000000000',report
-assert int(report['funded']['feeCollectorAtomic'])-int(report['before']['feeCollectorAtomic'])==int(report['delegation']['feeAtomic']),report
-assert int(report['final']['feeCollectorAtomic'])-int(report['funded']['feeCollectorAtomic'])==int(report['topUp']['feeAtomic']),report
+assert report['feeRewards'] is (sys.argv[4]=='1'),report
+assert report['before']['bankSupplyAtomic']==report['final']['bankSupplyAtomic'],report
+if report['feeRewards']:
+    assert report['before']['feeCollectorAtomic']==report['final']['feeCollectorAtomic']=='0',report
+    for tx,settlement,powers in (('delegation','firstFeeSettlement',(2,1,0)), ('topUp','topUpFeeSettlement',(2,0,3))):
+        fee=int(report[tx]['feeAtomic'])
+        paid=report[settlement]
+        assert paid['height']==report[tx]['height']+1 and paid['feeCollectorAtomic']=='0',report
+        expected={name:str(fee*power//sum(powers)//4) for name,power in zip('abc',powers,strict=True)}
+        assert paid['commissionPaidAtomic']==expected and int(paid['ownerRewardAtomic'])==fee-sum(map(int,expected.values())),report
+else:
+    assert int(report['funded']['feeCollectorAtomic'])-int(report['before']['feeCollectorAtomic'])==int(report['delegation']['feeAtomic']),report
+    assert int(report['final']['feeCollectorAtomic'])-int(report['funded']['feeCollectorAtomic'])==int(report['topUp']['feeAtomic']),report
 print('Three replicas agree on the signed DEL validator replacement at H+2 and on restart.')
 PY
 fi

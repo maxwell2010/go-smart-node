@@ -34,6 +34,10 @@ on:
         description: Also check a signed native consensus transition on three isolated mcnd nodes
         default: false
         type: boolean
+      native_fee_rewards:
+        description: Check the native consensus transition with fee-only rewards on three isolated nodes
+        default: false
+        type: boolean
 
 permissions:
   contents: read
@@ -188,6 +192,7 @@ jobs:
           DEL_STATE_SYNC: ${{ inputs.del_state_sync }}
           IBC_CLIENT_UPGRADE: ${{ inputs.ibc_client_upgrade }}
           NATIVE_CONSENSUS: ${{ inputs.native_consensus }}
+          NATIVE_FEE_REWARDS: ${{ inputs.native_fee_rewards }}
         run: |
           args=("$RUNNER_TEMP/process-evidence" off off off off)
           if [[ "$DEL_STATE_SYNC" == true ]]; then
@@ -199,7 +204,9 @@ jobs:
           if [[ "$IBC_CLIENT_UPGRADE" == true ]]; then
             args[3]=ibc-client-upgrade
           fi
-          if [[ "$NATIVE_CONSENSUS" == true ]]; then
+          if [[ "$NATIVE_FEE_REWARDS" == true ]]; then
+            args[4]=native-consensus-fee-rewards
+          elif [[ "$NATIVE_CONSENSUS" == true ]]; then
             args[4]=native-consensus
           fi
           bash scripts/remote/process-gates.sh "${args[@]}"

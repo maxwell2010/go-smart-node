@@ -33,16 +33,19 @@ import (
 )
 
 const nativeConsensusDaemonFixtureEnv = "MCND_NATIVE_CONSENSUS_FIXTURE_DIR"
+const nativeConsensusFeeRewardsEnv = "MCND_NATIVE_CONSENSUS_FEE_REWARDS"
 
 type nativeConsensusFixtureValidator struct {
-	Name        string `json:"name"`
-	Operator    string `json:"operator"`
-	EVM         string `json:"evm"`
-	Consensus   string `json:"consensusAddress"`
-	PubKey      string `json:"publicKey"`
-	ReserveData string `json:"reserveData"`
-	Initial     int64  `json:"initialPower"`
-	AfterStake  int64  `json:"afterStakePower"`
+	Name         string `json:"name"`
+	Operator     string `json:"operator"`
+	EVM          string `json:"evm"`
+	Consensus    string `json:"consensusAddress"`
+	PubKey       string `json:"publicKey"`
+	ReserveData  string `json:"reserveData"`
+	Reward       string `json:"reward"`
+	RewardNative string `json:"rewardNative"`
+	Initial      int64  `json:"initialPower"`
+	AfterStake   int64  `json:"afterStakePower"`
 }
 
 func exportNativeConsensusDaemonFixture(t *testing.T, e isolatedBackendEnv, dir string, profile ownedapp.WithdrawalProfile,
@@ -61,6 +64,12 @@ func exportNativeConsensusDaemonFixture(t *testing.T, e isolatedBackendEnv, dir 
 	key := e.keys[3]
 	actor := crypto.PubkeyToAddress(key.PublicKey)
 	beneficiary := sdk.AccAddress(actor.Bytes()).String()
+	feeRewards := os.Getenv(nativeConsensusFeeRewardsEnv) == "1"
+	commission := sdkmath.LegacyZeroDec()
+	if feeRewards {
+		commission = sdkmath.LegacyMustNewDecFromStr("0.25")
+	}
+	collector := authtypes.NewModuleAddress(authtypes.FeeCollectorName)
 	nativeKeeper := e.app.NativeValidatorKeeper
 	config, err := json.Marshal(profile)
 	require.NoError(t, err)
@@ -79,20 +88,23 @@ func exportNativeConsensusDaemonFixture(t *testing.T, e isolatedBackendEnv, dir 
 		require.NoError(t, err)
 		moniker := "native-consensus-fixture-" + name
 		publicKey := base64.StdEncoding.EncodeToString(pub.Bytes())
+		reward := crypto.PubkeyToAddress(e.keys[i].PublicKey)
+		rewardNative := sdk.AccAddress(reward.Bytes()).String()
 		meta, err := json.Marshal(map[string]interface{}{
-			"operator_address": operator, "reward_address": actor.Hex(), "consensus_pubkey": publicKey,
-			"description": map[string]string{"moniker": moniker}, "commission": "0",
+			"operator_address": operator, "reward_address": reward.Hex(), "consensus_pubkey": publicKey,
+			"description": map[string]string{"moniker": moniker}, "commission": commission.String(),
 		})
 		require.NoError(t, err)
 		masterValidators = append(masterValidators, masterValidator{Validator: address, Meta: string(meta)})
-		row, err := validatortypes.NewValidator(operator, beneficiary, &ed25519.PubKey{Key: pub.Bytes()},
-			validatortypes.Description{Moniker: moniker}, sdkmath.LegacyZeroDec())
+		row, err := validatortypes.NewValidator(operator, rewardNative, &ed25519.PubKey{Key: pub.Bytes()},
+			validatortypes.Description{Moniker: moniker}, commission)
 		require.NoError(t, err)
 		row.Online = true
 		require.NoError(t, nativeKeeper.SetValidator(e.ctx(), row))
 		validators = append(validators, nativeConsensusFixtureValidator{
 			Name: name, Operator: operator, EVM: address.Hex(), Consensus: pub.Address().String(), PubKey: publicKey,
 			Initial: []int64{2, 1, 0}[i], AfterStake: []int64{2, 0, 3}[i],
+			Reward: reward.Hex(), RewardNative: rewardNative,
 		})
 		pv := privval.NewFilePV(signer, filepath.Join(dir, "priv_validator_key_"+name+".json"), filepath.Join(dir, "unused_sign_state_"+name+".json"))
 		pv.Key.Save()
@@ -147,6 +159,9 @@ func exportNativeConsensusDaemonFixture(t *testing.T, e isolatedBackendEnv, dir 
 		authtypes.NewModuleAddress(stakingtypes.NotBondedPoolName).String(): true,
 		authtypes.NewModuleAddress(distrtypes.ModuleName).String():          true,
 	}
+	if feeRewards {
+		discard[collector.String()] = true
+	}
 	bank.Supply = sdk.NewCoins()
 	balances := bank.Balances[:0]
 	for _, row := range bank.Balances {
@@ -158,6 +173,7 @@ func exportNativeConsensusDaemonFixture(t *testing.T, e isolatedBackendEnv, dir 
 	bank.Balances = balances
 	genesis[banktypes.ModuleName] = cdc.MustMarshalJSON(&bank)
 	profile.EnableNativeConsensus = true
+	profile.EnableNativeFeeRewards = feeRewards
 	genesis[ownedapp.WithdrawalGenesisKey], err = json.Marshal(profile)
 	require.NoError(t, err)
 	require.NoError(t, ownedapp.ReconcileNativeGenesisAllocation(cdc, genesis))
@@ -199,7 +215,6 @@ func exportNativeConsensusDaemonFixture(t *testing.T, e isolatedBackendEnv, dir 
 		return map[string]string{"raw": "0x" + hex.EncodeToString(raw), "hash": signed.Hash().Hex()}
 	}
 	topUp := amount(1).QuoRaw(4)
-	collector := authtypes.NewModuleAddress(authtypes.FeeCollectorName)
 	hexData := func(value []byte) string { return "0x" + hex.EncodeToString(value) }
 	for i := range validators {
 		validators[i].ReserveData = hexData(pack(gateway, "getValidatorReserve", common.HexToAddress(validators[i].EVM), profile.WrappedDEL))
@@ -208,7 +223,7 @@ func exportNativeConsensusDaemonFixture(t *testing.T, e isolatedBackendEnv, dir 
 		"chainId": ctx.ChainID(), "evmChainId": 990001, "gateway": profile.Gateway.Hex(), "wrapped": profile.WrappedDEL.Hex(),
 		"actor": actor.Hex(), "actorNative": beneficiary, "wrappedNative": sdk.AccAddress(profile.WrappedDEL.Bytes()).String(),
 		"amount": deposit.String(), "topUpAmount": topUp.String(), "gasPrice": price.String(), "gasLimit": gasLimit, "nonce": nonce,
-		"feeCollector": common.BytesToAddress(collector).Hex(), "feeCollectorNative": collector.String(),
+		"feeCollector": common.BytesToAddress(collector).Hex(), "feeCollectorNative": collector.String(), "feeRewards": feeRewards,
 		"validators": validators, "stakeId": stakeID.Hex(),
 		"supplyData": hexData(pack(wrapper, "totalSupply")), "escrowData": hexData(pack(wrapper, "balanceOf", profile.Gateway)),
 		"delegate": sign(nonce, deposit.BigInt()), "topUp": sign(nonce+1, topUp.BigInt()),

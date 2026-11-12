@@ -15,7 +15,7 @@ import time
 from configure_history import validate_fresh_home
 from del_delegation_smoke import DELEGATED, GAS_LIMIT, GAS_PRICE, balance, native_positions, read_words, submit, write_config
 from mcnd_process_smoke import ProcessOwner, SignalGuard, private_environment, private_namespace, run_command
-from withdrawal_genesis_smoke import ADDRESS, CHAIN, EVM_CHAIN, MAX_BLOCKS, SHA256, WORD, bech32_payload, check, comet, private_bytes, private_write, safe_diagnostic, wait_height
+from withdrawal_genesis_smoke import ADDRESS, CHAIN, EVM_CHAIN, MAX_BLOCKS, SHA256, WORD, bech32_payload, check, comet, native, private_bytes, private_write, safe_diagnostic, wait_height
 
 
 ATOMS = 10**18
@@ -81,7 +81,7 @@ def decode_pubkey(record):
     return value
 
 
-def load_fixture(directory):
+def load_fixture(directory, fee_rewards):
     info = directory.lstat()
     check(stat.S_ISDIR(info.st_mode) and stat.S_IMODE(info.st_mode) & 0o077 == 0, 'private fixture directory required')
     expected = json.loads(private_bytes(directory / 'expectations.json', 8192))
@@ -108,8 +108,13 @@ def load_fixture(directory):
     check([row['name'] for row in validators] == ['a', 'b', 'c'] and
           tuple(row['initialPower'] for row in validators) == INITIAL and
           tuple(row['afterStakePower'] for row in validators) == AFTER, 'unexpected fixture initial or changed voting power')
-    keys = []
+    check(expected['feeRewards'] is fee_rewards, 'fixture fee rewards mode differs')
+    keys, reward_addresses = [], set()
     for row in validators:
+        row['reward'] = row['reward'].lower()
+        check(re.fullmatch(ADDRESS, row['reward']) and bech32_payload(row['rewardNative']) == row['reward'],
+              'invalid fixture reward recipient')
+        reward_addresses.add(row['reward'])
         key = decode_pubkey(row['publicKey'])
         check(re.fullmatch(r'0x[0-9a-f]{136}', row['reserveData']), 'invalid validator reserve calldata')
         address = hashlib.sha256(key).hexdigest()[:40].upper()
@@ -120,6 +125,8 @@ def load_fixture(directory):
         check(key_doc['address'] == address and decode_pubkey(key_doc['pub_key']) == key, 'fixture validator key identity differs')
         keys.append(private)
     check(len({row['consensusAddress'] for row in validators}) == 3, 'fixture validators require distinct consensus keys')
+    check(len(reward_addresses) == 3 and not reward_addresses.intersection(
+        expected[field] for field in ('actor', 'feeCollector', 'gateway', 'wrapped')), 'fixture reward recipients must be independent')
     genesis = private_bytes(directory / 'genesis.json', 64 * 1024 * 1024)
     doc = json.loads(genesis)
     profile = doc['app_state']['withdrawal_settlement']
@@ -128,6 +135,7 @@ def load_fixture(directory):
     check(all(profile.get(flag) is True for flag in ('enable_native_consensus', 'enable_del_delegation', 'settlement_only')) and
           profile['gateway'].lower() == expected['gateway'] and profile['wrapped_del'].lower() == expected['wrapped'],
           'fixture genesis native consensus and financial profile differ')
+    check(profile.get('enable_native_fee_rewards', False) is fee_rewards, 'fixture genesis fee rewards mode differs')
     check(not doc['app_state']['staking'].get('validators') and not doc['app_state']['staking'].get('delegations'),
           'fixture requires empty SDK staking genesis')
     return expected, genesis, keys, height
@@ -221,10 +229,14 @@ def check_updates(replicas, validators, height):
     return {'b': 0, 'c': 3}
 
 
-def check_ledger(replicas, expected, height, c_reserve, *, wallet=None, collector=None):
+def check_ledger(replicas, expected, height, c_reserve, *, wallet=None, collector=None, previous=None, rewards=None):
     reserves = (2 * ATOMS, ATOMS, c_reserve)
     total = sum(reserves)
     wallet_value, collector_value = wallet, collector
+    reward_values = {} if previous is None else {key: int(value) for key, value in previous['rewardAtomic'].items()}
+    if rewards is not None:
+        reward_values = rewards.copy()
+    bank_supply = None if previous is None else int(previous['bankSupplyAtomic'])
     for node in replicas:
         for validator, value in zip(expected['validators'], reserves, strict=True):
             native_positions({**expected, 'validatorNative': validator['operator']}, height, value, 0, None, node.rest)
@@ -242,9 +254,37 @@ def check_ledger(replicas, expected, height, c_reserve, *, wallet=None, collecto
         if collector_value is None:
             collector_value = amount
         check(amount == collector_value, f'fee collector balance differs on {node.label}')
-    return {'height': height, 'walletAtomic': str(wallet_value), 'feeCollectorAtomic': str(collector_value), 'wrappedAtomic': str(total),
+        for validator in expected['validators']:
+            value = balance(validator['reward'], validator['rewardNative'], height, node.evm, node.rest)
+            want = reward_values.setdefault(validator['name'], value)
+            check(value == want, f'validator commission balance differs on {node.label}')
+        supply = native('/cosmos/bank/v1beta1/supply/by_denom?denom=del', height, base=node.rest)['amount']
+        check(supply['denom'] == 'del', 'unexpected native supply denomination')
+        if bank_supply is None:
+            bank_supply = int(supply['amount'])
+        check(int(supply['amount']) == bank_supply, f'native bank supply differs on {node.label}')
+    return {'height': height, 'walletAtomic': str(wallet_value), 'feeCollectorAtomic': str(collector_value),
+            'wrappedAtomic': str(total), 'bankSupplyAtomic': str(bank_supply),
+            'rewardAtomic': {name: str(value) for name, value in reward_values.items()},
             'activeReservesAtomic': {row['name']: str(value) for row, value in zip(expected['validators'], reserves, strict=True)}}
 
+
+def settle_fees(replicas, expected, collected, powers, c_reserve, fee):
+    check(int(collected['feeCollectorAtomic']) == fee, 'fee collector must contain exactly one transaction fee')
+    total_power = sum(powers)
+    commissions = {}
+    balances = {}
+    for validator, power in zip(expected['validators'], powers, strict=True):
+        share, remainder = divmod(fee * power, total_power)
+        check(remainder == 0, 'fixture fee must divide exactly across the effective signer powers')
+        name = validator['name']
+        commissions[name] = share // 4
+        balances[name] = int(collected['rewardAtomic'][name]) + commissions[name]
+    owner_reward = fee - sum(commissions.values())
+    ledger = check_ledger(replicas, expected, collected['height'] + 1, c_reserve,
+                          wallet=int(collected['walletAtomic']) + owner_reward, collector=0, previous=collected, rewards=balances)
+    return {**ledger, 'commissionPaidAtomic': {name: str(value) for name, value in commissions.items()},
+            'ownerRewardAtomic': str(owner_reward)}
 
 
 def run_gate(args, binary, root, expected, genesis, keys, env, owner, report):
@@ -272,7 +312,7 @@ def run_gate(args, binary, root, expected, genesis, keys, env, owner, report):
     report['initialPower'] = effective_set(replicas, validators, initial, INITIAL)
     report['initialSigners'] = check_signatures(replicas, validators, initial, INITIAL)
     report['initialBlock'] = committed_header(replicas, initial + 1)
-    before = check_ledger(replicas, expected, first, 0)
+    before = check_ledger(replicas, expected, first, 0, collector=0 if args.fee_rewards else None)
     report['before'] = before
 
     report['phase'] = 'signed-del-delegation'
@@ -299,7 +339,13 @@ def run_gate(args, binary, root, expected, genesis, keys, env, owner, report):
     deposit, fee = int(expected['amount']), int(signed['feeAtomic'])
     wallet = int(before['walletAtomic']) - deposit - fee
     collector = int(before['feeCollectorAtomic']) + fee
-    report['funded'] = check_ledger(replicas, expected, height + 2, deposit, wallet=wallet, collector=collector)
+    collected = check_ledger(replicas, expected, height, deposit, wallet=wallet, collector=collector, previous=before)
+    report['firstFeeCollected'] = collected
+    if args.fee_rewards:
+        paid = settle_fees(replicas, expected, collected, INITIAL, deposit, fee)
+        report['firstFeeSettlement'] = paid
+        wallet, collector, collected = int(paid['walletAtomic']), 0, paid
+    report['funded'] = check_ledger(replicas, expected, height + 2, deposit, wallet=wallet, collector=collector, previous=collected)
 
     report['phase'] = 'post-transition-top-up'
     top_up = submit(source.child, source.log, report, expected, 'topUp', True, expected['nonce'] + 1, DELEGATED,
@@ -329,7 +375,13 @@ def run_gate(args, binary, root, expected, genesis, keys, env, owner, report):
     wallet -= top_up_amount + top_up_fee
     collector += top_up_fee
     c_reserve = deposit + top_up_amount
-    report['toppedUp'] = check_ledger(replicas, expected, top_up_height, c_reserve, wallet=wallet, collector=collector)
+    check_signatures(replicas, validators, top_up_height, AFTER)
+    topped_up = check_ledger(replicas, expected, top_up_height, c_reserve, wallet=wallet, collector=collector, previous=report['funded'])
+    report['toppedUp'] = topped_up
+    if args.fee_rewards:
+        paid = settle_fees(replicas, expected, topped_up, AFTER, c_reserve, top_up_fee)
+        report['topUpFeeSettlement'] = paid
+        wallet, collector, topped_up = int(paid['walletAtomic']), 0, paid
 
     report['phase'] = 'restart'
     checkpoint = wait_replicas(replicas, top_up_height + 4, 35, report)
@@ -346,13 +398,14 @@ def run_gate(args, binary, root, expected, genesis, keys, env, owner, report):
                          'powers': effective_set(replicas, validators, final_height, AFTER),
                          'signers': check_signatures(replicas, validators, final_height, AFTER),
                          **committed_header(replicas, final_height)}
-    report['final'] = check_ledger(replicas, expected, final_height, c_reserve, wallet=wallet, collector=collector)
+    report['final'] = check_ledger(replicas, expected, final_height, c_reserve, wallet=wallet, collector=collector, previous=topped_up)
 
 
 def main(argv=None, signals=None):
     parser = argparse.ArgumentParser(description=__doc__)
     for name in ('binary', 'binary-sha256', 'source-commit', 'fixture', 'home-parent', 'report'):
         parser.add_argument('--' + name, required=True)
+    parser.add_argument('--fee-rewards', action='store_true')
     args = parser.parse_args(argv)
     report = {'status': 'FAIL', 'phase': 'fixture-provenance', 'scope': 'three loopback processes with native consensus and a signed DEL stake'}
     with pathlib.Path(args.report).open('x', encoding='utf8') as stream:
@@ -362,9 +415,9 @@ def main(argv=None, signals=None):
             binary = str(pathlib.Path(args.binary).resolve(strict=True))
             with open(binary, 'rb') as binary_stream:
                 check(hashlib.file_digest(binary_stream, 'sha256').hexdigest() == args.binary_sha256, 'daemon SHA256 mismatch')
-            expected, genesis, keys, initial = load_fixture(pathlib.Path(args.fixture))
+            expected, genesis, keys, initial = load_fixture(pathlib.Path(args.fixture), args.fee_rewards)
             report.update(sourceCommit=args.source_commit, binarySha256=args.binary_sha256, initialHeight=initial,
-                          genesisSha256=hashlib.sha256(genesis).hexdigest(), chainID=CHAIN, evmChainID=EVM_CHAIN)
+                          genesisSha256=hashlib.sha256(genesis).hexdigest(), chainID=CHAIN, evmChainID=EVM_CHAIN, feeRewards=args.fee_rewards)
             with tempfile.TemporaryDirectory(prefix='mcnd-native-consensus-', dir=args.home_parent) as directory:
                 root = pathlib.Path(directory)
                 owner = ProcessOwner(signals)
