@@ -127,6 +127,12 @@ CLI regressions verify that information commands leave fresh/existing fixture
 homes untouched and that the registered `snapshots` commands require this
 network's signing domain.
 
+The isolated native consensus profile passed on `7d7ef4e`. A signed DEL
+delegation at height 35 replaced a validator at height 37, and three
+processes agreed through a same-home restart and height 40. This run used
+an empty SDK staking ledger and real Gateway-backed DEL positions.
+[Process evidence](https://github.com/maxwell2010/go-smart-node/actions/runs/43154836869)
+
 Modern release blockers remain:
 
 - Complete native Decimal coin, NFT, validator, rewards and fee integration.

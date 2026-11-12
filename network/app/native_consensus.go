@@ -145,6 +145,9 @@ func (app *App) initNativeConsensusModules(ctx sdk.Context, genesis GenesisState
 	if len(genutil.GenTxs) != 0 {
 		return nil, errors.New("native consensus genesis does not admit SDK genesis transactions")
 	}
+	if err := validatorkeeper.ValidateSigningWindowSize(validators.Params.SignedBlocksWindow); err != nil {
+		return nil, err
+	}
 	if err := app.NativeValidatorKeeper.InitGenesis(ctx, validators); err != nil {
 		return nil, err
 	}
@@ -196,6 +199,11 @@ func (c *withdrawalController) projectAndCheckConsensus(ctx sdk.Context, project
 	}
 	if err := c.keeper.ValidateStakeConsensusSelection(child, eligible); err != nil {
 		return fmt.Errorf("stake change would leave an invalid native validator set: %w", err)
+	}
+	if c.profile.EnableNativeFeeRewards {
+		if err := c.keeper.ValidateNativeFeeRewardAdmission(child, c.feeRewardRecipientAllowed); err != nil {
+			return fmt.Errorf("stake change exceeds native fee reward admission: %w", err)
+		}
 	}
 	write()
 	return nil

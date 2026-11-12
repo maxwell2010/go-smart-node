@@ -53,6 +53,9 @@ func parseWithdrawalGenesisProfile(raw json.RawMessage) (*WithdrawalProfile, err
 	if profile.EnableNativeConsensus && !profile.EnableDELDelegation {
 		return nil, errors.New("native consensus genesis requires DEL delegation admission")
 	}
+	if profile.EnableNativeFeeRewards && !profile.EnableNativeConsensus {
+		return nil, errors.New("native fee rewards genesis requires native consensus")
+	}
 	seen := make(map[common.Address]bool)
 	for _, addr := range []common.Address{profile.Registry, profile.Gateway, profile.Library, profile.NFTCenter,
 		profile.PositionVault, profile.MasterValidator, profile.WrappedDEL} {
@@ -259,6 +262,11 @@ func (app *App) initWithdrawalGenesis(ctx sdk.Context, req *abci.RequestInitChai
 	}
 	if err != nil {
 		return nil, err
+	}
+	if profile.EnableNativeFeeRewards {
+		if err := app.validateNativeFeeRewardGenesis(child, controller); err != nil {
+			return nil, err
+		}
 	}
 	// InitChain has no proposer. A deterministic initialized validator
 	// supplies COINBASE for discarded EVM getter calls only.

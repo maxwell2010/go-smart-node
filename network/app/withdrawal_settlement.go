@@ -38,29 +38,31 @@ const (
 // WithdrawalProfile pins the system addresses for the isolated-position profile.
 // It is read from consensus state, never from node-local operator settings.
 type WithdrawalProfile struct {
-	Registry              common.Address `json:"registry"`
-	Gateway               common.Address `json:"gateway"`
-	Library               common.Address `json:"library"`
-	NFTCenter             common.Address `json:"nft_center"`
-	PositionVault         common.Address `json:"position_vault"`
-	MasterValidator       common.Address `json:"master_validator"`
-	WrappedDEL            common.Address `json:"wrapped_del"`
-	SettlementOnly        bool           `json:"settlement_only,omitempty"`
-	EnableDELDelegation   bool           `json:"enable_del_delegation,omitempty"`
-	EnableDELHold         bool           `json:"enable_del_hold,omitempty"`
-	EnableDELHoldReset    bool           `json:"enable_del_hold_reset,omitempty"`
-	EnableNFTDelegation   bool           `json:"enable_nft_delegation,omitempty"`
-	EnableNativeConsensus bool           `json:"enable_native_consensus,omitempty"`
+	Registry               common.Address `json:"registry"`
+	Gateway                common.Address `json:"gateway"`
+	Library                common.Address `json:"library"`
+	NFTCenter              common.Address `json:"nft_center"`
+	PositionVault          common.Address `json:"position_vault"`
+	MasterValidator        common.Address `json:"master_validator"`
+	WrappedDEL             common.Address `json:"wrapped_del"`
+	SettlementOnly         bool           `json:"settlement_only,omitempty"`
+	EnableDELDelegation    bool           `json:"enable_del_delegation,omitempty"`
+	EnableDELHold          bool           `json:"enable_del_hold,omitempty"`
+	EnableDELHoldReset     bool           `json:"enable_del_hold_reset,omitempty"`
+	EnableNFTDelegation    bool           `json:"enable_nft_delegation,omitempty"`
+	EnableNativeConsensus  bool           `json:"enable_native_consensus,omitempty"`
+	EnableNativeFeeRewards bool           `json:"enable_native_fee_rewards,omitempty"`
 }
 
 type withdrawalController struct {
-	profile  WithdrawalProfile
-	abi      abi.ABI
-	topic    common.Hash
-	keeper   *validatorkeeper.StateKeeper
-	nft      *nftkeeper.StateKeeper
-	executor *settlement.Executor
-	assets   *withdrawalassets.Projector
+	profile                   WithdrawalProfile
+	abi                       abi.ABI
+	topic                     common.Hash
+	keeper                    *validatorkeeper.StateKeeper
+	nft                       *nftkeeper.StateKeeper
+	executor                  *settlement.Executor
+	assets                    *withdrawalassets.Projector
+	feeRewardRecipientAllowed func(sdk.AccAddress) bool
 }
 
 // LoadWithdrawalSettlement wires the profile after store load. An absent
@@ -100,6 +102,9 @@ func (app *App) LoadWithdrawalSettlement(ctx sdk.Context) error {
 }
 
 func (app *App) newWithdrawalController(profile WithdrawalProfile) (*withdrawalController, error) {
+	if profile.EnableNativeFeeRewards && !profile.EnableNativeConsensus {
+		return nil, errors.New("native fee rewards require native consensus")
+	}
 	if profile.EnableNativeConsensus && (!profile.SettlementOnly || !profile.EnableDELDelegation) {
 		return nil, errors.New("native consensus requires restricted DEL admission")
 	}
@@ -153,10 +158,14 @@ func (app *App) newWithdrawalController(profile WithdrawalProfile) (*withdrawalC
 	if err != nil {
 		return nil, err
 	}
-	return &withdrawalController{
+	controller := &withdrawalController{
 		profile: profile, abi: gatewayABI, topic: gatewayABI.Events["WithdrawCompleted"].ID,
 		keeper: app.NativeValidatorKeeper, nft: app.NativeNFTKeeper, executor: executor, assets: projector,
-	}, nil
+	}
+	if profile.EnableNativeFeeRewards {
+		controller.feeRewardRecipientAllowed = app.nativeFeeRewardRecipientPolicy(profile)
+	}
+	return controller, nil
 }
 
 func (app *App) installWithdrawalController(controller *withdrawalController) {
