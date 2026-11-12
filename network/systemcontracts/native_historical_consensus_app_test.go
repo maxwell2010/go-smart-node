@@ -131,7 +131,8 @@ func runNativeHistoricalConsensusLifecycle(t *testing.T, dir, phase string) {
 		checkpoint.BeforeHash = app.LastCommitID().Hash
 		checkpoint.BeforeSupply = l.supply().String()
 		writeNativeHistoricalJSON(t, checkpointPath, checkpoint)
-		l.assertPenaltyState(false)
+		l.assertNativePenaltyState(false)
+		l.assertMasterPenaltyState(false)
 		l.finalizePenalty()
 		require.Equal(t, int64(4), app.LastBlockHeight(), "FinalizeBlock alone cannot persist historical settlement")
 		require.Equal(t, checkpoint.BeforeHash, app.LastCommitID().Hash)
@@ -146,9 +147,12 @@ func runNativeHistoricalConsensusLifecycle(t *testing.T, dir, phase string) {
 		require.Equal(t, int64(4), app.LastBlockHeight())
 		require.Equal(t, checkpoint.BeforeHash, app.LastCommitID().Hash)
 		require.True(t, beforeSupply.Equal(l.supply()))
-		l.assertPenaltyState(false)
+		// The committed app hash authenticates EVM storage before the
+		// first reopened block initializes the EVM denomination globals.
+		l.assertNativePenaltyState(false)
 		l.commit(l.finalizePenalty())
-		l.assertPenaltyState(true)
+		l.assertNativePenaltyState(true)
+		l.assertMasterPenaltyState(true)
 		require.True(t, beforeSupply.Sub(burned).Equal(l.supply()))
 		checkpoint.AfterHash = app.LastCommitID().Hash
 		writeNativeHistoricalJSON(t, checkpointPath, checkpoint)
@@ -157,7 +161,7 @@ func runNativeHistoricalConsensusLifecycle(t *testing.T, dir, phase string) {
 	require.Equal(t, "restart", phase)
 	require.Equal(t, int64(5), app.LastBlockHeight())
 	require.Equal(t, checkpoint.AfterHash, app.LastCommitID().Hash)
-	l.assertPenaltyState(true)
+	l.assertNativePenaltyState(true)
 	clock, err := app.NativeValidatorKeeper.NativeEvidenceBlockAtSnapshot(l.context(5))
 	require.NoError(t, err)
 	require.Equal(t, int64(5), clock.Height)
@@ -165,6 +169,9 @@ func runNativeHistoricalConsensusLifecycle(t *testing.T, dir, phase string) {
 	beforePayout := app.BankKeeper.GetBalance(l.snapshot(), beneficiary, identity.BaseDenom).Amount
 	for height := int64(6); height <= 11; height++ {
 		l.commit(l.finalize(nil, nil))
+		if height == 6 {
+			l.assertMasterPenaltyState(true)
+		}
 		row, err := app.NativeValidatorKeeper.GetEVMFrozenBinding(l.snapshot(), expected.Gateway[:], make([]byte, 32))
 		require.NoError(t, err)
 		wantBalance := beforePayout
@@ -315,7 +322,7 @@ func (l nativeHistoricalLifecycle) finalizePenalty() *abci.ResponseFinalizeBlock
 	return block
 }
 
-func (l nativeHistoricalLifecycle) assertPenaltyState(applied bool) {
+func (l nativeHistoricalLifecycle) assertNativePenaltyState(applied bool) {
 	t := l.t
 	t.Helper()
 	keeper, ctx := l.app.NativeValidatorKeeper, l.snapshot()
@@ -353,11 +360,20 @@ func (l nativeHistoricalLifecycle) assertPenaltyState(applied bool) {
 	require.True(t, frozen.Active)
 	require.True(t, principal.Equal(frozen.RawAmount))
 	require.Equal(t, l.context(5).BlockTime().Unix(), common.BytesToHash(frozen.CompletionTimestamp).Big().Int64())
+}
+
+func (l nativeHistoricalLifecycle) assertMasterPenaltyState(applied bool) {
+	t := l.t
+	t.Helper()
+	cursor := int64(0)
+	if applied {
+		cursor = 1
+	}
 	master, err := contracts.CompiledABI("NewNetworkMasterValidator")
 	require.NoError(t, err)
 	data, err := master.Pack("getValidatorState", common.HexToAddress(l.target.EVM))
 	require.NoError(t, err)
-	child, _ := ctx.CacheContext()
+	child, _ := l.snapshot().CacheContext()
 	child = child.WithGasMeter(storetypes.NewGasMeter(3_000_000))
 	msg := core.Message{From: l.expect.Actor, To: &l.expect.Master, Value: new(big.Int), Data: data, GasLimit: 500_000,
 		GasPrice: new(big.Int), GasFeeCap: new(big.Int), GasTipCap: new(big.Int), SkipNonceChecks: true, SkipFromEOACheck: true}
