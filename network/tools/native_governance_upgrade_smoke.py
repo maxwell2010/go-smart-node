@@ -187,7 +187,8 @@ def check_schedule(replicas, action, height):
 def wait_predecessor_halt(replicas, action, report):
     target = action['planHeight']
     expected_info = json.dumps({'schema': SCHEMA, 'proposal_id': action['passedID']}, separators=(',', ':'))
-    deadline = time.monotonic() + 180
+    started = time.monotonic()
+    deadline = started + 180
     observed = {}
     while time.monotonic() < deadline:
         ready = True
@@ -201,7 +202,10 @@ def wait_predecessor_halt(replicas, action, report):
                 ready = False
                 continue
             check(height <= target - 1, 'predecessor committed the upgrade height')
-            state = {'committedHeight': height, 'upgradeHint': False}
+            prior = observed.get(node.label)
+            last_advance = (prior['lastAdvanceSeconds'] if prior and height == prior['committedHeight']
+                            else round(time.monotonic() - started, 1))
+            state = {'committedHeight': height, 'upgradeHint': False, 'lastAdvanceSeconds': last_advance}
             observed[node.label] = state
             try:
                 hint = json.loads(private_bytes(node.home / 'data/upgrade-info.json', 4096))
@@ -216,6 +220,7 @@ def wait_predecessor_halt(replicas, action, report):
             return
         time.sleep(0.25)
     report['predecessorProgress'] = observed
+    report['predecessorDiagnostics'] = {node.label: readiness_diagnostic(node.log, report) for node in replicas}
     raise TimeoutError('predecessors did not reach the exact SDK upgrade boundary')
 
 
@@ -356,7 +361,8 @@ def run_gate(args, binary, replacement, root, expected, genesis, keys, action, e
     report['phase'] = 'successor-replay-and-exact-preblock-application'
     for node in replicas:
         node.start(replacement, env, owner, 'upgrade-successor')
-    tip = wait_replicas(replicas, target + 4, 125, report)
+    # Observe continuing full-profile consensus past the earlier CI frontier.
+    tip = wait_replicas(replicas, target + (16 if args.full_profile else 4), 125, report)
     final = tip - 1
     check(committed_header(replicas, target - 1) == before and committed_header(replicas, target) == boundary,
           'successor changed the predecessor checkpoint or signed boundary block')

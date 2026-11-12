@@ -91,7 +91,7 @@ func nativeGovernanceUpgradeFixture(t *testing.T, e isolatedBackendEnv, genesis 
 	if fullUpgrade {
 		// Give the genesis-at-height-one fixture time to commit the signed
 		// withdrawal after approval and still finish before the handoff.
-		height = 64
+		height = 32
 	}
 	metadata := fmt.Sprintf(`mintcandy-sdk-upgrade/v1:{"name":"%s","height":%d}`, planName, height)
 	propose := func(title string) sdk.Msg {
