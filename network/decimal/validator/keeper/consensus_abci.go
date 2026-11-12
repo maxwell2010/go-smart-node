@@ -153,6 +153,13 @@ func (k *StateKeeper) VerifyABCIConsensusStartup(ctx sdk.Context, committedHeigh
 	if anchor.previousCount == 0 {
 		return errors.New("restored native ABCI consensus lacks a prior commit")
 	}
+	progress, err := k.signingProgress(ctx)
+	if err != nil {
+		return err
+	}
+	if progress != 0 && progress != committedHeight {
+		return errors.New("restored native commit observation differs from the committed height")
+	}
 	return nil
 }
 
@@ -160,6 +167,34 @@ func (k *StateKeeper) VerifyABCIConsensusStartup(ctx sdk.Context, committedHeigh
 // before making transaction hooks available.
 func (k *StateKeeper) HasABCIConsensusAnchor(ctx sdk.Context) (bool, error) {
 	return k.service.OpenKVStore(ctx).Has([]byte{abciConsensusAnchorKey})
+}
+
+func (k *StateKeeper) verifyABCIBlock(ctx sdk.Context) ([]types.ScheduledValidatorSet, *cmttypes.ValidatorSet, abciConsensusAnchor, error) {
+	if ctx.BlockHeight() <= 0 || ctx.BlockHeight() > math.MaxInt64-2 {
+		return nil, nil, abciConsensusAnchor{}, errors.New("invalid scheduled ABCI block height")
+	}
+	rows, current, anchor, err := k.anchoredConsensus(ctx)
+	if err != nil {
+		return nil, nil, anchor, err
+	}
+	next, err := ConsensusSet(rows[1].Validators)
+	if err != nil {
+		return nil, nil, anchor, err
+	}
+	header := ctx.BlockHeader()
+	if !bytes.Equal(next.Hash(), header.NextValidatorsHash) {
+		return nil, nil, anchor, errors.New("native next set differs from ABCI next validators hash")
+	}
+	if len(header.ValidatorsHash) != 0 && !bytes.Equal(header.ValidatorsHash, anchor.currentHash[:]) {
+		return nil, nil, anchor, errors.New("native effective set differs from the supplied current validators hash")
+	}
+	if len(ctx.HeaderHash()) != sha256.Size || !current.HasAddress(header.ProposerAddress) {
+		return nil, nil, anchor, errors.New("invalid ABCI block hash or effective proposer")
+	}
+	if err := anchor.verifyLastCommit(ctx.VoteInfos()); err != nil {
+		return nil, nil, anchor, err
+	}
+	return rows, current, anchor, nil
 }
 
 // ScheduledABCIEndBlock uses the actual SDK53 FinalizeBlock context. At H, the
@@ -170,31 +205,12 @@ func (k *StateKeeper) ScheduledABCIEndBlock(ctx sdk.Context, eligible []string) 
 }
 
 func (k *StateKeeper) scheduledABCIEndBlock(ctx sdk.Context, eligible []string, deriveStakePower bool) ([]abci.ValidatorUpdate, error) {
-	if ctx.BlockHeight() <= 0 || ctx.BlockHeight() > math.MaxInt64-2 {
-		return nil, errors.New("invalid scheduled ABCI end block height")
-	}
 	child, commit := ctx.CacheContext()
-	rows, current, anchor, err := k.anchoredConsensus(child)
-	if err != nil {
-		return nil, err
-	}
-	next, err := ConsensusSet(rows[1].Validators)
+	rows, current, anchor, err := k.verifyABCIBlock(child)
 	if err != nil {
 		return nil, err
 	}
 	header := child.BlockHeader()
-	if !bytes.Equal(next.Hash(), header.NextValidatorsHash) {
-		return nil, errors.New("native next set differs from ABCI next validators hash")
-	}
-	if len(header.ValidatorsHash) != 0 && !bytes.Equal(header.ValidatorsHash, anchor.currentHash[:]) {
-		return nil, errors.New("native effective set differs from the supplied current validators hash")
-	}
-	if len(child.HeaderHash()) != sha256.Size || !current.HasAddress(header.ProposerAddress) {
-		return nil, errors.New("invalid ABCI block hash or effective proposer")
-	}
-	if err := anchor.verifyLastCommit(child.VoteInfos()); err != nil {
-		return nil, err
-	}
 	// Only the local history projection receives the derived current set hash.
 	// SDK53's supplied HeaderHash remains the actual Comet block hash.
 	header.ValidatorsHash = bytes.Clone(anchor.currentHash[:])
