@@ -3,6 +3,7 @@ package keeper
 import (
 	"bytes"
 	"errors"
+	"math"
 	"slices"
 
 	sdk "github.com/cosmos/cosmos-sdk/types"
@@ -43,7 +44,7 @@ func (k *StateKeeper) requireNativeValidatorNotRetired(ctx sdk.Context, operator
 // governance EndBlock, after the H+1/H+2 schedule is recorded. The caller
 // proves the Master pause and checks the future set in the same outer cache.
 func (k *StateKeeper) RetireNativeValidator(ctx sdk.Context, operator string) error {
-	if ctx.ExecMode() != sdk.ExecModeFinalize {
+	if ctx.ExecMode() != sdk.ExecModeFinalize || ctx.BlockHeight() <= 0 || ctx.BlockHeight() > math.MaxInt64-2 {
 		return errors.New("native validator retirement requires a finalized block")
 	}
 	child, write := ctx.CacheContext()
@@ -67,6 +68,9 @@ func (k *StateKeeper) RetireNativeValidator(ctx sdk.Context, operator string) er
 	}
 	if pending {
 		return errors.New("native validator retirement requires no unresolved historical penalty")
+	}
+	if err := k.checkDelegationIndex(child); err != nil {
+		return err
 	}
 	count, err := k.delegationCount(child, operator)
 	if err != nil {
