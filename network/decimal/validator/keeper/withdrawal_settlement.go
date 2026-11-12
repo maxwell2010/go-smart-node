@@ -33,12 +33,16 @@ func withdrawalDueKey(r *bindingRecord) []byte {
 // cache. Execute the Gateway and project its receipt with
 // ApplyWithdrawalCompletion in that cache. A revert or projection failure must
 // return an error. The scheduler verifies the exact native result before commit.
+// ErrWithdrawalAwaitingEvidenceFinality advances the scan without settlement.
 type WithdrawalExecutor func(sdk.Context, types.EVMFrozenBinding) error
 
 type WithdrawalSettlementResult struct {
 	Settled int
 	Retried int
+	Waiting int
 }
+
+var ErrWithdrawalAwaitingEvidenceFinality = errors.New("withdrawal awaits evidence finality")
 
 // SettleMatureWithdrawals attempts at most eight due withdrawals in index
 // order. The cursor wraps so a repeatedly failing withdrawal cannot block
@@ -99,11 +103,15 @@ func (k *StateKeeper) SettleMatureWithdrawalsLimit(ctx sdk.Context, maxAttempts 
 		if row.frozen == nil || !row.active() || row.frozen.FreezeType != 1 || !bytes.Equal(key, withdrawalDueKey(row)) {
 			return WithdrawalSettlementResult{}, errors.New("invalid due withdrawal index entry")
 		}
-		if err = k.attemptWithdrawal(batch, attemptGas, row, execute); err != nil {
+		err = k.attemptWithdrawal(batch, attemptGas, row, execute)
+		switch {
+		case err == nil:
+			result.Settled++
+		case errors.Is(err, ErrWithdrawalAwaitingEvidenceFinality):
+			result.Waiting++
+		default:
 			result.Retried++
 			ctx.Logger().Error("withdrawal settlement deferred", "gateway", fmt.Sprintf("%x", row.frozen.Gateway), "id", fmt.Sprintf("%x", row.frozen.FrozenIndex), "error", err)
-		} else {
-			result.Settled++
 		}
 	}
 	if len(keys) != 0 {

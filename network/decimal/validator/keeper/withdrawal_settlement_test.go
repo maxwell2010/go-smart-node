@@ -251,3 +251,34 @@ func TestWithdrawalSettlementLowerLimitLeavesLaterDueEntries(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, WithdrawalSettlementResult{Settled: 1}, last)
 }
+
+func TestWithdrawalSettlementWaitAdvancesCursorWithoutCountingAsRetry(t *testing.T) {
+	ctx, service, _ := environment(t)
+	ctx = ctx.WithChainID(bindingTestChain).WithBlockHeight(10).WithBlockTime(time.Unix(2000, 0))
+	k, err := NewStateKeeperWithDomain(service, bindingTestChain, 990001)
+	require.NoError(t, err)
+	g := bindingGenesisState(t, false)
+	early := withdrawalGenesis(t, g, stateWord(0), 2000)
+	later := withdrawalGenesis(t, g, stateWord(1), 2000)
+	require.NoError(t, k.InitGenesis(ctx, g))
+
+	result, err := k.SettleMatureWithdrawalsLimit(ctx, 1, 1_000_000, func(_ sdk.Context, row types.EVMFrozenBinding) error {
+		require.Equal(t, early.FrozenIndex, row.FrozenIndex)
+		return ErrWithdrawalAwaitingEvidenceFinality
+	})
+	require.NoError(t, err)
+	require.Equal(t, WithdrawalSettlementResult{Waiting: 1}, result)
+	next := ctx.WithBlockHeight(11).WithBlockTime(time.Unix(2001, 0))
+	result, err = k.SettleMatureWithdrawalsLimit(next, 1, 1_000_000, func(child sdk.Context, row types.EVMFrozenBinding) error {
+		require.Equal(t, later.FrozenIndex, row.FrozenIndex)
+		return k.ApplyWithdrawalCompletion(child, row)
+	})
+	require.NoError(t, err)
+	require.Equal(t, WithdrawalSettlementResult{Settled: 1}, result)
+	row, err := k.GetEVMFrozenBinding(next, early.Gateway, early.FrozenIndex)
+	require.NoError(t, err)
+	require.True(t, row.Active)
+	result, err = k.SettleMatureWithdrawalsLimit(next, 1, 1_000_000, k.ApplyWithdrawalCompletion)
+	require.NoError(t, err)
+	require.Equal(t, WithdrawalSettlementResult{Settled: 1}, result)
+}

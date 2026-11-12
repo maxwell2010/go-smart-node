@@ -30,6 +30,19 @@ func (k *StateKeeper) PreviousNativeEvidenceBlock(ctx sdk.Context) (CommittedEvi
 	return previous, nil
 }
 
+// NativeEvidenceBlockAtSnapshot authenticates the clock at the read-only
+// SDK snapshot used by transaction simulation and RPC gas estimation.
+func (k *StateKeeper) NativeEvidenceBlockAtSnapshot(ctx sdk.Context) (CommittedEvidenceBlock, error) {
+	clock, err := k.readNativeEvidenceClock(ctx)
+	if err != nil {
+		return CommittedEvidenceBlock{}, err
+	}
+	if clock.Height != ctx.BlockHeight() || !clock.Time.Equal(ctx.BlockTime()) {
+		return CommittedEvidenceBlock{}, errors.New("native evidence clock disagrees with the committed snapshot")
+	}
+	return clock, nil
+}
+
 // RecordNativeEvidenceBlock stages the current canonical height and time. The
 // caller invokes it at EndBlock in the same cache as the native transitions.
 // A failed or uncommitted block must discard that cache.

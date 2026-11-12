@@ -8,6 +8,7 @@ import (
 	"math/big"
 
 	sdkmath "cosmossdk.io/math"
+	cmtproto "github.com/cometbft/cometbft/proto/tendermint/types"
 	sdk "github.com/cosmos/cosmos-sdk/types"
 	"github.com/ethereum/go-ethereum/accounts/abi"
 	"github.com/ethereum/go-ethereum/common"
@@ -69,6 +70,7 @@ type withdrawalController struct {
 	executor                  *settlement.Executor
 	assets                    *withdrawalassets.Projector
 	feeRewardRecipientAllowed func(sdk.AccAddress) bool
+	consensusParams           func(sdk.Context) cmtproto.ConsensusParams
 }
 
 // LoadWithdrawalSettlement wires the profile after store load. An absent
@@ -182,6 +184,7 @@ func (app *App) newWithdrawalController(profile WithdrawalProfile) (*withdrawalC
 	controller := &withdrawalController{
 		profile: profile, abi: gatewayABI, topic: gatewayABI.Events["WithdrawCompleted"].ID,
 		keeper: app.NativeValidatorKeeper, nft: app.NativeNFTKeeper, executor: executor, assets: projector,
+		consensusParams: app.GetConsensusParams,
 	}
 	if profile.EnableNativeFeeRewards {
 		controller.feeRewardRecipientAllowed = app.nativeFeeRewardRecipientPolicy(profile)
@@ -308,6 +311,9 @@ func (c *withdrawalController) PostTxProcessing(ctx sdk.Context, sender common.A
 	if err != nil {
 		return fmt.Errorf("load signed withdrawal: %w", err)
 	}
+	if err := c.checkWithdrawalPayout(ctx, row); err != nil {
+		return err
+	}
 	proof, err := c.executor.ValidateSigned(ctx, row, receipt)
 	if err != nil {
 		return err
@@ -431,6 +437,9 @@ func (c *withdrawalController) settle(ctx sdk.Context) error {
 	gasBefore := ctx.GasMeter().GasConsumed()
 	result, err := c.keeper.SettleMatureWithdrawalsLimit(ctx, withdrawalAttempts, withdrawalAttemptGas,
 		func(child sdk.Context, row validatortypes.EVMFrozenBinding) error {
+			if err := c.checkWithdrawalPayout(child, row); err != nil {
+				return err
+			}
 			child = child.WithValue(automaticWithdrawalKey{}, common.BytesToHash(row.FrozenIndex))
 			return c.executor.Complete(child, row, func(projectCtx sdk.Context, proof settlement.Proof) error {
 				return c.project(projectCtx, row, proof)
