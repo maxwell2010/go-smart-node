@@ -12,6 +12,7 @@ import (
 	ethtypes "github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/crypto"
 	nftkeeper "github.com/maxwell2010/go-smart-node/network/decimal/nft/keeper"
+	nfttypes "github.com/maxwell2010/go-smart-node/network/decimal/nft/types"
 	validatorkeeper "github.com/maxwell2010/go-smart-node/network/decimal/validator/keeper"
 	"github.com/maxwell2010/go-smart-node/network/decimal/validator/settlement"
 	validatortypes "github.com/maxwell2010/go-smart-node/network/decimal/validator/types"
