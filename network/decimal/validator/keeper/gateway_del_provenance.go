@@ -50,14 +50,19 @@ type DELHistoricalPenaltyPlan struct {
 // PlanActiveDELHistoricalPenalty calculates the direct DEL loss for one
 // active position. Held DEL retains the original start times of all parts.
 func (k *StateKeeper) PlanActiveDELHistoricalPenalty(ctx sdk.Context, row types.EVMStakeBinding, infractionHeight int64) (DELHistoricalPenaltyPlan, error) {
+	plan, _, err := k.planActiveDELHistoricalPenalty(ctx, row, infractionHeight)
+	return plan, err
+}
+
+func (k *StateKeeper) planActiveDELHistoricalPenalty(ctx sdk.Context, row types.EVMStakeBinding, infractionHeight int64) (DELHistoricalPenaltyPlan, []DELProvenanceTranche, error) {
 	if err := k.checkDELHistoricalPenaltyContext(ctx, infractionHeight); err != nil {
-		return DELHistoricalPenaltyPlan{}, err
+		return DELHistoricalPenaltyPlan{}, nil, err
 	}
 	lots, err := k.GetActiveDELProvenance(ctx, row)
 	if err != nil {
-		return DELHistoricalPenaltyPlan{}, err
+		return DELHistoricalPenaltyPlan{}, nil, err
 	}
-	return planDELHistoricalPenalty(lots, infractionHeight), nil
+	return planDELHistoricalPenalty(lots, infractionHeight), lots, nil
 }
 
 // PlanFrozenDELHistoricalPenalty calculates the direct DEL loss for one

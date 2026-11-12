@@ -124,6 +124,32 @@ func (s GatewayDELStake) penalizeHold(previous *types.Delegation, loss sdkmath.I
 	return &next, nil
 }
 
+// projectHistoricalDELHoldLots regroups surviving funding blocks at the
+// original native hold start seconds. The caller verifies the prestate lots.
+func projectHistoricalDELHoldLots(holds []*types.StakeHold, deadline int64, tranches []DELProvenanceTranche) ([]*types.StakeHold, error) {
+	kept := make([]*types.StakeHold, 0, len(holds))
+	for _, hold := range holds {
+		if hold.HoldEndTime != deadline {
+			kept = append(kept, hold)
+			continue
+		}
+		remaining := sdkmath.ZeroInt()
+		for len(tranches) != 0 && tranches[0].FundedAt.Unix() == hold.HoldStartTime {
+			remaining = remaining.Add(tranches[0].Amount)
+			tranches = tranches[1:]
+		}
+		if remaining.IsPositive() {
+			updated := *hold
+			updated.Amount = remaining
+			kept = append(kept, &updated)
+		}
+	}
+	if len(tranches) != 0 {
+		return nil, errors.New("historical DEL penalty tranches have no matching native hold lot")
+	}
+	return kept, nil
+}
+
 // reduceDELHoldLots uses the difference of adjacent cumulative floors in
 // canonical start-time order. Each selected lot's share is within one atom
 // of exact pro rata and the shares add up to the entire bucket loss. The

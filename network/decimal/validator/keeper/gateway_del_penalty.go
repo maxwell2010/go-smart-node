@@ -3,6 +3,8 @@ package keeper
 import (
 	"bytes"
 	"errors"
+	"math/big"
+	"time"
 
 	sdkmath "cosmossdk.io/math"
 	sdk "github.com/cosmos/cosmos-sdk/types"
@@ -16,17 +18,27 @@ import (
 // bound and real native burn and uses the same outer transaction cache.
 // This method changes only active metadata and its indexes.
 func (k *StateKeeper) ApplyGatewayDELPenalty(ctx sdk.Context, before GatewayDELStake, afterAmount sdkmath.Int, afterCursor common.Hash) error {
-	return k.applyGatewayDELPenalty(ctx, before, afterAmount, afterCursor, false)
+	return k.applyGatewayDELPenalty(ctx, before, afterAmount, afterCursor, false, nil)
 }
 
 // ApplyGatewayDELHoldPenalty projects a verified active DEL hold-bucket
 // penalty. Only lots with that exact deadline participate in its loss. The
 // caller authenticates the unchanged EVM hold identity and actual native burn.
 func (k *StateKeeper) ApplyGatewayDELHoldPenalty(ctx sdk.Context, before GatewayDELStake, afterAmount sdkmath.Int, afterCursor common.Hash) error {
-	return k.applyGatewayDELPenalty(ctx, before, afterAmount, afterCursor, true)
+	return k.applyGatewayDELPenalty(ctx, before, afterAmount, afterCursor, true, nil)
 }
 
-func (k *StateKeeper) applyGatewayDELPenalty(ctx sdk.Context, before GatewayDELStake, afterAmount sdkmath.Int, afterCursor common.Hash, held bool) error {
+// ApplyGatewayActiveHistoricalDELPenalty projects one exact historical
+// penalty on active direct DEL, including a hold bucket. The caller verifies
+// the EVM transition and any native burn in the same outer cache.
+func (k *StateKeeper) ApplyGatewayActiveHistoricalDELPenalty(ctx sdk.Context, before GatewayDELStake, infractionHeight int64, afterAmount sdkmath.Int, afterCursor common.Hash) error {
+	if new(big.Int).Add(before.PenaltyCursor.Big(), big.NewInt(1)).Cmp(afterCursor.Big()) != 0 {
+		return errors.New("historical Gateway DEL penalty cursor must advance exactly once")
+	}
+	return k.applyGatewayDELPenalty(ctx, before, afterAmount, afterCursor, before.HoldDeadline != 0, &infractionHeight)
+}
+
+func (k *StateKeeper) applyGatewayDELPenalty(ctx sdk.Context, before GatewayDELStake, afterAmount sdkmath.Int, afterCursor common.Hash, held bool, infractionHeight *int64) error {
 	owner, operator, err := before.nativePairIdentity()
 	if err != nil {
 		return err
@@ -56,11 +68,39 @@ func (k *StateKeeper) applyGatewayDELPenalty(ctx sdk.Context, before GatewayDELS
 		return errors.New("active DEL reserve is below the penalized position")
 	}
 	loss := before.Amount.Sub(afterAmount)
-	change := DelegationChange{Expected: previous}
-	if held {
-		change.Next, err = before.penalizeHold(previous, loss)
+	var historical *DELHistoricalPenaltyPlan
+	if infractionHeight != nil {
+		exact, priorTranches, err := k.planActiveDELHistoricalPenalty(child, *active, *infractionHeight)
 		if err != nil {
 			return err
+		}
+		if !exact.Before.Equal(before.Amount) || !exact.Remaining.Equal(afterAmount) {
+			return errors.New("Gateway DEL penalty amount differs from the historical exposure")
+		}
+		if held {
+			if err := matchDELProvenanceHoldLots(priorTranches, delegationHoldLots(previous), before.HoldDeadline); err != nil {
+				return err
+			}
+		}
+		historical = &exact
+	}
+	change := DelegationChange{Expected: previous}
+	if held {
+		if historical == nil {
+			change.Next, err = before.penalizeHold(previous, loss)
+			if err != nil {
+				return err
+			}
+		} else if loss.IsPositive() {
+			lots, err := projectHistoricalDELHoldLots(previous.Stake.Holds, before.HoldDeadline, historical.Tranches)
+			if err != nil {
+				return err
+			}
+			if len(lots) != 0 {
+				remaining := *previous
+				remaining.Stake = gatewayDELHoldStake(previous.Stake.Stake.Amount.Sub(loss), lots)
+				change.Next = &remaining
+			}
 		}
 	} else if afterAmount.IsPositive() {
 		remaining := *previous
@@ -83,8 +123,15 @@ func (k *StateKeeper) applyGatewayDELPenalty(ctx sdk.Context, before GatewayDELS
 	if err != nil {
 		return err
 	}
-	if err := k.recordActiveDELProvenancePenalty(child, before, change, loss); err != nil {
-		return err
+	if historical == nil {
+		if err := k.recordActiveDELProvenancePenalty(child, before, change, loss); err != nil {
+			return err
+		}
+	} else if loss.IsPositive() {
+		key := delProvenanceKey(activeDELProvenancePrefix, before.Gateway[:], before.StakeID[:])
+		if err := k.storeDELProvenance(child, key, historical.Tranches, time.Time{}); err != nil {
+			return err
+		}
 	}
 	if loss.IsPositive() {
 		if err := k.ApplyDelegationBatch(child, []DelegationChange{change}); err != nil {
