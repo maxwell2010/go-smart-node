@@ -7426,15 +7426,15 @@ contract DecimalDelegation is
             0,
             holdTimestamp
         );
-        Stake memory stake = _getStake(coinStakeId);
+        uint256 amount = _getStake(coinStakeId).amount;
         uint256 nftBackedAmount = _getDelegationStorage()._nftBackedAmounts[
             coinStakeId
         ];
 
-        if (stake.amount <= nftBackedAmount) {
+        if (amount <= nftBackedAmount) {
             return 0;
         }
-        return stake.amount - nftBackedAmount;
+        unchecked { return amount - nftBackedAmount; }
     }
 
     function getNFTBackedAmount(
@@ -7502,20 +7502,23 @@ contract MintCandyIsolatedDelegation is DecimalDelegation {
 
     function delegateNFT1155(address validator, address originContract, uint256 tokenId, uint256 quantity)
         public override whenNotPaused {
-        DelegationNFTLib.delegateIsolatedNFT1155(_getDelegationStorage(), msg.sender,
-            validator, originContract, tokenId, quantity, 0, 0, 0);
+        _delegateIsolated(validator, originContract, tokenId, quantity, 0, 0, 0);
     }
     function delegateNFT1155Hold(address validator, address originContract, uint256 tokenId,
         uint256 quantity, uint256 holdTimestamp) public override whenNotPaused {
         if (holdTimestamp == 0) revert InvalidHoldTimestamp(0);
-        DelegationNFTLib.delegateIsolatedNFT1155(_getDelegationStorage(), msg.sender,
-            validator, originContract, tokenId, quantity, holdTimestamp, 0, 0);
+        _delegateIsolated(validator, originContract, tokenId, quantity, holdTimestamp, 0, 0);
     }
 
     function delegateNFT1155WithConversion(address validator, address originContract, uint256 tokenId,
         uint256 quantity, uint256 minimumNativeOutput, uint256 deadline) external whenNotPaused {
         if (minimumNativeOutput == 0 || deadline == 0) revert InvalidAmount();
+        _delegateIsolated(validator, originContract, tokenId, quantity, 0, minimumNativeOutput, deadline);
+    }
+
+    function _delegateIsolated(address validator, address originContract, uint256 tokenId, uint256 quantity,
+        uint256 holdTimestamp, uint256 minimumNativeOutput, uint256 deadline) private {
         DelegationNFTLib.delegateIsolatedNFT1155(_getDelegationStorage(), msg.sender,
-            validator, originContract, tokenId, quantity, 0, minimumNativeOutput, deadline);
+            validator, originContract, tokenId, quantity, holdTimestamp, minimumNativeOutput, deadline);
     }
 }
