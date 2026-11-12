@@ -123,6 +123,73 @@ func checkSignedPagedPenalties(t *testing.T, keys []*ecdsa.PrivateKey, roles map
 		call(1, "master-validator", "addValidators", new(big.Int), []validatorMeta{{validator, string(meta)}})
 		return validator
 	}
+	t.Run("typed duplicate-vote penalty metadata", func(t *testing.T) {
+		validator := addValidator(0xa3)
+		const role = "master-validator"
+		master, target := artifacts[role], roles[role]
+		rejectAppend := func(user int, cursor, height int64) {
+			t.Helper()
+			input, err := master.ABI.Pack("appendDuplicateVotePenalty", validator, big.NewInt(cursor), big.NewInt(height), uint16(5))
+			require.NoError(t, err)
+			send(keys[user], &target, new(big.Int), input, false)
+		}
+		state := func() []interface{} {
+			t.Helper()
+			return call(1, role, "getValidatorState", new(big.Int), validator)
+		}
+		appendAt := func(cursor, height int64, alreadyPaused bool) {
+			t.Helper()
+			call(1, role, "appendDuplicateVotePenalty", new(big.Int), validator, big.NewInt(cursor), big.NewInt(height), uint16(5))
+			logs := last.Logs
+			if alreadyPaused {
+				require.Len(t, logs, 1, "paused validator must not emit a second pause")
+			} else {
+				require.Len(t, logs, 2)
+			}
+			log := logs[len(logs)-1]
+			event := master.ABI.Events["ValidatorDuplicateVotePenalty"]
+			require.Equal(t, target, common.HexToAddress(log.Address))
+			require.Len(t, log.Topics, 4)
+			require.Equal(t, event.ID, common.HexToHash(log.Topics[0]))
+			require.Equal(t, common.BytesToHash(validator[:]), common.HexToHash(log.Topics[1]))
+			require.Equal(t, common.BigToHash(big.NewInt(cursor)), common.HexToHash(log.Topics[2]))
+			require.Equal(t, common.BigToHash(big.NewInt(height)), common.HexToHash(log.Topics[3]))
+			data, err := event.Inputs.NonIndexed().Pack(uint16(5))
+			require.NoError(t, err)
+			require.Equal(t, data, log.Data)
+		}
+
+		beforeSupply := new(big.Int).Set(nativeSupply())
+		before := state()
+		require.False(t, before[1].(bool))
+		rejectAppend(0, 0, 1)
+		rejectAppend(1, 1, 1)
+		rejectAppend(1, 0, 0)
+		require.Equal(t, before, state())
+
+		call(1, role, "addPenalty", new(big.Int), validator, uint16(1))
+		appendAt(1, 1, true)
+		paused := state()
+		require.Equal(t, before[0], paused[0])
+		require.True(t, paused[1].(bool))
+		require.Equal(t, big.NewInt(2), paused[2])
+		rejectAppend(1, 2, 1)
+		require.Equal(t, paused, state())
+
+		call(1, role, "unpauseValidator", new(big.Int), validator)
+		appendAt(2, 2, false)
+		after := state()
+		require.Equal(t, before[0], after[0])
+		require.True(t, after[1].(bool))
+		require.Equal(t, big.NewInt(3), after[2])
+		for index, want := range []int64{0, 1, 2} {
+			result := call(1, role, "getDuplicateVotePenaltyHeight", new(big.Int), validator, big.NewInt(int64(index)))
+			require.Equal(t, big.NewInt(want), result[0])
+		}
+		result := call(1, role, "getPenaltiesRange", new(big.Int), validator, big.NewInt(0), big.NewInt(3))
+		require.Equal(t, []uint16{1, 5, 5}, result[0])
+		require.Equal(t, beforeSupply, nativeSupply())
+	})
 	firstPair := func(validator common.Address) {
 		first, err := artifacts["master-validator"].ABI.Pack("addPenalty", validator, uint16(1))
 		require.NoError(t, err)
