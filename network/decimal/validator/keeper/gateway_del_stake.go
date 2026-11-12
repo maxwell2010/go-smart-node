@@ -30,6 +30,13 @@ type GatewayDELStake struct {
 const gatewayDELCoinBinding = types.EVMStakeBindingKind_EVM_STAKE_BINDING_COIN
 
 func (s GatewayDELStake) nativePair() (string, string, error) {
+	if s.PenaltyCursor != (common.Hash{}) {
+		return "", "", errors.New("invalid Gateway DEL position or unsupported penalty cursor")
+	}
+	return s.nativePairIdentity()
+}
+
+func (s GatewayDELStake) nativePairIdentity() (string, string, error) {
 	var words [64]byte // token ID and hold timestamp in Gateway getStakeId.
 	if s.HoldDeadline < 0 || (s.HoldDeadline == 0 && s.HoldStartTime != 0) ||
 		(s.HoldDeadline > 0 && (s.HoldStartTime <= 0 || s.HoldStartTime >= s.HoldDeadline)) {
@@ -38,7 +45,7 @@ func (s GatewayDELStake) nativePair() (string, string, error) {
 	binary.BigEndian.PutUint64(words[56:], uint64(s.HoldDeadline))
 	if s.Gateway == (common.Address{}) || s.WrappedDEL == (common.Address{}) ||
 		s.Beneficiary == (common.Address{}) || s.Validator == (common.Address{}) ||
-		s.PenaltyCursor != (common.Hash{}) || s.Amount.IsNil() || s.Amount.IsNegative() ||
+		s.Amount.IsNil() || s.Amount.IsNegative() ||
 		s.StakeID != crypto.Keccak256Hash(s.Validator[:], s.Beneficiary[:], s.WrappedDEL[:], words[:]) {
 		return "", "", errors.New("invalid Gateway DEL position or unsupported penalty cursor")
 	}
