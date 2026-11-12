@@ -301,6 +301,11 @@ func (k *StateKeeper) SetValidator(ctx sdk.Context, v types.Validator) error {
 	if stored != nil && string(stored) != v.OperatorAddress {
 		return errors.New("consensus address belongs to another validator")
 	}
+	if previous == nil {
+		if err := k.updateNativeLiveValidatorRoster(child, v.OperatorAddress, true); err != nil {
+			return err
+		}
+	}
 	if e = k.updateBondedMember(child, previous, v); e != nil {
 		return e
 	}
