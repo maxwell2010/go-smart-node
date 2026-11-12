@@ -13,17 +13,17 @@ import (
 )
 
 const (
-	nativeDuplicateVoteRecordPrefix    byte = 0x62
-	nativeDuplicateVotePendingPrefix   byte = 0x63
-	nativeDuplicateVoteOperatorPrefix  byte = 0x64
-	nativeDuplicateVoteRecordVersion   byte = 1
-	nativeDuplicateVotePending         byte = 0
-	nativeDuplicateVoteCompleted       byte = 1
-	nativeDuplicateVoteRecordKeySize        = 1 + 8 + cmtcrypto.AddressSize
-	nativeDuplicateVoteOperatorKeySize      = 1 + 20
-	nativeDuplicateVoteRecordSize           = 1 + 1 + 8 + 20 + 8 + 4 + 8 + 8 + 2
+	nativeDuplicateVoteRecordPrefix       byte = 0x62
+	nativeDuplicateVotePendingPrefix      byte = 0x63
+	nativeDuplicateVoteOperatorPrefix     byte = 0x64
+	nativeDuplicateVoteRecordVersion      byte = 1
+	nativeDuplicateVotePending            byte = 0
+	nativeDuplicateVoteCompleted          byte = 1
+	nativeDuplicateVoteRecordKeySize           = 1 + 8 + cmtcrypto.AddressSize
+	nativeDuplicateVoteOperatorPrefixSize      = 1 + 20
+	nativeDuplicateVoteRecordSize              = 1 + 1 + 8 + 20 + 8 + 4 + 8 + 8 + 2
 
-	// MaxNativeDuplicateVoteQueuePage bounds work loaded for one worker pass.
+	// MaxNativeDuplicateVoteQueuePage bounds the read-only pending list.
 	MaxNativeDuplicateVoteQueuePage = 8
 )
 
@@ -83,7 +83,7 @@ func (k *StateKeeper) enqueueNativeDuplicateVoteCandidates(ctx sdk.Context, cand
 		if !errors.Is(err, ErrNotFound) {
 			return 0, err
 		}
-		if err := state.Set(primary, encodeNativeDuplicateVoteJob(job, operator[1:nativeDuplicateVoteOperatorKeySize], nativeDuplicateVotePending)); err != nil {
+		if err := state.Set(primary, encodeNativeDuplicateVoteJob(job, operator[1:nativeDuplicateVoteOperatorPrefixSize], nativeDuplicateVotePending)); err != nil {
 			return 0, err
 		}
 		if err := state.Set(fifo, primary); err != nil {
@@ -117,12 +117,12 @@ func (k *StateKeeper) PendingNativeDuplicateVotePenalties(ctx sdk.Context, limit
 			return nil, err
 		}
 		primary := it.Value()
-		job, status, err := k.readNativeDuplicateVoteJob(state, primary)
+		job, err := k.readIndexedNativeDuplicateVoteJob(state, primary)
 		if err != nil {
 			_ = it.Close()
 			return nil, err
 		}
-		if status != nativeDuplicateVotePending || !bytes.Equal(it.Key(), nativeDuplicateVotePendingKey(job.AdmittedHeight, primary)) {
+		if !bytes.Equal(it.Key(), nativeDuplicateVotePendingKey(job.AdmittedHeight, primary)) {
 			_ = it.Close()
 			return nil, errors.New("corrupt native duplicate-vote FIFO index")
 		}
@@ -137,38 +137,16 @@ func (k *StateKeeper) PendingNativeDuplicateVotePenalties(ctx sdk.Context, limit
 // HasPendingNativeDuplicateVotePenalty checks the first unresolved liability
 // for the operator address stored at admission.
 func (k *StateKeeper) HasPendingNativeDuplicateVotePenalty(ctx sdk.Context, operator string) (bool, error) {
-	prefix, err := operatorKey(nativeDuplicateVoteOperatorPrefix, operator)
-	if err != nil {
-		return false, err
+	_, _, err := k.nativeDuplicateVoteOperatorHead(k.service.OpenKVStore(ctx), operator)
+	if errors.Is(err, ErrNotFound) {
+		return false, nil
 	}
-	state := k.service.OpenKVStore(ctx)
-	it, err := state.Iterator(prefix, storetypes.PrefixEndBytes(prefix))
-	if err != nil {
-		return false, err
-	}
-	if !it.Valid() {
-		return false, it.Close()
-	}
-	if err = it.Error(); err != nil {
-		_ = it.Close()
-		return false, err
-	}
-	primary := it.Value()
-	job, status, err := k.readNativeDuplicateVoteJob(state, primary)
-	if err != nil {
-		_ = it.Close()
-		return false, err
-	}
-	if status != nativeDuplicateVotePending || job.Operator != operator || !bytes.Equal(it.Key(), append(prefix, primary[1:]...)) {
-		_ = it.Close()
-		return false, errors.New("corrupt native duplicate-vote operator index")
-	}
-	return true, it.Close()
+	return err == nil, err
 }
 
-// CompleteNativeDuplicateVotePenalty retires one exact pending job and keeps
-// its identity for replay protection. The caller stages the penalty and this
-// completion in the same outer cache.
+// CompleteNativeDuplicateVotePenalty retires the operator's first exact
+// pending job and keeps its identity for replay protection. The caller stages
+// the penalty and this completion in the same outer cache.
 func (k *StateKeeper) CompleteNativeDuplicateVotePenalty(ctx sdk.Context, expected NativeDuplicateVoteJob) error {
 	primary, err := nativeDuplicateVoteRecordKey(expected.ConsensusAddress, expected.InfractionHeight)
 	if err != nil {
@@ -194,7 +172,14 @@ func (k *StateKeeper) CompleteNativeDuplicateVotePenalty(ctx sdk.Context, expect
 	if err := verifyNativeDuplicateVotePendingKeys(state, primary, fifo, operator); err != nil {
 		return err
 	}
-	record := encodeNativeDuplicateVoteJob(current, operator[1:nativeDuplicateVoteOperatorKeySize], nativeDuplicateVoteCompleted)
+	_, head, err := k.nativeDuplicateVoteOperatorHead(state, current.Operator)
+	if err != nil {
+		return err
+	}
+	if !bytes.Equal(head, primary) {
+		return errors.New("native duplicate-vote completion must settle the operator's first pending liability")
+	}
+	record := encodeNativeDuplicateVoteJob(current, operator[1:nativeDuplicateVoteOperatorPrefixSize], nativeDuplicateVoteCompleted)
 	if err := state.Set(primary, record); err != nil {
 		return err
 	}
@@ -217,7 +202,11 @@ func nativeDuplicateVoteRecordKey(consensus sdk.ConsAddress, height int64) ([]by
 }
 
 func nativeDuplicateVotePendingKey(admittedHeight int64, primary []byte) []byte {
-	key := binary.BigEndian.AppendUint64([]byte{nativeDuplicateVotePendingPrefix}, uint64(admittedHeight))
+	return nativeDuplicateVoteOrderKey([]byte{nativeDuplicateVotePendingPrefix}, admittedHeight, primary)
+}
+
+func nativeDuplicateVoteOrderKey(prefix []byte, admittedHeight int64, primary []byte) []byte {
+	key := binary.BigEndian.AppendUint64(prefix, uint64(admittedHeight))
 	return append(key, primary[1:]...)
 }
 
@@ -230,7 +219,7 @@ func (k *StateKeeper) nativeDuplicateVotePendingKeys(job NativeDuplicateVoteJob,
 	if err != nil || canonical != job.Operator {
 		return nil, nil, errors.New("invalid native duplicate-vote operator encoding")
 	}
-	return nativeDuplicateVotePendingKey(job.AdmittedHeight, primary), append(prefix, primary[1:]...), nil
+	return nativeDuplicateVotePendingKey(job.AdmittedHeight, primary), nativeDuplicateVoteOrderKey(prefix, job.AdmittedHeight, primary), nil
 }
 
 func (k *StateKeeper) verifyNativeDuplicateVotePendingKeys(state store.KVStore, job NativeDuplicateVoteJob, primary []byte) error {
