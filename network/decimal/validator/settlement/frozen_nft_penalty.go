@@ -49,12 +49,12 @@ func (e *Executor) ApplyFrozenNFTPenalty(ctx sdk.Context, row validatortypes.EVM
 	return e.applyFrozenNFTPenalty(ctx, row, infractionHeight, percentage, nativeSupply, project, nil, false)
 }
 
-// ApplyCustodiedNFTCheckpoint advances an ordinary penalty cursor for a
-// mature NFT claim that left active stake before the infraction.
-func (e *Executor) ApplyCustodiedNFTCheckpoint(ctx sdk.Context, row validatortypes.EVMFrozenBinding, infractionHeight int64, percentage uint16,
+// ApplyCustodiedNFTPenalty realizes the ordinary reserve loss or advances the
+// cursor of a nominally mature NFT that remains in Gateway custody.
+func (e *Executor) ApplyCustodiedNFTPenalty(ctx sdk.Context, row validatortypes.EVMFrozenBinding, infractionHeight int64, percentage uint16,
 	nativeSupply func(sdk.Context) sdkmath.Int, project func(sdk.Context, FrozenNFTPenaltyProof) error,
 ) error {
-	if err := requireCustodiedOrdinaryCheckpoint(ctx, row, infractionHeight); err != nil {
+	if err := requireCustodiedOrdinaryPenalty(ctx, row, infractionHeight); err != nil {
 		return err
 	}
 	return e.applyFrozenNFTPenalty(ctx, row, infractionHeight, percentage, nativeSupply, project, nil, true)
@@ -75,7 +75,7 @@ func (e *Executor) ApplyFrozenHistoricalNFTPenalty(ctx sdk.Context, row validato
 
 func (e *Executor) applyFrozenNFTPenalty(ctx sdk.Context, row validatortypes.EVMFrozenBinding, infractionHeight int64,
 	percentage uint16, nativeSupply func(sdk.Context) sdkmath.Int, project func(sdk.Context, FrozenNFTPenaltyProof) error,
-	historical *frozenHistoricalNFTPenalty, custodiedCheckpoint bool,
+	historical *frozenHistoricalNFTPenalty, custodiedOrdinary bool,
 ) error {
 	if nativeSupply == nil || project == nil || ctx.ExecMode() != sdk.ExecModeFinalize ||
 		infractionHeight <= 0 || infractionHeight > ctx.BlockHeight() || percentage == 0 || percentage > 100 {
@@ -89,7 +89,7 @@ func (e *Executor) applyFrozenNFTPenalty(ctx sdk.Context, row validatortypes.EVM
 	if !row.Active || row.SourceKind != validatortypes.EVMStakeBindingKind_EVM_STAKE_BINDING_NFT ||
 		row.NativeTarget.StakeType != validatortypes.StakeType_NFT || row.ReserveAsset.ReserveKind != nfttypes.IsolatedReserveDEL ||
 		row.ReserveAsset.NativeDenom != identity.BaseDenom || row.CreatedHeight <= 0 || row.UpdatedHeight > ctx.BlockHeight() || now <= 0 ||
-		(historical == nil && !custodiedCheckpoint && common.BytesToHash(row.CompletionTimestamp).Big().Cmp(big.NewInt(now)) <= 0) {
+		(historical == nil && !custodiedOrdinary && common.BytesToHash(row.CompletionTimestamp).Big().Cmp(big.NewInt(now)) <= 0) {
 		if historical != nil {
 			return errors.New("historical penalty requires a custodied ordinary isolated NFT claim backed by native DEL")
 		}

@@ -70,26 +70,26 @@ func (e *Executor) ApplyFrozenDELPenalty(ctx sdk.Context, row validatortypes.EVM
 	return e.applyFrozenDELPenalty(ctx, row, infractionHeight, percentage, nativeSupply, project, nil, false)
 }
 
-// ApplyCustodiedDELCheckpoint advances an ordinary penalty cursor for a
-// mature claim that left active stake before the infraction.
-func (e *Executor) ApplyCustodiedDELCheckpoint(ctx sdk.Context, row validatortypes.EVMFrozenBinding, infractionHeight int64, percentage uint16,
+// ApplyCustodiedDELPenalty realizes the ordinary loss or advances the cursor
+// of a nominally mature claim that remains in Gateway custody.
+func (e *Executor) ApplyCustodiedDELPenalty(ctx sdk.Context, row validatortypes.EVMFrozenBinding, infractionHeight int64, percentage uint16,
 	nativeSupply func(sdk.Context) sdkmath.Int, project func(sdk.Context, FrozenDELPenaltyProof) error,
 ) error {
-	if err := requireCustodiedOrdinaryCheckpoint(ctx, row, infractionHeight); err != nil {
+	if err := requireCustodiedOrdinaryPenalty(ctx, row, infractionHeight); err != nil {
 		return err
 	}
 	return e.applyFrozenDELPenalty(ctx, row, infractionHeight, percentage, nativeSupply, project, nil, true)
 }
 
-func requireCustodiedOrdinaryCheckpoint(ctx sdk.Context, row validatortypes.EVMFrozenBinding, infractionHeight int64) error {
+func requireCustodiedOrdinaryPenalty(ctx sdk.Context, row validatortypes.EVMFrozenBinding, infractionHeight int64) error {
 	now := ctx.BlockTime().Unix()
-	if now <= 0 || row.CreatedHeight <= 0 || row.CreatedHeight >= infractionHeight ||
+	if now <= 0 || row.CreatedHeight <= 0 || infractionHeight <= 0 || infractionHeight > ctx.BlockHeight() ||
 		common.BytesToHash(row.CompletionTimestamp).Big().Cmp(big.NewInt(now)) > 0 {
-		return errors.New("ordinary frozen checkpoint requires a mature claim predating the infraction")
+		return errors.New("custodied ordinary penalty requires a mature claim and valid infraction height")
 	}
 	scope, _ := ctx.Value(penaltySourceKey{}).(*penaltySourceScope)
 	if scope == nil || !scope.active || scope.infractionHeight != 0 {
-		return errors.New("ordinary frozen checkpoint requires the active Master reconciliation")
+		return errors.New("custodied ordinary penalty requires the active Master reconciliation")
 	}
 	// The ordinary realization below authenticates this scope's validator,
 	// height and percentage before reading or calling the Gateway.
@@ -110,7 +110,7 @@ func (e *Executor) ApplyFrozenHistoricalDELPenalty(ctx sdk.Context, row validato
 
 func (e *Executor) applyFrozenDELPenalty(ctx sdk.Context, row validatortypes.EVMFrozenBinding, infractionHeight int64, percentage uint16,
 	nativeSupply func(sdk.Context) sdkmath.Int, project func(sdk.Context, FrozenDELPenaltyProof) error, historical *historicalDELPenalty,
-	custodiedCheckpoint bool,
+	custodiedOrdinary bool,
 ) error {
 	if e == nil || nativeSupply == nil || project == nil || ctx.ExecMode() != sdk.ExecModeFinalize ||
 		infractionHeight <= 0 || infractionHeight > ctx.BlockHeight() || percentage == 0 || percentage > 100 {
@@ -127,7 +127,7 @@ func (e *Executor) applyFrozenDELPenalty(ctx sdk.Context, row validatortypes.EVM
 		row.UpdatedHeight > ctx.BlockHeight() || now <= 0 {
 		return errors.New("penalty requires a custodied frozen DEL binding")
 	}
-	if historical == nil && !custodiedCheckpoint && common.BytesToHash(row.CompletionTimestamp).Big().Cmp(big.NewInt(now)) <= 0 {
+	if historical == nil && !custodiedOrdinary && common.BytesToHash(row.CompletionTimestamp).Big().Cmp(big.NewInt(now)) <= 0 {
 		return errors.New("penalty requires an unmatured frozen DEL binding")
 	}
 	child, write := ctx.CacheContext()

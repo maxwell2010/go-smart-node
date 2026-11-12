@@ -20,15 +20,22 @@ type frozenPenaltyMode uint8
 const (
 	frozenPenaltyRegular frozenPenaltyMode = iota
 	frozenPenaltyHistorical
-	frozenPenaltyCustodiedCheckpoint
+	frozenPenaltyCustodiedOrdinary
 )
 
-func checkMatureCustodiedCheckpoint(entry *types.UndelegationEntry, infractionHeight int64, now time.Time) error {
-	if entry.CreationHeight <= 0 || entry.CreationHeight >= infractionHeight {
-		return errors.New("custodied checkpoint requires a claim created before the infraction")
+func checkMatureCustodiedOrdinaryPenalty(entry *types.UndelegationEntry, now time.Time, infractionHeight int64, percentage uint16, principal, loss sdkmath.Int) error {
+	if entry.CreationHeight <= 0 || percentage == 0 || percentage > 100 {
+		return errors.New("custodied ordinary penalty requires a valid claim height and percentage")
 	}
 	if entry.CompletionTime.After(now) {
-		return errors.New("custodied checkpoint requires a mature withdrawal claim")
+		return errors.New("custodied ordinary penalty requires a mature withdrawal claim")
+	}
+	var expected big.Int
+	if entry.CreationHeight >= infractionHeight {
+		expected.Mul(principal.BigInt(), big.NewInt(int64(percentage))).Quo(&expected, big.NewInt(100))
+	}
+	if expected.Cmp(loss.BigInt()) != 0 {
+		return errors.New("custodied ordinary penalty differs from the exact eligible loss")
 	}
 	return nil
 }
@@ -42,7 +49,7 @@ func frozenDELPenaltyCursorKey(gateway, index []byte) []byte {
 // claim adjustment. The caller proves the EVM checkpoint and burn in the same
 // outer cache. An ineligible claim may advance its cursor without losing DEL.
 func (k *StateKeeper) ApplyGatewayFrozenDELPenalty(ctx sdk.Context, before types.EVMFrozenBinding, infractionHeight int64, oldCursor, newCursor common.Hash, remaining sdkmath.Int) error {
-	return k.applyGatewayFrozenDELPenalty(ctx, before, nil, infractionHeight, oldCursor, newCursor, remaining, frozenPenaltyRegular)
+	return k.applyGatewayFrozenDELPenalty(ctx, before, nil, infractionHeight, oldCursor, newCursor, remaining, frozenPenaltyRegular, 0)
 }
 
 // GatewayFrozenDELHold is the immutable held-claim identity from the verified
@@ -57,24 +64,28 @@ type GatewayFrozenDELHold struct {
 // held DEL claim and its matched native queue entry in the same outer cache
 // as the verified Gateway checkpoint and burn.
 func (k *StateKeeper) ApplyGatewayFrozenDELHoldPenalty(ctx sdk.Context, before types.EVMFrozenBinding, hold GatewayFrozenDELHold, infractionHeight int64, oldCursor, newCursor common.Hash, remaining sdkmath.Int) error {
-	return k.applyGatewayFrozenDELPenalty(ctx, before, &hold, infractionHeight, oldCursor, newCursor, remaining, frozenPenaltyRegular)
+	return k.applyGatewayFrozenDELPenalty(ctx, before, &hold, infractionHeight, oldCursor, newCursor, remaining, frozenPenaltyRegular, 0)
 }
 
 // ApplyGatewayFrozenHistoricalDELPenalty projects the exact historical loss
 // on a still-custodied claim. The App verifies the accepted evidence and the
 // EVM burn in the same cache. The nominal unfreeze time can precede settlement.
 func (k *StateKeeper) ApplyGatewayFrozenHistoricalDELPenalty(ctx sdk.Context, before types.EVMFrozenBinding, hold *GatewayFrozenDELHold, infractionHeight int64, oldCursor, newCursor common.Hash, remaining sdkmath.Int) error {
-	return k.applyGatewayFrozenDELPenalty(ctx, before, hold, infractionHeight, oldCursor, newCursor, remaining, frozenPenaltyHistorical)
+	return k.applyGatewayFrozenDELPenalty(ctx, before, hold, infractionHeight, oldCursor, newCursor, remaining, frozenPenaltyHistorical, 0)
 }
 
-// ApplyGatewayCustodiedDELCheckpoint acknowledges one verified ordinary
-// penalty on a mature claim that was already frozen before the infraction.
-// Its original DEL and hold lots remain available for later withdrawal.
-func (k *StateKeeper) ApplyGatewayCustodiedDELCheckpoint(ctx sdk.Context, before types.EVMFrozenBinding, hold *GatewayFrozenDELHold, infractionHeight int64, oldCursor, newCursor common.Hash) error {
-	return k.applyGatewayFrozenDELPenalty(ctx, before, hold, infractionHeight, oldCursor, newCursor, before.RawAmount, frozenPenaltyCustodiedCheckpoint)
+// ApplyGatewayCustodiedDELPenalty projects an ordinary penalty on a mature
+// claim still in custody in the evidence-aware profile. A claim created at or
+// after the infraction is debited and an older claim only advances its cursor.
+func (k *StateKeeper) ApplyGatewayCustodiedDELPenalty(ctx sdk.Context, before types.EVMFrozenBinding, hold *GatewayFrozenDELHold,
+	infractionHeight int64, percentage uint16, oldCursor, newCursor common.Hash, remaining sdkmath.Int,
+) error {
+	return k.applyGatewayFrozenDELPenalty(ctx, before, hold, infractionHeight, oldCursor, newCursor, remaining, frozenPenaltyCustodiedOrdinary, percentage)
 }
 
-func (k *StateKeeper) applyGatewayFrozenDELPenalty(ctx sdk.Context, before types.EVMFrozenBinding, hold *GatewayFrozenDELHold, infractionHeight int64, oldCursor, newCursor common.Hash, remaining sdkmath.Int, mode frozenPenaltyMode) error {
+func (k *StateKeeper) applyGatewayFrozenDELPenalty(ctx sdk.Context, before types.EVMFrozenBinding, hold *GatewayFrozenDELHold, infractionHeight int64,
+	oldCursor, newCursor common.Hash, remaining sdkmath.Int, mode frozenPenaltyMode, custodiedPercentage uint16,
+) error {
 	if err := before.Validate(); err != nil {
 		return err
 	}
@@ -132,13 +143,21 @@ func (k *StateKeeper) applyGatewayFrozenDELPenalty(ctx sdk.Context, before types
 		return err
 	}
 	entry := &pending.Entries[i]
-	historical := mode != frozenPenaltyRegular
-	if entry.CreationHeight != before.CreatedHeight || (!historical && !entry.CompletionTime.After(ctx.BlockTime())) {
+	historical := mode == frozenPenaltyHistorical
+	if entry.CreationHeight != before.CreatedHeight || (mode == frozenPenaltyRegular && !entry.CompletionTime.After(ctx.BlockTime())) {
 		return errors.New("frozen DEL penalty requires a matching creation height and an unmatured claim for regular penalties")
 	}
-	if mode == frozenPenaltyCustodiedCheckpoint {
-		if err := checkMatureCustodiedCheckpoint(entry, infractionHeight, ctx.BlockTime()); err != nil {
+	loss := before.RawAmount.Sub(remaining)
+	if mode == frozenPenaltyCustodiedOrdinary {
+		if err := checkMatureCustodiedOrdinaryPenalty(entry, ctx.BlockTime(), infractionHeight, custodiedPercentage, before.RawAmount, loss); err != nil {
 			return err
+		}
+		enabled, err := k.NativeStakeProvenanceEnabled(child)
+		if err != nil {
+			return err
+		}
+		if !enabled {
+			return errors.New("custodied ordinary DEL penalty requires native stake provenance")
 		}
 	}
 	if hold != nil {
@@ -146,7 +165,6 @@ func (k *StateKeeper) applyGatewayFrozenDELPenalty(ctx sdk.Context, before types
 			return err
 		}
 	}
-	loss := before.RawAmount.Sub(remaining)
 	if entry.CreationHeight < infractionHeight && !loss.IsZero() {
 		return errors.New("frozen DEL claim predates the infraction")
 	}
@@ -174,7 +192,7 @@ func (k *StateKeeper) applyGatewayFrozenDELPenalty(ctx sdk.Context, before types
 	}
 	after := before
 	after.RawAmount, after.UpdatedHeight = remaining, ctx.BlockHeight()
-	writeQueue := mode != frozenPenaltyCustodiedCheckpoint
+	writeQueue := mode != frozenPenaltyCustodiedOrdinary || loss.IsPositive()
 	if remaining.IsZero() {
 		after.Active = false
 		pending.Entries = append(pending.Entries[:i], pending.Entries[i+1:]...)

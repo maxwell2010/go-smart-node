@@ -12,7 +12,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestCustodiedOrdinaryCheckpointRequiresMaturityAndOlderClaim(t *testing.T) {
+func TestCustodiedOrdinaryPenaltyRequiresMaturityAndOrdinaryScope(t *testing.T) {
 	deadline := time.Unix(2000, 0).UTC()
 	ctx := sdk.Context{}.WithContext(context.Background()).WithBlockHeight(10).WithBlockTime(deadline)
 	scope := &penaltySourceScope{active: true}
@@ -21,11 +21,12 @@ func TestCustodiedOrdinaryCheckpointRequiresMaturityAndOlderClaim(t *testing.T) 
 		CreatedHeight: 6, CompletionTimestamp: common.BigToHash(big.NewInt(deadline.Unix())).Bytes(),
 	}
 
-	require.NoError(t, requireCustodiedOrdinaryCheckpoint(active, row, 7))
-	require.NoError(t, requireCustodiedOrdinaryCheckpoint(active.WithBlockTime(deadline.Add(time.Second)), row, 7))
-	require.ErrorContains(t, requireCustodiedOrdinaryCheckpoint(active.WithBlockTime(deadline.Add(-time.Nanosecond)), row, 7), "mature claim")
-	require.ErrorContains(t, requireCustodiedOrdinaryCheckpoint(active, row, 6), "predating the infraction")
-	require.ErrorContains(t, requireCustodiedOrdinaryCheckpoint(active, row, 5), "predating the infraction")
-	require.ErrorContains(t, requireCustodiedOrdinaryCheckpoint(ctx, row, 7), "active Master reconciliation")
-	require.ErrorContains(t, requireCustodiedOrdinaryCheckpoint(ctx.WithValue(penaltySourceKey{}, &penaltySourceScope{active: true, infractionHeight: 7}), row, 7), "active Master reconciliation")
+	require.NoError(t, requireCustodiedOrdinaryPenalty(active, row, 7), "older claim advances without a debit")
+	require.NoError(t, requireCustodiedOrdinaryPenalty(active.WithBlockHeight(7).WithBlockTime(deadline.Add(time.Second)), row, 6), "a later timestamp can mature an equal-height claim in the very next block")
+	require.NoError(t, requireCustodiedOrdinaryPenalty(active, row, 5), "a newer claim remains ordinarily eligible")
+	require.ErrorContains(t, requireCustodiedOrdinaryPenalty(active.WithBlockTime(deadline.Add(-time.Nanosecond)), row, 7), "mature claim")
+	require.ErrorContains(t, requireCustodiedOrdinaryPenalty(active, row, 0), "valid infraction height")
+	require.ErrorContains(t, requireCustodiedOrdinaryPenalty(active, row, 11), "valid infraction height")
+	require.ErrorContains(t, requireCustodiedOrdinaryPenalty(ctx, row, 7), "active Master reconciliation")
+	require.ErrorContains(t, requireCustodiedOrdinaryPenalty(ctx.WithValue(penaltySourceKey{}, &penaltySourceScope{active: true, infractionHeight: 7}), row, 7), "active Master reconciliation")
 }
