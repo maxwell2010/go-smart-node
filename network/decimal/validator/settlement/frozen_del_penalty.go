@@ -65,7 +65,8 @@ func (e *Executor) ApplyFrozenDELPenalty(ctx sdk.Context, row validatortypes.EVM
 		return errors.New("penalty requires an unmatured frozen DEL binding")
 	}
 	child, write := ctx.CacheContext()
-	source, err := e.auth.AuthenticateStakeProfile(child)
+	validator := common.BytesToAddress(row.SourceValidator)
+	source, err := e.authenticatePenaltySource(child, validator, percentage)
 	if err != nil {
 		return err
 	}
@@ -97,7 +98,6 @@ func (e *Executor) ApplyFrozenDELPenalty(ctx sdk.Context, row validatortypes.EVM
 		return errors.New("frozen DEL penalty cursor overflow")
 	}
 	afterCursor := common.BigToHash(next)
-	validator := common.BytesToAddress(row.SourceValidator)
 	status, err := e.verifyAnnouncedPenalty(child, validator, checkpoint.cursor, afterCursor, percentage)
 	if err != nil {
 		return err
@@ -164,16 +164,15 @@ func (e *Executor) ApplyFrozenDELPenalty(ctx sdk.Context, row validatortypes.EVM
 	if err := verifyDELBurnDeltas(beforeState.payoutState, afterState.payoutState, beforeState.bankSupply, afterState.bankSupply, burned); err != nil {
 		return err
 	}
-	afterSource, err := e.auth.AuthenticateStakeProfile(child)
-	if err != nil {
+	if err := e.confirmPenaltySource(child, source); err != nil {
 		return err
 	}
 	afterStatus, err := e.verifyAnnouncedPenalty(child, validator, checkpoint.cursor, afterCursor, percentage)
 	if err != nil {
 		return err
 	}
-	if afterSource != source || afterStatus != status {
-		return errors.New("Gateway source or Master validator status changed during frozen DEL penalty")
+	if afterStatus != status {
+		return errors.New("Master validator status changed during frozen DEL penalty")
 	}
 	if err := project(child, proof); err != nil {
 		return fmt.Errorf("project frozen DEL penalty: %w", err)

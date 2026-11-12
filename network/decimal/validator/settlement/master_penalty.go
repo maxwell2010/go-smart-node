@@ -14,6 +14,7 @@ import (
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core"
 	ethtypes "github.com/ethereum/go-ethereum/core/types"
+	"github.com/maxwell2010/go-smart-node/network/decimal/nft/evmview"
 )
 
 // MasterPenaltyProof identifies one verified append and its old and new
@@ -30,6 +31,48 @@ type masterPenaltyCall struct {
 	height     int64
 	validator  common.Address
 	percentage uint16
+}
+
+type penaltySourceKey struct{}
+
+type penaltySourceScope struct {
+	executor   *Executor
+	height     int64
+	validator  common.Address
+	percentage uint16
+	active     bool
+}
+
+// Each realization still verifies its exact Master entry, receipt and
+// balance deltas. Within an append, authenticate the shared roles at both
+// ends of the same outer cache instead of repeating that read per position.
+func (e *Executor) authenticatePenaltySource(ctx sdk.Context, validator common.Address, percentage uint16) (*evmview.StakeSource, error) {
+	if scope, ok := ctx.Value(penaltySourceKey{}).(*penaltySourceScope); ok {
+		if !scope.active || scope.executor != e || scope.height != ctx.BlockHeight() ||
+			scope.validator != validator || scope.percentage != percentage {
+			return nil, errors.New("position penalty differs from the active Master reconciliation scope")
+		}
+		return nil, nil
+	}
+	source, err := e.auth.AuthenticateStakeProfile(ctx)
+	if err != nil {
+		return nil, err
+	}
+	return &source, nil
+}
+
+func (e *Executor) confirmPenaltySource(ctx sdk.Context, before *evmview.StakeSource) error {
+	if before == nil {
+		return nil
+	}
+	after, err := e.auth.AuthenticateStakeProfile(ctx)
+	if err != nil {
+		return err
+	}
+	if after != *before {
+		return errors.New("authenticated system roles changed during penalty reconciliation")
+	}
+	return nil
 }
 
 func masterPenaltySender() common.Address {
@@ -121,16 +164,15 @@ func (e *Executor) AppendMasterPenalty(ctx sdk.Context, validator common.Address
 		!before.bankSupply.Equal(after.bankSupply) {
 		return errors.New("Master penalty announcement changed native DEL or WDEL")
 	}
-	afterSource, err := e.auth.AuthenticateStakeProfile(child)
-	if err != nil {
-		return err
-	}
-	if afterSource != source {
-		return errors.New("authenticated system roles changed during Master penalty")
-	}
 	proof := MasterPenaltyProof{Validator: validator, Percentage: percentage, BeforeCursor: beforeCursor, AfterCursor: afterCursor}
-	if err := reconcile(child, proof); err != nil {
+	scope := &penaltySourceScope{executor: e, height: child.BlockHeight(), validator: validator, percentage: percentage, active: true}
+	defer func() { scope.active = false }()
+	if err := reconcile(child.WithValue(penaltySourceKey{}, scope), proof); err != nil {
 		return fmt.Errorf("reconcile announced Master penalty: %w", err)
+	}
+	scope.active = false
+	if err := e.confirmPenaltySource(child, &source); err != nil {
+		return err
 	}
 	write()
 	return nil

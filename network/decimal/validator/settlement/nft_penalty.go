@@ -87,7 +87,7 @@ func (e *Executor) ApplyActiveNFTPenalty(ctx sdk.Context, row validatortypes.EVM
 	}
 	afterCursor := common.BigToHash(next)
 	child, write := ctx.CacheContext()
-	source, err := e.auth.AuthenticateStakeProfile(child)
+	source, err := e.authenticatePenaltySource(child, validator, percentage)
 	if err != nil {
 		return err
 	}
@@ -132,16 +132,15 @@ func (e *Executor) ApplyActiveNFTPenalty(ctx sdk.Context, row validatortypes.EVM
 	if err := e.verifyActiveNFTPenaltyLogs(receipt, id, before.position.ReserveAmount, after, percentage, burned); err != nil {
 		return err
 	}
-	afterSource, err := e.auth.AuthenticateStakeProfile(child)
-	if err != nil {
+	if err := e.confirmPenaltySource(child, source); err != nil {
 		return err
 	}
 	afterStatus, err := e.verifyAnnouncedPenalty(child, validator, beforeCursor, afterCursor, percentage)
 	if err != nil {
 		return err
 	}
-	if afterSource != source || afterStatus != status {
-		return errors.New("active NFT penalty changed the authenticated source or Master status")
+	if afterStatus != status {
+		return errors.New("active NFT penalty changed the Master status")
 	}
 	proof := ActiveNFTPenaltyProof{Companion: before.companion, CompanionCursor: before.coinCursor,
 		BeforeCursor: beforeCursor, AfterCursor: afterCursor, RemainingReserve: remaining, Burned: loss}

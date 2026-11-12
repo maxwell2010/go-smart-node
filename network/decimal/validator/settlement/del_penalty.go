@@ -99,7 +99,7 @@ func (e *Executor) applyActiveDELPenalty(ctx sdk.Context, row validatortypes.EVM
 	}
 	afterCursor := common.BigToHash(next)
 	child, write := ctx.CacheContext()
-	source, err := e.auth.AuthenticateStakeProfile(child)
+	source, err := e.authenticatePenaltySource(child, validator, percentage)
 	if err != nil {
 		return err
 	}
@@ -141,12 +141,8 @@ func (e *Executor) applyActiveDELPenalty(ctx sdk.Context, row validatortypes.EVM
 	if err := verifyActiveDELPenaltyDeltas(before, after, burned); err != nil {
 		return err
 	}
-	afterSource, err := e.auth.AuthenticateStakeProfile(child)
-	if err != nil {
+	if err := e.confirmPenaltySource(child, source); err != nil {
 		return err
-	}
-	if afterSource != source {
-		return errors.New("Gateway source changed during active DEL penalty")
 	}
 	afterStatus, err := e.verifyAnnouncedPenalty(child, validator, beforeCursor, afterCursor, percentage)
 	if err != nil {
