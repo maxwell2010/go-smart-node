@@ -541,6 +541,17 @@ if pending_ibc == '1':
     assert set(phases)=={'client_connection_channel_handshake','pending_packet_across_native_upgrade',
                          'post_native_upgrade_voucher_return'},report
     assert all(phase['status']=='PASS' and (phase['owned_fees'] or phase['counterparty_fees']) for phase in phases.values()),report
+    rollback=report['rollback']
+    assert rollback['mode']=='coordinated-private-copy-restore',report
+    assert rollback['predecessorHeight']==plan['targetHeight']-1 and rollback['replayedHeight']==plan['targetHeight'],report
+    assert rollback['boundaryBlockHash']==application['block']['block_hash'],report
+    restored=rollback['restoredClaim']
+    assert restored['height']==plan['targetHeight'] and restored['appHash']==rollback['primaryAppliedAppHash'],report
+    for field in ('pendingAtomic','activeAtomic','dueAt','wrappedBackingAtomic','nativeSupplyAtomic'):
+        assert restored[field]==before[field],report
+    ledger=rollback['pendingLedger']
+    assert ledger['packets']==packet['packets'] and ledger['escrowAtomic']==packet['escrowAtomic'],report
+    assert ledger['referenceVoucherAtomic']=='0' and ledger['referenceClientHeight']<plan['targetHeight'],report
 print('Native governance tally, exact predecessor halt, successor migration and continued three-node consensus passed.')
 PY
 fi

@@ -4,12 +4,13 @@ import hashlib
 import json
 from pathlib import Path
 import re
+import shutil
 import sys
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "internal" / "ibclab"))
 from hermes_lab import (
     A_ID, B_ID, HERMES_SHA256, Lab, amount, binary, commitments, connect_transfer, escrow, field, fields,
-    fund_native_relayer, new_events, open_channel, phase_after, phase_before, query, require, verify_native_unbonding,
+    fund_native_relayer, new_events, open_channel, phase_after, phase_before, query, require, rpc, verify_native_unbonding,
 )
 
 
@@ -85,6 +86,75 @@ class NativeUpgradeIBC:
         self.run("clear", "packets", "--chain", A_ID, "--port", "transfer", "--channel", self.a_channel)
         self.lab.wait(lambda: not commitments(self.a["rpc"], self.a_channel) and not commitments(self.b["rpc"], self.b_channel),
                       "genuine packet commitments must clear")
+
+    def reference_header(self, height):
+        response = rpc(self.b["rpc"], "block", height=str(height))
+        header = response["block"]["header"]
+        block_hash, app_hash = response["block_id"]["hash"], header["app_hash"]
+        require(header["chain_id"] == B_ID and int(header["height"]) == height and
+                all(re.fullmatch(r"[A-Fa-f0-9]{64}", value) for value in (block_hash, app_hash)),
+                "invalid committed counterparty checkpoint")
+        return {"height": height, "blockHash": block_hash, "appHash": app_hash}
+
+    def pending_ledger(self):
+        self.assert_pending()
+        return {"ownedRelayerAtomic": str(amount(self.a["rpc"], self.a["address"], "del")),
+                "referenceRelayerAtomic": str(amount(self.b["rpc"], self.b["address"], "stake")),
+                "referenceClientHeight": self.client_height(), "referenceVoucherAtomic": "0",
+                "packets": self.pending, "escrowAtomic": str(self.value)}
+
+    def mark_checkpoint(self):
+        reference = self.b["rpc"]
+        committed = int(rpc(reference, "abci_info")["response"]["last_block_height"])
+        height = min(committed, self.lab.height(reference, B_ID)) - 1
+        require(height > 0, "counterparty has no committed rollback anchor")
+        self.backup_reference_header = self.reference_header(height)
+        self.backup_ledger = self.pending_ledger()
+
+    def copy_private_home(self, source, destination):
+        root = self.lab.root.resolve(strict=True)
+        require(source.is_dir() and not source.is_symlink() and source.resolve(strict=True).is_relative_to(root) and
+                destination.parent.resolve(strict=True).is_relative_to(root),
+                "backup requires private, unlinked homes")
+        require(not any(entry.is_symlink() for entry in source.rglob("*")), "backup home contains a symbolic link")
+        shutil.copytree(source, destination)
+
+    def backup_closed_homes(self):
+        require(all(replica.child.returncode == 0 for replica in self.replicas), "close all predecessor signers cleanly before copying")
+        self.lab.stop(self.b["process"])
+        require(self.b["process"].returncode == 0, "close the counterparty cleanly before copying")
+        self.backup = self.lab.root / "pre-upgrade-closed"
+        self.backup.mkdir(mode=0o700)
+        for replica in self.replicas:
+            self.copy_private_home(replica.home, self.backup / replica.label)
+        self.copy_private_home(self.b["home"], self.backup / "reference")
+
+    def start_reference(self, label):
+        require(self.b["process"].poll() is not None, "old counterparty signer is still running")
+        self.b["process"] = self.lab.spawn(self.b["start"], label)
+        anchor = self.backup_reference_header["height"]
+        self.lab.wait(lambda: self.lab.height(self.b["rpc"], B_ID) > anchor, "counterparty must reopen its backup checkpoint")
+        require(self.reference_header(anchor) == self.backup_reference_header, "counterparty checkpoint changed on reopen")
+
+    def restore_closed_homes(self, replicas):
+        require(all(replica.child.returncode == 0 for replica in replicas), "stop all advanced native signers before restoring")
+        self.lab.stop(self.b["process"])
+        require(self.b["process"].returncode == 0, "stop the advanced counterparty before restoring")
+        restored = self.lab.root / "restored-pre-upgrade"
+        restored.mkdir(mode=0o700)
+        for replica in replicas:
+            self.copy_private_home(self.backup / replica.label, restored / replica.label)
+        home = restored / "reference"
+        self.copy_private_home(self.backup / "reference", home)
+        self.b["home"] = home
+        self.b["start"][self.b["start"].index("--home") + 1] = home
+        return restored
+
+    def verify_restored_ledger(self, replicas):
+        self.replicas = replicas
+        require(self.pending_ledger() == self.backup_ledger, "restored ledger differs from the closed pre-relay checkpoint")
+        return {"referenceCheckpoint": self.backup_reference_header, "pendingLedger": self.backup_ledger,
+                "mode": "coordinated-private-copy-restore"}
 
     def settle_after_handoff(self, target):
         self.assert_pending()
