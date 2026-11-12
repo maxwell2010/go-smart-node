@@ -122,9 +122,12 @@ func (app *App) applyOrdinaryDELDowntime(ctx sdk.Context) error {
 	// One attempt per block, rotating across candidates if an operation
 	// cannot be completed within its bounded work budget.
 	candidate := candidates[ctx.BlockHeight()%int64(len(candidates))]
+	beforeGas := ctx.GasMeter().GasConsumed()
 	if err := app.executeOrdinaryDELDowntime(ctx, candidate); err != nil {
-		ctx.Logger().Error("native ordinary DEL downtime deferred", "operator", candidate.Operator, "error", err)
-		ctx.EventManager().EmitEvent(sdk.NewEvent("decimal_native_downtime_deferred", sdk.NewAttribute("operator", candidate.Operator)))
+		gas := ctx.GasMeter().GasConsumed() - beforeGas
+		ctx.Logger().Error("native ordinary DEL downtime deferred", "operator", candidate.Operator, "gas_used", gas, "error", err)
+		ctx.EventManager().EmitEvent(sdk.NewEvent("decimal_native_downtime_deferred",
+			sdk.NewAttribute("operator", candidate.Operator), sdk.NewAttribute("gas_used", strconv.FormatUint(gas, 10))))
 	}
 	return nil
 }
@@ -256,10 +259,12 @@ func (app *App) executeOrdinaryDELDowntime(ctx sdk.Context, candidate validatork
 	if err != nil {
 		return err
 	}
+	burned := beforeSupply.Sub(supply(child))
 	child.EventManager().EmitEvent(sdk.NewEvent("decimal_native_downtime_applied",
 		sdk.NewAttribute("operator", candidate.Operator),
 		sdk.NewAttribute("infraction_height", strconv.FormatInt(candidate.InfractionHeight, 10)),
-		sdk.NewAttribute("burned", beforeSupply.Sub(supply(child)).String())))
+		sdk.NewAttribute("burned", burned.String()),
+		sdk.NewAttribute("gas_used", strconv.FormatUint(meter.GasConsumed(), 10))))
 	write()
 	return nil
 }
