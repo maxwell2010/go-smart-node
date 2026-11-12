@@ -3,7 +3,7 @@
   "canonicalSource": "sources/DecimalDelegation.sol",
   "canonicalSha256": "4478ab6d8b4a7feb230d70715c72f3be816fdbfd0efe7743e3572cfd4ce010c2",
   "ownedSource": "owned/DecimalDelegation.sol",
-  "ownedSha256": "569f8c075f17d3fc4c2d53498a012dbd0a189100c1021e482f6ecad8f0c81800",
+  "ownedSha256": "4660efe865e6fef9899f81dd58fcaa4b3ab570735cf78fe33b949d95a9399b3c",
   "changedFunctions": [
     "DelegationNFTLib._applyPenaltiesToStake",
     "DecimalDelegation._applyPenaltiesToStake",
@@ -40,6 +40,7 @@
     "MintCandyIsolatedDelegation.delegateNFT1155WithConversion",
     "MintCandyIsolatedDelegation._delegateIsolated",
     "DecimalDelegation.getAvailableCoinAmount",
+    "DecimalDelegation._applyForcedWithdrawal",
     "DecimalDelegationCommon._isValidatorActive",
     "DelegationNFTLib._isValidatorActive",
     "DelegationNFTLib._checkToken",
