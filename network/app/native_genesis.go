@@ -98,9 +98,15 @@ func ValidateNativeGenesisAllocation(cdc codec.JSONCodec, genesis map[string]jso
 	if err := nft.Validate(); err != nil {
 		return err
 	}
-	if len(coin.Coins) != 0 || len(coin.Checks) != 0 ||
+	if len(coin.Checks) != 0 ||
+		((profile == nil || !profile.customCollateralEnabled()) && len(coin.Coins) != 0) ||
 		(profile == nil && (len(nft.Collections) != 0 || len(nft.ExternalBindings) != 0 || len(nft.IsolatedVaults) != 0 || len(nft.IsolatedPositions) != 0)) {
 		return errors.New("nonempty native asset genesis requires authenticated contract bootstrap and backing reconciliation, not yet enabled")
+	}
+	if profile != nil && profile.customCollateralEnabled() {
+		if err := validateCustomCollateralGenesis(coin); err != nil {
+			return err
+		}
 	}
 	var validators nativevalidatortypes.GenesisState
 	if len(genesis[nativevalidatortypes.ModuleName]) == 0 {

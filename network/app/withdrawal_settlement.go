@@ -46,6 +46,8 @@ type WithdrawalProfile struct {
 	PositionVault                   common.Address `json:"position_vault"`
 	MasterValidator                 common.Address `json:"master_validator"`
 	WrappedDEL                      common.Address `json:"wrapped_del"`
+	TokenCenter                     common.Address `json:"token_center,omitzero"`
+	CurveConverter                  common.Address `json:"curve_converter,omitzero"`
 	SettlementOnly                  bool           `json:"settlement_only,omitempty"`
 	EnableDELDelegation             bool           `json:"enable_del_delegation,omitempty"`
 	EnableDELHold                   bool           `json:"enable_del_hold,omitempty"`
@@ -70,6 +72,7 @@ type withdrawalController struct {
 	nft                       *nftkeeper.StateKeeper
 	executor                  *settlement.Executor
 	assets                    *withdrawalassets.Projector
+	customCollateral          *customCollateralRegistry
 	feeRewardRecipientAllowed func(sdk.AccAddress) bool
 	consensusParams           func(sdk.Context) cmtproto.ConsensusParams
 }
@@ -109,10 +112,13 @@ func (app *App) LoadWithdrawalSettlement(ctx sdk.Context) error {
 		if app.withdrawals.profile != profile {
 			return errors.New("withdrawal profile changed without a coordinated restart")
 		}
-		return nil
+		return app.withdrawals.customCollateral.verifyRestored(ctx, nil)
 	}
 	controller, err := app.newWithdrawalController(profile)
 	if err != nil {
+		return err
+	}
+	if err := controller.customCollateral.verifyRestored(ctx, nil); err != nil {
 		return err
 	}
 	app.installWithdrawalController(controller)
@@ -120,6 +126,10 @@ func (app *App) LoadWithdrawalSettlement(ctx sdk.Context) error {
 }
 
 func (app *App) newWithdrawalController(profile WithdrawalProfile) (*withdrawalController, error) {
+	customCollateral, err := newCustomCollateralRegistry(app, profile)
+	if err != nil {
+		return nil, err
+	}
 	if err := validateNativeOrdinaryDELDowntimeProfile(profile); err != nil {
 		return nil, err
 	}
@@ -191,7 +201,8 @@ func (app *App) newWithdrawalController(profile WithdrawalProfile) (*withdrawalC
 	controller := &withdrawalController{
 		profile: profile, abi: gatewayABI, topic: gatewayABI.Events["WithdrawCompleted"].ID,
 		keeper: app.NativeValidatorKeeper, nft: app.NativeNFTKeeper, executor: executor, assets: projector,
-		consensusParams: app.GetConsensusParams,
+		customCollateral: customCollateral,
+		consensusParams:  app.GetConsensusParams,
 	}
 	if profile.EnableNativeFeeRewards {
 		controller.feeRewardRecipientAllowed = app.nativeFeeRewardRecipientPolicy(profile)
@@ -200,6 +211,9 @@ func (app *App) newWithdrawalController(profile WithdrawalProfile) (*withdrawalC
 }
 
 func (app *App) installWithdrawalController(controller *withdrawalController) {
+	if controller.customCollateral != nil {
+		app.BankKeeper.AppendSendRestriction(controller.customCollateral.restrictReserveCredit)
+	}
 	app.EVMKeeper.SetInternalCommitGuard(controller.guardInternalCommit)
 	app.EVMKeeper.AppendHooks(controller)
 	app.withdrawals = controller
