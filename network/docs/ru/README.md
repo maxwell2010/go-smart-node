@@ -9,6 +9,7 @@
 [газ нативной обработки](NATIVE_WORK_GAS.md),
 [проверка зависимостей отдельной сборки](../security/mcnd-sdkarmor-264303b-20261103/README.md).
 [Подробно о синхронизации и хранении](SYNCHRONIZATION_AND_STORAGE.md).
+[Окно доказательств и восстановление валидатора](SYNCHRONIZATION_AND_STORAGE.md#история-для-штрафа-за-двойную-подпись).
 [Проверка восстановления DEL-стейка на трёх процессах](evidence/del-state-sync-c83a193-20261111/README.md).
 [Ручное и автоматическое завершение возврата стейков](STAKE_WITHDRAWAL_SETTLEMENT.md).
 [Нативный консенсус и выплаты из комиссий на изолированной сети](NATIVE_CONSENSUS_REHEARSAL.md).
