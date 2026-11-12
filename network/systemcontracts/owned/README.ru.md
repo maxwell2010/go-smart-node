@@ -26,7 +26,7 @@ go test -mod=readonly -p 1 -count=1 -run '^TestOwnedAppSignedRegistryBootstrap$'
 SOLC=/path/to/pinned/solc python3 systemcontracts/build_owned_delegation.py
 ```
 
-Solidity 0.8.20, viaIR и optimizer runs=200 закреплены вместе с SHA-256 компилятора. Сборщик проверяет исходный манифест и owned-хеш. Runtime библиотеки проверяется по compiler-derived immutable references и заранее известному адресу её создания, без одобрения наблюдённого кода самим собой. Для линковки используется `owned/DecimalDelegation.sol:DelegationNFTLib`.
+Solidity 0.8.20, viaIR и optimizer runs=1 для `owned/DecimalDelegation.sol` закреплены вместе с SHA-256 компилятора. Настройка отдаёт приоритет размеру runtime. В сборке с runs=200 изолированный Gateway с обработкой штрафов для замороженного DEL занял 25 019 байт при лимите EIP-170 в 24 576 байт. Сборщик проверяет лимит, исходный манифест и owned-хеш. После регенерации отдельно проверяется расход газа в сценариях вывода DEL и NFT. Runtime библиотеки проверяется по immutable references компилятора и заранее известному адресу её создания. Для линковки используется `owned/DecimalDelegation.sol:DelegationNFTLib`.
 
 Функции и события ABI основного gateway сохраняются. Добавлена ошибка `PenaltyCatchupRequired(positionId,cursor,target)` для незавершённой обработки истории. Библиотека получает helper для реализации coin-штрафа. Временной смысл глобального события изменён, индексаторы должны учитывать описанную выше семантику. Настройка оптимизатора не менялась ради ограничения EIP-170.
 
