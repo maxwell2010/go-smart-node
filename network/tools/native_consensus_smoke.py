@@ -21,6 +21,10 @@ from withdrawal_genesis_smoke import ADDRESS, CHAIN, EVM_CHAIN, MAX_BLOCKS, SHA2
 ATOMS = 10**18
 INITIAL = (2, 1, 0)
 AFTER = (2, 0, 3)
+DOWNTIME_INITIAL = (3, 3, 2)
+DOWNTIME_AFTER = (3, 3, 0)
+DOWNTIME_BURN = ATOMS // 50
+DOWNTIME_WINDOW = 3
 
 
 @dataclass
@@ -85,7 +89,7 @@ def decode_pubkey(record):
     return value
 
 
-def load_fixture(directory, fee_rewards):
+def load_fixture(directory, fee_rewards, downtime):
     info = directory.lstat()
     check(stat.S_ISDIR(info.st_mode) and stat.S_IMODE(info.st_mode) & 0o077 == 0, 'private fixture directory required')
     expected = json.loads(private_bytes(directory / 'expectations.json', 8192))
@@ -96,22 +100,30 @@ def load_fixture(directory, fee_rewards):
     for field in ('actor', 'wrapped', 'feeCollector'):
         check(bech32_payload(expected[field + 'Native']) == expected[field], 'fixture bank and EVM addresses differ')
     check(len({expected[field] for field in ('gateway', 'wrapped', 'actor', 'feeCollector')}) == 4, 'duplicate fixture roles')
-    check(expected['gasLimit'] == GAS_LIMIT and expected['gasPrice'] == str(GAS_PRICE) and
-          (expected['amount'], expected['topUpAmount']) == (str(3 * ATOMS), str(ATOMS // 4)),
-          'fixture transaction value or gas differs')
-    check(type(expected['nonce']) is int and 0 <= expected['nonce'] < 2**32 - 1, 'invalid fixture nonce')
     check(re.fullmatch(WORD, expected['stakeId']), 'invalid fixture stake ID')
-    for route in ('delegate', 'topUp'):
-        signed = expected[route]
-        check(re.fullmatch(WORD, signed['hash']) and re.fullmatch(r'0x(?:[0-9a-f]{2}){100,512}', signed['raw']),
-              'invalid signed DEL fixture transaction')
-    check(expected['delegate']['hash'] != expected['topUp']['hash'], 'duplicate signed fixture transaction')
+    if downtime:
+        expected['master'] = expected['master'].lower()
+        check(re.fullmatch(ADDRESS, expected['master']) and set(expected['masterStateData']) == set('abc') and
+              all(re.fullmatch(r'0x[0-9a-f]{72}', data) for data in expected['masterStateData'].values()) and
+              re.fullmatch(r'0x[0-9a-f]{72}', expected['stakePenaltyData']), 'invalid downtime fixture EVM data')
+        check(not any(route in expected for route in ('delegate', 'topUp')), 'downtime fixture contains an unrelated transaction')
+    else:
+        check(expected['gasLimit'] == GAS_LIMIT and expected['gasPrice'] == str(GAS_PRICE) and
+              (expected['amount'], expected['topUpAmount']) == (str(3 * ATOMS), str(ATOMS // 4)),
+              'fixture transaction value or gas differs')
+        check(type(expected['nonce']) is int and 0 <= expected['nonce'] < 2**32 - 1, 'invalid fixture nonce')
+        for route in ('delegate', 'topUp'):
+            signed = expected[route]
+            check(re.fullmatch(WORD, signed['hash']) and re.fullmatch(r'0x(?:[0-9a-f]{2}){100,512}', signed['raw']),
+                  'invalid signed DEL fixture transaction')
+        check(expected['delegate']['hash'] != expected['topUp']['hash'], 'duplicate signed fixture transaction')
     for name, words in (('supplyData', 0), ('escrowData', 1)):
         check(re.fullmatch(fr'0x[0-9a-f]{{{8 + words * 64}}}', expected[name]), 'invalid fixture WDEL calldata')
     validators = expected['validators']
+    initial, after = (DOWNTIME_INITIAL, DOWNTIME_AFTER) if downtime else (INITIAL, AFTER)
     check([row['name'] for row in validators] == ['a', 'b', 'c'] and
-          tuple(row['initialPower'] for row in validators) == INITIAL and
-          tuple(row['afterStakePower'] for row in validators) == AFTER, 'unexpected fixture initial or changed voting power')
+          tuple(row['initialPower'] for row in validators) == initial and
+          tuple(row['afterStakePower'] for row in validators) == after, 'unexpected fixture initial or changed voting power')
     check(expected['feeRewards'] is fee_rewards, 'fixture fee rewards mode differs')
     keys, reward_addresses = [], set()
     for row in validators:
@@ -140,6 +152,11 @@ def load_fixture(directory, fee_rewards):
           profile['gateway'].lower() == expected['gateway'] and profile['wrapped_del'].lower() == expected['wrapped'],
           'fixture genesis native consensus and financial profile differ')
     check(profile.get('enable_native_fee_rewards', False) is fee_rewards, 'fixture genesis fee rewards mode differs')
+    check(profile.get('enable_native_ordinary_del_downtime', False) is downtime, 'fixture genesis downtime mode differs')
+    if downtime:
+        check(profile['master_validator'].lower() == expected['master'] and
+              not any(profile.get(flag, False) for flag in ('enable_del_hold', 'enable_nft_delegation', 'enable_native_ibc_v1')),
+              'downtime fixture must contain only ordinary DEL')
     check(not doc['app_state']['staking'].get('validators') and not doc['app_state']['staking'].get('delegations'),
           'fixture requires empty SDK staking genesis')
     return expected, genesis, keys, height
@@ -209,8 +226,10 @@ def committed_header(replicas, height):
     return headers[0]
 
 
-def check_signatures(replicas, validators, height, powers):
+def check_signatures(replicas, validators, height, powers, *, missing=()):
     expected = {row['consensusAddress'] for row, power in zip(validators, powers, strict=True) if power}
+    absent = {row['consensusAddress'] for row in validators if row['name'] in missing}
+    check(absent <= expected, 'fixture marked a non-member absent')
     for node in replicas:
         result = node.rpc(f'commit?height={height}')
         commit = result['signed_header']['commit']
@@ -218,8 +237,10 @@ def check_signatures(replicas, validators, height, powers):
         signatures = commit['signatures']
         signers = {signature['validator_address'] for signature in signatures
                    if int(signature['block_id_flag']) == 2 and signature['signature']}
-        check(len(signatures) == len(expected) and signers == expected, f'unexpected commit signers on {node.label} at {height}')
-    return [row['name'] for row in validators if row['consensusAddress'] in expected]
+        skipped = sum(int(signature['block_id_flag']) == 1 for signature in signatures)
+        check(len(signatures) == len(expected) and skipped == len(absent) and signers == expected - absent,
+              f'unexpected commit signers on {node.label} at {height}')
+    return [row['name'] for row in validators if row['consensusAddress'] in expected - absent]
 
 
 def check_updates(replicas, validators, height):
@@ -233,14 +254,15 @@ def check_updates(replicas, validators, height):
     return {'b': 0, 'c': 3}
 
 
-def check_ledger(replicas, expected, height, c_reserve, *, wallet=None, collector=None, previous=None, rewards=None):
-    reserves = (2 * ATOMS, ATOMS, c_reserve)
+def check_ledger(replicas, expected, height, c_reserve, *, wallet=None, collector=None, previous=None, rewards=None,
+                 downtime=False, burned=0):
+    reserves = (3 * ATOMS, 3 * ATOMS, c_reserve) if downtime else (2 * ATOMS, ATOMS, c_reserve)
     total = sum(reserves)
     wallet_value, collector_value = wallet, collector
     reward_values = {} if previous is None else {key: int(value) for key, value in previous['rewardAtomic'].items()}
     if rewards is not None:
         reward_values = rewards.copy()
-    bank_supply = None if previous is None else int(previous['bankSupplyAtomic'])
+    bank_supply = None if previous is None else int(previous['bankSupplyAtomic']) - burned
     for node in replicas:
         for validator, value in zip(expected['validators'], reserves, strict=True):
             native_positions({**expected, 'validatorNative': validator['operator']}, height, value, 0, None, node.rest)
@@ -291,6 +313,106 @@ def settle_fees(replicas, expected, collected, powers, c_reserve, fee):
             'ownerRewardAtomic': str(owner_reward)}
 
 
+def check_downtime_state(replicas, expected, height, jailed):
+    count = int(jailed)
+    for node in replicas:
+        for row in expected['validators']:
+            name = row['name']
+            penalized = jailed and name == 'c'
+            native_row = native('/decimal/validator/v1/validators/' + row['operator'], height, base=node.rest)['validator']
+            check(native_row['operator_address'] == row['operator'] and native_row.get('jailed', False) is penalized,
+                  f'unexpected native jail state for {name} on {node.label}')
+            status, paused, penalties = read_words(expected['master'], expected['masterStateData'][name], height, 3, node.evm)
+            check(status in (1, 2) and paused == penalties == int(penalized),
+                  f'unexpected Master state for {name} on {node.label}')
+        cursor = read_words(expected['gateway'], expected['stakePenaltyData'], height, 1, node.evm)[0]
+        check(cursor == count, f'unexpected Gateway penalty cursor on {node.label}')
+    return {'jailed': ['c'] if jailed else [], 'masterPenaltyCount': count, 'stakePenaltyCursor': count}
+
+
+def downtime_events(result):
+    return [event for event in result['finalize_block_events'] or [] if event['type'] == 'decimal_native_downtime_applied']
+
+
+def run_downtime_gate(binary, expected, replicas, env, owner, report, first):
+    validators = expected['validators']
+    a, b, c = replicas
+    quorum = (a, b)
+    baseline = first - 1
+    before = check_ledger(replicas, expected, baseline, 2 * ATOMS, downtime=True)
+    report['before'] = {**before, **check_downtime_state(replicas, expected, baseline, False)}
+    report['beforeSigners'] = check_signatures(replicas, validators, baseline, DOWNTIME_INITIAL)
+
+    report['phase'] = 'stop-c-and-observe-downtime'
+    check(c.child.poll() is None, 'validator C exited before the deliberate stop')
+    last_seen = int(a.rpc('status')['sync_info']['latest_block_height'])
+    owner.stop(c.child)
+    # The surviving 6/8 voting power can advance blocks while C is offline.
+    tip = wait_replicas(quorum, max(first + 9, last_seen + 8), 85, report)
+    penalty_heights = [height for height in range(baseline + 1, tip)
+                       if downtime_events(a.rpc(f'block_results?height={height}'))]
+    check(len(penalty_heights) == 1, 'expected exactly one ordinary DEL downtime event while C was stopped')
+    height = penalty_heights[0]
+    infraction = height - 1
+    check(height >= baseline + DOWNTIME_WINDOW + 1 and c.child.poll() is not None,
+          'C must be absent for the full signing window')
+    fields = {'operator': validators[2]['operator'], 'infraction_height': str(infraction), 'burned': str(DOWNTIME_BURN)}
+    for node in quorum:
+        result = node.rpc(f'block_results?height={height}')
+        events = downtime_events(result)
+        check(len(events) == 1 and len(events[0]['attributes']) == len(fields) and
+              {item['key']: item['value'] for item in events[0]['attributes']} == fields,
+              f'unexpected downtime event on {node.label}')
+        updates = result.get('validator_updates') or []
+        check(len(updates) == 1 and int(updates[0].get('power', 0)) == 0 and
+              decode_pubkey(updates[0]['pub_key']) == decode_pubkey(validators[2]['publicKey']),
+              f'ABCI must remove only C on {node.label}')
+    missed = {}
+    for observed in range(height - DOWNTIME_WINDOW, height):
+        effective_set(quorum, validators, observed, DOWNTIME_INITIAL)
+        missed[str(observed)] = check_signatures(quorum, validators, observed, DOWNTIME_INITIAL, missing=('c',))
+    report['downtime'] = {'height': height, 'infractionHeight': infraction, 'burnedAtomic': str(DOWNTIME_BURN),
+                          'missedCommits': missed, 'abciUpdates': {'c': 0}}
+
+    report['phase'] = 'verify-penalty-and-effective-h-plus-two'
+    wait_replicas(quorum, height + 3, 65, report)
+    pre_penalty = check_ledger(quorum, expected, infraction, 2 * ATOMS, downtime=True, previous=before,
+                               wallet=int(before['walletAtomic']), collector=int(before['feeCollectorAtomic']))
+    check_downtime_state(quorum, expected, infraction, False)
+    remaining = 2 * ATOMS - DOWNTIME_BURN
+    punished = check_ledger(quorum, expected, height, remaining, downtime=True, previous=pre_penalty, burned=DOWNTIME_BURN,
+                            wallet=int(before['walletAtomic']), collector=int(before['feeCollectorAtomic']))
+    report['penalty'] = {**punished, **check_downtime_state(quorum, expected, height, True)}
+    transition = {}
+    for offset, powers in enumerate((DOWNTIME_INITIAL, DOWNTIME_INITIAL, DOWNTIME_AFTER)):
+        current = height + offset
+        transition[f'H+{offset}'] = {'height': current, 'powers': effective_set(quorum, validators, current, powers),
+                                     'signers': check_signatures(quorum, validators, current, powers,
+                                                                 missing=('c',) if offset < 2 else ()),
+                                     **committed_header(quorum, current)}
+    old, following, changed = (transition[f'H+{offset}'] for offset in range(3))
+    check(old['validators_hash'] == old['next_validators_hash'] == following['validators_hash'] and
+          following['next_validators_hash'] == changed['validators_hash'] != following['validators_hash'],
+          'downtime removal must first become effective at H+2')
+    report['transition'] = transition
+
+    report['phase'] = 'restart-c-as-follower'
+    checkpoint = height + 2
+    checkpoint_header = committed_header(quorum, checkpoint)
+    c.start(binary, env, owner, 'follower')
+    tip = wait_replicas(replicas, checkpoint + 3, 95, report)
+    check(committed_header(replicas, checkpoint) == checkpoint_header,
+          'restarted C disagrees on the removal checkpoint')
+    final_height = tip - 1
+    report['follower'] = {'checkpointHeight': checkpoint, 'height': final_height,
+                          'powers': effective_set(replicas, validators, final_height, DOWNTIME_AFTER),
+                          'signers': check_signatures(replicas, validators, final_height, DOWNTIME_AFTER),
+                          **committed_header(replicas, final_height)}
+    final = check_ledger(replicas, expected, final_height, remaining, downtime=True, previous=punished,
+                         wallet=int(before['walletAtomic']), collector=int(before['feeCollectorAtomic']))
+    report['final'] = {**final, **check_downtime_state(replicas, expected, final_height, True)}
+
+
 def run_gate(args, binary, root, expected, genesis, keys, env, owner, report):
     report['phase'] = 'create-replicas'
     replicas = create_replicas(binary, root, genesis, keys, env)
@@ -308,12 +430,16 @@ def run_gate(args, binary, root, expected, genesis, keys, env, owner, report):
     for node in replicas:
         node.start(binary, env, owner, 'initial')
     initial = report['initialHeight']
-    first = wait_replicas(replicas, initial + 2, 85, report)
+    first = wait_replicas(replicas, initial + (4 if args.downtime else 2), 85, report)
     for node, validator in zip(replicas, validators, strict=True):
         status = node.rpc('status')
         check(status['node_info']['id'] == node.node_id and status['validator_info']['address'] == validator['consensusAddress'],
               'replica did not start with its distinct configured signing key')
-    report['initialPower'] = effective_set(replicas, validators, initial, INITIAL)
+    initial_powers = DOWNTIME_INITIAL if args.downtime else INITIAL
+    report['initialPower'] = effective_set(replicas, validators, initial, initial_powers)
+    if args.downtime:
+        run_downtime_gate(binary, expected, replicas, env, owner, report, first)
+        return
     report['initialSigners'] = check_signatures(replicas, validators, initial, INITIAL)
     report['initialBlock'] = committed_header(replicas, initial + 1)
     before = check_ledger(replicas, expected, first, 0, collector=0 if args.fee_rewards else None)
@@ -409,7 +535,9 @@ def main(argv=None, signals=None):
     parser = argparse.ArgumentParser(description=__doc__)
     for name in ('binary', 'binary-sha256', 'source-commit', 'fixture', 'home-parent', 'report'):
         parser.add_argument('--' + name, required=True)
-    parser.add_argument('--fee-rewards', action='store_true')
+    mode = parser.add_mutually_exclusive_group()
+    mode.add_argument('--fee-rewards', action='store_true')
+    mode.add_argument('--downtime', action='store_true')
     args = parser.parse_args(argv)
     report = {'status': 'FAIL', 'phase': 'fixture-provenance', 'scope': 'three loopback processes with native consensus and a signed DEL stake'}
     with pathlib.Path(args.report).open('x', encoding='utf8') as stream:
@@ -419,9 +547,11 @@ def main(argv=None, signals=None):
             binary = str(pathlib.Path(args.binary).resolve(strict=True))
             with open(binary, 'rb') as binary_stream:
                 check(hashlib.file_digest(binary_stream, 'sha256').hexdigest() == args.binary_sha256, 'daemon SHA256 mismatch')
-            expected, genesis, keys, initial = load_fixture(pathlib.Path(args.fixture), args.fee_rewards)
+            expected, genesis, keys, initial = load_fixture(pathlib.Path(args.fixture), args.fee_rewards, args.downtime)
             report.update(sourceCommit=args.source_commit, binarySha256=args.binary_sha256, initialHeight=initial,
                           genesisSha256=hashlib.sha256(genesis).hexdigest(), chainID=CHAIN, evmChainID=EVM_CHAIN, feeRewards=args.fee_rewards)
+            if args.downtime:
+                report['scope'] = 'three loopback processes with an ordinary DEL downtime penalty and follower catch-up'
             with tempfile.TemporaryDirectory(prefix='mcnd-native-consensus-', dir=args.home_parent) as directory:
                 root = pathlib.Path(directory)
                 owner = ProcessOwner(signals)

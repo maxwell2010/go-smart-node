@@ -42,6 +42,10 @@ on:
         description: Check bank ICS-20 v1 with three native nodes, fee rewards, Hermes and an independent chain
         default: false
         type: boolean
+      native_del_downtime:
+        description: Check an ordinary DEL downtime penalty and follower catch-up on three isolated nodes
+        default: false
+        type: boolean
 
 permissions:
   contents: read
@@ -198,8 +202,9 @@ jobs:
           NATIVE_CONSENSUS: ${{ inputs.native_consensus }}
           NATIVE_FEE_REWARDS: ${{ inputs.native_fee_rewards }}
           NATIVE_IBC_V1: ${{ inputs.native_ibc_v1 }}
+          NATIVE_DEL_DOWNTIME: ${{ inputs.native_del_downtime }}
         run: |
-          args=("$RUNNER_TEMP/process-evidence" off off off off off)
+          args=("$RUNNER_TEMP/process-evidence" off off off off off off)
           if [[ "$DEL_STATE_SYNC" == true ]]; then
             args[1]=withdrawal-genesis
             args[2]=del-state-sync
@@ -216,6 +221,9 @@ jobs:
           fi
           if [[ "$NATIVE_IBC_V1" == true ]]; then
             args[5]=native-ibc-v1
+          fi
+          if [[ "$NATIVE_DEL_DOWNTIME" == true ]]; then
+            args[6]=native-del-downtime
           fi
           bash scripts/remote/process-gates.sh "${args[@]}"
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9

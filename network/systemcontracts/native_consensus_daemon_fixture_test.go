@@ -35,6 +35,7 @@ import (
 const nativeConsensusDaemonFixtureEnv = "MCND_NATIVE_CONSENSUS_FIXTURE_DIR"
 const nativeConsensusFeeRewardsEnv = "MCND_NATIVE_CONSENSUS_FEE_REWARDS"
 const nativeConsensusIBCV1Env = "MCND_NATIVE_CONSENSUS_IBC_V1"
+const nativeConsensusDowntimeEnv = "MCND_NATIVE_CONSENSUS_DEL_DOWNTIME"
 
 type nativeConsensusFixtureValidator struct {
 	Name         string `json:"name"`
@@ -67,6 +68,14 @@ func exportNativeConsensusDaemonFixture(t *testing.T, e isolatedBackendEnv, dir 
 	beneficiary := sdk.AccAddress(actor.Bytes()).String()
 	feeRewards := os.Getenv(nativeConsensusFeeRewardsEnv) == "1"
 	ibcV1 := os.Getenv(nativeConsensusIBCV1Env) == "1"
+	downtime := os.Getenv(nativeConsensusDowntimeEnv) == "1"
+	initial, after := [3]int64{2, 1, 0}, [3]int64{2, 0, 3}
+	keyScope := "mintcandy native consensus process fixture "
+	if downtime {
+		require.False(t, feeRewards || ibcV1, "the ordinary DEL downtime fixture has a separate profile")
+		initial, after = [3]int64{3, 3, 2}, [3]int64{3, 3, 0}
+		keyScope = "mintcandy native ordinary del downtime process fixture "
+	}
 	commission := sdkmath.LegacyZeroDec()
 	if feeRewards {
 		commission = sdkmath.LegacyMustNewDecFromStr("0.25")
@@ -83,7 +92,7 @@ func exportNativeConsensusDaemonFixture(t *testing.T, e isolatedBackendEnv, dir 
 	var validators []nativeConsensusFixtureValidator
 	for i, name := range []string{"a", "b", "c"} {
 		// Reproducible keys scoped to the isolated CI chain and private homes.
-		signer := cmted25519.GenPrivKeyFromSecret([]byte("mintcandy native consensus process fixture " + name))
+		signer := cmted25519.GenPrivKeyFromSecret([]byte(keyScope + name))
 		pub := signer.PubKey()
 		address := common.BytesToAddress(pub.Address())
 		operator, err := nativeKeeper.ValidatorAddressCodec().BytesToString(address.Bytes())
@@ -105,7 +114,7 @@ func exportNativeConsensusDaemonFixture(t *testing.T, e isolatedBackendEnv, dir 
 		require.NoError(t, nativeKeeper.SetValidator(e.ctx(), row))
 		validators = append(validators, nativeConsensusFixtureValidator{
 			Name: name, Operator: operator, EVM: address.Hex(), Consensus: pub.Address().String(), PubKey: publicKey,
-			Initial: []int64{2, 1, 0}[i], AfterStake: []int64{2, 0, 3}[i],
+			Initial: initial[i], AfterStake: after[i],
 			Reward: reward.Hex(), RewardNative: rewardNative,
 		})
 		pv := privval.NewFilePV(signer, filepath.Join(dir, "priv_validator_key_"+name+".json"), filepath.Join(dir, "unused_sign_state_"+name+".json"))
@@ -129,10 +138,15 @@ func exportNativeConsensusDaemonFixture(t *testing.T, e isolatedBackendEnv, dir 
 		require.NoError(t, err)
 		return data
 	}
-	for _, validator := range validators[:2] {
+	var seeded int
+	for _, validator := range validators {
+		if validator.Initial == 0 {
+			continue
+		}
 		e.nextGasLimit(gasLimit)
 		e.send(key, &profile.Gateway, amount(validator.Initial).BigInt(),
 			pack(gateway, "delegateDEL", common.HexToAddress(validator.EVM)), true)
+		seeded++
 	}
 	ctx, cdc := e.ctx(), e.app.AppCodec()
 	for _, validator := range validators {
@@ -144,11 +158,18 @@ func exportNativeConsensusDaemonFixture(t *testing.T, e isolatedBackendEnv, dir 
 	require.NoError(t, err)
 	var nativeGenesis validatortypes.GenesisState
 	require.NoError(t, cdc.UnmarshalJSON(genesis[validatortypes.ModuleName], &nativeGenesis))
-	require.Len(t, nativeGenesis.Delegations, 2)
-	require.Len(t, nativeGenesis.EVMStakeBindings, 2)
+	require.Len(t, nativeGenesis.Delegations, seeded)
+	require.Len(t, nativeGenesis.EVMStakeBindings, seeded)
 	require.Empty(t, nativeGenesis.EVMFrozenBindings)
 	require.Empty(t, nativeGenesis.Undelegations)
 	nativeGenesis.Params.MaxValidators = 2
+	if downtime {
+		nativeGenesis.Params.MaxValidators = 3
+		nativeGenesis.Params.SignedBlocksWindow = 3
+		nativeGenesis.Params.MinSignedPerWindow = sdkmath.LegacyMustNewDecFromStr("0.25")
+		nativeGenesis.Params.SlashFractionDowntime = sdkmath.LegacyMustNewDecFromStr("0.01")
+		nativeGenesis.Params.DowntimeJailDuration = time.Hour
+	}
 	nativeGenesis.BindingRevision = 0
 	genesis[validatortypes.ModuleName] = cdc.MustMarshalJSON(&nativeGenesis)
 
@@ -181,13 +202,19 @@ func exportNativeConsensusDaemonFixture(t *testing.T, e isolatedBackendEnv, dir 
 	profile.EnableNativeConsensus = true
 	profile.EnableNativeFeeRewards = feeRewards
 	profile.EnableNativeIBCV1 = ibcV1
+	profile.EnableNativeOrdinaryDELDowntime = downtime
 	genesis[ownedapp.WithdrawalGenesisKey], err = json.Marshal(profile)
 	require.NoError(t, err)
 	require.NoError(t, ownedapp.ReconcileNativeGenesisAllocation(cdc, genesis))
 	require.NoError(t, ownedapp.ValidateNativeGenesisAllocation(cdc, genesis))
 
+	genesisTime := time.Now().UTC().Truncate(time.Second).Add(-time.Second)
+	if downtime {
+		// Let all three processes connect before the first three-sample window.
+		genesisTime = genesisTime.Add(15 * time.Second)
+	}
 	doc := cmttypes.GenesisDoc{ChainID: ctx.ChainID(), InitialHeight: ctx.BlockHeight(),
-		GenesisTime: time.Now().UTC().Truncate(time.Second).Add(-time.Second), ConsensusParams: cmttypes.DefaultConsensusParams()}
+		GenesisTime: genesisTime, ConsensusParams: cmttypes.DefaultConsensusParams()}
 	doc.AppState, err = json.Marshal(genesis)
 	require.NoError(t, err)
 	body, err := cmtjson.MarshalIndent(doc, "", "  ")
@@ -206,6 +233,30 @@ func exportNativeConsensusDaemonFixture(t *testing.T, e isolatedBackendEnv, dir 
 	target := common.HexToAddress(validators[2].EVM)
 	var zero common.Hash
 	stakeID := crypto.Keccak256Hash(target.Bytes(), actor.Bytes(), profile.WrappedDEL.Bytes(), zero.Bytes(), zero.Bytes())
+	hexData := func(value []byte) string { return "0x" + hex.EncodeToString(value) }
+	for i := range validators {
+		validators[i].ReserveData = hexData(pack(gateway, "getValidatorReserve", common.HexToAddress(validators[i].EVM), profile.WrappedDEL))
+	}
+	expectations := map[string]interface{}{
+		"chainId": ctx.ChainID(), "evmChainId": 990001, "gateway": profile.Gateway.Hex(), "wrapped": profile.WrappedDEL.Hex(),
+		"actor": actor.Hex(), "actorNative": beneficiary, "wrappedNative": sdk.AccAddress(profile.WrappedDEL.Bytes()).String(),
+		"feeCollector": common.BytesToAddress(collector).Hex(), "feeCollectorNative": collector.String(), "feeRewards": feeRewards,
+		"validators": validators, "stakeId": stakeID.Hex(),
+		"supplyData": hexData(pack(wrapper, "totalSupply")), "escrowData": hexData(pack(wrapper, "balanceOf", profile.Gateway)),
+	}
+	if downtime {
+		masterState := make(map[string]string, len(validators))
+		for _, validator := range validators {
+			masterState[validator.Name] = hexData(pack(master, "getValidatorState", common.HexToAddress(validator.EVM)))
+		}
+		expectations["master"] = profile.MasterValidator.Hex()
+		expectations["masterStateData"] = masterState
+		expectations["stakePenaltyData"] = hexData(pack(gateway, "getStakePenaltyIndex", stakeID))
+		body, err := json.Marshal(expectations)
+		require.NoError(t, err)
+		write("expectations.json", body)
+		return
+	}
 	deposit := amount(validators[2].AfterStake)
 	nonce := e.app.EVMKeeper.GetNonce(ctx, actor)
 	price := big.NewInt(1_000_000_000_000)
@@ -222,19 +273,10 @@ func exportNativeConsensusDaemonFixture(t *testing.T, e isolatedBackendEnv, dir 
 		return map[string]string{"raw": "0x" + hex.EncodeToString(raw), "hash": signed.Hash().Hex()}
 	}
 	topUp := amount(1).QuoRaw(4)
-	hexData := func(value []byte) string { return "0x" + hex.EncodeToString(value) }
-	for i := range validators {
-		validators[i].ReserveData = hexData(pack(gateway, "getValidatorReserve", common.HexToAddress(validators[i].EVM), profile.WrappedDEL))
-	}
-	expect, err := json.Marshal(map[string]interface{}{
-		"chainId": ctx.ChainID(), "evmChainId": 990001, "gateway": profile.Gateway.Hex(), "wrapped": profile.WrappedDEL.Hex(),
-		"actor": actor.Hex(), "actorNative": beneficiary, "wrappedNative": sdk.AccAddress(profile.WrappedDEL.Bytes()).String(),
-		"amount": deposit.String(), "topUpAmount": topUp.String(), "gasPrice": price.String(), "gasLimit": gasLimit, "nonce": nonce,
-		"feeCollector": common.BytesToAddress(collector).Hex(), "feeCollectorNative": collector.String(), "feeRewards": feeRewards,
-		"validators": validators, "stakeId": stakeID.Hex(),
-		"supplyData": hexData(pack(wrapper, "totalSupply")), "escrowData": hexData(pack(wrapper, "balanceOf", profile.Gateway)),
-		"delegate": sign(nonce, deposit.BigInt()), "topUp": sign(nonce+1, topUp.BigInt()),
-	})
+	expectations["amount"], expectations["topUpAmount"] = deposit.String(), topUp.String()
+	expectations["gasPrice"], expectations["gasLimit"], expectations["nonce"] = price.String(), gasLimit, nonce
+	expectations["delegate"], expectations["topUp"] = sign(nonce, deposit.BigInt()), sign(nonce+1, topUp.BigInt())
+	expect, err := json.Marshal(expectations)
 	require.NoError(t, err)
 	write("expectations.json", expect)
 }

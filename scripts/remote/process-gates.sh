@@ -16,6 +16,8 @@ native_consensus="${5:-off}"
 [[ "$native_consensus" == off || "$native_consensus" == native-consensus || "$native_consensus" == native-consensus-fee-rewards ]] || { echo 'Unsupported native consensus option.' >&2; exit 2; }
 native_ibc_v1="${6:-off}"
 [[ "$native_ibc_v1" == off || "$native_ibc_v1" == native-ibc-v1 ]] || { echo 'Unsupported native IBC v1 option.' >&2; exit 2; }
+native_del_downtime="${7:-off}"
+[[ "$native_del_downtime" == off || "$native_del_downtime" == native-del-downtime ]] || { echo 'Unsupported native DEL downtime option.' >&2; exit 2; }
 for tool in sudo unshare ip gcc python3 go; do command -v "$tool" >/dev/null; done
 python="$(command -v python3)"
 "$python" -c 'import sys,tomllib; assert sys.version_info >= (3,11), "Python >=3.11 required"'
@@ -28,7 +30,7 @@ mkdir -- "$output"
 evidence_owner="$(id -u):$(id -g)"
 preserve_public_reports() {
   local file
-  for file in "$output/daemon.json" "$output/hermes.json" "$output/withdrawal-genesis.json" "$output/del-delegation.json" "$output/ibc-client-upgrade.json" "$output/native-consensus.json" "$output/native-hermes.json"; do
+  for file in "$output/daemon.json" "$output/hermes.json" "$output/withdrawal-genesis.json" "$output/del-delegation.json" "$output/ibc-client-upgrade.json" "$output/native-consensus.json" "$output/native-hermes.json" "$output/native-del-downtime.json"; do
     if [[ -L "$file" ]]; then echo 'Refuse symbolic report file.' >&2; return 1; fi
     if [[ -f "$file" ]]; then
       sudo -n chown -- "$evidence_owner" "$file" || return 1
@@ -357,6 +359,40 @@ else:
     assert int(report['funded']['feeCollectorAtomic'])-int(report['before']['feeCollectorAtomic'])==int(report['delegation']['feeAtomic']),report
     assert int(report['final']['feeCollectorAtomic'])-int(report['funded']['feeCollectorAtomic'])==int(report['topUp']['feeAtomic']),report
 print('Three replicas agree on the signed DEL validator replacement at H+2 and on restart.')
+PY
+fi
+
+if [[ "$native_del_downtime" == native-del-downtime ]]; then
+  mkdir -m 700 -- "$work/native-del-downtime-fixture"
+  if ! MCND_NATIVE_CONSENSUS_FIXTURE_DIR="$work/native-del-downtime-fixture" MCND_NATIVE_CONSENSUS_DEL_DOWNTIME=1 \
+      go test -mod=readonly -tags= -trimpath -p 2 -count=1 -timeout 8m -json \
+      -run '^TestOwnedAppSignedRegistryBootstrap$/^authenticated_isolated_position_reader$' ./systemcontracts \
+      > "$work/native-del-downtime-fixture.log" 2>&1; then
+    private_fixture_diagnostic "$work/native-del-downtime-fixture.log"
+    exit 1
+  fi
+  sudo -n unshare --net -- bash -euc 'ip link set lo up; exec "$@"' _ \
+    env TMPDIR="$work" "$python" -B "$root/network/tools/native_consensus_smoke.py" \
+    --binary "$work/mcnd" --binary-sha256 "$mcnd_sha" --source-commit "$revision" \
+    --fixture "$work/native-del-downtime-fixture" --home-parent "$work" --report "$output/native-del-downtime.json" --downtime \
+    |& tee "$output/native-del-downtime.log"
+  preserve_public_reports
+  "$python" - "$output/native-del-downtime.json" "$revision" "$mcnd_sha" <<'PY'
+import json,sys
+from pathlib import Path
+report=json.loads(Path(sys.argv[1]).read_text())
+assert report['status']=='PASS' and 'error' not in report,report
+assert report['sourceCommit']==sys.argv[2] and report['binarySha256']==sys.argv[3],report
+assert report['initialPower']=={'a':3,'b':3,'c':2} and report['beforeSigners']==['a','b','c'],report
+penalty=report['downtime']
+assert penalty['height']==penalty['infractionHeight']+1 and penalty['abciUpdates']=={'c':0},report
+assert penalty['burnedAtomic']=='20000000000000000' and len(penalty['missedCommits'])==3,report
+assert report['transition']['H+2']['height']==penalty['height']+2,report
+assert report['follower']['powers']=={'a':3,'b':3} and report['follower']['signers']==['a','b'],report
+assert report['final']['activeReservesAtomic']=={'a':'3000000000000000000','b':'3000000000000000000','c':'1980000000000000000'},report
+assert report['final']['masterPenaltyCount']==report['final']['stakePenaltyCursor']==1,report
+assert int(report['before']['bankSupplyAtomic'])-int(report['final']['bankSupplyAtomic'])==int(penalty['burnedAtomic']),report
+print('Three isolated nodes proved one ordinary DEL downtime burn, H+2 removal and follower catch-up.')
 PY
 fi
 
