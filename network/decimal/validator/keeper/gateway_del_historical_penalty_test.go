@@ -107,6 +107,40 @@ func TestPlanHeldDELHistoricalPenaltyKeepsSameSecondFundingHeights(t *testing.T)
 	require.EqualValues(t, held.HoldStartTime, plan.Tranches[1].FundedAt.Unix())
 }
 
+func TestApplyMatureFrozenHistoricalDELOnlyDebitsEligibleCustody(t *testing.T) {
+	ctx, _, k := bindingEnvironment(t, false)
+	require.NoError(t, k.service.OpenKVStore(ctx).Set([]byte{nativeStakeProvenanceMarker}, []byte{1}))
+	held := gatewayDELHoldFixture(2000, 2010, 20)
+	require.NoError(t, k.ApplyGatewayDELDelegation(ctx, held, held.Amount))
+	ctx = ctx.WithBlockHeight(11).WithBlockTime(time.Unix(2001, 0).UTC())
+	held.Amount = held.Amount.AddRaw(50)
+	require.NoError(t, k.ApplyGatewayDELDelegation(ctx, held, sdkmath.NewInt(50)))
+	ctx = ctx.WithBlockHeight(12).WithBlockTime(time.Unix(2011, 0).UTC())
+	held.Amount = held.Amount.SubRaw(25)
+	index, next := common.Hash{31: 3}, common.Hash{31: 1}
+	due := time.Unix(2020, 0).UTC()
+	require.NoError(t, k.ApplyGatewayDELWithdrawal(ctx, held, index, sdkmath.NewInt(25), due))
+	claim, err := k.GetEVMFrozenBinding(ctx, held.Gateway[:], index[:])
+	require.NoError(t, err)
+	hold := GatewayFrozenDELHold{WrappedDEL: held.WrappedDEL, HoldDeadline: held.HoldDeadline, HoldStartTime: held.HoldStartTime}
+	ctx = ctx.WithBlockHeight(13).WithBlockTime(due.Add(time.Second))
+	require.Error(t, k.ApplyGatewayFrozenDELHoldPenalty(ctx, claim, hold, 11, common.Hash{}, next, sdkmath.NewInt(24)))
+	require.ErrorContains(t, k.ApplyGatewayFrozenHistoricalDELPenalty(ctx, claim, &hold, 11, common.Hash{}, next, sdkmath.NewInt(23)), "eligible historical principal")
+	child, _ := ctx.CacheContext()
+	require.NoError(t, k.ApplyGatewayFrozenHistoricalDELPenalty(child, claim, &hold, 11, common.Hash{}, next, sdkmath.NewInt(24)))
+	current, err := k.GetEVMFrozenBinding(ctx, held.Gateway[:], index[:])
+	require.NoError(t, err)
+	require.Equal(t, claim, current)
+	require.NoError(t, k.ApplyGatewayFrozenHistoricalDELPenalty(ctx, claim, &hold, 11, common.Hash{}, next, sdkmath.NewInt(24)))
+	current, err = k.GetEVMFrozenBinding(ctx, held.Gateway[:], index[:])
+	require.NoError(t, err)
+	require.True(t, current.RawAmount.Equal(sdkmath.NewInt(24)))
+	lots, _, err := k.GetFrozenDELProvenance(ctx, current)
+	require.NoError(t, err)
+	requireDELProvenance(t, lots, []int64{10, 11}, []int64{19, 5})
+	require.Error(t, k.ApplyGatewayFrozenHistoricalDELPenalty(ctx, claim, &hold, 11, common.Hash{}, next, sdkmath.NewInt(24)))
+}
+
 func TestPlanDELHistoricalPenaltyTruncatesSurvivingPrincipalBelowOneAtom(t *testing.T) {
 	ctx, k, position := delProvenanceGenesis(t)
 	position.Amount = position.Amount.AddRaw(8)

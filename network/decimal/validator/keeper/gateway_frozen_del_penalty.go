@@ -23,7 +23,7 @@ func frozenDELPenaltyCursorKey(gateway, index []byte) []byte {
 // claim adjustment. The caller proves the EVM checkpoint and burn in the same
 // outer cache. An ineligible claim may advance its cursor without losing DEL.
 func (k *StateKeeper) ApplyGatewayFrozenDELPenalty(ctx sdk.Context, before types.EVMFrozenBinding, infractionHeight int64, oldCursor, newCursor common.Hash, remaining sdkmath.Int) error {
-	return k.applyGatewayFrozenDELPenalty(ctx, before, nil, infractionHeight, oldCursor, newCursor, remaining)
+	return k.applyGatewayFrozenDELPenalty(ctx, before, nil, infractionHeight, oldCursor, newCursor, remaining, false)
 }
 
 // GatewayFrozenDELHold is the immutable held-claim identity from the verified
@@ -38,10 +38,17 @@ type GatewayFrozenDELHold struct {
 // held DEL claim and its matched native queue entry in the same outer cache
 // as the verified Gateway checkpoint and burn.
 func (k *StateKeeper) ApplyGatewayFrozenDELHoldPenalty(ctx sdk.Context, before types.EVMFrozenBinding, hold GatewayFrozenDELHold, infractionHeight int64, oldCursor, newCursor common.Hash, remaining sdkmath.Int) error {
-	return k.applyGatewayFrozenDELPenalty(ctx, before, &hold, infractionHeight, oldCursor, newCursor, remaining)
+	return k.applyGatewayFrozenDELPenalty(ctx, before, &hold, infractionHeight, oldCursor, newCursor, remaining, false)
 }
 
-func (k *StateKeeper) applyGatewayFrozenDELPenalty(ctx sdk.Context, before types.EVMFrozenBinding, hold *GatewayFrozenDELHold, infractionHeight int64, oldCursor, newCursor common.Hash, remaining sdkmath.Int) error {
+// ApplyGatewayFrozenHistoricalDELPenalty projects the exact historical loss
+// on a still-custodied claim. The App verifies the accepted evidence and the
+// EVM burn in the same cache. The nominal unfreeze time can precede settlement.
+func (k *StateKeeper) ApplyGatewayFrozenHistoricalDELPenalty(ctx sdk.Context, before types.EVMFrozenBinding, hold *GatewayFrozenDELHold, infractionHeight int64, oldCursor, newCursor common.Hash, remaining sdkmath.Int) error {
+	return k.applyGatewayFrozenDELPenalty(ctx, before, hold, infractionHeight, oldCursor, newCursor, remaining, true)
+}
+
+func (k *StateKeeper) applyGatewayFrozenDELPenalty(ctx sdk.Context, before types.EVMFrozenBinding, hold *GatewayFrozenDELHold, infractionHeight int64, oldCursor, newCursor common.Hash, remaining sdkmath.Int, historical bool) error {
 	if err := before.Validate(); err != nil {
 		return err
 	}
@@ -99,8 +106,8 @@ func (k *StateKeeper) applyGatewayFrozenDELPenalty(ctx sdk.Context, before types
 		return err
 	}
 	entry := &pending.Entries[i]
-	if entry.CreationHeight != before.CreatedHeight || !entry.CompletionTime.After(ctx.BlockTime()) {
-		return errors.New("frozen DEL penalty requires an unmatured claim with matching creation height")
+	if entry.CreationHeight != before.CreatedHeight || (!historical && !entry.CompletionTime.After(ctx.BlockTime())) {
+		return errors.New("frozen DEL penalty requires a matching creation height and an unmatured claim for regular penalties")
 	}
 	if hold != nil {
 		if err := hold.verifyQueuedStake(entry.Stake); err != nil {
@@ -117,6 +124,22 @@ func (k *StateKeeper) applyGatewayFrozenDELPenalty(ctx sdk.Context, before types
 	if hold != nil {
 		holdDeadline = hold.HoldDeadline
 	}
+	var history DELHistoricalPenaltyPlan
+	if historical {
+		var tranches []DELProvenanceTranche
+		history, tranches, err = k.planFrozenDELHistoricalPenalty(child, before, infractionHeight)
+		if err != nil {
+			return err
+		}
+		if !remaining.Equal(history.Remaining) {
+			return errors.New("frozen DEL penalty differs from eligible historical principal")
+		}
+		if hold != nil {
+			if err := matchDELProvenanceHoldLots(tranches, previousHolds, holdDeadline); err != nil {
+				return err
+			}
+		}
+	}
 	after := before
 	after.RawAmount, after.UpdatedHeight = remaining, ctx.BlockHeight()
 	if remaining.IsZero() {
@@ -126,7 +149,11 @@ func (k *StateKeeper) applyGatewayFrozenDELPenalty(ctx sdk.Context, before types
 		if hold == nil {
 			entry.Stake = types.NewStakeCoin(sdk.NewCoin(identity.BaseDenom, remaining))
 		} else {
-			entry.Stake.Holds, err = reduceDELHoldLots(entry.Stake.Holds, hold.HoldDeadline, before.RawAmount, loss)
+			if historical {
+				entry.Stake.Holds, err = projectHistoricalDELHoldLots(previousHolds, holdDeadline, history.Tranches)
+			} else {
+				entry.Stake.Holds, err = reduceDELHoldLots(previousHolds, holdDeadline, before.RawAmount, loss)
+			}
 			if err != nil {
 				return err
 			}
@@ -140,7 +167,14 @@ func (k *StateKeeper) applyGatewayFrozenDELPenalty(ctx sdk.Context, before types
 	if remaining.IsPositive() {
 		nextHolds = entry.Stake.Holds
 	}
-	if err := k.recordFrozenDELProvenancePenalty(child, before, loss, holdDeadline, previousHolds, nextHolds); err != nil {
+	if historical {
+		if loss.IsPositive() {
+			err = k.storeDELProvenance(child, delProvenanceKey(frozenDELProvenancePrefix, before.Gateway, before.FrozenIndex), history.Tranches, history.FrozenAt)
+		}
+	} else {
+		err = k.recordFrozenDELProvenancePenalty(child, before, loss, holdDeadline, previousHolds, nextHolds)
+	}
+	if err != nil {
 		return err
 	}
 	pair, err := encodeWithdrawalPair(pending)

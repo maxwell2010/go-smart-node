@@ -64,12 +64,17 @@ func (k *StateKeeper) PlanActiveDELHistoricalPenalty(ctx sdk.Context, row types.
 // still-custodied frozen claim. Only claims moved from active stake at or
 // after the infraction height can retain exposure to that infraction.
 func (k *StateKeeper) PlanFrozenDELHistoricalPenalty(ctx sdk.Context, row types.EVMFrozenBinding, infractionHeight int64) (DELHistoricalPenaltyPlan, error) {
+	plan, _, err := k.planFrozenDELHistoricalPenalty(ctx, row, infractionHeight)
+	return plan, err
+}
+
+func (k *StateKeeper) planFrozenDELHistoricalPenalty(ctx sdk.Context, row types.EVMFrozenBinding, infractionHeight int64) (DELHistoricalPenaltyPlan, []DELProvenanceTranche, error) {
 	if err := k.checkDELHistoricalPenaltyContext(ctx, infractionHeight); err != nil {
-		return DELHistoricalPenaltyPlan{}, err
+		return DELHistoricalPenaltyPlan{}, nil, err
 	}
 	lots, frozenAt, err := k.GetFrozenDELProvenance(ctx, row)
 	if err != nil {
-		return DELHistoricalPenaltyPlan{}, err
+		return DELHistoricalPenaltyPlan{}, nil, err
 	}
 	cutoff := infractionHeight
 	if row.CreatedHeight < infractionHeight {
@@ -77,7 +82,7 @@ func (k *StateKeeper) PlanFrozenDELHistoricalPenalty(ctx sdk.Context, row types.
 	}
 	plan := planDELHistoricalPenalty(lots, cutoff)
 	plan.FrozenAt = frozenAt
-	return plan, nil
+	return plan, lots, nil
 }
 
 func (k *StateKeeper) checkDELHistoricalPenaltyContext(ctx sdk.Context, height int64) error {
