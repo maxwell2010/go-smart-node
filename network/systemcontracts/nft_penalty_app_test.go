@@ -51,7 +51,7 @@ func runSignedActiveNFTPenalty(t *testing.T, e isolatedBackendEnv, profile owned
 	principal, unitReserve := sdkmath.NewIntWithDecimal(3, 18), sdkmath.NewIntWithDecimal(2, 18)
 	percentage := uint16(25)
 	zeroExit := mode == "nft-penalty-zero-exit"
-	historical := mode == activeHistoricalNFTPenaltyMode || mode == frozenHistoricalNFTPenaltyMode
+	historical := mode == activeHistoricalNFTPenaltyMode || mode == frozenHistoricalNFTPenaltyMode || mode == historicalZeroNFTExitMode
 	if zeroExit {
 		principal, percentage = sdkmath.ZeroInt(), 100
 	}
@@ -100,7 +100,7 @@ func runSignedActiveNFTPenalty(t *testing.T, e isolatedBackendEnv, profile owned
 		unitsPerPosition = nfttypes.MaxIsolatedOriginUnits
 	}
 	originQuantity := 2 * unitsPerPosition
-	if withHeld {
+	if withHeld || mode == historicalZeroNFTExitMode {
 		originQuantity = unitsPerPosition
 	}
 	seedActiveNFTPenaltyOrigin(t, f, profile, origin, vault, originAddress, originID, unitReserve, originQuantity)
@@ -132,6 +132,10 @@ func runSignedActiveNFTPenalty(t *testing.T, e isolatedBackendEnv, profile owned
 		return proof
 	}
 	penalized := delegate(unitsPerPosition)
+	if mode == historicalZeroNFTExitMode {
+		runHistoricalZeroNFTExit(t, f, reader, executor, penalized, principal, unitReserve, inclusion)
+		return
+	}
 	if withHeld {
 		runSignedFrozenNFTAndHeldPenalty(t, f, reader, executor, penalized, freezeHold, inclusion)
 		return
