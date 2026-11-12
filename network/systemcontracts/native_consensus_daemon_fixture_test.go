@@ -101,7 +101,7 @@ func exportNativeConsensusDaemonFixture(t *testing.T, e isolatedBackendEnv, dir 
 		initial, after = [3]int64{3, 3, 0}, [3]int64{3, 3, 2}
 		keyScope = "mintcandy native held del downtime process fixture "
 	}
-	if nft != nil {
+	if nft != nil && !fullUpgrade {
 		initial, after = [3]int64{3, 3, 0}, [3]int64{3, 3, 2}
 		keyScope = "mintcandy native NFT downtime process fixture "
 	}
