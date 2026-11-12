@@ -9,6 +9,9 @@ import subprocess
 ROOT = Path(__file__).resolve().parent
 COMPILER_SHA256 = "0479d44fdf9c501c25337fdc540419f1593b884a87b47f023da4f1c700fda782"
 COMPILER_VERSION = "0.8.20+commit.a1b79de6.Linux.g++"
+# Prioritize runtime size in the owned Gateway/library unit. The new
+# isolated Gateway's 200-run build measured 25,019 bytes against EIP-170.
+OPTIMIZER_RUNS = 1
 
 def main():
     compiler = Path(os.environ["SOLC"]).resolve(strict=True)
@@ -28,7 +31,7 @@ def main():
     source = (ROOT / unit).read_text(encoding="utf-8")
     output = ["abi", "evm.bytecode.object", "evm.bytecode.linkReferences", "evm.deployedBytecode.object", "evm.deployedBytecode.linkReferences", "evm.deployedBytecode.immutableReferences"]
     targets = {"DecimalDelegation": "MintCandyDelegation", "DelegationNFTLib": "MintCandyDelegationNFTLib", "MintCandyIsolatedDelegation": "MintCandyIsolatedDelegation"}
-    settings = {"optimizer": {"enabled": True, "runs": 200}, "evmVersion": "paris", "viaIR": True,
+    settings = {"optimizer": {"enabled": True, "runs": OPTIMIZER_RUNS}, "evmVersion": "paris", "viaIR": True,
                 "metadata": {"bytecodeHash": "ipfs"}, "libraries": {},
                 "outputSelection": {unit: {name: output for name in targets}}}
     request = {"language": "Solidity", "sources": {unit: {"content": source}}, "settings": settings}
