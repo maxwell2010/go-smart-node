@@ -155,8 +155,23 @@ def native(path, height, *, base=REST):
 
 def safe_diagnostic(text):
     categories = ('authenticate withdrawal genesis', 'genesis signing domain', 'failed to unmarshal',
-                  'failed to initialize', 'validator set', 'priv-validator', 'no space left on device')
-    notes = [category for category in categories if category in text.lower()]
+                  'failed to initialize', 'validator set', 'priv-validator', 'no space left on device',
+                  'failed init node', 'failed start cometbft server', 'invalid cachemergeiterator',
+                  'native fee rewards require an empty genesis del fee collector',
+                  'native fee reward positions differ from the indexed active del reserve',
+                  'native fee reward commission address is not admitted',
+                  'native fee reward owner address is not admitted', 'invalid native fee reward recipient',
+                  'native delegation index requires initialization or explicit migration',
+                  'distribute native fees', 'record native prior commit', 'authenticate native consensus genesis position',
+                  'native ordinary del downtime requires native consensus', 'native ordinary downtime requires',
+                  'native ordinary downtime exceeds its per-validator position budget',
+                  'native ordinary downtime encountered an unsupported', 'native ordinary del downtime deferred',
+                  'native validator frozen index is unavailable', 'invalid native validator binding index',
+                  'native commit observation is replayed or skipped', 'invalid native signing window',
+                  'native signing window size or height differs', 'native downtime planning requires the recorded prior commit',
+                  'native downtime window differs')
+    lower = text.lower()
+    notes = [category for category in categories if category in lower]
     reason = consensus_reason(text)
     if reason:
         notes.insert(0, 'consensus block application: ' + reason)
@@ -206,7 +221,7 @@ def readiness_diagnostic(path, report):
         text = stream.read(65536).decode('utf8', errors='replace')
     if path.stat().st_size > 65536:
         text += '\n' + log_tail(path)
-    if report['phase'] == 'positive-start':
+    if report['phase'] in ('positive-start', 'initial-native-consensus'):
         report['genesisAdmissionObserved'] = 'authenticated withdrawal genesis admitted' in text
     return safe_diagnostic(text)
 
