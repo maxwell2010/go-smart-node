@@ -319,10 +319,6 @@ func (e *Executor) verifySignedNFTWithdrawal(ctx sdk.Context, msg core.Message, 
 	return proof, nil
 }
 
-func (e *Executor) isolationOriginPoststate(ctx sdk.Context, origin common.Address, originID *big.Int) (uint32, *big.Int, error) {
-	return e.isolationOriginCollateralPoststate(ctx, origin, originID, common.Address{})
-}
-
 func (e *Executor) isolationOriginCollateralPoststate(ctx sdk.Context, origin common.Address, originID *big.Int,
 	token common.Address,
 ) (uint32, *big.Int, error) {
