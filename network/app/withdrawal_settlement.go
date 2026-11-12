@@ -259,7 +259,17 @@ func (c *withdrawalController) PostTxProcessing(ctx sdk.Context, sender common.A
 	}
 	managed, completion := c.withdrawalActivity(ctx, msg, receipt.Logs)
 	if c.profile.EnableNativeConsensus && (msg.To == nil || *msg.To != c.profile.Gateway || !managed) {
-		return errors.New("isolated native consensus admits only the approved Gateway EVM transactions")
+		if c.profile.EnableNFTDelegation && sender == msg.From && msg.To != nil && *msg.To != c.profile.PositionVault &&
+			isDirectNFTApproval(msg, receipt.Logs) && receipt.Logs[0].Topics[2] == common.BytesToHash(c.profile.Gateway[:]) {
+			origin, err := c.isManagedNFT(ctx, *msg.To)
+			if err != nil {
+				return err
+			}
+			if origin {
+				return nil
+			}
+		}
+		return errors.New("isolated native consensus requires an approved Gateway transaction or NFT origin approval")
 	}
 	if !completion {
 		if c.isDELStakeCall(msg) {
