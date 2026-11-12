@@ -41,6 +41,10 @@ class Replica:
         return partial(comet, base=f'http://127.0.0.1:{self.p2p + 1}')
 
     @property
+    def grpc(self):
+        return 9190 + self.index * 100
+
+    @property
     def rest(self):
         return f'http://127.0.0.1:{1317 + self.index * 10}'
 
@@ -53,7 +57,7 @@ class Replica:
         args = [
             'start', '--home', str(self.home), '--chain-id', CHAIN, '--evm.evm-chain-id', str(EVM_CHAIN),
             '--rpc.laddr', f'tcp://127.0.0.1:{self.p2p + 1}',
-            '--p2p.laddr', f'tcp://127.0.0.1:{self.p2p}', '--grpc.address', f'127.0.0.1:{9190 + self.index * 100}',
+            '--p2p.laddr', f'tcp://127.0.0.1:{self.p2p}', '--grpc.address', f'127.0.0.1:{self.grpc}',
             '--api.enable=true', '--grpc-web.enable=false', '--json-rpc.enable=true',
             '--json-rpc.address', f'127.0.0.1:{evm}', '--json-rpc.ws-address', f'127.0.0.1:{evm + 1}',
             '--log_format', 'json', '--log_level', 'info',

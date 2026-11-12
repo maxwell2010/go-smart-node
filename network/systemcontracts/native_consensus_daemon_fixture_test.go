@@ -34,6 +34,7 @@ import (
 
 const nativeConsensusDaemonFixtureEnv = "MCND_NATIVE_CONSENSUS_FIXTURE_DIR"
 const nativeConsensusFeeRewardsEnv = "MCND_NATIVE_CONSENSUS_FEE_REWARDS"
+const nativeConsensusIBCV1Env = "MCND_NATIVE_CONSENSUS_IBC_V1"
 
 type nativeConsensusFixtureValidator struct {
 	Name         string `json:"name"`
@@ -65,6 +66,7 @@ func exportNativeConsensusDaemonFixture(t *testing.T, e isolatedBackendEnv, dir 
 	actor := crypto.PubkeyToAddress(key.PublicKey)
 	beneficiary := sdk.AccAddress(actor.Bytes()).String()
 	feeRewards := os.Getenv(nativeConsensusFeeRewardsEnv) == "1"
+	ibcV1 := os.Getenv(nativeConsensusIBCV1Env) == "1"
 	commission := sdkmath.LegacyZeroDec()
 	if feeRewards {
 		commission = sdkmath.LegacyMustNewDecFromStr("0.25")
@@ -112,7 +114,11 @@ func exportNativeConsensusDaemonFixture(t *testing.T, e isolatedBackendEnv, dir 
 	for _, validator := range masterValidators {
 		gov(master, profile.MasterValidator, "addValidators", []masterValidator{validator})
 	}
-	gov(gateway, profile.Gateway, "setFreezeTime", big.NewInt(20), new(big.Int))
+	withdrawalSeconds := int64(20)
+	if ibcV1 {
+		withdrawalSeconds = int64(validatortypes.DefaultParams().UndelegationTime / time.Second)
+	}
+	gov(gateway, profile.Gateway, "setFreezeTime", big.NewInt(withdrawalSeconds), new(big.Int))
 	e.ctx().KVStore(e.app.GetKey(validatortypes.StoreKey)).Set([]byte{ownedapp.WithdrawalProfileKey}, config)
 	require.NoError(t, e.app.LoadWithdrawalSettlement(e.ctx()))
 
@@ -174,6 +180,7 @@ func exportNativeConsensusDaemonFixture(t *testing.T, e isolatedBackendEnv, dir 
 	genesis[banktypes.ModuleName] = cdc.MustMarshalJSON(&bank)
 	profile.EnableNativeConsensus = true
 	profile.EnableNativeFeeRewards = feeRewards
+	profile.EnableNativeIBCV1 = ibcV1
 	genesis[ownedapp.WithdrawalGenesisKey], err = json.Marshal(profile)
 	require.NoError(t, err)
 	require.NoError(t, ownedapp.ReconcileNativeGenesisAllocation(cdc, genesis))

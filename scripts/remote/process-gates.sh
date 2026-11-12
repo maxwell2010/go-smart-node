@@ -14,6 +14,8 @@ ibc_client_upgrade="${4:-off}"
 [[ "$ibc_client_upgrade" == off || "$ibc_client_upgrade" == ibc-client-upgrade ]] || { echo 'Unsupported IBC client upgrade option.' >&2; exit 2; }
 native_consensus="${5:-off}"
 [[ "$native_consensus" == off || "$native_consensus" == native-consensus || "$native_consensus" == native-consensus-fee-rewards ]] || { echo 'Unsupported native consensus option.' >&2; exit 2; }
+native_ibc_v1="${6:-off}"
+[[ "$native_ibc_v1" == off || "$native_ibc_v1" == native-ibc-v1 ]] || { echo 'Unsupported native IBC v1 option.' >&2; exit 2; }
 for tool in sudo unshare ip gcc python3 go; do command -v "$tool" >/dev/null; done
 python="$(command -v python3)"
 "$python" -c 'import sys,tomllib; assert sys.version_info >= (3,11), "Python >=3.11 required"'
@@ -26,7 +28,7 @@ mkdir -- "$output"
 evidence_owner="$(id -u):$(id -g)"
 preserve_public_reports() {
   local file
-  for file in "$output/daemon.json" "$output/hermes.json" "$output/withdrawal-genesis.json" "$output/del-delegation.json" "$output/ibc-client-upgrade.json" "$output/native-consensus.json"; do
+  for file in "$output/daemon.json" "$output/hermes.json" "$output/withdrawal-genesis.json" "$output/del-delegation.json" "$output/ibc-client-upgrade.json" "$output/native-consensus.json" "$output/native-hermes.json"; do
     if [[ -L "$file" ]]; then echo 'Refuse symbolic report file.' >&2; return 1; fi
     if [[ -f "$file" ]]; then
       sudo -n chown -- "$evidence_owner" "$file" || return 1
@@ -355,5 +357,42 @@ else:
     assert int(report['funded']['feeCollectorAtomic'])-int(report['before']['feeCollectorAtomic'])==int(report['delegation']['feeAtomic']),report
     assert int(report['final']['feeCollectorAtomic'])-int(report['funded']['feeCollectorAtomic'])==int(report['topUp']['feeAtomic']),report
 print('Three replicas agree on the signed DEL validator replacement at H+2 and on restart.')
+PY
+fi
+
+if [[ "$native_ibc_v1" == native-ibc-v1 ]]; then
+  mkdir -m 700 -- "$work/native-hermes-fixture"
+  if ! MCND_NATIVE_CONSENSUS_FIXTURE_DIR="$work/native-hermes-fixture" MCND_NATIVE_CONSENSUS_FEE_REWARDS=1 MCND_NATIVE_CONSENSUS_IBC_V1=1 \
+      go test -mod=readonly -tags= -trimpath -p 2 -count=1 -timeout 8m -json \
+      -run '^TestOwnedAppSignedRegistryBootstrap$/^authenticated_isolated_position_reader$' ./systemcontracts \
+      > "$work/native-hermes-fixture.log" 2>&1; then
+    private_fixture_diagnostic "$work/native-hermes-fixture.log"
+    exit 1
+  fi
+  sudo -n unshare --net -- bash -euc 'ip link set lo up; exec "$@"' _ \
+    env TMPDIR="$work" "$python" -B "$root/network/internal/ibclab/hermes_lab.py" --mode native-full \
+    --mcnd-binary "$work/mcnd" --mcnd-sha256 "$mcnd_sha" --mcnd-source-commit "$revision" \
+    --reference-binary "$work/ibcreference" --reference-sha256 "$reference_sha" --reference-source-commit "$revision" \
+    --hermes-binary "$work/hermes" --native-fixture "$work/native-hermes-fixture" --report "$output/native-hermes.json" \
+    |& tee "$output/native-hermes.log"
+  preserve_public_reports
+  "$python" - "$output/native-hermes.json" "$revision" "$mcnd_sha" "$reference_sha" <<'PY'
+import json,sys
+from pathlib import Path
+report=json.loads(Path(sys.argv[1]).read_text())
+assert report['status']=='NATIVE_CONSENSUS_HERMES_PASS' and report['release_gate'] is True and 'error' not in report,report
+assert report['binaries']['mcnd']=={'source_commit':sys.argv[2],'sha256':sys.argv[3]},report
+assert report['binaries']['reference']=={'source_commit':sys.argv[2],'sha256':sys.argv[4]},report
+probe=report['owned_probe']
+assert probe['replicas']==3 and probe['unbonding_seconds']==28*24*60*60 and probe['consensus']['signers']==['a','b'],report
+phases=report['phases']
+assert set(phases)=={'client_connection_channel_handshake','native_send','voucher_return','foreign_bank_voucher',
+                     'foreign_bank_voucher_return','pending_packet_restart','error_ack_refund','timeout_refund'},report
+assert all(phase['status']=='PASS' and (phase['owned_fees'] or phase['counterparty_fees']) for phase in phases.values()),report
+restart=phases['pending_packet_restart']
+assert len(restart['preserved_packets'])==1 and restart['native_after_restart']['height']>restart['native_before_restart']['height'],report
+final=report['native_final_consensus']
+assert final['height']>restart['native_after_restart']['height'] and final['power']=={'a':2,'b':1},report
+print('Native consensus bank ICS-20 v1, both voucher directions, disk restart and refunds passed with Hermes.')
 PY
 fi
