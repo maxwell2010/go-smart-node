@@ -40,7 +40,7 @@ func TestOwnedAppSignedDELDelegationLifecycle(t *testing.T) {
 	testSignedDELFixture(t, "1", delLifecyclePassed)
 }
 
-func testSignedDELFixture(t *testing.T, mode, passed string) {
+func testSignedDELFixture(t *testing.T, mode, passed string) string {
 	t.Helper()
 	binary, err := os.Executable()
 	require.NoError(t, err)
@@ -51,6 +51,7 @@ func testSignedDELFixture(t *testing.T, mode, passed string) {
 	require.NoError(t, err, "%s", output)
 	require.Contains(t, string(output), passed)
 	t.Log(passed)
+	return string(output)
 }
 
 type gatewayDELStake struct {

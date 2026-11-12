@@ -79,13 +79,17 @@ func runSignedActiveNFTPenalty(t *testing.T, e isolatedBackendEnv, profile owned
 	}
 
 	originID := common.BigToHash(new(big.Int).Add(new(big.Int).Lsh(big.NewInt(1), 224), big.NewInt(880)))
-	seedActiveNFTPenaltyOrigin(t, f, profile, origin, vault, originAddress, originID, unitReserve)
+	lateUnits := uint32(1)
+	if mode == "frozen-nft-penalty-max-units" {
+		lateUnits = nfttypes.MaxIsolatedOriginUnits
+	}
+	seedActiveNFTPenaltyOrigin(t, f, profile, origin, vault, originAddress, originID, unitReserve, lateUnits+1)
 	data, err := origin.ABI.Pack("setApprovalForAll", f.target, true)
 	require.NoError(t, err)
 	e.send(e.keys[0], &originAddress, new(big.Int), data, true)
-	delegate := func() settlement.NFTIsolation {
+	delegate := func(units uint32) settlement.NFTIsolation {
 		t.Helper()
-		args := []interface{}{f.validator, originAddress, originID.Big(), big.NewInt(1)}
+		args := []interface{}{f.validator, originAddress, originID.Big(), big.NewInt(int64(units))}
 		data, err := gateway.ABI.Pack("delegateNFT1155", args...)
 		require.NoError(t, err)
 		response := f.signed("delegateNFT1155", sdkmath.ZeroInt(), true, args...)
@@ -107,8 +111,8 @@ func runSignedActiveNFTPenalty(t *testing.T, e isolatedBackendEnv, profile owned
 		commit()
 		return proof
 	}
-	penalized, sibling := delegate(), delegate()
-	if mode == "frozen-nft-penalty" {
+	penalized, sibling := delegate(1), delegate(lateUnits)
+	if mode == "frozen-nft-penalty" || mode == "frozen-nft-penalty-max-units" {
 		runSignedFrozenNFTPenalty(t, f, reader, executor, penalized, sibling, unitReserve, inclusion)
 		return
 	}
@@ -312,31 +316,34 @@ func completePenalizedNFTExit(t *testing.T, f signedDELFixture, reader *nftview.
 }
 
 func seedActiveNFTPenaltyOrigin(t *testing.T, f signedDELFixture, profile ownedapp.WithdrawalProfile,
-	origin, vault contracts.Artifact, originAddress common.Address, originID common.Hash, reserve sdkmath.Int,
+	origin, vault contracts.Artifact, originAddress common.Address, originID common.Hash, reserve sdkmath.Int, quantity uint32,
 ) {
 	t.Helper()
 	e := f.env
 	const uri = "ipfs://active-nft-penalty"
-	data, err := origin.ABI.Pack("mintByDEL", f.user, originID.Big(), big.NewInt(2), uri)
+	data, err := origin.ABI.Pack("mintByDEL", f.user, originID.Big(), big.NewInt(int64(quantity)), uri)
 	require.NoError(t, err)
 	e.nextGasLimit(signedNFTGasLimit)
-	e.send(e.keys[0], &originAddress, reserve.MulRaw(2).BigInt(), data, true)
+	e.send(e.keys[0], &originAddress, reserve.MulRaw(int64(quantity)).BigInt(), data, true)
 	genesis, err := e.app.NativeNFTKeeper.ExportGenesis(e.ctx())
 	require.NoError(t, err)
 	require.Empty(t, genesis.Collections)
 	domain, ok := e.app.NativeValidatorKeeper.ConfiguredEVMSourceDomain()
 	require.True(t, ok)
 	vaultCreator := sdk.AccAddress(e.govOwner.Bytes()).String()
+	units := make(nfttypes.SubTokens, quantity)
+	for i := range units {
+		units[i] = &nfttypes.SubToken{ID: uint32(i + 1), Owner: f.beneficiary}
+	}
 	genesis.Collections = []nfttypes.Collection{
 		{Creator: f.beneficiary, Denom: signedNFTNativeOriginDenom, Supply: 1, TypeNft: nfttypes.NftType_NFT1155,
 			AddressDRC: originAddress.Hex(), Tokens: nfttypes.Tokens{{Creator: f.beneficiary, Denom: signedNFTNativeOriginDenom,
-				ID: signedNFTNativeOriginID, URI: uri, Reserve: sdk.NewCoin(identity.BaseDenom, reserve), Minted: 2,
-				SubTokens: nfttypes.SubTokens{{ID: 1, Owner: f.beneficiary}, {ID: 2, Owner: f.beneficiary}}}}},
+				ID: signedNFTNativeOriginID, URI: uri, Reserve: sdk.NewCoin(identity.BaseDenom, reserve), Minted: quantity, SubTokens: units}}},
 		{Creator: vaultCreator, Denom: signedNFTNativeVaultDenom, TypeNft: nfttypes.NftType_NFT721, AddressDRC: profile.PositionVault.Hex()},
 	}
 	genesis.ExternalBindings = []nfttypes.ExternalNFTBinding{{ChainID: domain.ChainID, EVMChainID: domain.EVMChainID,
 		Contract: originAddress[:], TokenID: originID[:], NativeTokenID: signedNFTNativeOriginID,
-		NFTType: nfttypes.NftType_NFT1155, NextSubTokenID: 3}}
+		NFTType: nfttypes.NftType_NFT1155, NextSubTokenID: uint64(quantity) + 1}}
 	nextPosition := common.BigToHash(f.read(vault, profile.PositionVault, "nextPositionId").(*big.Int))
 	genesis.IsolatedVaults = []nfttypes.IsolatedVaultState{{ChainID: domain.ChainID, EVMChainID: domain.EVMChainID,
 		Vault: profile.PositionVault[:], NextPositionID: nextPosition[:], ReceiptCreator: vaultCreator, ReceiptDenom: signedNFTNativeVaultDenom}}

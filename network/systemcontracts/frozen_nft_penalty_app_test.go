@@ -3,6 +3,7 @@ package systemcontracts_test
 import (
 	"errors"
 	"math/big"
+	"strings"
 	"testing"
 
 	sdkmath "cosmossdk.io/math"
@@ -25,6 +26,15 @@ const frozenNFTPenaltyPassed = "frozen isolated NFT penalties preserve both rece
 
 func TestOwnedAppSignedFrozenNFTPenalty(t *testing.T) {
 	testSignedDELFixture(t, "frozen-nft-penalty", frozenNFTPenaltyPassed)
+}
+
+func TestOwnedAppSignedMaxUnitFrozenNFTPenalty(t *testing.T) {
+	output := testSignedDELFixture(t, "frozen-nft-penalty-max-units", frozenNFTPenaltyPassed)
+	const prefix = "frozen NFT penalty gas origin_units=1024 "
+	_, measurement, found := strings.Cut(output, prefix)
+	require.True(t, found, "isolated fixture did not report the 1024-unit measurement")
+	line, _, _ := strings.Cut(measurement, "\n")
+	t.Log(prefix + strings.TrimSpace(line))
 }
 
 func runSignedFrozenNFTPenalty(t *testing.T, f signedDELFixture, reader *nftview.Reader, executor *settlement.Executor,
@@ -64,10 +74,13 @@ func runSignedFrozenNFTPenalty(t *testing.T, f signedDELFixture, reader *nftview
 		return withdrawal{out, getRow(out.FrozenIndex), lineage}
 	}
 	early, late := withdraw(first), withdraw(second)
+	lateReserve := unitReserve.MulRaw(int64(second.Position.OriginQuantity))
+	require.Len(t, late.lineage.OriginSubTokenIDs, int(second.Position.OriginQuantity))
 	require.Less(t, early.row.CreatedHeight, late.row.CreatedHeight)
 	infraction := late.row.CreatedHeight
+	const attemptGas = uint64(24_000_000)
 	ctx := func() sdk.Context {
-		return e.ctx().WithExecMode(sdk.ExecModeFinalize).WithGasMeter(storetypes.NewGasMeter(24_000_000))
+		return e.ctx().WithExecMode(sdk.ExecModeFinalize).WithGasMeter(storetypes.NewGasMeter(attemptGas))
 	}
 	supply := func(ctx sdk.Context) sdkmath.Int { return e.app.BankKeeper.GetSupply(ctx, identity.BaseDenom).Amount }
 	initialSupply := supply(ctx())
@@ -83,12 +96,13 @@ func runSignedFrozenNFTPenalty(t *testing.T, f signedDELFixture, reader *nftview
 	})
 	const percentage uint16 = 100
 	apply := func(injected error) error {
-		return executor.AppendMasterPenalty(ctx(), f.validator, percentage, supply, func(ctx sdk.Context, _ settlement.MasterPenaltyProof) error {
+		execution := ctx()
+		err := executor.AppendMasterPenalty(execution, f.validator, percentage, supply, func(ctx sdk.Context, _ settlement.MasterPenaltyProof) error {
 			for _, claim := range []withdrawal{early, late} {
 				if err := executor.ApplyFrozenNFTPenalty(ctx, claim.row, infraction, percentage, supply, func(ctx sdk.Context, proof settlement.FrozenNFTPenaltyProof) error {
 					eligible := claim.row.CreatedHeight == infraction
 					require.Equal(t, eligible, proof.Eligible)
-					require.Equal(t, eligible, proof.Burned.Equal(unitReserve))
+					require.Equal(t, eligible, proof.Burned.Equal(lateReserve))
 					require.Equal(t, eligible, proof.RemainingReserve.IsZero())
 					return validators.ApplyGatewayFrozenNFTPenalty(ctx, nft, claim.row, infraction, proof.BeforeCursor, proof.AfterCursor, proof.RemainingReserve)
 				}); err != nil {
@@ -97,6 +111,13 @@ func runSignedFrozenNFTPenalty(t *testing.T, f signedDELFixture, reader *nftview
 			}
 			return injected
 		})
+		if err == nil {
+			used := execution.GasMeter().GasConsumed()
+			require.Positive(t, used)
+			require.LessOrEqual(t, used, attemptGas)
+			t.Logf("frozen NFT penalty gas origin_units=%d sdk_gas=%d budget=%d", second.Position.OriginQuantity, used, attemptGas)
+		}
+		return err
 	}
 	injected := errors.New("reject after both frozen NFT projections")
 	require.ErrorIs(t, apply(injected), injected)
@@ -109,10 +130,10 @@ func runSignedFrozenNFTPenalty(t *testing.T, f signedDELFixture, reader *nftview
 	for _, claim := range []withdrawal{early, late} {
 		position, err := reader.Position(ctx(), claim.out.Position.Asset.TokenID)
 		require.NoError(t, err)
-		require.Equal(t, common.BigToHash(unitReserve.BigInt()), position.ReserveAmount)
+		require.Equal(t, common.BigToHash(claim.row.ReportedReserveAmount.BigInt()), position.ReserveAmount)
 	}
 	require.NoError(t, apply(nil))
-	require.True(t, initialSupply.Sub(unitReserve).Equal(supply(ctx())))
+	require.True(t, initialSupply.Sub(lateReserve).Equal(supply(ctx())))
 	noLoss, exhausted := getRow(early.out.FrozenIndex), getRow(late.out.FrozenIndex)
 	require.Equal(t, early.row.NativeEntryHash, noLoss.NativeEntryHash)
 	require.True(t, noLoss.ReportedReserveAmount.Equal(unitReserve))
@@ -130,6 +151,6 @@ func runSignedFrozenNFTPenalty(t *testing.T, f signedDELFixture, reader *nftview
 		}))
 	completePenalizedNFTExit(t, f, reader, executor, exhausted, late.out, late.lineage, inclusion, 1)
 	completePenalizedNFTExit(t, f, reader, executor, noLoss, early.out, early.lineage, inclusion, 0)
-	require.True(t, initialSupply.Sub(unitReserve).Equal(supply(ctx())))
+	require.True(t, initialSupply.Sub(lateReserve).Equal(supply(ctx())))
 	t.Log(frozenNFTPenaltyPassed)
 }
