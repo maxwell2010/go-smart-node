@@ -29,6 +29,19 @@ type GatewayIsolation struct {
 // vault receipt. The caller authenticates the receipt and actual EVM backing
 // and commits this projection with the validator changes in the same cache.
 func (k *StateKeeper) AdmitGatewayIsolation(ctx sdk.Context, proof GatewayIsolation) (types.IsolatedPositionLineage, error) {
+	return k.admitGatewayIsolation(ctx, proof, sdk.Coin{Denom: identity.BaseDenom, Amount: proof.Reserve})
+}
+
+// AdmitGatewayConvertedIsolation archives the verified custom input separately
+// from the independently verified DEL amount held by the new receipt.
+func (k *StateKeeper) AdmitGatewayConvertedIsolation(ctx sdk.Context, proof GatewayIsolation, input sdk.Coin) (types.IsolatedPositionLineage, error) {
+	if input.Denom == identity.BaseDenom || input.Amount.IsNil() || !input.IsValid() || !input.IsPositive() {
+		return types.IsolatedPositionLineage{}, errors.New("converted NFT isolation requires positive custom origin collateral")
+	}
+	return k.admitGatewayIsolation(ctx, proof, input)
+}
+
+func (k *StateKeeper) admitGatewayIsolation(ctx sdk.Context, proof GatewayIsolation, input sdk.Coin) (types.IsolatedPositionLineage, error) {
 	var empty types.IsolatedPositionLineage
 	if proof.Vault == (common.Address{}) || proof.Origin == (common.Address{}) || proof.Vault == proof.Origin ||
 		proof.Gateway == (common.Address{}) || proof.Owner == (common.Address{}) || proof.Owner == proof.Gateway ||
@@ -78,11 +91,11 @@ func (k *StateKeeper) AdmitGatewayIsolation(ctx sdk.Context, proof GatewayIsolat
 	}
 	supply := origin.Minted - origin.Burnt
 	if originBinding.NFTType != types.NftType_NFT1155 || origin.IsolatedReceipt || origin.ReserveLess ||
-		origin.Reserve.Denom != identity.BaseDenom || proof.Quantity > supply ||
+		origin.Reserve.Denom != input.Denom || proof.Quantity > supply ||
 		proof.OriginSupplyAfter != supply-proof.Quantity ||
-		!matchesIsolatedDELReserve(origin.Reserve.Amount, proof.Quantity, proof.Reserve) ||
-		!matchesIsolatedDELReserve(origin.Reserve.Amount, proof.OriginSupplyAfter, proof.OriginReserveAfter) {
-		return empty, errors.New("Gateway isolation differs from the native uniform DEL reserve or supply")
+		!matchesIsolatedReserve(origin.Reserve.Amount, proof.Quantity, input.Amount) ||
+		!matchesIsolatedReserve(origin.Reserve.Amount, proof.OriginSupplyAfter, proof.OriginReserveAfter) {
+		return empty, errors.New("Gateway isolation differs from the native uniform origin reserve or supply")
 	}
 	owner := sdk.AccAddress(proof.Owner[:])
 	units, err := k.selectIsolationOriginUnits(child, origin, owner, proof.Quantity)
@@ -189,16 +202,20 @@ func (k *StateKeeper) AdmitGatewayIsolation(ctx sdk.Context, proof GatewayIsolat
 			return empty, err
 		}
 	}
-	child.EventManager().EmitEvent(sdk.NewEvent("decimal_nft_isolated",
+	event := sdk.NewEvent("decimal_nft_isolated",
 		sdk.NewAttribute("position_id", proof.PositionID.Hex()),
 		sdk.NewAttribute("origin_token_id", origin.ID), sdk.NewAttribute("receipt_token_id", receiptID),
 		sdk.NewAttribute("quantity", strconv.FormatUint(uint64(proof.Quantity), 10)),
-		sdk.NewAttribute("reserve", proof.Reserve.String())))
+		sdk.NewAttribute("reserve", proof.Reserve.String()))
+	if input.Denom != identity.BaseDenom {
+		event = event.AppendAttributes(sdk.NewAttribute("custom_input", input.String()))
+	}
+	child.EventManager().EmitEvent(event)
 	commit()
 	return lineage, nil
 }
 
-func matchesIsolatedDELReserve(perUnit sdkmath.Int, quantity uint32, amount sdkmath.Int) bool {
+func matchesIsolatedReserve(perUnit sdkmath.Int, quantity uint32, amount sdkmath.Int) bool {
 	expected := new(big.Int).Mul(perUnit.BigInt(), new(big.Int).SetUint64(uint64(quantity)))
 	return expected.Cmp(amount.BigInt()) == 0
 }
@@ -239,7 +256,7 @@ func (k *StateKeeper) selectIsolationOriginUnits(ctx sdk.Context, token types.To
 		}
 		if unit.Reserve != nil && (unit.Reserve.Denom != token.Reserve.Denom || unit.Reserve.Amount.IsNil() ||
 			!unit.Reserve.Amount.Equal(token.Reserve.Amount)) {
-			return nil, errors.New("Gateway isolation requires a uniform native DEL reserve on each origin unit")
+			return nil, errors.New("Gateway isolation requires a uniform native reserve on each origin unit")
 		}
 		archived, err := state.Has(types.GetIsolatedOriginUnitKey(token.ID, id))
 		if err != nil {

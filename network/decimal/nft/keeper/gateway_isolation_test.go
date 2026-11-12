@@ -120,9 +120,9 @@ func TestGatewayIsolationRejectsInconsistentProofAndPreservesState(t *testing.T)
 	}{
 		{func(p *GatewayIsolation) { p.NextPositionID = stateIsolationID(3) }, "advance the vault cursor"},
 		{func(p *GatewayIsolation) { p.Quantity = types.MaxIsolatedOriginUnits + 1 }, "identity, quantity or DEL reserve"},
-		{func(p *GatewayIsolation) { p.Reserve = p.Reserve.AddRaw(1) }, "uniform DEL reserve or supply"},
-		{func(p *GatewayIsolation) { p.OriginReserveAfter = p.OriginReserveAfter.AddRaw(1) }, "uniform DEL reserve or supply"},
-		{func(p *GatewayIsolation) { p.OriginSupplyAfter++ }, "uniform DEL reserve or supply"},
+		{func(p *GatewayIsolation) { p.Reserve = p.Reserve.AddRaw(1) }, "uniform origin reserve or supply"},
+		{func(p *GatewayIsolation) { p.OriginReserveAfter = p.OriginReserveAfter.AddRaw(1) }, "uniform origin reserve or supply"},
+		{func(p *GatewayIsolation) { p.OriginSupplyAfter++ }, "uniform origin reserve or supply"},
 	} {
 		invalid := proof
 		tc.change(&invalid)
@@ -146,7 +146,35 @@ func TestGatewayIsolationRejectsInconsistentProofAndPreservesState(t *testing.T)
 	origin.SubTokens[2].Reserve = &mismatch
 	require.NoError(t, bad.InitGenesis(badCtx, badGenesis))
 	_, err = bad.AdmitGatewayIsolation(badCtx, badProof)
-	require.ErrorContains(t, err, "uniform native DEL reserve on each origin unit")
+	require.ErrorContains(t, err, "uniform native reserve on each origin unit")
+}
+
+func TestGatewayConvertedIsolationKeepsOriginReserveAndReceiptSeparate(t *testing.T) {
+	ctx, k, genesis, proof, owners := gatewayIsolationFixture(t)
+	origin := genesis.Collections[0].Tokens[1]
+	origin.Reserve = sdk.NewInt64Coin("custom", 7)
+	proof.OriginReserveAfter = sdkmath.NewInt(14)
+	proof.Reserve = sdkmath.NewInt(9)
+	require.NoError(t, k.InitGenesis(ctx, genesis))
+	_, err := k.AdmitGatewayIsolation(ctx, proof)
+	require.ErrorContains(t, err, "uniform origin reserve or supply")
+	_, err = k.AdmitGatewayConvertedIsolation(ctx, proof, sdk.NewInt64Coin("custom", 13))
+	require.ErrorContains(t, err, "uniform origin reserve or supply")
+	lineage, err := k.AdmitGatewayConvertedIsolation(ctx, proof, sdk.NewInt64Coin("custom", 14))
+	require.NoError(t, err)
+	require.Equal(t, []uint32{2, 5}, lineage.OriginSubTokenIDs)
+	storedOrigin, err := k.GetToken(ctx, origin.ID)
+	require.NoError(t, err)
+	require.Equal(t, origin.Reserve, storedOrigin.Reserve)
+	require.EqualValues(t, 5, storedOrigin.Burnt)
+	sibling, err := k.GetSubToken(ctx, origin.ID, 3)
+	require.NoError(t, err)
+	require.Equal(t, owners[1], sibling.Owner)
+	receipt, err := k.GetToken(ctx, lineage.ReceiptNativeTokenID)
+	require.NoError(t, err)
+	require.Equal(t, sdk.NewInt64Coin("del", 9), receipt.Reserve)
+	_, err = k.ExportGenesis(ctx)
+	require.NoError(t, err)
 }
 
 func TestGatewayIsolationLateFailureAndOuterRollback(t *testing.T) {
