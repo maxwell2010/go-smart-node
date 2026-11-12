@@ -1,4 +1,5 @@
 """Guards for the real-process lab; these do not simulate IBC success."""
+import base64
 import importlib.util
 import io
 import json
@@ -17,6 +18,21 @@ daemon_spec.loader.exec_module(daemon)
 
 
 class LabGuards(unittest.TestCase):
+    def test_native_staking_query_decodes_protobuf_once_per_message_layer(self):
+        for seconds in (lab.NATIVE_UNBONDING_SECONDS, 21 * 24 * 60 * 60):
+            with self.subTest(seconds=seconds):
+                duration = lab.varint(8) + lab.varint(seconds)
+                response = lab.field(1, lab.field(1, duration))
+                result = {"response": {"value": base64.b64encode(response).decode()}}
+                with patch.object(lab, "rpc", return_value=result) as rpc:
+                    if seconds == lab.NATIVE_UNBONDING_SECONDS:
+                        lab.verify_native_unbonding(28657)
+                    else:
+                        with self.assertRaisesRegex(RuntimeError, "attested 28-day Gateway delay"):
+                            lab.verify_native_unbonding(28657)
+                    rpc.assert_called_once_with(28657, "abci_query", path="/cosmos.staking.v1beta1.Query/Params",
+                                                data="", prove=False)
+
     def test_real_cli_zero_exit_success_summary_cannot_mask_chain_health_failure(self):
         warning = {"level": "WARN", "fields": {"message": "chain is not healthy"}}
         summary = {"result": "performed health check for all chains in the config", "status": "success"}

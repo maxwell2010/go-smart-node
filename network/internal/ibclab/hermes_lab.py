@@ -180,6 +180,14 @@ def amount(port, address, denom):
     return int(coin.get(2, [b"0"])[0])
 
 
+def verify_native_unbonding(port):
+    response = query(port, "/cosmos.staking.v1beta1.Query/Params")
+    params = fields(response[1][0]) if response.get(1) else {}
+    duration = fields(params[1][0]) if params.get(1) else {}
+    require(duration.get(1) == [NATIVE_UNBONDING_SECONDS] and duration.get(2, [0]) == [0],
+            "native Hermes staking query does not expose the attested 28-day Gateway delay")
+
+
 def escrow(port, denom):
     body = query(port, "/ibc.applications.transfer.v1.Query/TotalEscrowForDenom", field(1, denom))
     coin = fields(body[1][0]) if body.get(1) else {}
@@ -468,10 +476,7 @@ def prepare_native_owned(lab, mcnd, fixture):
     require(amount(rpc_port, address, "del") == 10**24, "unexpected isolated native relayer account funding")
     require(escrow(rpc_port, "del") == 0, "new native escrow must be zero")
     for replica in replicas:
-        response = fields(query(replica.p2p + 1, "/cosmos.staking.v1beta1.Query/Params"))
-        duration = fields(fields(response[1][0])[1][0])
-        require(duration.get(1) == [NATIVE_UNBONDING_SECONDS] and duration.get(2, [0]) == [0],
-                "native Hermes staking query does not expose the attested 28-day Gateway delay")
+        verify_native_unbonding(replica.p2p + 1)
     lab.report["owned_probe"] = {"chain": A_ID, "funded_address": address, "replicas": len(replicas),
                                  "unbonding_seconds": NATIVE_UNBONDING_SECONDS, "consensus": snapshot,
                                  "genesis_sha256": hashlib.sha256(funded_genesis).hexdigest()}
