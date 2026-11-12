@@ -313,6 +313,9 @@ def verify_systemd_upgrade(systemd, follower, validators, expected, genesis, upg
           "updated service or backup executable differs from its signed package")
     check(private_bytes(genesis_path, GENESIS_LIMIT) == genesis, "upgrade changed the follower genesis")
     synced = verify_follower_resume(follower, validators, expected, report, previous_handshakes, before)
+    if "iavlBefore" in upgraded:
+        check(upgraded["iavlBefore"]["committedHeight"] == synced["loadedHeight"],
+              "upgraded daemon did not load the measured IAVL backup height")
     report["systemdUpgrade"] = {**upgraded, "beforeHeight": before, **synced}
 
     report["phase"] = "systemd-follower-rollback"
@@ -326,6 +329,15 @@ def verify_systemd_upgrade(systemd, follower, validators, expected, genesis, upg
     check((restored["loadedHeight"], restored["loadedAppHash"]) == (synced["loadedHeight"], synced["loadedAppHash"]),
           "rollback did not load the offline backup checkpoint")
     report["systemdRollback"] = {**rollback, **restored}
+    if "iavlBefore" in upgraded:
+        check(rollback["iavlAfterUpgrade"]["committedHeight"] >= synced["verifiedHeight"] and
+              rollback["iavlAfterUpgrade"]["fastStorageHeight"] >= synced["loadedHeight"] and
+              rollback["iavlRestored"]["committedHeight"] == restored["loadedHeight"],
+              "offline IAVL database heights differ from the running service checkpoints")
+        final_schema = systemd.inspect_iavl_after_rollback()
+        check(final_schema["committedHeight"] >= restored["verifiedHeight"],
+              "rolled-back follower did not persist its synchronized height")
+        report["systemdRollback"]["iavlAfterSync"] = final_schema
 
 
 def run_launch(binary, root, genesis, expected, keys, env, owner, report, *, four_validators=False, treasury=None,
@@ -437,6 +449,7 @@ def main(argv=None, signals=None):
     parser.add_argument("--restart-and-snapshot", action="store_true", help="verify systemd restart and a fresh state-sync peer")
     parser.add_argument("--upgrade-package", type=Path, help="verified replacement package directory")
     parser.add_argument("--upgrade-package-report", type=Path, help="signature and checksum report for the replacement package")
+    parser.add_argument("--iavl-schema-probe", type=Path, help="inspect the IAVL storage upgrade with the node stopped")
     args = parser.parse_args(argv)
     if args.treasury_transfer and not args.four_validators:
         parser.error("--treasury-transfer requires --four-validators")
@@ -446,6 +459,8 @@ def main(argv=None, signals=None):
         parser.error("--restart-and-snapshot requires --systemd-follower")
     if (args.upgrade_package is None) != (args.upgrade_package_report is None) or (args.upgrade_package and not args.systemd_follower):
         parser.error("--upgrade-package and --upgrade-package-report require each other and --systemd-follower")
+    if args.iavl_schema_probe and not args.upgrade_package:
+        parser.error("--iavl-schema-probe requires --upgrade-package")
     report = {"status": "FAIL", "phase": "fixture-provenance", "initialHeight": 1}
     with Path(args.report).open("x", encoding="utf8") as stream:
         try:
@@ -490,7 +505,8 @@ def main(argv=None, signals=None):
                         from native_launch_systemd import SystemdFollower
 
                         report["phase"] = "systemd-follower-install"
-                        service = SystemdFollower(binary, args.binary_sha256, signals=signals)
+                        service = SystemdFollower(binary, args.binary_sha256, signals=signals,
+                                                  iavl_schema_probe=args.iavl_schema_probe)
                     with service as systemd:
                         run_launch(binary, root, genesis, expected, keys, env, owner, report,
                                    four_validators=args.four_validators, treasury=treasury, systemd=systemd,

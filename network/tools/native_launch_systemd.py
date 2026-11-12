@@ -12,6 +12,7 @@ import tempfile
 import time
 import uuid
 
+from del_delegation_smoke import write_config
 from mcnd_process_smoke import private_namespace
 
 
@@ -52,10 +53,11 @@ def copy_offline_home(source, target):
 class SystemdFollower:
     """Own a private installation and a single systemd service for its follower."""
 
-    def __init__(self, binary, expected_binary_sha256, signals=None):
+    def __init__(self, binary, expected_binary_sha256, signals=None, *, iavl_schema_probe=None):
         self.source = Path(binary)
         self.expected_sha256 = expected_binary_sha256
         self.signals = signals
+        self.iavl_schema_probe = iavl_schema_probe
         self.unit = f"mcnd-launch-ci-{uuid.uuid4().hex}.service"
         self.submitted = False
 
@@ -90,6 +92,9 @@ class SystemdFollower:
     def prepare(self, home):
         if home.parent != self.root or home.is_symlink():
             raise RuntimeError("follower home must be inside the clean installation")
+        if self.iavl_schema_probe:
+            write_config(home, "app.toml", {(None, "app-db-backend"): '"goleveldb"',
+                                            (None, "iavl-disable-fastnode"): "true"})
         for path in (home, *home.rglob("*")):
             mode = path.lstat().st_mode
             if not (stat.S_ISDIR(mode) or stat.S_ISREG(mode)):
@@ -169,6 +174,13 @@ class SystemdFollower:
                 "backupHomeSha256": self.backup_home_sha256, "backupBinarySha256": self.backup_binary_sha256,
                 "sameHome": True}
 
+    def _inspect_iavl(self, home):
+        result = subprocess.run([str(self.iavl_schema_probe), "--home", str(home)],
+                                capture_output=True, text=True, timeout=20)
+        if result.returncode:
+            raise RuntimeError("could not inspect stopped follower's IAVL schema: " + result.stderr.strip()[:240])
+        return json.loads(result.stdout)
+
     def upgrade(self, binary, expected_sha256):
         private_namespace()
         previous = self.evidence()
@@ -184,11 +196,21 @@ class SystemdFollower:
         self.backup_binary_sha256 = digest(backup_binary)
         if self.backup_binary_sha256 != previous["binarySha256"]:
             raise RuntimeError("backup binary differs from the original signed package")
+        if self.iavl_schema_probe:
+            self.iavl_before = self._inspect_iavl(self.backup / "home")
+            if (self.iavl_before["storageVersion"] != "1.0.0" or self.iavl_before["fastNodes"] != 0 or
+                self.iavl_before["committedHeight"] <= 0):
+                raise RuntimeError("the offline backup must contain committed IAVL state without the fast index")
+            write_config(self.home, "app.toml", {(None, "iavl-disable-fastnode"): "false"})
+            os.chown(self.home / "config/app.toml", self.user.pw_uid, self.user.pw_gid, follow_symlinks=False)
         self._replace_binary(binary, expected_sha256)
         self._start()
         if not os.path.samestat(previous_data, (self.home / "data").stat()):
             raise RuntimeError("upgrade changed the follower data directory")
-        return self._transition_evidence(previous)
+        evidence = self._transition_evidence(previous)
+        if self.iavl_schema_probe:
+            evidence["iavlBefore"] = self.iavl_before
+        return evidence
 
     def rollback(self):
         private_namespace()
@@ -196,14 +218,33 @@ class SystemdFollower:
         if previous["binarySha256"] == self.backup_binary_sha256:
             raise RuntimeError("rollback requires the upgraded follower")
         self._stop(require_unloaded=True)
+        if self.iavl_schema_probe:
+            migrated = self._inspect_iavl(self.home)
+            if migrated["storageVersion"] != "1.1.0" or migrated["fastNodes"] <= 0:
+                raise RuntimeError("updated daemon did not persist the IAVL fast storage schema and index")
         restored = self.root / "restored-home"
         if copy_offline_home(self.backup / "home", restored) != self.backup_home_sha256:
             raise RuntimeError("restored follower home differs from the offline backup")
+        if self.iavl_schema_probe:
+            restored_schema = self._inspect_iavl(restored)
+            if restored_schema != self.iavl_before:
+                raise RuntimeError("restored follower IAVL schema and height differ from the original backup")
         self.home.rename(self.root / "upgraded-home")
         restored.rename(self.home)
         self._replace_binary(self.backup / "mcnd", self.backup_binary_sha256)
         self._start()
-        return self._transition_evidence(previous)
+        evidence = self._transition_evidence(previous)
+        if self.iavl_schema_probe:
+            evidence.update(iavlAfterUpgrade=migrated, iavlRestored=restored_schema)
+        return evidence
+
+    def inspect_iavl_after_rollback(self):
+        private_namespace()
+        self._stop()
+        schema = self._inspect_iavl(self.home)
+        if schema["storageVersion"] != "1.0.0" or schema["fastNodes"] != 0:
+            raise RuntimeError("rolled-back follower changed the restored IAVL storage schema")
+        return schema
 
     def poll(self):
         props = self._properties("ActiveState", "MainPID")

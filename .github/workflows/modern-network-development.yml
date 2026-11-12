@@ -36,7 +36,7 @@ on:
         default: false
         type: boolean
       systemd_upgrade_rollback:
-        description: Upgrade the systemd follower from a new signed package and restore its offline backup
+        description: Upgrade the systemd follower and its IAVL storage, then restore its offline backup
         default: false
         type: boolean
   push:
@@ -214,12 +214,14 @@ jobs:
               signed_binary="$launch_work/mcnd-upgrade"
               signed_report="$evidence/upgrade-package.json"
               signed_extract="$launch_work/verified-upgrade"
+              iavl_schema_probe="$launch_work/iavl-schema-probe"
               [[ "$GITHUB_SHA" != "$launch_revision" ]]
               (
                 cd network
                 go mod verify
                 go build -mod=readonly -tags= -p 2 -trimpath -ldflags "-X main.buildCommit=$GITHUB_SHA" \
                   -o "$signed_binary" ./cmd/mcnd
+                go build -mod=readonly -p 2 -trimpath -o "$iavl_schema_probe" ./tools/iavl_schema_probe
               )
             fi
             signer_home=$(mktemp -d "$launch_work/gnupg.XXXXXXXX")
@@ -247,7 +249,8 @@ jobs:
             cat "$signed_report"
             if [[ "$SYSTEMD_UPGRADE_ROLLBACK" == true ]]; then
               [[ "$signed_archive_sha" != "$archive_sha" && "$signed_binary_sha" != "$binary_sha" ]]
-              launch_options+=(--upgrade-package "$signed_extract" --upgrade-package-report "$signed_report")
+              launch_options+=(--upgrade-package "$signed_extract" --upgrade-package-report "$signed_report" \
+                --iavl-schema-probe "$iavl_schema_probe")
             else
               [[ "$signed_binary_sha" == "$binary_sha" ]]
               launch_binary="$signed_extract/bin/mcnd"
