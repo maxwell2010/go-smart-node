@@ -93,6 +93,25 @@ claim and the exact AppHash after reapplying height 56. This rehearsal uses
 two builds of the same source revision.
 [Pending IBC packet and coordinated restore](https://github.com/maxwell2010/go-smart-node/actions/runs/43213910119)
 
+The `3688b0b` candidate enables the wallet owner to redeem a refundable,
+burnable NFT receipt for the remaining DEL. Signed EVM tests reconcile the
+recipient credit and vault debit, reject a repeated payment, and verify
+atomic rollback when the recipient fails native admission. Receipts from
+1 and 1024 origin units fit the 24 million gas limit. A separate signed EVM
+case verifies closure after the entire reserve was slashed.
+[Redemption and module checks](https://github.com/maxwell2010/go-smart-node/actions/runs/43217878365)
+[Linux archive and scanner](https://github.com/maxwell2010/go-smart-node/actions/runs/43217879863)
+
+The cross-version rehearsal moved from archived `de3851c` to `3688b0b`
+with the approved handler. The rebuilt predecessor matched the archived
+binary SHA256. It committed height 55 and the successor applied height 56.
+Hermes delivered the pending 1 DEL ICS-20 packet and returned its voucher
+for the original principal. A coordinated restore of both private chains
+recovered the pending commitment, escrow and 28-day withdrawal claim.
+Replaying height 56 produced the same AppHash as the primary upgrade.
+Both candidates use the same SDK and IBC dependency family.
+[Cross-version IBC and restore](https://github.com/maxwell2010/go-smart-node/actions/runs/43217877949)
+
 ## Separate release tracks
 
 The selected architecture is a fresh network on a maintained modern stack,
@@ -284,19 +303,10 @@ The owned EVM workload test signed NFT admission and DEL top-ups to exercise
 funded at and after the infraction height.
 [Historical penalty workload](https://github.com/maxwell2010/go-smart-node/actions/runs/43202494582)
 
-Modern release blockers remain:
-
-- Complete the native `redeemPosition` projection for wallet-held NFT receipts
-  and check the resulting DEL payout. The existing signed withdrawal and
-  `complete` return the receipt with its DEL backing.
-  [Custom collateral routes](../network/docs/ru/CUSTOM_COLLATERAL_CONVERSION.md)
-- Run the actual release-state migration and rollback rehearsal on the
-  agreed predecessor and successor, including a pending ICS-20 packet and
-  financial claims. Existing same-family rehearsals provide evidence for
-  the specific handlers and profile combinations they exercised.
-- Verify the agreed public genesis, approved contract roles, initial
-  allocations, operator keys, bootstrap and trust data. Publish release
-  checksums and provenance for the exact independently reviewed binary.
+The public release requires an approved genesis for the separate network,
+including contract roles, initial allocations, operator public keys and
+bootstrap and trust data. Bind published checksums and provenance to the
+reviewed release binaries and genesis.
 
 ## Legacy reference evidence and limitations
 
