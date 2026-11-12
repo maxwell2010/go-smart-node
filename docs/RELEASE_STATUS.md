@@ -11,10 +11,16 @@ key and preservation of a pending job on rollback.
 [Linux module and owned EVM tests](https://github.com/maxwell2010/go-smart-node/actions/runs/43192837081)
 
 The fresh profile wires this work to finalized Comet metadata, fixed genesis
-evidence age limits and the shared manual/automatic payout gate. Full genesis,
-validator transition and restart evidence for that profile are required before
-release. Published operational data must include the approved genesis and
-independent bootstrap and RPC endpoints for this separate network.
+evidence age limits and the shared manual/automatic payout gate. The Linux ABCI
+rehearsal started from a fresh height-one genesis and verified rollback before
+commit, a durable 0.1 DEL burn on block 5, removal of the old key at block 7,
+and a single 0.95 DEL payout on block 10. The rehearsal uses authenticated-shape
+metadata supplied by the test harness. [Fresh-profile lifecycle](https://github.com/maxwell2010/go-smart-node/actions/runs/43196854310)
+
+Release verification still needs the governed replacement-key flow, its exact
+combined revision and production launch data. Published operational data must
+include the approved genesis and independent bootstrap and RPC endpoints for
+this separate network.
 
 ## Separate release tracks
 
@@ -197,12 +203,12 @@ requires both age thresholds to be exceeded, using the preceding committed
 height and time. The application needs a deterministic cutoff using the
 same clock for admission, payout, compaction and replay. These rules apply
 to the common manual and automatic payout path.
-[CometBFT evidence age check](https://github.com/cometbft/cometbft/blob/v0.38.26/evidence/verify.go#L280-L289)
+[CometBFT evidence age check](https://github.com/cometbft/cometbft/blob/v0.38.26/evidence/verify.go#L309-L318)
 
-The stable process gate must cover a validator already paused for downtime,
-a late top-up, a partial withdrawal, a restart with pending liability and
-an exact burn without reallocating loss to later backing. The new-network
-release remains a development candidate while this path is being built.
+The Linux module and fresh ABCI suites cover a paused validator, a late
+top-up, partial withdrawal, restart and exact burns from eligible principal.
+The final revision still needs combined process evidence and a workload
+rehearsal for typed penalties at the supported position limits.
 
 Modern release blockers remain:
 
