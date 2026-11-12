@@ -333,5 +333,6 @@ func verifyNativeLaunchPreview(t *testing.T, dir string, spec nativeLaunchSpec) 
 		require.IsType(t, &multisig.LegacyAminoPubKey{}, account.GetPubKey())
 		require.True(t, treasury.Equals(account.GetPubKey()))
 		require.True(t, app.BankKeeper.GetBalance(ctx, authtypes.NewModuleAddress(authtypes.FeeCollectorName), identity.BaseDenom).IsZero())
+		verifyNativeLaunchTreasurySpend(l, dir, treasury)
 	}
 }

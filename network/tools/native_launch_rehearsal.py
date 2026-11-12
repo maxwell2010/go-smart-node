@@ -1,6 +1,7 @@
 """Start a fresh native network and replay it on a new ordinary peer."""
 
 import argparse
+import base64
 import hashlib
 import ipaddress
 import json
@@ -18,7 +19,7 @@ from mcnd_process_smoke import ProcessOwner, SignalGuard, private_environment, p
 from native_consensus_smoke import (
     check_signatures, committed_header, create_replica, decode_pubkey, effective_set, wait_peer_pair, wait_replicas,
 )
-from withdrawal_genesis_smoke import ADDRESS, SHA256, bech32_payload, check, ethereum, private_bytes, safe_diagnostic
+from withdrawal_genesis_smoke import ADDRESS, SHA256, bech32_payload, check, ethereum, native, private_bytes, request, safe_diagnostic
 
 
 GENESIS_LIMIT = 64 * 1024 * 1024
@@ -175,7 +176,87 @@ def confirm_outage(validators, stopped, rows, powers, owner, report):
     }
 
 
-def run_launch(binary, root, genesis, expected, keys, env, owner, report, *, four_validators=False):
+def treasury_state(nodes, fixture, height):
+    def read(node):
+        state = {}
+        for role in ("treasury", "recipient", "feeCollector"):
+            address = fixture[role]
+            result = native(f"/cosmos/bank/v1beta1/balances/{address}/by_denom?denom=del", height, base=node.rest)
+            coin = result["balance"]
+            check(coin["denom"] == "del", "treasury balance query returned a different denomination")
+            state[role + "Atomic"] = str(int(coin["amount"]))
+        account = native(f"/cosmos/auth/v1beta1/account_info/{fixture['treasury']}", height, base=node.rest)["info"]
+        check(account["address"] == fixture["treasury"], "treasury sequence query returned a different account")
+        state["sequence"] = int(account.get("sequence", "0"))
+        return state
+
+    snapshots = [read(node) for node in nodes]
+    check(all(state == snapshots[0] for state in snapshots), "nodes disagree on the committed treasury state")
+    return snapshots[0]
+
+
+def broadcast_treasury_tx(node, raw):
+    check(isinstance(raw, str) and re.fullmatch(r"(?:[0-9a-f]{2}){100,2048}", raw), "invalid signed treasury fixture")
+    tx = bytes.fromhex(raw)
+    tx_hash = hashlib.sha256(tx).hexdigest()
+    payload = {"jsonrpc": "2.0", "id": 1, "method": "broadcast_tx_sync",
+               "params": {"tx": base64.b64encode(tx).decode("ascii")}}
+    response, _ = request(f"http://127.0.0.1:{node.p2p + 1}", payload)
+    check("error" not in response and "result" in response, "treasury broadcast RPC failed")
+    result = response["result"]
+    check(result["hash"].lower().removeprefix("0x") == tx_hash, "treasury broadcast returned a different transaction hash")
+    return tx_hash, result
+
+
+def rehearse_treasury(nodes, fixture, height, report):
+    report["phase"] = "treasury-two-signatures"
+    check(len({bech32_payload(fixture[key]) for key in ("treasury", "recipient", "feeCollector")}) == 3,
+          "treasury fixture requires distinct bank accounts")
+    amount, fee = int(fixture["amountAtomic"]), int(fixture["feeAtomic"])
+    check(amount > 0 and fee > 0 and fixture["invalidTx"] != fixture["validTx"], "invalid treasury transfer pair")
+    before = treasury_state(nodes, fixture, height)
+    check(before["treasuryAtomic"] == str(14_000 * 10**18) and before["feeCollectorAtomic"] == "0" and
+          before["sequence"] == fixture["initialSequence"], "unexpected initial treasury state")
+    source = nodes[0]
+    rejected_hash, rejected = broadcast_treasury_tx(source, fixture["invalidTx"])
+    check(rejected.get("codespace") == "sdk" and int(rejected["code"]) == 4 and
+          "signature verification failed" in rejected.get("log", ""), "two-signature treasury transfer was not rejected by signature verification")
+    tip = int(source.rpc("abci_info")["response"]["last_block_height"])
+    after_rejected_height = wait_replicas(nodes, tip + 2, 40, report)
+    after_rejected = treasury_state(nodes, fixture, after_rejected_height)
+    check(after_rejected == before, "rejected treasury transfer changed a balance or the sequence")
+    report["treasury"] = {
+        "amountAtomic": str(amount), "feeAtomic": str(fee), "beforeHeight": height, "before": before,
+        "rejected": {"signatures": 2, "hash": rejected_hash, "checkTxCode": 4,
+                     "verifiedHeight": after_rejected_height, "state": after_rejected},
+    }
+
+    report["phase"] = "treasury-three-signatures"
+    tx_hash, accepted = broadcast_treasury_tx(source, fixture["validTx"])
+    check(int(accepted.get("code", 0)) == 0, f"three-signature treasury transfer failed CheckTx with code {accepted.get('code')}")
+    deadline = time.monotonic() + 40
+    while True:
+        try:
+            result = source.rpc(f"tx?hash=0x{tx_hash}&prove=false")
+            break
+        except (OSError, ValueError):
+            check(time.monotonic() < deadline and source.child.poll() is None, "accepted treasury transfer was not indexed")
+            time.sleep(0.25)
+    check(result["hash"].lower().removeprefix("0x") == tx_hash, "indexed a different treasury transaction")
+    check(int(result["tx_result"].get("code", 0)) == 0, "three-signature treasury transfer failed block execution")
+    committed_height = int(result["height"])
+    check(committed_height > after_rejected_height, "treasury transfer committed before the rejection check")
+    wait_replicas(nodes, committed_height + 1, 60, report)
+    after = treasury_state(nodes, fixture, committed_height)
+    check(after == {"treasuryAtomic": str(int(before["treasuryAtomic"]) - amount - fee),
+                    "recipientAtomic": str(int(before["recipientAtomic"]) + amount), "feeCollectorAtomic": str(fee),
+                    "sequence": before["sequence"] + 1}, "committed treasury transfer did not reconcile")
+    app_hash = committed_header(nodes, committed_height + 1)["app_hash"]
+    report["treasury"]["committed"] = {"signatures": 3, "hash": tx_hash, "height": committed_height,
+                                         "appHash": app_hash, "state": after}
+
+
+def run_launch(binary, root, genesis, expected, keys, env, owner, report, *, four_validators=False, treasury=None):
     rows = expected["validators"]
     powers = tuple(row["initialPower"] for row in rows)
     options = {"chain_id": expected["chainId"], "evm_chain_id": expected["evmChainId"]}
@@ -242,6 +323,8 @@ def run_launch(binary, root, genesis, expected, keys, env, owner, report, *, fou
     check(first_balance == next(iter(values)), "ordinary peer cannot query the same funded state at block 1")
     report["rpc"] = {"historicalHeight": 1, "verifiedHeight": height, "delAtomic": str(first_balance)}
     report.update(verify_network(nodes, follower, configured, env, stopped=stopped))
+    if treasury is not None:
+        rehearse_treasury(nodes, treasury, height, report)
 
 
 def main(argv=None, signals=None):
@@ -249,7 +332,10 @@ def main(argv=None, signals=None):
     for flag in ("binary", "binary-sha256", "archive-sha256", "source-commit", "fixture", "home-parent", "report"):
         parser.add_argument("--" + flag, required=True)
     parser.add_argument("--four-validators", action="store_true", help="check quorum and peer catchup after stopping one of four validators")
+    parser.add_argument("--treasury-transfer", action="store_true", help="check the signed transfer pair on the four-validator fixture")
     args = parser.parse_args(argv)
+    if args.treasury_transfer and not args.four_validators:
+        parser.error("--treasury-transfer requires --four-validators")
     report = {"status": "FAIL", "phase": "fixture-provenance", "initialHeight": 1}
     with Path(args.report).open("x", encoding="utf8") as stream:
         try:
@@ -261,6 +347,7 @@ def main(argv=None, signals=None):
             with open(binary, "rb") as daemon:
                 check(hashlib.file_digest(daemon, "sha256").hexdigest() == args.binary_sha256, "packaged daemon hash differs")
             genesis, expected, keys = load_fixture(Path(args.fixture), four_validators=args.four_validators)
+            treasury = json.loads(private_bytes(Path(args.fixture) / "treasury.json", 8192)) if args.treasury_transfer else None
             report.update(sourceCommit=args.source_commit, binarySha256=args.binary_sha256, archiveSha256=args.archive_sha256,
                           genesisSha256=hashlib.sha256(genesis).hexdigest(), chainId=expected["chainId"], evmChainId=expected["evmChainId"])
             with tempfile.TemporaryDirectory(prefix="mcnd-native-launch-", dir=args.home_parent) as directory:
@@ -270,7 +357,8 @@ def main(argv=None, signals=None):
                 check(version["server_name"] == "mcnd" and version["commit"] == args.source_commit, "packaged daemon revision differs")
                 owner = ProcessOwner(signals)
                 try:
-                    run_launch(binary, root, genesis, expected, keys, env, owner, report, four_validators=args.four_validators)
+                    run_launch(binary, root, genesis, expected, keys, env, owner, report,
+                               four_validators=args.four_validators, treasury=treasury)
                 finally:
                     owner.close()
             report.update(status="PASS", phase="complete")
