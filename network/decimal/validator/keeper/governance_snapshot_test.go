@@ -95,5 +95,5 @@ func TestActiveDELVotingStateExcludesPendingAndCompletedHistory(t *testing.T) {
 	require.NoError(t, err)
 	require.NoError(t, service.OpenKVStore(ctx).Set(key, make([]byte, activeDELReserveBytes)))
 	_, err = reader.ReadActiveDELVotingState(ctx)
-	require.ErrorContains(t, err, "differs from indexed DEL ownership")
+	require.ErrorContains(t, err, "differ from indexed DEL ownership")
 }
