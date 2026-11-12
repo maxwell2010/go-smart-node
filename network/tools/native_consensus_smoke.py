@@ -356,7 +356,8 @@ def run_downtime_gate(binary, expected, replicas, env, owner, report, first):
     infraction = height - 1
     check(height >= baseline + DOWNTIME_WINDOW + 1 and c.child.poll() is not None,
           'C must be absent for the full signing window')
-    fields = {'operator': validators[2]['operator'], 'infraction_height': str(infraction), 'burned': str(DOWNTIME_BURN)}
+    fields = {'operator': validators[2]['operator'], 'infraction_height': str(infraction),
+              'burned': str(DOWNTIME_BURN), 'mode': 'BeginBlock'}
     for node in quorum:
         result = node.rpc(f'block_results?height={height}')
         events = downtime_events(result)
