@@ -18,7 +18,7 @@ import (
 	validatortypes "github.com/maxwell2010/go-smart-node/network/decimal/validator/types"
 )
 
-// NFTIsolation is a verified mint from a known, uniformly DEL-backed origin.
+// NFTIsolation is a verified DEL-backed mint from a known uniform origin.
 // The native keepers still reconcile the archived origin and stake prestates.
 type NFTIsolation struct {
 	Position           evmview.PositionSnapshot
@@ -39,20 +39,26 @@ type NFTWithdrawal struct {
 
 // VerifySignedNFTIsolation admits only the direct no-hold Gateway route.
 func (e *Executor) VerifySignedNFTIsolation(ctx sdk.Context, msg core.Message, receipt *ethtypes.Receipt) (NFTIsolation, error) {
-	return e.verifySignedNFTIsolation(ctx, msg, receipt, false)
+	return e.verifySignedNFTIsolation(ctx, msg, receipt, false, nil)
 }
 
 // VerifySignedNFTIsolationWithDowntime proves the NFT and companion begin at
 // the current unpaused Master cursor without realizing earlier losses.
 func (e *Executor) VerifySignedNFTIsolationWithDowntime(ctx sdk.Context, msg core.Message, receipt *ethtypes.Receipt) (NFTIsolation, error) {
-	return e.verifySignedNFTIsolation(ctx, msg, receipt, true)
+	return e.verifySignedNFTIsolation(ctx, msg, receipt, true, nil)
 }
 
-func (e *Executor) verifySignedNFTIsolation(ctx sdk.Context, msg core.Message, receipt *ethtypes.Receipt, downtimeDeposit bool) (NFTIsolation, error) {
+func (e *Executor) verifySignedNFTIsolation(ctx sdk.Context, msg core.Message, receipt *ethtypes.Receipt, downtimeDeposit bool,
+	conversion *nftIsolationConversion,
+) (NFTIsolation, error) {
 	var proof NFTIsolation
-	method := e.gateway.Methods["delegateNFT1155"]
+	methodName, wordCount, receiptLogs := "delegateNFT1155", 4, 11
+	if conversion != nil {
+		methodName, wordCount, receiptLogs = "delegateNFT1155WithConversion", 6, receiptLogs+nftConversionLogs
+	}
+	method, known := e.gateway.Methods[methodName]
 	if msg.To == nil || *msg.To != e.roles.Gateway || msg.Value == nil || msg.Value.Sign() != 0 ||
-		len(msg.SetCodeAuthorizations) != 0 || len(msg.Data) != 4+4*common.HashLength || !bytes.Equal(msg.Data[:4], method.ID) || msg.From == Sender() {
+		!known || len(msg.SetCodeAuthorizations) != 0 || len(msg.Data) != 4+wordCount*common.HashLength || !bytes.Equal(msg.Data[:4], method.ID) || msg.From == Sender() {
 		return proof, errors.New("NFT isolation requires a direct signed Gateway call with zero value")
 	}
 	args, err := method.Inputs.Unpack(msg.Data[4:])
@@ -71,14 +77,14 @@ func (e *Executor) verifySignedNFTIsolation(ctx sdk.Context, msg core.Message, r
 	}
 	var cursor common.Hash
 	if downtimeDeposit {
-		if err := e.verifyDELReceiptEnvelope(ctx, receipt, msg.From, 11, 13); err != nil {
+		if err := e.verifyDELReceiptEnvelope(ctx, receipt, msg.From, receiptLogs, receiptLogs+2); err != nil {
 			return proof, err
 		}
 		cursor, err = e.readUnpausedDepositCursor(ctx, validator)
 		if err != nil {
 			return proof, err
 		}
-	} else if err := e.verifyDELStakeReceipt(ctx, receipt, validator, msg.From, 11); err != nil {
+	} else if err := e.verifyDELStakeReceipt(ctx, receipt, validator, msg.From, receiptLogs); err != nil {
 		return proof, err
 	}
 	collection, known, err := e.auth.AuthenticateCollection(ctx, origin, receipts.EntryPointSignedEthereum)
@@ -109,23 +115,44 @@ func (e *Executor) verifySignedNFTIsolation(ctx sdk.Context, msg core.Message, r
 		next.Cmp(position.NextPositionID.Big()) != 0 || reserve.Sign() <= 0 || reserve.BitLen() > 255 {
 		return proof, errors.New("new vault position differs from the signed DEL-backed origin")
 	}
-	supply, pool, err := e.isolationOriginPoststate(ctx, origin, originID)
-	if err != nil {
-		return proof, err
-	}
 	gatewayWord, vaultWord, validatorWord, wdelWord := common.BytesToHash(e.roles.Gateway[:]), common.BytesToHash(e.roles.PositionVault[:]),
 		common.BytesToHash(validator[:]), common.BytesToHash(e.roles.WrappedDEL[:])
 	var zero common.Hash
+	originToken, originAmount, originKind := common.Address{}, position.ReserveAmount, nfttypes.IsolatedReserveDEL
+	vaultStart := 4
+	if conversion != nil {
+		if !position.Refundable || !position.Burnable {
+			return proof, errors.New("converted NFT receipt must retain refundable and burnable origin policy")
+		}
+		vaultStart += nftConversionPrefixLogs
+		if err := conversion.verify(ctx, logs[4:vaultStart], origin, e.roles.PositionVault, e.roles.WrappedDEL,
+			args[4].(*big.Int), args[5].(*big.Int), position.ReserveAmount); err != nil {
+			return proof, err
+		}
+		originToken = conversion.proof.InputToken
+		originAmount, originKind = common.BigToHash(conversion.proof.InputAmount.BigInt()), nfttypes.IsolatedReserveERC20
+	}
+	supply, pool, err := e.isolationOriginCollateralPoststate(ctx, origin, originID, originToken)
+	if err != nil {
+		return proof, err
+	}
+	originEnd := vaultStart + 3
+	if conversion != nil {
+		if !matchesNFTEvent(logs[originEnd], originToken, []common.Hash{nftConversionApprovalTopic, originWord, vaultWord}, zero) {
+			return proof, errors.New("converted NFT origin did not clear the exact funding allowance")
+		}
+		originEnd++
+	}
 	transferSingle := e.origin.Events["TransferSingle"].ID
 	reserveKind := smallWord(byte(nfttypes.IsolatedReserveDEL))
 	supplyWord := common.BytesToHash(sdk.Uint64ToBigEndian(uint64(supply)))
 	if !matchesNFTEvent(logs[1], origin, []common.Hash{transferSingle, gatewayWord, ownerWord, gatewayWord}, originIDWord, quantityWord) ||
 		!matchesNFTEvent(logs[2], origin, []common.Hash{transferSingle, gatewayWord, gatewayWord, zero}, originIDWord, quantityWord) ||
-		!matchesNFTEvent(logs[3], origin, []common.Hash{e.origin.Events["ReserveUpdated"].ID}, originIDWord, supplyWord, zero, common.BigToHash(pool), reserveKind) ||
-		!matchesNFTEvent(logs[4], e.roles.PositionVault, []common.Hash{e.vault.Events["Transfer"].ID, zero, gatewayWord, positionID}) ||
-		!matchesNFTEvent(logs[5], e.roles.PositionVault, []common.Hash{e.vault.Events["PositionIsolated"].ID, positionID, originWord, originIDWord}, gatewayWord, quantityWord, reserveKind, zero, position.ReserveAmount, boolWord(position.Refundable), boolWord(position.Burnable)) ||
-		!matchesNFTEvent(logs[6], e.roles.PositionVault, []common.Hash{e.vault.Events["PositionReserveUpdated"].ID, positionID}, reserveKind, zero, position.ReserveAmount, quantityWord) ||
-		!matchesNFTEvent(logs[7], origin, []common.Hash{e.origin.Events["OriginIsolated"].ID, originIDWord, positionID, gatewayWord}, gatewayWord, quantityWord, position.ReserveAmount) {
+		!matchesNFTEvent(logs[3], origin, []common.Hash{e.origin.Events["ReserveUpdated"].ID}, originIDWord, supplyWord, common.BytesToHash(originToken[:]), common.BigToHash(pool), smallWord(byte(originKind))) ||
+		!matchesNFTEvent(logs[vaultStart], e.roles.PositionVault, []common.Hash{e.vault.Events["Transfer"].ID, zero, gatewayWord, positionID}) ||
+		!matchesNFTEvent(logs[vaultStart+1], e.roles.PositionVault, []common.Hash{e.vault.Events["PositionIsolated"].ID, positionID, originWord, originIDWord}, gatewayWord, quantityWord, reserveKind, zero, position.ReserveAmount, boolWord(position.Refundable), boolWord(position.Burnable)) ||
+		!matchesNFTEvent(logs[vaultStart+2], e.roles.PositionVault, []common.Hash{e.vault.Events["PositionReserveUpdated"].ID, positionID}, reserveKind, zero, position.ReserveAmount, quantityWord) ||
+		!matchesNFTEvent(logs[originEnd], origin, []common.Hash{e.origin.Events["OriginIsolated"].ID, originIDWord, positionID, gatewayWord}, gatewayWord, quantityWord, originAmount) {
 		return proof, errors.New("NFT isolation receipt does not reconcile origin burn and vault mint")
 	}
 	companion, post, coinCursor, err := e.readNFTCompanionState(ctx, validator, msg.From)
@@ -140,7 +167,7 @@ func (e *Executor) verifySignedNFTIsolation(ctx sdk.Context, msg core.Message, r
 	}
 	companion.PenaltyCursor = coinCursor
 	isNew := common.BytesToHash(post[3*common.HashLength:4*common.HashLength]) == position.ReserveAmount
-	tail := logs[8:]
+	tail := logs[originEnd+1:]
 	if downtimeDeposit {
 		ack, err := e.verifyDepositPenaltyAcknowledgements(ctx, tail, validator, companion.StakeID, cursor)
 		if err != nil {
@@ -293,6 +320,12 @@ func (e *Executor) verifySignedNFTWithdrawal(ctx sdk.Context, msg core.Message, 
 }
 
 func (e *Executor) isolationOriginPoststate(ctx sdk.Context, origin common.Address, originID *big.Int) (uint32, *big.Int, error) {
+	return e.isolationOriginCollateralPoststate(ctx, origin, originID, common.Address{})
+}
+
+func (e *Executor) isolationOriginCollateralPoststate(ctx sdk.Context, origin common.Address, originID *big.Int,
+	token common.Address,
+) (uint32, *big.Int, error) {
 	if e.origin.Methods["totalSupply0"].Sig != "totalSupply(uint256)" {
 		return 0, nil, errors.New("compiler origin supply ABI differs")
 	}
@@ -306,11 +339,31 @@ func (e *Executor) isolationOriginPoststate(ctx sdk.Context, origin common.Addre
 	}
 	supply := new(big.Int).SetBytes(rawSupply)
 	pool := new(big.Int).SetBytes(rawReserve[common.HashLength : 2*common.HashLength])
-	held := e.evm.GetBalance(ctx, origin)
-	if supply.BitLen() > 32 || common.BytesToHash(rawReserve[:common.HashLength]) != (common.Hash{}) ||
-		common.BytesToHash(rawReserve[2*common.HashLength:]) != smallWord(byte(nfttypes.IsolatedReserveDEL)) ||
-		held == nil || held.ToBig().Cmp(pool) < 0 {
-		return 0, nil, errors.New("ERC1155 origin pool or supply differs from a funded DEL position")
+	kind := nfttypes.IsolatedReserveDEL
+	if token != (common.Address{}) {
+		kind = nfttypes.IsolatedReserveERC20
+	}
+	if supply.BitLen() > 32 || !matchesNFTWords(rawReserve, common.BytesToHash(token[:]), common.BigToHash(pool), smallWord(byte(kind))) {
+		return 0, nil, errors.New("ERC1155 origin pool or supply differs from its declared collateral")
+	}
+	if kind == nfttypes.IsolatedReserveDEL {
+		held := e.evm.GetBalance(ctx, origin)
+		if held == nil || held.ToBig().Cmp(pool) < 0 {
+			return 0, nil, errors.New("ERC1155 origin DEL pool is underfunded")
+		}
+	} else {
+		declared, err := e.read(ctx, origin, e.origin, "declaredReserve", common.HashLength, uint8(kind), token)
+		if err != nil {
+			return 0, nil, err
+		}
+		// The pinned wrapper ABI supplies the canonical ERC20 balanceOf selector.
+		held, err := e.read(ctx, token, e.wrapper, "balanceOf", common.HashLength, origin)
+		if err != nil {
+			return 0, nil, err
+		}
+		if new(big.Int).SetBytes(declared).Cmp(pool) < 0 || bytes.Compare(held, declared) < 0 {
+			return 0, nil, errors.New("ERC1155 origin custom pool is underfunded")
+		}
 	}
 	return uint32(supply.Uint64()), pool, nil
 }
