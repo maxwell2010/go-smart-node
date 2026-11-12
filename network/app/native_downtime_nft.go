@@ -47,11 +47,18 @@ func (c *withdrawalController) activeNFTPenaltyProjection(ctx sdk.Context, row v
 }
 
 func (c *withdrawalController) applyFrozenNFTDowntime(ctx sdk.Context, row validatortypes.EVMFrozenBinding, master settlement.MasterPenaltyProof,
-	infractionHeight int64, percent uint16, supply func(sdk.Context) sdkmath.Int,
+	infractionHeight int64, percent uint16, mature bool, supply func(sdk.Context) sdkmath.Int,
 ) error {
-	return c.executor.ApplyFrozenNFTPenalty(ctx, row, infractionHeight, percent, supply, func(next sdk.Context, proof settlement.FrozenNFTPenaltyProof) error {
+	apply := c.executor.ApplyFrozenNFTPenalty
+	if mature {
+		apply = c.executor.ApplyCustodiedNFTCheckpoint
+	}
+	return apply(ctx, row, infractionHeight, percent, supply, func(next sdk.Context, proof settlement.FrozenNFTPenaltyProof) error {
 		if proof.BeforeCursor != master.BeforeCursor || proof.AfterCursor != master.AfterCursor {
 			return errors.New("isolated NFT claim differs from the announced Master penalty")
+		}
+		if mature {
+			return c.keeper.ApplyGatewayCustodiedNFTCheckpoint(next, c.nft, row, infractionHeight, proof.BeforeCursor, proof.AfterCursor)
 		}
 		return c.keeper.ApplyGatewayFrozenNFTPenalty(next, c.nft, row, infractionHeight, proof.BeforeCursor, proof.AfterCursor, proof.RemainingReserve)
 	})

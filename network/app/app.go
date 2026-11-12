@@ -927,6 +927,9 @@ func (app *App) InitChainer(ctx sdk.Context, req *abci.RequestInitChain) (*abci.
 }
 
 func (app *App) PreBlocker(ctx sdk.Context, _ *abci.RequestFinalizeBlock) (*sdk.ResponsePreBlock, error) {
+	if app.usesNativeDuplicateVote() {
+		return app.preBlockNativeDuplicateVote(ctx)
+	}
 	return app.ModuleManager.PreBlock(ctx)
 }
 

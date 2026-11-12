@@ -26,6 +26,9 @@ const (
 )
 
 func validateNativeOrdinaryDELDowntimeProfile(profile WithdrawalProfile) error {
+	if profile.EnableNativeDuplicateVote && !profile.EnableNativeOrdinaryDELDowntime {
+		return errors.New("native duplicate-vote settlement requires native downtime and its bounded stake profile")
+	}
 	if profile.EnableNativeHeldDELDowntime && (!profile.EnableNativeOrdinaryDELDowntime || !profile.EnableDELHold) {
 		return errors.New("native held DEL downtime requires native DEL downtime and DEL hold admission")
 	}
@@ -278,24 +281,35 @@ func (app *App) executeOrdinaryDELDowntime(ctx sdk.Context, candidate validatork
 			if !deadline.IsInt64() || deadline.Sign() <= 0 {
 				return errors.New("invalid frozen DEL penalty deadline")
 			}
-			if deadline.Int64() <= project.BlockTime().Unix() {
+			mature := deadline.Int64() <= project.BlockTime().Unix()
+			if mature && !c.profile.EnableNativeDuplicateVote {
 				continue
 			}
 			if row.SourceKind == validatortypes.EVMStakeBindingKind_EVM_STAKE_BINDING_NFT {
-				if err := c.applyFrozenNFTDowntime(project, row, master, candidate.InfractionHeight, percent, supply); err != nil {
+				if err := c.applyFrozenNFTDowntime(project, row, master, candidate.InfractionHeight, percent, mature, supply); err != nil {
 					return err
 				}
 				continue
 			}
-			err := c.executor.ApplyFrozenDELPenalty(project, row, candidate.InfractionHeight, percent, supply, func(next sdk.Context, proof settlement.FrozenDELPenaltyProof) error {
+			apply := c.executor.ApplyFrozenDELPenalty
+			if mature {
+				apply = c.executor.ApplyCustodiedDELCheckpoint
+			}
+			err := apply(project, row, candidate.InfractionHeight, percent, supply, func(next sdk.Context, proof settlement.FrozenDELPenaltyProof) error {
 				if proof.BeforeCursor != master.BeforeCursor || proof.AfterCursor != master.AfterCursor {
 					return errors.New("frozen DEL claim differs from the Master penalty cursor")
 				}
+				var hold *validatorkeeper.GatewayFrozenDELHold
 				if row.NativeTarget.StakeType == validatortypes.StakeType_CoinHold {
-					hold := validatorkeeper.GatewayFrozenDELHold{
+					hold = &validatorkeeper.GatewayFrozenDELHold{
 						WrappedDEL: c.profile.WrappedDEL, HoldDeadline: proof.HoldDeadline, HoldStartTime: proof.HoldStartTime,
 					}
-					return c.keeper.ApplyGatewayFrozenDELHoldPenalty(next, row, hold, candidate.InfractionHeight, proof.BeforeCursor, proof.AfterCursor, proof.Remaining)
+				}
+				if mature {
+					return c.keeper.ApplyGatewayCustodiedDELCheckpoint(next, row, hold, candidate.InfractionHeight, proof.BeforeCursor, proof.AfterCursor)
+				}
+				if hold != nil {
+					return c.keeper.ApplyGatewayFrozenDELHoldPenalty(next, row, *hold, candidate.InfractionHeight, proof.BeforeCursor, proof.AfterCursor, proof.Remaining)
 				}
 				return c.keeper.ApplyGatewayFrozenDELPenalty(next, row, candidate.InfractionHeight, proof.BeforeCursor, proof.AfterCursor, proof.Remaining)
 			})

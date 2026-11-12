@@ -43,7 +43,14 @@ func (app *App) beginNativeConsensus(ctx sdk.Context) (sdk.BeginBlock, error) {
 			return sdk.BeginBlock{}, fmt.Errorf("distribute native fees for height %d: %w", commit.Height, err)
 		}
 	}
-	if app.withdrawals.profile.EnableNativeOrdinaryDELDowntime && commit.Height > 0 {
+	var attemptedHistorical bool
+	if app.usesNativeDuplicateVote() && commit.Height > 0 {
+		attemptedHistorical, err = app.applyNativeDuplicateVotePenalty(child)
+		if err != nil {
+			return sdk.BeginBlock{}, err
+		}
+	}
+	if !attemptedHistorical && app.withdrawals.profile.EnableNativeOrdinaryDELDowntime && commit.Height > 0 {
 		if err := app.applyOrdinaryDELDowntime(child); err != nil {
 			return sdk.BeginBlock{}, err
 		}

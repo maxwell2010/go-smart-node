@@ -59,6 +59,7 @@ type WithdrawalProfile struct {
 	EnableNativeOrdinaryDELDowntime bool           `json:"enable_native_ordinary_del_downtime,omitempty"`
 	EnableNativeHeldDELDowntime     bool           `json:"enable_native_held_del_downtime,omitempty"`
 	EnableNativeNFTDowntime         bool           `json:"enable_native_nft_downtime,omitempty"`
+	EnableNativeDuplicateVote       bool           `json:"enable_native_duplicate_vote,omitempty"`
 }
 
 type withdrawalController struct {
@@ -82,6 +83,9 @@ func (app *App) LoadWithdrawalSettlement(ctx sdk.Context) error {
 	}
 	raw := ctx.KVStore(app.keys[validatortypes.StoreKey]).Get([]byte{WithdrawalProfileKey})
 	if raw == nil && app.withdrawals == nil {
+		if err := app.verifyNativeDuplicateVoteState(ctx, false); err != nil {
+			return err
+		}
 		return app.verifyNativeConsensusState(ctx, false)
 	}
 	var profile WithdrawalProfile
@@ -96,6 +100,9 @@ func (app *App) LoadWithdrawalSettlement(ctx sdk.Context) error {
 		return err
 	}
 	if err := app.verifyNativeIBCState(ctx, profile); err != nil {
+		return err
+	}
+	if err := app.verifyNativeDuplicateVoteState(ctx, profile.EnableNativeDuplicateVote); err != nil {
 		return err
 	}
 	if app.withdrawals != nil {
@@ -395,6 +402,12 @@ func (c *withdrawalController) delStakePosition(result settlement.DELTransition)
 type automaticWithdrawalKey struct{}
 
 func (c *withdrawalController) guardInternalCommit(ctx sdk.Context, msg core.Message, logs []*ethtypes.Log) error {
+	if c.profile.EnableNativeDuplicateVote &&
+		(c.executor.AuthorizeMasterHistoricalPenalty(ctx, msg) || c.executor.AuthorizeActiveHistoricalDELPenalty(ctx, msg) ||
+			c.executor.AuthorizeFrozenHistoricalDELPenalty(ctx, msg) || c.executor.AuthorizeActiveHistoricalNFTPenalty(ctx, msg) ||
+			c.executor.AuthorizeFrozenHistoricalNFTPenalty(ctx, msg)) {
+		return nil
+	}
 	if c.profile.EnableNativeOrdinaryDELDowntime &&
 		(c.executor.AuthorizeMasterPenalty(ctx, msg) || c.executor.AuthorizeOrdinaryDELPenalty(ctx, msg) ||
 			c.executor.AuthorizeFrozenDELPenalty(ctx, msg) ||

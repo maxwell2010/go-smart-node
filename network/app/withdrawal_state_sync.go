@@ -123,6 +123,9 @@ func (app *App) verifyRestoredWithdrawalProfile(offer *withdrawalSnapshotOffer) 
 		if raw != nil {
 			return errors.New("restored withdrawal profile was not prepared before state sync")
 		}
+		if err := app.verifyNativeDuplicateVoteState(ctx, false); err != nil {
+			return err
+		}
 		return app.verifyNativeConsensusState(ctx, false)
 	}
 	expected, err := json.Marshal(app.withdrawals.profile)
@@ -133,6 +136,9 @@ func (app *App) verifyRestoredWithdrawalProfile(offer *withdrawalSnapshotOffer) 
 		return errors.New("restored withdrawal profile differs from the configured withdrawal profile")
 	}
 	if err := app.verifyNativeConsensusState(ctx, app.withdrawals.profile.EnableNativeConsensus); err != nil {
+		return err
+	}
+	if err := app.verifyNativeDuplicateVoteState(ctx, app.withdrawals.profile.EnableNativeDuplicateVote); err != nil {
 		return err
 	}
 	return app.verifyNativeIBCState(ctx, app.withdrawals.profile)

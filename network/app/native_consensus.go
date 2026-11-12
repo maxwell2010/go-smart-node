@@ -257,6 +257,14 @@ func (app *App) endNativeConsensus(ctx sdk.Context) (sdk.EndBlock, error) {
 			return sdk.EndBlock{}, err
 		}
 	}
+	if app.usesNativeDuplicateVote() {
+		if err := app.NativeValidatorKeeper.VerifyNativeEvidenceLimits(child, app.GetConsensusParams(child).Evidence); err != nil {
+			return sdk.EndBlock{}, err
+		}
+		if err := app.NativeValidatorKeeper.RecordNativeEvidenceBlock(child); err != nil {
+			return sdk.EndBlock{}, err
+		}
+	}
 	result.Events = append(result.Events, child.EventManager().ABCIEvents()...)
 	write()
 	return result, nil

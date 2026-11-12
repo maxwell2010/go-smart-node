@@ -7,12 +7,14 @@ import (
 	"fmt"
 	"io"
 
+	sdkmath "cosmossdk.io/math"
 	abci "github.com/cometbft/cometbft/abci/types"
 	cryptoenc "github.com/cometbft/cometbft/crypto/encoding"
 	"github.com/cosmos/cosmos-sdk/codec/address"
 	sdk "github.com/cosmos/cosmos-sdk/types"
 	"github.com/ethereum/go-ethereum/common"
 	nfttypes "github.com/maxwell2010/go-smart-node/network/decimal/nft/types"
+	validatorkeeper "github.com/maxwell2010/go-smart-node/network/decimal/validator/keeper"
 	"github.com/maxwell2010/go-smart-node/network/decimal/validator/settlement"
 	validatortypes "github.com/maxwell2010/go-smart-node/network/decimal/validator/types"
 	"github.com/maxwell2010/go-smart-node/network/identity"
@@ -256,6 +258,15 @@ func (app *App) initWithdrawalGenesis(ctx sdk.Context, req *abci.RequestInitChai
 	if err := app.appCodec.UnmarshalJSON(genesis[validatortypes.ModuleName], &validators); err != nil {
 		return nil, err
 	}
+	if profile.EnableNativeDuplicateVote {
+		if ctx.BlockHeight() != 0 || max(req.InitialHeight, 1) != 1 || len(validators.EVMFrozenBindings) != 0 {
+			return nil, errors.New("native duplicate-vote settlement requires a fresh height-one genesis without frozen bindings")
+		}
+		if fraction := validators.Params.SlashFractionDoubleSign; fraction.IsNil() ||
+			!fraction.Equal(sdkmath.LegacyNewDecWithPrec(validatorkeeper.HistoricalDELPenaltyPercent, 2)) {
+			return nil, errors.New("native duplicate-vote genesis requires the exact five percent slash fraction")
+		}
+	}
 	for _, row := range validators.EVMFrozenBindings {
 		if row.UpdatedHeight > max(req.InitialHeight, 1) {
 			return nil, errors.New("withdrawal genesis binding height exceeds the initial height")
@@ -360,6 +371,14 @@ func (app *App) initWithdrawalGenesis(ctx sdk.Context, req *abci.RequestInitChai
 	}
 	if err := controller.executor.AttestGenesis(read, validators.EVMFrozenBindings, limits, controller.assets.AttestGenesisNFT); err != nil {
 		return nil, fmt.Errorf("authenticate withdrawal genesis: %w", err)
+	}
+	if profile.EnableNativeDuplicateVote {
+		if err := app.NativeValidatorKeeper.InitializeDELProvenance(child, profile.Gateway, profile.WrappedDEL); err != nil {
+			return nil, fmt.Errorf("initialize native stake history: %w", err)
+		}
+		if err := app.NativeValidatorKeeper.InitializeNativeEvidenceLimits(child, app.GetConsensusParams(child).Evidence); err != nil {
+			return nil, fmt.Errorf("initialize native evidence limits: %w", err)
+		}
 	}
 	if profile.EnableNativeIBCV1 {
 		// Hermes reads the SDK staking query. The native duration is safe to

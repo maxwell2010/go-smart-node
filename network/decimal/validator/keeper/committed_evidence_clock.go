@@ -13,6 +13,19 @@ const (
 	committedEvidenceClockSize      = 1 + 8 + 8 + 4
 )
 
+// VerifyNativeEvidenceClockHeight checks the clock of a restored or reopened
+// application against its committed height. Startup does not supply header time.
+func (k *StateKeeper) VerifyNativeEvidenceClockHeight(ctx sdk.Context) error {
+	block, err := k.readNativeEvidenceClock(ctx)
+	if err != nil {
+		return err
+	}
+	if ctx.BlockHeight() != block.Height {
+		return errors.New("stored native evidence clock differs from the application height")
+	}
+	return nil
+}
+
 // PreviousNativeEvidenceBlock returns the canonical clock saved by the
 // immediately preceding block. It does not depend on validator history pruning
 // or on CometBFT's local evidence pool.
