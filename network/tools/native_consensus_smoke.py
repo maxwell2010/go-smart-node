@@ -183,7 +183,7 @@ def load_fixture(directory, fee_rewards, downtime, jail_recovery, held_downtime)
                   'invalid signed held downtime fixture transaction')
         check(expected['heldDelegate']['hash'] != expected['heldWithdraw']['hash'], 'duplicate held downtime transaction')
     if jail_recovery:
-        check(expected['jailSeconds'] == 30 and type(expected['unjailNonce']) is int and
+        check(expected['jailSeconds'] == 60 and type(expected['unjailNonce']) is int and
               0 <= expected['unjailNonce'] < 2**32 - 1, 'invalid jail recovery duration or nonce')
         for route in ('earlyUnpause', 'unpause'):
             signed = expected[route]
@@ -649,6 +649,16 @@ def run_downtime_gate(binary, expected, replicas, env, owner, report, first, *, 
     punished = check_ledger(quorum, expected, height, remaining, downtime=True, previous=pre_penalty, burned=DOWNTIME_BURN,
                             wallet=int(before['walletAtomic']), collector=int(before['feeCollectorAtomic']))
     report['penalty'] = {**punished, **check_downtime_state(quorum, expected, height, True)}
+
+    jail_until = None
+    prior = punished
+    if jail_recovery:
+        report['phase'] = 'signed-unpause-before-jail-deadline'
+        jail_until = block_time(height) + timedelta(seconds=expected['jailSeconds'])
+        report['jailUntil'] = jail_until.isoformat()
+        prior = submit_unpause(quorum, expected, report, punished, jail_until, success=False)
+
+    report['phase'] = 'verify-penalty-and-effective-h-plus-two'
     transition = {}
     for offset, powers in enumerate((DOWNTIME_INITIAL, DOWNTIME_INITIAL, DOWNTIME_AFTER)):
         current = height + offset
@@ -661,14 +671,6 @@ def run_downtime_gate(binary, expected, replicas, env, owner, report, first, *, 
           following['next_validators_hash'] == changed['validators_hash'] != following['validators_hash'],
           'downtime removal must first become effective at H+2')
     report['transition'] = transition
-
-    jail_until = None
-    prior = punished
-    if jail_recovery:
-        report['phase'] = 'signed-unpause-before-jail-deadline'
-        jail_until = block_time(height) + timedelta(seconds=expected['jailSeconds'])
-        report['jailUntil'] = jail_until.isoformat()
-        prior = submit_unpause(quorum, expected, report, punished, jail_until, success=False)
 
     report['phase'] = 'restart-c-as-follower'
     checkpoint = height + 2
