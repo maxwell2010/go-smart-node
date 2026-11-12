@@ -55,6 +55,14 @@ clean installation and the source and binary symbol scans.
 [Combined module checks](https://github.com/maxwell2010/go-smart-node/actions/runs/43203291269)
 [Archive and scanner](https://github.com/maxwell2010/go-smart-node/actions/runs/43203291717)
 
+On `4ddae0c`, three private nodes with the historical penalty, native IBC,
+and governance profile halted at block 31, applied the rehearsal handler
+at block 32 and agreed on AppHash at block 47. The signed 0.25 DEL pending
+claim and 28-day deadline survived in both native state and EVM. The IBC
+assertion covers unbonding parameter continuity. The same-family pending
+packet rehearsal is tracked separately above.
+[Full-profile handoff](https://github.com/maxwell2010/go-smart-node/actions/runs/43204900931)
+
 ## Separate release tracks
 
 The selected architecture is a fresh network on a maintained modern stack,
