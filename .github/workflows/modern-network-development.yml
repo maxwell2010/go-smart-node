@@ -31,6 +31,10 @@ on:
       systemd_package_fingerprint:
         description: Trusted OpenPGP fingerprint from the signing run
         type: string
+      systemd_restart_snapshot:
+        description: Restart the systemd follower and restore a separate peer from a P2P snapshot
+        default: false
+        type: boolean
   push:
     branches: ['integration/**', 'release/**']
     paths: ['network/**', '.github/workflows/modern-network-development.yml']
@@ -122,6 +126,7 @@ jobs:
           SYSTEMD_PACKAGE_RUN: ${{ inputs.systemd_package_run }}
           SYSTEMD_PACKAGE_SHA256: ${{ inputs.systemd_package_sha256 }}
           SYSTEMD_PACKAGE_FINGERPRINT: ${{ inputs.systemd_package_fingerprint }}
+          SYSTEMD_RESTART_SNAPSHOT: ${{ inputs.systemd_restart_snapshot }}
         run: |
           set -euo pipefail
           umask 077
@@ -135,6 +140,10 @@ jobs:
           export MCND_NATIVE_LAUNCH_REHEARSAL=1
           launch_options=()
           allocation_options=()
+          if [[ "$SYSTEMD_RESTART_SNAPSHOT" == true ]]; then
+            [[ -n "$SYSTEMD_PACKAGE_RUN" ]]
+            launch_options+=(--restart-and-snapshot)
+          fi
           if [[ "$LAUNCH_FOUR_VALIDATORS" == true || "$LAUNCH_TREASURY" == true || "$LAUNCH_SIGNED_PACKAGE" == true || -n "$SYSTEMD_PACKAGE_RUN" ]]; then
             export MCND_NATIVE_LAUNCH_REHEARSAL=4
             launch_options+=(--four-validators)

@@ -101,16 +101,40 @@ class SystemdFollower:
         props = self._properties("ActiveState", "MainPID")
         return None if props.get("ActiveState") == "active" and int(props.get("MainPID", "0")) else 1
 
+    def restart(self):
+        private_namespace()
+        previous = self.evidence()
+        previous_data = (self.home / "data").stat()
+        guard = self.signals.finish_owned_operation() if self.signals else nullcontext()
+        with guard:
+            result = subprocess.run(["systemctl", "--system", "--quiet", "restart", self.unit],
+                                    capture_output=True, text=True, timeout=45)
+            if result.returncode:
+                raise RuntimeError(f"could not restart transient systemd follower: {result.stderr.strip()[:300]}")
+        restarted = self.evidence()
+        if restarted["mainPid"] == previous["mainPid"] or restarted["invocationId"] == previous["invocationId"]:
+            raise RuntimeError("systemd restart did not start a new follower invocation")
+        if not os.path.samestat(previous_data, (self.home / "data").stat()):
+            raise RuntimeError("systemd restart changed the follower data directory")
+        return {"previousMainPid": previous["mainPid"], "restartedMainPid": restarted["mainPid"],
+                "previousInvocationId": previous["invocationId"], "restartedInvocationId": restarted["invocationId"],
+                "sameHome": True}
+
     def evidence(self):
         props = self._properties("ActiveState", "SubState", "MainPID", "User", "Type", "Transient",
-                                 "NetworkNamespacePath")
+                                 "NetworkNamespacePath", "WorkingDirectory", "InvocationID")
         if (props.get("ActiveState"), props.get("SubState"), props.get("User"), props.get("Type"),
             props.get("Transient"), props.get("NetworkNamespacePath")) != (
                 "active", "running", self.user.pw_name, "exec", "yes", self.namespace_path):
             raise RuntimeError("expected a running transient systemd follower in the isolated namespace")
+        if props.get("WorkingDirectory") != str(self.home):
+            raise RuntimeError("running systemd follower does not use the prepared home")
         pid = int(props["MainPID"])
         if pid <= 1:
             raise RuntimeError("systemd did not report a follower MainPID")
+        invocation_id = props.get("InvocationID", "")
+        if not invocation_id or not invocation_id.strip("0"):
+            raise RuntimeError("systemd did not report a follower invocation ID")
         process = Path(f"/proc/{pid}")
         status = dict(line.split(":", 1) for line in (process / "status").read_text().splitlines() if ":" in line)
         uid = int(status["Uid"].split()[1])
@@ -123,7 +147,7 @@ class SystemdFollower:
         if binary_sha256 != self.expected_sha256:
             raise RuntimeError("systemd MainPID binary SHA256 differs from the signed package")
         return {"unit": self.unit, "activeState": props["ActiveState"], "subState": props["SubState"],
-                "mainPid": pid, "serviceUid": uid, "networkNamespaceMatches": namespace_matches,
+                "mainPid": pid, "invocationId": invocation_id, "serviceUid": uid, "networkNamespaceMatches": namespace_matches,
                 "binarySha256": binary_sha256}
 
     def __exit__(self, *_):

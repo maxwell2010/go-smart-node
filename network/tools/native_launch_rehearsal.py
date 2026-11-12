@@ -20,7 +20,7 @@ from mcnd_process_smoke import ProcessOwner, SignalGuard, private_environment, p
 from native_consensus_smoke import (
     check_signatures, committed_header, create_replica, decode_pubkey, effective_set, wait_peer_pair, wait_replicas,
 )
-from withdrawal_genesis_smoke import ADDRESS, SHA256, bech32_payload, check, ethereum, native, private_bytes, request, safe_diagnostic
+from withdrawal_genesis_smoke import ADDRESS, SHA256, bech32_payload, check, ethereum, log_records, native, private_bytes, request, safe_diagnostic
 
 
 GENESIS_LIMIT = 64 * 1024 * 1024
@@ -257,8 +257,48 @@ def rehearse_treasury(nodes, fixture, height, report):
                                          "appHash": app_hash, "state": after}
 
 
+def wait_caught_up(node):
+    deadline = time.monotonic() + 30
+    status = node.rpc("status")
+    while status["sync_info"]["catching_up"]:
+        check(time.monotonic() < deadline, f"{node.label} did not finish P2P block sync")
+        time.sleep(0.25)
+        status = node.rpc("status")
+    return status
+
+
+def verify_systemd_restart(systemd, follower, validators, expected, report):
+    report["phase"] = "systemd-follower-restart"
+    before = int(follower.rpc("abci_info")["response"]["last_block_height"])
+    check(before > 0, "systemd follower must commit state before restarting")
+    message = "ABCI Handshake App Info"
+    previous_handshakes = len(log_records(follower.log, message))
+    check(previous_handshakes > 0, "systemd follower has no startup handshake record")
+    restart = systemd.restart()
+    wait_peer_pair(validators[0], follower, 60, report)
+    handshakes = log_records(follower.log, message)[previous_handshakes:]
+    check(len(handshakes) == 1, "restart must produce one new application handshake")
+    loaded = int(handshakes[0]["height"])
+    check(loaded >= before, "restarted follower did not load its previously committed application state")
+
+    nodes = [*validators, follower]
+    height = wait_replicas(nodes, loaded + 4, 100, report) - 1
+    loaded_hash = committed_header(validators, loaded + 1)["app_hash"]
+    check(handshakes[0]["hash"].upper() == loaded_hash.upper(), "restarted follower loaded a different AppHash")
+    status = wait_caught_up(follower)
+    check(status["node_info"]["id"] == follower.node_id and int(status["validator_info"]["voting_power"]) == 0,
+          "systemd restart changed the follower's peer identity or voting power")
+    check(verify_first_block(nodes) == report["block1Hash"], "systemd restart did not preserve block 1")
+    app_hash = committed_header(nodes, height + 1)["app_hash"]
+    values = {balance(expected["actor"], expected["actorNative"], height, node.evm, node.rest) for node in nodes}
+    check(len(values) == 1 and next(iter(values)) > 0, "restarted follower disagrees on the committed DEL balance")
+    report["systemdRestart"] = {**restart, "beforeHeight": before, "loadedHeight": loaded, "loadedAppHash": loaded_hash,
+                                "verifiedHeight": height, "appHash": app_hash, "sameNodeId": True, "catchingUp": False}
+    return height
+
+
 def run_launch(binary, root, genesis, expected, keys, env, owner, report, *, four_validators=False, treasury=None,
-               systemd=None):
+               systemd=None, restart_snapshot=False):
     rows = expected["validators"]
     powers = tuple(row["initialPower"] for row in rows)
     options = {"chain_id": expected["chainId"], "evm_chain_id": expected["evmChainId"]}
@@ -274,6 +314,10 @@ def run_launch(binary, root, genesis, expected, keys, env, owner, report, *, fou
     check(len({node.node_id for node in nodes}) == len(nodes), "duplicate launch P2P identity")
     stopped = validators[-1] if four_validators else None
     live_validators = [node for node in validators if node is not stopped]
+    if restart_snapshot:
+        from native_launch_snapshot import configure_snapshot_source, rehearse_snapshot
+
+        configure_snapshot_source(live_validators[0])
     configured = {node.label: configure_peers(node, [peer for peer in validators if peer is not node]) for node in validators}
     configured[follower.label] = configure_peers(follower, live_validators)
     try:
@@ -308,10 +352,7 @@ def run_launch(binary, root, genesis, expected, keys, env, owner, report, *, fou
     nodes = [*live_validators, follower]
     wait_peer_pair(live_validators[0], follower, 60, report)
     observed_height = wait_replicas(nodes, tip + 5, 150, report)
-    deadline = time.monotonic() + 30
-    while follower.rpc("status")["sync_info"]["catching_up"]:
-        check(time.monotonic() < deadline, "ordinary peer did not finish P2P block sync")
-        time.sleep(0.25)
+    follower_status = wait_caught_up(follower)
     report["phase"] = "verified-network-state"
     height = observed_height - 1
     report["block1Hash"] = verify_first_block(nodes)
@@ -322,7 +363,7 @@ def run_launch(binary, root, genesis, expected, keys, env, owner, report, *, fou
         report["confirmedSigners"] = check_signing(nodes, rows, height - 3, height)
     else:
         report["confirmedSigners"] = check_signatures(nodes, rows, height, powers, missing=(stopped.label,))
-    info = follower.rpc("status")["validator_info"]
+    info = follower_status["validator_info"]
     check(int(info["voting_power"]) == 0 and info["address"] not in {row["consensusAddress"] for row in expected["validators"]},
           "ordinary peer unexpectedly participates in validator consensus")
     report["followerVotingPower"] = 0
@@ -346,6 +387,10 @@ def run_launch(binary, root, genesis, expected, keys, env, owner, report, *, fou
                                      "catchingUp": False, "syncedFromHeight": 1, "verifiedHeight": height}
     if treasury is not None:
         rehearse_treasury(nodes, treasury, height, report)
+    if restart_snapshot:
+        restarted_height = verify_systemd_restart(systemd, follower, live_validators, expected, report)
+        rehearse_snapshot(follower_binary, root, genesis, expected, env, owner, report,
+                          source=live_validators[0], witness=follower, replicas=nodes, minimum_height=restarted_height)
 
 
 def main(argv=None, signals=None):
@@ -356,11 +401,14 @@ def main(argv=None, signals=None):
     parser.add_argument("--treasury-transfer", action="store_true", help="check the signed transfer pair on the four-validator fixture")
     parser.add_argument("--package-genesis", type=Path, help="use genesis extracted from the verified launch package")
     parser.add_argument("--systemd-follower", action="store_true", help="start the clean installed follower as a systemd service")
+    parser.add_argument("--restart-and-snapshot", action="store_true", help="verify systemd restart and a fresh state-sync peer")
     args = parser.parse_args(argv)
     if args.treasury_transfer and not args.four_validators:
         parser.error("--treasury-transfer requires --four-validators")
     if args.systemd_follower and not args.package_genesis:
         parser.error("--systemd-follower requires --package-genesis")
+    if args.restart_and_snapshot and not args.systemd_follower:
+        parser.error("--restart-and-snapshot requires --systemd-follower")
     report = {"status": "FAIL", "phase": "fixture-provenance", "initialHeight": 1}
     with Path(args.report).open("x", encoding="utf8") as stream:
         try:
@@ -394,7 +442,8 @@ def main(argv=None, signals=None):
                         service = SystemdFollower(binary, args.binary_sha256, signals=signals)
                     with service as systemd:
                         run_launch(binary, root, genesis, expected, keys, env, owner, report,
-                                   four_validators=args.four_validators, treasury=treasury, systemd=systemd)
+                                   four_validators=args.four_validators, treasury=treasury, systemd=systemd,
+                                   restart_snapshot=args.restart_and_snapshot)
                 finally:
                     owner.close()
             report.update(status="PASS", phase="complete")
