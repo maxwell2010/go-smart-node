@@ -97,6 +97,8 @@ func TestGatewayNFTNativeLifecycleWithDirectDELAndSibling(t *testing.T) {
 	require.False(t, hasProvenance)
 	_, err = k.GatewayFrozenNFTStakeEntryHeight(ctx, frozen)
 	require.ErrorIs(t, err, ErrNotFound)
+	_, err = k.GetFrozenWithdrawalCreationBlock(ctx, frozen)
+	require.ErrorIs(t, err, ErrNotFound)
 	require.Equal(t, first.StakeID.Bytes(), frozen.SourceStakeID)
 	require.Equal(t, sdkmath.OneInt(), frozen.RawAmount)
 	require.Equal(t, sdkmath.NewInt(5), frozen.ReportedReserveAmount)
