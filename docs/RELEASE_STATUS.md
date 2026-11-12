@@ -17,10 +17,24 @@ commit, a durable 0.1 DEL burn on block 5, removal of the old key at block 7,
 and a single 0.95 DEL payout on block 10. The rehearsal uses authenticated-shape
 metadata supplied by the test harness. [Fresh-profile lifecycle](https://github.com/maxwell2010/go-smart-node/actions/runs/43196854310)
 
-Release verification still needs the governed replacement-key flow, its exact
-combined revision and production launch data. Published operational data must
-include the approved genesis and independent bootstrap and RPC endpoints for
-this separate network.
+The governed replacement-key test rejects an excluded key from a new
+operator, registers a new key in the native and MasterValidator records with
+zero power and activates it at H+2 after a signed DEL delegation. It uses
+signed SDK proposals and weighted votes in the fresh-profile ABCI test.
+[Registration lifecycle](https://github.com/maxwell2010/go-smart-node/actions/runs/43198473506)
+
+The combined module suite on `824e469` passed the historical penalty,
+registration, cold EVM balance query, zero-reserve NFT exit and the
+offline registration command. The archive and scanner run on `507e5f2`
+passed clean installation and CycloneDX validation and reported zero
+symbol advisories in its source and Linux amd64 binary scans. The scanner
+database was dated 2026-11-11. The difference between these revisions is
+in a test helper.
+[Combined module suite](https://github.com/maxwell2010/go-smart-node/actions/runs/43199989617)
+[Archive and scanner](https://github.com/maxwell2010/go-smart-node/actions/runs/43199545547)
+
+Published operational data must include the approved genesis and independent
+bootstrap and RPC endpoints for this separate network.
 
 ## Separate release tracks
 
@@ -207,8 +221,11 @@ to the common manual and automatic payout path.
 
 The Linux module and fresh ABCI suites cover a paused validator, a late
 top-up, partial withdrawal, restart and exact burns from eligible principal.
-The final revision still needs combined process evidence and a workload
-rehearsal for typed penalties at the supported position limits.
+The owned EVM workload test signed NFT admission and DEL top-ups to exercise
+1024 origin units and 127 DEL tranches. Settlement used 22,817,925 of the
+24,000,000 SDK gas budget and burned 108.7 DEL while retaining two tranches
+funded at and after the infraction height.
+[Historical penalty workload](https://github.com/maxwell2010/go-smart-node/actions/runs/43199989617)
 
 Modern release blockers remain:
 
