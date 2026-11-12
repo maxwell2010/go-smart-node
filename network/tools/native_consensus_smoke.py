@@ -137,7 +137,7 @@ def create_replicas(binary, root, genesis, keys, env):
         validate_fresh_home(home)
         private_write(home / 'config/genesis.json', genesis)
         private_write(home / 'config/priv_validator_key.json', key)
-        node_id = run_command(binary, home, ['comet', 'show-node-id'], env, secret=True)
+        node_id = run_command(binary, home, ['comet', 'show-node-id'], env, secret=True).strip()
         check(re.fullmatch(r'[0-9a-f]{40}', node_id), 'invalid disposable P2P node identity')
         replica = Replica(label, index, home, node_id)
         write_config(home, 'app.toml', {('api', 'address'): json.dumps(replica.rest.replace('http:', 'tcp:'))})
