@@ -184,6 +184,11 @@ func (f signedDELFixture) backing(want sdkmath.Int) {
 }
 
 func (f signedDELFixture) activeReserve(want sdkmath.Int) {
+	f.t.Helper()
+	f.activeReserveAtCursor(want, common.Hash{})
+}
+
+func (f signedDELFixture) activeReserveAtCursor(want sdkmath.Int, cursor common.Hash) {
 	t, e := f.t, f.env
 	t.Helper()
 	native, err := e.app.NativeValidatorKeeper.GetActiveDELReserve(e.ctx(), f.operator)
@@ -191,7 +196,7 @@ func (f signedDELFixture) activeReserve(want sdkmath.Int) {
 	raw := f.read(f.gateway, f.target, "getValidatorReserve", f.validator, f.wrapped)
 	type validatorReserve struct{ PenaltyIndex, Reserve *big.Int }
 	gateway := abi.ConvertType(raw, new(validatorReserve)).(*validatorReserve)
-	require.Zero(t, gateway.PenaltyIndex.Sign())
+	require.Equal(t, cursor, common.BigToHash(gateway.PenaltyIndex))
 	require.True(t, want.Equal(native), "active native DEL excludes frozen claims and counts each reserve once")
 	require.Zero(t, native.BigInt().Cmp(gateway.Reserve), "active native DEL must match Gateway validator reserve")
 }
