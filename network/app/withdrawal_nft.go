@@ -13,6 +13,8 @@ import (
 	"github.com/ethereum/go-ethereum/crypto"
 	nftkeeper "github.com/maxwell2010/go-smart-node/network/decimal/nft/keeper"
 	validatorkeeper "github.com/maxwell2010/go-smart-node/network/decimal/validator/keeper"
+	"github.com/maxwell2010/go-smart-node/network/decimal/validator/settlement"
+	validatortypes "github.com/maxwell2010/go-smart-node/network/decimal/validator/types"
 )
 
 var (
@@ -57,7 +59,20 @@ func (c *withdrawalController) projectSignedNFT(ctx sdk.Context, msg core.Messag
 			return fmt.Errorf("project native NFT delegation: %w", err)
 		}
 	} else {
-		proof, err := c.executor.VerifySignedNFTWithdrawal(child, msg, receipt)
+		stakeID, err := c.executor.SignedNFTWithdrawalStakeID(msg)
+		if err != nil {
+			return err
+		}
+		active, err := c.keeper.GetEVMStakeBinding(child, validatortypes.EVMStakeBindingKind_EVM_STAKE_BINDING_NFT, c.profile.Gateway[:], stakeID[:])
+		if err != nil {
+			return fmt.Errorf("load active NFT withdrawal binding: %w", err)
+		}
+		var proof settlement.NFTWithdrawal
+		if common.BytesToHash(active.PenaltyCursor) == (common.Hash{}) {
+			proof, err = c.executor.VerifySignedNFTWithdrawal(child, msg, receipt)
+		} else {
+			proof, err = c.executor.VerifySignedPenalizedNFTWithdrawal(child, msg, receipt, active)
+		}
 		if err != nil {
 			return fmt.Errorf("verify signed NFT withdrawal: %w", err)
 		}
@@ -87,9 +102,16 @@ func (c *withdrawalController) projectSignedNFT(ctx sdk.Context, msg core.Messag
 			len(lineage.OriginSubTokenIDs) != int(p.OriginQuantity) || !bytes.Equal(lineage.ParentPositionID, p.ParentPositionID[:]) || !lineage.Reserve.Equal(&reserve) {
 			return errors.New("NFT withdrawal custody and backing differ from native lineage")
 		}
-		if err := c.keeper.ApplyGatewayNFTWithdrawal(child, validatorkeeper.GatewayNFTPosition{
+		position := validatorkeeper.GatewayNFTPosition{
 			Companion: c.delStakePosition(proof.Companion), StakeID: proof.StakeID, Lineage: lineage,
-		}, proof.FrozenIndex, proof.Deadline); err != nil {
+		}
+		position.Companion.PenaltyCursor = proof.Companion.PenaltyCursor
+		if proof.PenaltyCursor == (common.Hash{}) {
+			err = c.keeper.ApplyGatewayNFTWithdrawal(child, position, proof.FrozenIndex, proof.Deadline)
+		} else {
+			err = c.keeper.ApplyGatewayPenalizedNFTWithdrawal(child, position, proof.FrozenIndex, proof.Deadline, proof.PenaltyCursor, proof.CompanionCursorAcknowledged)
+		}
+		if err != nil {
 			return fmt.Errorf("project native NFT withdrawal: %w", err)
 		}
 	}

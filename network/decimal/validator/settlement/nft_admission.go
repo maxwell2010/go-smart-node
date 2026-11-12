@@ -15,6 +15,7 @@ import (
 	"github.com/maxwell2010/go-smart-node/network/decimal/nft/evmview"
 	"github.com/maxwell2010/go-smart-node/network/decimal/nft/receipts"
 	nfttypes "github.com/maxwell2010/go-smart-node/network/decimal/nft/types"
+	validatortypes "github.com/maxwell2010/go-smart-node/network/decimal/validator/types"
 )
 
 // NFTIsolation is a verified mint from a known, uniformly DEL-backed origin.
@@ -28,11 +29,12 @@ type NFTIsolation struct {
 }
 
 type NFTWithdrawal struct {
-	Position    evmview.PositionSnapshot
-	Companion   DELTransition
-	StakeID     common.Hash
-	FrozenIndex common.Hash
-	Deadline    time.Time
+	Position                    evmview.PositionSnapshot
+	Companion                   DELTransition
+	StakeID, FrozenIndex        common.Hash
+	PenaltyCursor               common.Hash
+	CompanionCursorAcknowledged bool
+	Deadline                    time.Time
 }
 
 // VerifySignedNFTIsolation admits only the direct no-hold Gateway route.
@@ -133,26 +135,58 @@ func (e *Executor) VerifySignedNFTIsolation(ctx sdk.Context, msg core.Message, r
 // VerifySignedNFTWithdrawal proves the request for one vault receipt. The
 // receipt stays in Gateway custody until the shared settlement path runs.
 func (e *Executor) VerifySignedNFTWithdrawal(ctx sdk.Context, msg core.Message, receipt *ethtypes.Receipt) (NFTWithdrawal, error) {
-	var proof NFTWithdrawal
+	return e.verifySignedNFTWithdrawal(ctx, msg, receipt, nil)
+}
+
+// SignedNFTWithdrawalStakeID derives the ordinary stake identity from the
+// canonical signed call. The App resolves the corresponding active native row.
+func (e *Executor) SignedNFTWithdrawalStakeID(msg core.Message) (common.Hash, error) {
+	validator, positionID, err := e.signedNFTWithdrawalCall(msg)
+	if err != nil {
+		return common.Hash{}, err
+	}
+	return e.ordinaryNFTStakeID(positionID, validator, msg.From), nil
+}
+
+func (e *Executor) signedNFTWithdrawalCall(msg core.Message) (common.Address, common.Hash, error) {
 	method := e.gateway.Methods["withdrawNFT"]
 	if msg.To == nil || *msg.To != e.roles.Gateway || msg.Value == nil || msg.Value.Sign() != 0 ||
-		len(msg.SetCodeAuthorizations) != 0 || len(msg.Data) != 4+3*common.HashLength || !bytes.Equal(msg.Data[:4], method.ID) || msg.From == Sender() {
-		return proof, errors.New("NFT withdrawal requires a direct signed Gateway call with zero value")
+		len(msg.SetCodeAuthorizations) != 0 || len(msg.Data) != 4+3*common.HashLength || !bytes.Equal(msg.Data[:4], method.ID) ||
+		msg.From == Sender() || msg.From == (common.Address{}) {
+		return common.Address{}, common.Hash{}, errors.New("NFT withdrawal requires a direct signed Gateway call with zero value")
 	}
 	args, err := method.Inputs.Unpack(msg.Data[4:])
 	if err != nil {
-		return proof, err
+		return common.Address{}, common.Hash{}, err
 	}
 	canonical, err := method.Inputs.Pack(args...)
 	if err != nil || !bytes.Equal(canonical, msg.Data[4:]) {
-		return proof, errors.New("noncanonical NFT withdrawal call")
+		return common.Address{}, common.Hash{}, errors.New("noncanonical NFT withdrawal call")
 	}
 	validator, vault := args[0].(common.Address), args[1].(common.Address)
 	positionID := common.BigToHash(args[2].(*big.Int))
 	if validator == (common.Address{}) || vault != e.roles.PositionVault || positionID == (common.Hash{}) {
-		return proof, errors.New("NFT withdrawal must name the approved vault and a valid position")
+		return common.Address{}, common.Hash{}, errors.New("NFT withdrawal must name the approved vault and a valid position")
 	}
-	if err := e.verifyDELStakeReceipt(ctx, receipt, validator, msg.From, 4); err != nil {
+	return validator, positionID, nil
+}
+
+func (e *Executor) ordinaryNFTStakeID(positionID common.Hash, validator, beneficiary common.Address) common.Hash {
+	var zero common.Hash
+	return crypto.Keccak256Hash([]byte("NFT"), e.roles.PositionVault[:], positionID[:], beneficiary[:], validator[:], zero[:])
+}
+
+func (e *Executor) verifySignedNFTWithdrawal(ctx sdk.Context, msg core.Message, receipt *ethtypes.Receipt, before *validatortypes.EVMStakeBinding) (NFTWithdrawal, error) {
+	var proof NFTWithdrawal
+	validator, positionID, err := e.signedNFTWithdrawalCall(msg)
+	if err != nil {
+		return proof, err
+	}
+	if before == nil {
+		if err := e.verifyDELStakeReceipt(ctx, receipt, validator, msg.From, 4); err != nil {
+			return proof, err
+		}
+	} else if err := e.verifyDELReceiptEnvelope(ctx, receipt, msg.From, 4, 8); err != nil {
 		return proof, err
 	}
 	position, err := e.auth.Position(ctx, positionID)
@@ -161,21 +195,38 @@ func (e *Executor) VerifySignedNFTWithdrawal(ctx sdk.Context, msg core.Message, 
 	}
 	reserve := position.ReserveAmount.Big()
 	if position.Status != evmview.PositionActive || position.Owner != e.roles.Gateway || position.ReserveKind != nfttypes.IsolatedReserveDEL ||
-		position.ReserveToken != (common.Address{}) || reserve.Sign() <= 0 || reserve.BitLen() > 255 {
+		position.ReserveToken != (common.Address{}) || (before == nil && reserve.Sign() == 0) || reserve.BitLen() > 255 {
 		return proof, errors.New("NFT withdrawal did not preserve DEL-backed Gateway custody")
 	}
-	companion, post, err := e.readNFTCompanion(ctx, validator, msg.From)
+	companion, post, coinCursor, err := e.readNFTCompanionState(ctx, validator, msg.From)
 	if err != nil {
 		return proof, err
 	}
-	if err := e.checkDELStakeLogs(receipt.Logs[:2], companion.StakeID, post, new(big.Int).Neg(reserve), false); err != nil {
+	logs := receipt.Logs
+	if before == nil {
+		if coinCursor != (common.Hash{}) {
+			return proof, errors.New("DEL position has an unsupported penalty cursor")
+		}
+	} else {
+		proof.PenaltyCursor = common.BytesToHash(before.PenaltyCursor)
+		if err := e.checkPenalizedNFTWithdrawalPosition(*before, position, validator, msg.From, companion.StakeID); err != nil {
+			return proof, err
+		}
+		proof.CompanionCursorAcknowledged, err = e.verifyNFTWithdrawalPenaltyAcknowledgements(ctx, logs[:len(logs)-4], validator, companion, post, reserve, proof.PenaltyCursor, coinCursor)
+		if err != nil {
+			return proof, err
+		}
+		companion.PenaltyCursor = coinCursor
+		logs = logs[len(logs)-4:]
+	}
+	if err := e.checkDELStakeLogs(logs[:2], companion.StakeID, post, new(big.Int).Neg(reserve), false); err != nil {
 		return proof, err
 	}
-	stakeID, err := e.verifyNFTStake(ctx, position, validator, msg.From, false)
+	stakeID, err := e.verifyNFTStakeAtCursor(ctx, position, validator, msg.From, false, proof.PenaltyCursor)
 	if err != nil {
 		return proof, err
 	}
-	request := receipt.Logs[2]
+	request := logs[2]
 	if len(request.Data) != (2+frozenWordCount)*common.HashLength {
 		return proof, errors.New("unexpected NFT withdrawal request event size")
 	}
@@ -188,7 +239,7 @@ func (e *Executor) VerifySignedNFTWithdrawal(ctx sdk.Context, msg core.Message, 
 		return proof, err
 	}
 	var zero common.Hash
-	if words[0] != common.BytesToHash(validator[:]) || words[1] != common.BytesToHash(msg.From[:]) || words[2] != common.BytesToHash(vault[:]) ||
+	if words[0] != common.BytesToHash(validator[:]) || words[1] != common.BytesToHash(msg.From[:]) || words[2] != common.BytesToHash(e.roles.PositionVault[:]) ||
 		words[3] != smallWord(1) || words[4] != positionID || words[5] != smallWord(tokenERC721) || words[6] != zero || words[7] != zero ||
 		words[8] != smallWord(statusFrozen) || words[9] != smallWord(freezeWithdraw) {
 		return proof, errors.New("frozen NFT differs from the signed withdrawal request")
@@ -199,11 +250,12 @@ func (e *Executor) VerifySignedNFTWithdrawal(ctx sdk.Context, msg core.Message, 
 	}
 	requestWords := append([]common.Hash{companion.StakeID, index}, words[:]...)
 	if !matchesNFTEvent(request, e.roles.Gateway, []common.Hash{e.gateway.Events["WithdrawRequest"].ID}, requestWords...) ||
-		!matchesNFTEvent(receipt.Logs[3], e.roles.Gateway, []common.Hash{e.gateway.Events["NFTUndelegated"].ID, stakeID}, index) {
+		!matchesNFTEvent(logs[3], e.roles.Gateway, []common.Hash{e.gateway.Events["NFTUndelegated"].ID, stakeID}, index) {
 		return proof, errors.New("NFT withdrawal events differ from the exact frozen Gateway row")
 	}
-	return NFTWithdrawal{Position: position, Companion: companion, StakeID: stakeID, FrozenIndex: index,
-		Deadline: time.Unix(deadline.Int64(), 0).UTC()}, nil
+	proof.Position, proof.Companion, proof.StakeID, proof.FrozenIndex = position, companion, stakeID, index
+	proof.Deadline = time.Unix(deadline.Int64(), 0).UTC()
+	return proof, nil
 }
 
 func (e *Executor) isolationOriginPoststate(ctx sdk.Context, origin common.Address, originID *big.Int) (uint32, *big.Int, error) {

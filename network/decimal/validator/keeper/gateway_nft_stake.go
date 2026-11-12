@@ -166,12 +166,34 @@ func (k *StateKeeper) ApplyGatewayNFTDelegation(ctx sdk.Context, position Gatewa
 // ApplyGatewayNFTWithdrawal replaces one active stake with a frozen claim on
 // the same receipt. The asset remains in Gateway custody until completion.
 func (k *StateKeeper) ApplyGatewayNFTWithdrawal(ctx sdk.Context, position GatewayNFTPosition, index common.Hash, deadline time.Time) error {
+	return k.applyGatewayNFTWithdrawal(ctx, position, index, deadline, common.Hash{}, false)
+}
+
+// ApplyGatewayPenalizedNFTWithdrawal queues an authenticated ordinary NFT
+// receipt after its exact native and EVM penalty cursor has been reconciled.
+// Zero remaining reserve changes neither the receipt quantity nor custody.
+func (k *StateKeeper) ApplyGatewayPenalizedNFTWithdrawal(ctx sdk.Context, position GatewayNFTPosition, index common.Hash,
+	deadline time.Time, cursor common.Hash, companionAcknowledged bool,
+) error {
+	if cursor == (common.Hash{}) || position.Companion.PenaltyCursor != cursor ||
+		(companionAcknowledged && (position.Companion.Amount.IsNil() || !position.Companion.Amount.IsZero())) {
+		return errors.New("invalid realized NFT withdrawal penalty cursor or companion acknowledgement")
+	}
+	return k.applyGatewayNFTWithdrawal(ctx, position, index, deadline, cursor, companionAcknowledged)
+}
+
+func (k *StateKeeper) applyGatewayNFTWithdrawal(ctx sdk.Context, position GatewayNFTPosition, index common.Hash,
+	deadline time.Time, cursor common.Hash, companionAcknowledged bool,
+) error {
 	if index == common.MaxHash || deadline.Unix() <= 0 || deadline.Nanosecond() != 0 || deadline.Unix() <= ctx.BlockTime().Unix() {
 		return errors.New("invalid Gateway NFT withdrawal index or deadline")
 	}
-	delegation, expected, err := k.gatewayNFTProjection(ctx, position)
+	delegation, expected, err := k.gatewayNFTState(ctx, position, cursor)
 	if err != nil {
 		return err
+	}
+	if cursor == (common.Hash{}) && (!expected.ReportedReserveAmount.IsPositive() || position.Companion.PenaltyCursor != (common.Hash{})) {
+		return errors.New("unpenalized NFT withdrawal requires a positive reserve and zero companion cursor")
 	}
 	companion := position.Companion
 	prior := companion
@@ -182,6 +204,16 @@ func (k *StateKeeper) ApplyGatewayNFTWithdrawal(ctx sdk.Context, position Gatewa
 	prior.NFTBacked = sdkmath.NewIntFromBigInt(backed)
 	owner, operator := delegation.Delegator, delegation.Validator
 	child, commit := ctx.CacheContext()
+	if companionAcknowledged && prior.NFTBacked.IsPositive() {
+		previous, err := k.GetEVMStakeBinding(child, gatewayDELCoinBinding, prior.Gateway[:], prior.StakeID[:])
+		if err != nil {
+			return err
+		}
+		prior.PenaltyCursor = common.BytesToHash(previous.PenaltyCursor)
+		if bytes.Compare(prior.PenaltyCursor[:], cursor[:]) >= 0 {
+			return errors.New("NFT-only companion acknowledgement must advance the native cursor")
+		}
+	}
 	oldCompanion, _, err := k.checkGatewayDELPrestate(child, prior, prior.Amount, owner, operator)
 	if err != nil {
 		return err
@@ -227,12 +259,16 @@ func (k *StateKeeper) ApplyGatewayNFTWithdrawal(ctx sdk.Context, position Gatewa
 		NFTPosition: active.NFTPosition, NativeTarget: active.NativeTarget, NativeEntryHash: entryHash,
 		Active: true, CreatedHeight: ctx.BlockHeight(), UpdatedHeight: ctx.BlockHeight(),
 	}
-	coin, err := gatewayNFTCompanionMutation(child, companion, oldCompanion)
-	if err != nil {
-		return err
-	}
 	remove := BindingReference{Kind: active.Kind, Gateway: active.Gateway, ID: active.StakeID}
-	plan, err := k.PrepareBindingPlan(child, []BindingMutation{coin, {Remove: &remove}, {Frozen: &frozen}})
+	mutations := []BindingMutation{{Remove: &remove}, {Frozen: &frozen}}
+	if expected.ReportedReserveAmount.IsPositive() || (companionAcknowledged && oldCompanion != nil) {
+		coin, err := gatewayNFTCompanionMutation(child, companion, oldCompanion)
+		if err != nil {
+			return err
+		}
+		mutations = append(mutations, coin)
+	}
+	plan, err := k.PrepareBindingPlan(child, mutations)
 	if err != nil {
 		return err
 	}
