@@ -41,7 +41,7 @@ func TestNativeHeldDowntimeLotAdmissionPreservesSplitExit(t *testing.T) {
 	operator, err := keeper.ValidatorAddressCodec().BytesToString(validator[:])
 	require.NoError(t, err)
 	publicKey := &ed25519.PubKey{Key: bytes.Repeat([]byte{0x42}, ed25519.PubKeySize)}
-	v, err := validatortypes.NewValidator(operator, owner, publicKey, validatortypes.Description{}, sdkmath.LegacyZeroDec())
+	v, err := validatortypes.NewValidator(operator, owner, publicKey, validatortypes.Description{Moniker: "held-lot-budget"}, sdkmath.LegacyZeroDec())
 	require.NoError(t, err)
 	require.NoError(t, keeper.SetValidator(ctx, v))
 
