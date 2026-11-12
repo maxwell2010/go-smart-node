@@ -170,12 +170,12 @@ type frozenNFTPenaltyState struct {
 	bankSupply sdkmath.Int
 }
 
-func (e *Executor) readFrozenNFTPenaltyPosition(ctx sdk.Context, row validatortypes.EVMFrozenBinding) (nftview.PositionSnapshot, error) {
+func (e *Executor) readFrozenNFTPenaltyPosition(ctx sdk.Context, row validatortypes.EVMFrozenBinding) (evmview.PositionSnapshot, error) {
 	p := row.NFTPosition
 	positionID := common.BytesToHash(p.PositionID)
 	position, err := e.auth.Position(ctx, positionID)
 	if err != nil {
-		return nftview.PositionSnapshot{}, err
+		return evmview.PositionSnapshot{}, err
 	}
 	if position.Status != evmview.PositionActive || position.Owner != e.roles.Gateway ||
 		position.Asset.Contract != e.roles.PositionVault || position.Asset.TokenID != positionID ||
@@ -184,7 +184,7 @@ func (e *Executor) readFrozenNFTPenaltyPosition(ctx sdk.Context, row validatorty
 		position.Origin.TokenID != common.BytesToHash(p.Origin.TokenID) || position.OriginQuantity != uint32(len(p.Origin.NativeSubTokenIDs)) ||
 		position.ReserveKind != nfttypes.IsolatedReserveDEL || position.ReserveToken != (common.Address{}) ||
 		position.ReserveAmount != common.BigToHash(row.ReportedReserveAmount.BigInt()) {
-		return nftview.PositionSnapshot{}, errors.New("frozen NFT penalty differs from exact live Vault custody and DEL reserve")
+		return evmview.PositionSnapshot{}, errors.New("frozen NFT penalty differs from exact live Vault custody and DEL reserve")
 	}
 	return position, nil
 }
@@ -193,8 +193,8 @@ func (e *Executor) readFrozenNFTPenaltyPosition(ctx sdk.Context, row validatorty
 // Vault implements this exact twelve-word read after the reserve-only call.
 // Rechecking all returned words and collateral avoids repeating the factory
 // and origin proxy discovery just to read the changed balance.
-func (e *Executor) readFrozenNFTPenaltyPostPosition(ctx sdk.Context, before nftview.PositionSnapshot, remaining sdkmath.Int) (nftview.PositionSnapshot, error) {
-	var out nftview.PositionSnapshot
+func (e *Executor) readFrozenNFTPenaltyPostPosition(ctx sdk.Context, before evmview.PositionSnapshot, remaining sdkmath.Int) (evmview.PositionSnapshot, error) {
+	var out evmview.PositionSnapshot
 	vault := e.roles.PositionVault
 	position, err := e.read(ctx, vault, e.vault, "getPosition", 12*common.HashLength, before.Asset.TokenID.Big())
 	if err != nil {
@@ -229,7 +229,7 @@ func (e *Executor) readFrozenNFTPenaltyPostPosition(ctx sdk.Context, before nftv
 }
 
 func (e *Executor) readFrozenNFTPenaltyState(ctx sdk.Context, row validatortypes.EVMFrozenBinding, beneficiary common.Address,
-	position nftview.PositionSnapshot, nativeSupply func(sdk.Context) sdkmath.Int,
+	position evmview.PositionSnapshot, nativeSupply func(sdk.Context) sdkmath.Int,
 ) (frozenNFTPenaltyState, error) {
 	var out frozenNFTPenaltyState
 	activeReserve, err := e.read(ctx, e.roles.Gateway, e.gateway, "getValidatorReserve", 2*common.HashLength,
