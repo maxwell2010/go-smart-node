@@ -2,7 +2,6 @@ package app
 
 import (
 	"errors"
-	"fmt"
 	"strconv"
 
 	sdkmath "cosmossdk.io/math"
