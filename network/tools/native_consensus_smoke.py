@@ -3,6 +3,7 @@
 import argparse
 import base64
 from dataclasses import dataclass
+from datetime import timedelta
 from functools import partial
 import hashlib
 import json
@@ -15,7 +16,7 @@ import time
 from configure_history import validate_fresh_home
 from del_delegation_smoke import DELEGATED, GAS_LIMIT, GAS_PRICE, balance, native_positions, read_words, submit, write_config
 from mcnd_process_smoke import ProcessOwner, SignalGuard, private_environment, private_namespace, run_command
-from withdrawal_genesis_smoke import ADDRESS, CHAIN, EVM_CHAIN, MAX_BLOCKS, SHA256, WORD, bech32_payload, check, comet, native, private_bytes, private_write, readiness_diagnostic, safe_diagnostic, wait_height
+from withdrawal_genesis_smoke import ADDRESS, CHAIN, EVM_CHAIN, MAX_BLOCKS, SHA256, WORD, bech32_payload, block_time, check, comet, ethereum, native, private_bytes, private_write, readiness_diagnostic, safe_diagnostic, wait_height
 
 
 ATOMS = 10**18
@@ -25,6 +26,8 @@ DOWNTIME_INITIAL = (3, 3, 2)
 DOWNTIME_AFTER = (3, 3, 0)
 DOWNTIME_BURN = ATOMS // 50
 DOWNTIME_WINDOW = 3
+JAIL_RECOVERED = (3, 3, 1)
+UNJAILED = 'decimal_native_downtime_unjailed'
 
 
 @dataclass
@@ -89,7 +92,7 @@ def decode_pubkey(record):
     return value
 
 
-def load_fixture(directory, fee_rewards, downtime):
+def load_fixture(directory, fee_rewards, downtime, jail_recovery):
     info = directory.lstat()
     check(stat.S_ISDIR(info.st_mode) and stat.S_IMODE(info.st_mode) & 0o077 == 0, 'private fixture directory required')
     expected = json.loads(private_bytes(directory / 'expectations.json', 8192))
@@ -127,6 +130,7 @@ def load_fixture(directory, fee_rewards, downtime):
     check(expected['feeRewards'] is fee_rewards, 'fixture fee rewards mode differs')
     keys, reward_addresses = [], set()
     for row in validators:
+        row['evm'] = row['evm'].lower()
         row['reward'] = row['reward'].lower()
         check(re.fullmatch(ADDRESS, row['reward']) and bech32_payload(row['rewardNative']) == row['reward'],
               'invalid fixture reward recipient')
@@ -134,8 +138,14 @@ def load_fixture(directory, fee_rewards, downtime):
         key = decode_pubkey(row['publicKey'])
         check(re.fullmatch(r'0x[0-9a-f]{136}', row['reserveData']), 'invalid validator reserve calldata')
         address = hashlib.sha256(key).hexdigest()[:40].upper()
-        check(row['consensusAddress'] == address and row['evm'].lower() == '0x' + address.lower() and
-              bech32_payload(row['operator'], 'd0valoper') == row['evm'].lower(), 'fixture validator identities differ')
+        check(row['consensusAddress'] == address and bech32_payload(row['operator'], 'd0valoper') == row['evm'],
+              'fixture validator identities differ')
+        consensus_evm = '0x' + address.lower()
+        if jail_recovery and row['name'] == 'c':
+            check(row['evm'] != consensus_evm and row['evm'] == row['reward'],
+                  'recovery requires a separate funded EVM operator')
+        else:
+            check(row['evm'] == consensus_evm, 'fixture operator differs from the consensus-derived address')
         private = private_bytes(directory / f'priv_validator_key_{row["name"]}.json', 8192)
         key_doc = json.loads(private)
         check(key_doc['address'] == address and decode_pubkey(key_doc['pub_key']) == key, 'fixture validator key identity differs')
@@ -157,6 +167,14 @@ def load_fixture(directory, fee_rewards, downtime):
         check(profile['master_validator'].lower() == expected['master'] and
               not any(profile.get(flag, False) for flag in ('enable_del_hold', 'enable_nft_delegation', 'enable_native_ibc_v1')),
               'downtime fixture must contain only ordinary DEL')
+    if jail_recovery:
+        check(expected['jailSeconds'] == 30 and type(expected['unjailNonce']) is int and
+              0 <= expected['unjailNonce'] < 2**32 - 1, 'invalid jail recovery duration or nonce')
+        for route in ('earlyUnpause', 'unpause'):
+            signed = expected[route]
+            check(re.fullmatch(WORD, signed['hash']) and re.fullmatch(r'0x(?:[0-9a-f]{2}){100,512}', signed['raw']),
+                  'invalid signed unpause fixture transaction')
+        check(expected['earlyUnpause']['hash'] != expected['unpause']['hash'], 'duplicate signed unpause transaction')
     check(not doc['app_state']['staking'].get('validators') and not doc['app_state']['staking'].get('delegations'),
           'fixture requires empty SDK staking genesis')
     return expected, genesis, keys, height
@@ -338,8 +356,8 @@ def settle_fees(replicas, expected, collected, powers, c_reserve, fee):
             'ownerRewardAtomic': str(owner_reward)}
 
 
-def check_downtime_state(replicas, expected, height, jailed):
-    count = int(jailed)
+def check_downtime_state(replicas, expected, height, jailed, *, penalty_count=None):
+    count = int(jailed) if penalty_count is None else penalty_count
     for node in replicas:
         for row in expected['validators']:
             name = row['name']
@@ -348,7 +366,7 @@ def check_downtime_state(replicas, expected, height, jailed):
             check(native_row['operator_address'] == row['operator'] and native_row.get('jailed', False) is penalized,
                   f'unexpected native jail state for {name} on {node.label}')
             status, paused, penalties = read_words(expected['master'], expected['masterStateData'][name], height, 3, node.evm)
-            check(status in (1, 2) and paused == penalties == int(penalized),
+            check(status in (1, 2) and paused == int(penalized) and penalties == (count if name == 'c' else 0),
                   f'unexpected Master state for {name} on {node.label}')
         cursor = read_words(expected['gateway'], expected['stakePenaltyData'], height, 1, node.evm)[0]
         check(cursor == count, f'unexpected Gateway penalty cursor on {node.label}')
@@ -359,7 +377,84 @@ def downtime_events(result):
     return [event for event in result['finalize_block_events'] or [] if event['type'] == 'decimal_native_downtime_applied']
 
 
-def run_downtime_gate(binary, expected, replicas, env, owner, report, first):
+def submit_unpause(replicas, expected, report, prior, jail_until, *, success):
+    source = replicas[0]
+    operator = expected['validators'][2]
+    signed = dict(expected, actor=operator['evm'], gateway=expected['master'])
+    name = 'unpause' if success else 'earlyUnpause'
+    receipt = submit(source.child, source.log, report, signed, name, success, expected['unjailNonce'] + int(success),
+                     UNJAILED, {'operator': operator['operator']} if success else {})
+    height = receipt['height']
+    stamp = block_time(height)
+    check((stamp >= jail_until) == success, f'{name} was executed on the wrong side of the committed jail deadline')
+    if not success:
+        eth_receipt = ethereum('eth_getTransactionReceipt', [receipt['transactionHash']])
+        check(not eth_receipt['logs'], 'rejected unpause retained an EVM log')
+    wait_replicas(replicas, height, 40, report)
+    fee = int(receipt['feeAtomic'])
+    rewards = {key: int(value) for key, value in prior['rewardAtomic'].items()}
+    rewards['c'] -= fee
+    state = check_ledger(replicas, expected, height, 2 * ATOMS - DOWNTIME_BURN, downtime=True, previous=prior,
+                         wallet=int(prior['walletAtomic']), collector=int(prior['feeCollectorAtomic']) + fee, rewards=rewards)
+    report[name] = {**state, **receipt, 'blockTime': stamp.isoformat(),
+                    **check_downtime_state(replicas, expected, height, not success, penalty_count=1)}
+    return report[name]
+
+
+def verify_jail_recovery(replicas, expected, report, jail_until):
+    validators = expected['validators']
+    source = replicas[0]
+    report['phase'] = 'wait-for-committed-jail-deadline'
+    prior = report['final']
+    height = prior['height']
+    deadline = time.monotonic() + 65
+    while block_time(height) < jail_until:
+        check(time.monotonic() < deadline, 'committed chain time did not reach the jail deadline')
+        height = wait_replicas(replicas, height + 1, max(0, deadline - time.monotonic()), report)
+
+    report['phase'] = 'signed-operator-unpause'
+    unpaused = submit_unpause(replicas, expected, report, prior, jail_until, success=True)
+    height = unpaused['height']
+
+    report['phase'] = 'verify-reentry-and-resumed-signatures'
+    tip = wait_replicas(replicas, height + 6, 75, report)
+    for node in replicas:
+        result = node.rpc(f'block_results?height={height}')
+        updates = result.get('validator_updates') or []
+        check(len(updates) == 1 and int(updates[0].get('power', 0)) == 1 and
+              decode_pubkey(updates[0]['pub_key']) == decode_pubkey(validators[2]['publicKey']),
+              f'ABCI must restore only C at power 1 on {node.label}')
+    transition = {}
+    for offset, powers in enumerate((DOWNTIME_AFTER, DOWNTIME_AFTER, JAIL_RECOVERED)):
+        current = height + offset
+        transition[f'H+{offset}'] = {'height': current, 'powers': effective_set(replicas, validators, current, powers),
+                                     **committed_header(replicas, current)}
+    old, following, changed = (transition[f'H+{offset}'] for offset in range(3))
+    check(old['validators_hash'] == old['next_validators_hash'] == following['validators_hash'] and
+          following['next_validators_hash'] == changed['validators_hash'] != following['validators_hash'],
+          'unjailed C must first become effective at H+2')
+    resumed = None
+    for signed_height in range(height + 2, height + 2 + DOWNTIME_WINDOW):
+        signatures = source.rpc(f'commit?height={signed_height}')['signed_header']['commit']['signatures']
+        if any(int(signature['block_id_flag']) == 2 and signature['validator_address'] == validators[2]['consensusAddress']
+               and signature['signature'] for signature in signatures):
+            resumed = signed_height
+            break
+    check(resumed is not None, 'recovered C did not sign within the first effective window')
+    report['reentry'] = {'abciUpdates': {'c': 1}, 'transition': transition, 'cSignedHeight': resumed,
+                         'signers': check_signatures(replicas, validators, resumed, JAIL_RECOVERED)}
+
+    final_height = tip - 1
+    check(all(not downtime_events(source.rpc(f'block_results?height={current}'))
+              for current in range(report['downtime']['height'] + 1, final_height + 1)), 'ordinary DEL penalty repeated')
+    final = check_ledger(replicas, expected, final_height, 2 * ATOMS - DOWNTIME_BURN, downtime=True, previous=unpaused,
+                         wallet=int(unpaused['walletAtomic']), collector=int(unpaused['feeCollectorAtomic']))
+    # The next Comet header carries the app hash of this committed ledger.
+    report['final'] = {**final, **check_downtime_state(replicas, expected, final_height, False, penalty_count=1),
+                       'appHashHeight': final_height + 1, **committed_header(replicas, final_height + 1)}
+
+
+def run_downtime_gate(binary, expected, replicas, env, owner, report, first, *, jail_recovery=False):
     validators = expected['validators']
     a, b, c = replicas
     quorum = (a, b)
@@ -424,11 +519,19 @@ def run_downtime_gate(binary, expected, replicas, env, owner, report, first):
           'downtime removal must first become effective at H+2')
     report['transition'] = transition
 
+    jail_until = None
+    prior = punished
+    if jail_recovery:
+        report['phase'] = 'signed-unpause-before-jail-deadline'
+        jail_until = block_time(height) + timedelta(seconds=expected['jailSeconds'])
+        report['jailUntil'] = jail_until.isoformat()
+        prior = submit_unpause(quorum, expected, report, punished, jail_until, success=False)
+
     report['phase'] = 'restart-c-as-follower'
     checkpoint = height + 2
     checkpoint_header = committed_header(quorum, checkpoint)
     c.start(binary, env, owner, 'follower')
-    tip = wait_replicas(replicas, checkpoint + 3, 95, report)
+    tip = wait_replicas(replicas, max(checkpoint + 3, prior['height'] + 1), 95, report)
     check(committed_header(replicas, checkpoint) == checkpoint_header,
           'restarted C disagrees on the removal checkpoint')
     final_height = tip - 1
@@ -436,9 +539,11 @@ def run_downtime_gate(binary, expected, replicas, env, owner, report, first):
                           'powers': effective_set(replicas, validators, final_height, DOWNTIME_AFTER),
                           'signers': check_signatures(replicas, validators, final_height, DOWNTIME_AFTER),
                           **committed_header(replicas, final_height)}
-    final = check_ledger(replicas, expected, final_height, remaining, downtime=True, previous=punished,
-                         wallet=int(before['walletAtomic']), collector=int(before['feeCollectorAtomic']))
+    final = check_ledger(replicas, expected, final_height, remaining, downtime=True, previous=prior,
+                         wallet=int(before['walletAtomic']), collector=int(prior['feeCollectorAtomic']))
     report['final'] = {**final, **check_downtime_state(replicas, expected, final_height, True)}
+    if jail_recovery:
+        verify_jail_recovery(replicas, expected, report, jail_until)
 
 
 def run_gate(args, binary, root, expected, genesis, keys, env, owner, report):
@@ -475,7 +580,7 @@ def run_gate(args, binary, root, expected, genesis, keys, env, owner, report):
     initial_powers = DOWNTIME_INITIAL if args.downtime else INITIAL
     report['initialPower'] = effective_set(replicas, validators, initial, initial_powers)
     if args.downtime:
-        run_downtime_gate(binary, expected, replicas, env, owner, report, first)
+        run_downtime_gate(binary, expected, replicas, env, owner, report, first, jail_recovery=args.jail_recovery)
         return
     report['initialSigners'] = check_signatures(replicas, validators, initial, INITIAL)
     report['initialBlock'] = committed_header(replicas, initial + 1)
@@ -575,7 +680,9 @@ def main(argv=None, signals=None):
     mode = parser.add_mutually_exclusive_group()
     mode.add_argument('--fee-rewards', action='store_true')
     mode.add_argument('--downtime', action='store_true')
+    mode.add_argument('--jail-recovery', action='store_true')
     args = parser.parse_args(argv)
+    args.downtime |= args.jail_recovery
     report = {'status': 'FAIL', 'phase': 'fixture-provenance', 'scope': 'three loopback processes with native consensus and a signed DEL stake'}
     with pathlib.Path(args.report).open('x', encoding='utf8') as stream:
         try:
@@ -584,11 +691,14 @@ def main(argv=None, signals=None):
             binary = str(pathlib.Path(args.binary).resolve(strict=True))
             with open(binary, 'rb') as binary_stream:
                 check(hashlib.file_digest(binary_stream, 'sha256').hexdigest() == args.binary_sha256, 'daemon SHA256 mismatch')
-            expected, genesis, keys, initial = load_fixture(pathlib.Path(args.fixture), args.fee_rewards, args.downtime)
+            expected, genesis, keys, initial = load_fixture(pathlib.Path(args.fixture), args.fee_rewards, args.downtime,
+                                                            args.jail_recovery)
             report.update(sourceCommit=args.source_commit, binarySha256=args.binary_sha256, initialHeight=initial,
                           genesisSha256=hashlib.sha256(genesis).hexdigest(), chainID=CHAIN, evmChainID=EVM_CHAIN, feeRewards=args.fee_rewards)
             if args.downtime:
                 report['scope'] = 'three loopback processes with an ordinary DEL downtime penalty and follower catch-up'
+            if args.jail_recovery:
+                report['scope'] = 'three loopback processes with ordinary DEL downtime and signed validator jail recovery'
             with tempfile.TemporaryDirectory(prefix='mcnd-native-consensus-', dir=args.home_parent) as directory:
                 root = pathlib.Path(directory)
                 owner = ProcessOwner(signals)

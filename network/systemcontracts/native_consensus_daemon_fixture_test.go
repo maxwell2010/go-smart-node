@@ -36,6 +36,7 @@ const nativeConsensusDaemonFixtureEnv = "MCND_NATIVE_CONSENSUS_FIXTURE_DIR"
 const nativeConsensusFeeRewardsEnv = "MCND_NATIVE_CONSENSUS_FEE_REWARDS"
 const nativeConsensusIBCV1Env = "MCND_NATIVE_CONSENSUS_IBC_V1"
 const nativeConsensusDowntimeEnv = "MCND_NATIVE_CONSENSUS_DEL_DOWNTIME"
+const nativeConsensusJailRecoveryEnv = "MCND_NATIVE_CONSENSUS_DEL_JAIL_RECOVERY"
 
 type nativeConsensusFixtureValidator struct {
 	Name         string `json:"name"`
@@ -69,12 +70,18 @@ func exportNativeConsensusDaemonFixture(t *testing.T, e isolatedBackendEnv, dir 
 	feeRewards := os.Getenv(nativeConsensusFeeRewardsEnv) == "1"
 	ibcV1 := os.Getenv(nativeConsensusIBCV1Env) == "1"
 	downtime := os.Getenv(nativeConsensusDowntimeEnv) == "1"
+	jailRecovery := os.Getenv(nativeConsensusJailRecoveryEnv) == "1"
+	require.False(t, jailRecovery && !downtime, "the jail recovery fixture requires the downtime profile")
 	initial, after := [3]int64{2, 1, 0}, [3]int64{2, 0, 3}
 	keyScope := "mintcandy native consensus process fixture "
 	if downtime {
 		require.False(t, feeRewards || ibcV1, "the ordinary DEL downtime fixture has a separate profile")
 		initial, after = [3]int64{3, 3, 2}, [3]int64{3, 3, 0}
 		keyScope = "mintcandy native ordinary del downtime process fixture "
+	}
+	const jailRecoveryDuration = 30 * time.Second
+	if jailRecovery {
+		keyScope = "mintcandy native ordinary del jail recovery process fixture "
 	}
 	commission := sdkmath.LegacyZeroDec()
 	if feeRewards {
@@ -95,6 +102,10 @@ func exportNativeConsensusDaemonFixture(t *testing.T, e isolatedBackendEnv, dir 
 		signer := cmted25519.GenPrivKeyFromSecret([]byte(keyScope + name))
 		pub := signer.PubKey()
 		address := common.BytesToAddress(pub.Address())
+		if jailRecovery && name == "c" {
+			address = crypto.PubkeyToAddress(e.keys[2].PublicKey)
+			require.NotEqual(t, common.BytesToAddress(pub.Address()), address)
+		}
 		operator, err := nativeKeeper.ValidatorAddressCodec().BytesToString(address.Bytes())
 		require.NoError(t, err)
 		moniker := "native-consensus-fixture-" + name
@@ -169,6 +180,9 @@ func exportNativeConsensusDaemonFixture(t *testing.T, e isolatedBackendEnv, dir 
 		nativeGenesis.Params.MinSignedPerWindow = sdkmath.LegacyMustNewDecFromStr("0.25")
 		nativeGenesis.Params.SlashFractionDowntime = sdkmath.LegacyMustNewDecFromStr("0.01")
 		nativeGenesis.Params.DowntimeJailDuration = time.Hour
+	}
+	if jailRecovery {
+		nativeGenesis.Params.DowntimeJailDuration = jailRecoveryDuration
 	}
 	nativeGenesis.BindingRevision = 0
 	genesis[validatortypes.ModuleName] = cdc.MustMarshalJSON(&nativeGenesis)
@@ -252,6 +266,23 @@ func exportNativeConsensusDaemonFixture(t *testing.T, e isolatedBackendEnv, dir 
 		expectations["master"] = profile.MasterValidator.Hex()
 		expectations["masterStateData"] = masterState
 		expectations["stakePenaltyData"] = hexData(pack(gateway, "getStakePenaltyIndex", stakeID))
+		if jailRecovery {
+			nonce := e.app.EVMKeeper.GetNonce(ctx, target)
+			price := big.NewInt(1_000_000_000_000)
+			signer := ethtypes.NewEIP155Signer(big.NewInt(990001))
+			input := pack(master, "unpauseSelf")
+			for i, name := range []string{"earlyUnpause", "unpause"} {
+				tx := ethtypes.NewTx(&ethtypes.LegacyTx{Nonce: nonce + uint64(i), To: &profile.MasterValidator,
+					Gas: gasLimit, GasPrice: price, Data: input})
+				signed, err := ethtypes.SignTx(tx, signer, e.keys[2])
+				require.NoError(t, err)
+				raw, err := signed.MarshalBinary()
+				require.NoError(t, err)
+				expectations[name] = map[string]string{"raw": hexData(raw), "hash": signed.Hash().Hex()}
+			}
+			expectations["unjailNonce"] = nonce
+			expectations["jailSeconds"] = int64(jailRecoveryDuration / time.Second)
+		}
 		body, err := json.Marshal(expectations)
 		require.NoError(t, err)
 		write("expectations.json", body)

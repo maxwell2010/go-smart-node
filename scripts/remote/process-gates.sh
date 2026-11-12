@@ -18,6 +18,8 @@ native_ibc_v1="${6:-off}"
 [[ "$native_ibc_v1" == off || "$native_ibc_v1" == native-ibc-v1 ]] || { echo 'Unsupported native IBC v1 option.' >&2; exit 2; }
 native_del_downtime="${7:-off}"
 [[ "$native_del_downtime" == off || "$native_del_downtime" == native-del-downtime ]] || { echo 'Unsupported native DEL downtime option.' >&2; exit 2; }
+native_del_jail_recovery="${8:-off}"
+[[ "$native_del_jail_recovery" == off || "$native_del_jail_recovery" == native-del-jail-recovery ]] || { echo 'Unsupported native DEL jail recovery option.' >&2; exit 2; }
 for tool in sudo unshare ip gcc python3 go; do command -v "$tool" >/dev/null; done
 python="$(command -v python3)"
 "$python" -c 'import sys,tomllib; assert sys.version_info >= (3,11), "Python >=3.11 required"'
@@ -30,7 +32,7 @@ mkdir -- "$output"
 evidence_owner="$(id -u):$(id -g)"
 preserve_public_reports() {
   local file
-  for file in "$output/daemon.json" "$output/hermes.json" "$output/withdrawal-genesis.json" "$output/del-delegation.json" "$output/ibc-client-upgrade.json" "$output/native-consensus.json" "$output/native-hermes.json" "$output/native-del-downtime.json"; do
+  for file in "$output/daemon.json" "$output/hermes.json" "$output/withdrawal-genesis.json" "$output/del-delegation.json" "$output/ibc-client-upgrade.json" "$output/native-consensus.json" "$output/native-hermes.json" "$output/native-del-downtime.json" "$output/native-del-jail-recovery.json"; do
     if [[ -L "$file" ]]; then echo 'Refuse symbolic report file.' >&2; return 1; fi
     if [[ -f "$file" ]]; then
       sudo -n chown -- "$evidence_owner" "$file" || return 1
@@ -362,23 +364,26 @@ print('Three replicas agree on the signed DEL validator replacement at H+2 and o
 PY
 fi
 
-if [[ "$native_del_downtime" == native-del-downtime ]]; then
-  mkdir -m 700 -- "$work/native-del-downtime-fixture"
-  if ! MCND_NATIVE_CONSENSUS_FIXTURE_DIR="$work/native-del-downtime-fixture" MCND_NATIVE_CONSENSUS_DEL_DOWNTIME=1 \
+run_native_del_downtime() {
+  local gate="$1" option="$2" recovery="$3"
+  local fixture="$work/$gate-fixture"
+  mkdir -m 700 -- "$fixture"
+  if ! MCND_NATIVE_CONSENSUS_FIXTURE_DIR="$fixture" MCND_NATIVE_CONSENSUS_DEL_DOWNTIME=1 MCND_NATIVE_CONSENSUS_DEL_JAIL_RECOVERY="$recovery" \
       go test -mod=readonly -tags= -trimpath -p 2 -count=1 -timeout 8m -json \
       -run '^TestOwnedAppSignedRegistryBootstrap$/^authenticated_isolated_position_reader$' ./systemcontracts \
-      > "$work/native-del-downtime-fixture.log" 2>&1; then
-    private_fixture_diagnostic "$work/native-del-downtime-fixture.log"
+      > "$fixture.log" 2>&1; then
+    private_fixture_diagnostic "$fixture.log"
     exit 1
   fi
   sudo -n unshare --net -- bash -euc 'ip link set lo up; exec "$@"' _ \
     env TMPDIR="$work" "$python" -B "$root/network/tools/native_consensus_smoke.py" \
     --binary "$work/mcnd" --binary-sha256 "$mcnd_sha" --source-commit "$revision" \
-    --fixture "$work/native-del-downtime-fixture" --home-parent "$work" --report "$output/native-del-downtime.json" --downtime \
-    |& tee "$output/native-del-downtime.log"
+    --fixture "$fixture" --home-parent "$work" --report "$output/$gate.json" "$option" \
+    |& tee "$output/$gate.log"
   preserve_public_reports
-  "$python" - "$output/native-del-downtime.json" "$revision" "$mcnd_sha" <<'PY'
+  "$python" - "$output/$gate.json" "$revision" "$mcnd_sha" "$recovery" <<'PY'
 import json,sys
+from datetime import datetime
 from pathlib import Path
 report=json.loads(Path(sys.argv[1]).read_text())
 assert report['status']=='PASS' and 'error' not in report,report
@@ -393,7 +398,26 @@ assert report['final']['activeReservesAtomic']=={'a':'3000000000000000000','b':'
 assert report['final']['masterPenaltyCount']==report['final']['stakePenaltyCursor']==1,report
 assert int(report['before']['bankSupplyAtomic'])-int(report['final']['bankSupplyAtomic'])==int(penalty['burnedAtomic']),report
 print('Three isolated nodes proved one ordinary DEL downtime burn, H+2 removal and follower catch-up.')
+if sys.argv[4]=='1':
+    early,success=report['earlyUnpause'],report['unpause']
+    timestamp=datetime.fromisoformat
+    assert not early['success'] and success['success'],report
+    assert timestamp(early['blockTime'])<timestamp(report['jailUntil'])<=timestamp(success['blockTime']),report
+    assert early['jailed']==['c'] and success['jailed']==report['final']['jailed']==[],report
+    reentry=report['reentry']
+    assert reentry['abciUpdates']=={'c':1} and reentry['signers']==['a','b','c'],report
+    assert reentry['transition']['H+2']['height']==success['height']+2,report
+    assert reentry['transition']['H+2']['powers']=={'a':3,'b':3,'c':1},report
+    assert reentry['cSignedHeight']>=success['height']+2 and report['final']['appHashHeight']==report['final']['height']+1,report
+    assert report['final']['app_hash'] and len(report['final']['app_hash'])==64,report
+    print('Signed early unpause rolled back; matured unpause restored C at H+2 and all replicas agreed without another burn.')
 PY
+}
+if [[ "$native_del_downtime" == native-del-downtime ]]; then
+  run_native_del_downtime native-del-downtime --downtime 0
+fi
+if [[ "$native_del_jail_recovery" == native-del-jail-recovery ]]; then
+  run_native_del_downtime native-del-jail-recovery --jail-recovery 1
 fi
 
 if [[ "$native_ibc_v1" == native-ibc-v1 ]]; then

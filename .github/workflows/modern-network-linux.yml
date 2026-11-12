@@ -46,6 +46,10 @@ on:
         description: Check an ordinary DEL downtime penalty and follower catch-up on three isolated nodes
         default: false
         type: boolean
+      native_del_jail_recovery:
+        description: Check signed ordinary DEL jail recovery and H+2 re-entry on three isolated nodes
+        default: false
+        type: boolean
 
 permissions:
   contents: read
@@ -203,8 +207,9 @@ jobs:
           NATIVE_FEE_REWARDS: ${{ inputs.native_fee_rewards }}
           NATIVE_IBC_V1: ${{ inputs.native_ibc_v1 }}
           NATIVE_DEL_DOWNTIME: ${{ inputs.native_del_downtime }}
+          NATIVE_DEL_JAIL_RECOVERY: ${{ inputs.native_del_jail_recovery }}
         run: |
-          args=("$RUNNER_TEMP/process-evidence" off off off off off off)
+          args=("$RUNNER_TEMP/process-evidence" off off off off off off off)
           if [[ "$DEL_STATE_SYNC" == true ]]; then
             args[1]=withdrawal-genesis
             args[2]=del-state-sync
@@ -224,6 +229,9 @@ jobs:
           fi
           if [[ "$NATIVE_DEL_DOWNTIME" == true ]]; then
             args[6]=native-del-downtime
+          fi
+          if [[ "$NATIVE_DEL_JAIL_RECOVERY" == true ]]; then
+            args[7]=native-del-jail-recovery
           fi
           bash scripts/remote/process-gates.sh "${args[@]}"
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
