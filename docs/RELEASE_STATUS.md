@@ -128,6 +128,19 @@ and independently operated bootstrap and RPC endpoints.
 [Packaged launch](https://github.com/maxwell2010/go-smart-node/actions/runs/43221986446)
 [Launch evidence](https://github.com/maxwell2010/go-smart-node/actions/runs/43221986446/artifacts/13946004522)
 
+The four-validator rehearsal on `da1d68c` used `mintcandy_990012-1` and
+reconciled all 100,000 DEL against the draft distribution. The cold app
+verified four 10,000 DEL positions, 40,000 DEL in WDEL, and DRC20 and
+ERC1155 collateral of 300 and 100 DEL. The four validators initially
+signed. After validator `d` stopped at height 12, the other three made
+canonical commits at heights 14-16 with 30,000 of the configured 40,000
+voting power. The ordinary peer joined after height 17, synchronized from
+block 1 and agreed on the AppHash at height 21. EVM JSON-RPC and Cosmos
+REST agreed at heights 1 and 21. The fixture used one synthetic community
+account and verified the treasury's 3-of-5 public key at genesis.
+[Four-validator CI](https://github.com/maxwell2010/go-smart-node/actions/runs/43226218714)
+[Public test evidence](https://github.com/maxwell2010/go-smart-node/actions/runs/43226218714/artifacts/13948965875)
+
 ## Separate release tracks
 
 The selected architecture is a fresh network on a maintained modern stack,
