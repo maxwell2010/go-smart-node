@@ -51,7 +51,7 @@ func runSignedActiveNFTPenalty(t *testing.T, e isolatedBackendEnv, profile owned
 	principal, unitReserve := sdkmath.NewIntWithDecimal(3, 18), sdkmath.NewIntWithDecimal(2, 18)
 	percentage := uint16(25)
 	zeroExit := mode == "nft-penalty-zero-exit"
-	historical := mode == activeHistoricalNFTPenaltyMode
+	historical := mode == activeHistoricalNFTPenaltyMode || mode == frozenHistoricalNFTPenaltyMode
 	if zeroExit {
 		principal, percentage = sdkmath.ZeroInt(), 100
 	}
@@ -138,8 +138,16 @@ func runSignedActiveNFTPenalty(t *testing.T, e isolatedBackendEnv, profile owned
 	}
 	lateBlock := e.ctx().BlockHeight()
 	sibling := delegate(unitsPerPosition)
-	if historical {
+	if mode == activeHistoricalNFTPenaltyMode {
 		runSignedActiveHistoricalNFTPenalty(t, f, reader, executor, master, profile.MasterValidator, penalized, sibling, principal, unitReserve, lateBlock)
+		return
+	}
+	if mode == frozenHistoricalNFTPenaltyMode {
+		earlyClaim := freezeSignedNFTPenaltyClaim(t, f, executor, penalized, inclusion)
+		e.advance()
+		e.advance()
+		lateClaim := freezeSignedNFTPenaltyClaim(t, f, executor, sibling, inclusion)
+		runSignedFrozenHistoricalNFTPenalty(t, f, reader, executor, master, profile.MasterValidator, earlyClaim, lateClaim, principal, lateBlock)
 		return
 	}
 	if mode == "frozen-nft-penalty" || mode == frozenNFTMaxUnitsMode || mode == frozenNFTBothEligibleMode {

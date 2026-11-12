@@ -157,6 +157,13 @@ func (f signedDELFixture) signedBy(key int, method string, value sdkmath.Int, su
 }
 
 func (f signedDELFixture) read(artifact contracts.Artifact, contract common.Address, method string, args ...interface{}) interface{} {
+	f.t.Helper()
+	values := f.readOutputs(artifact, contract, method, args...)
+	require.Len(f.t, values, 1)
+	return values[0]
+}
+
+func (f signedDELFixture) readOutputs(artifact contracts.Artifact, contract common.Address, method string, args ...interface{}) []interface{} {
 	t, e := f.t, f.env
 	t.Helper()
 	data, err := artifact.ABI.Pack(method, args...)
@@ -170,8 +177,7 @@ func (f signedDELFixture) read(artifact contracts.Artifact, contract common.Addr
 	require.Empty(t, response.VmError)
 	values, err := artifact.ABI.Unpack(method, response.Ret)
 	require.NoError(t, err)
-	require.Len(t, values, 1)
-	return values[0]
+	return values
 }
 
 func (f signedDELFixture) backing(want sdkmath.Int) {

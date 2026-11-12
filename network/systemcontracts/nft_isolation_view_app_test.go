@@ -313,7 +313,8 @@ func runIsolatedPositionReader(t *testing.T, e isolatedBackendEnv) {
 		mode == heldPenaltyMode || mode == heldLotBudgetMode || mode == mixedLotBudgetMode ||
 		mode == "frozen-penalty-partial" || mode == "frozen-penalty-full" ||
 		mode == "frozen-held-penalty" || mode == "frozen-held-penalty-full" || mode == frozenHeldLotBudgetMode ||
-		mode == "nft-penalty" || mode == "nft-penalty-zero-exit" || mode == activeHistoricalNFTPenaltyMode || mode == "frozen-nft-penalty" || mode == frozenNFTMaxUnitsMode || mode == frozenNFTBothEligibleMode || mode == frozenNFTWithHeldMode || mode == frozenNFTWithFrozenHeldMode {
+		mode == activeHistoricalNFTPenaltyMode || mode == frozenHistoricalNFTPenaltyMode ||
+		mode == "nft-penalty" || mode == "nft-penalty-zero-exit" || mode == "frozen-nft-penalty" || mode == frozenNFTMaxUnitsMode || mode == frozenNFTBothEligibleMode || mode == frozenNFTWithHeldMode || mode == frozenNFTWithFrozenHeldMode {
 		profile := ownedapp.WithdrawalProfile{Registry: registryAddress, Gateway: gatewayAddress, Library: libraryAddress, NFTCenter: factoryAddress,
 			PositionVault: vaultAddress, MasterValidator: masterAddress, WrappedDEL: wrapped, SettlementOnly: true, EnableDELDelegation: true,
 			EnableDELHold: mode == "hold" || mode == "reset", EnableDELHoldReset: mode == "reset"}
@@ -350,7 +351,8 @@ func runIsolatedPositionReader(t *testing.T, e isolatedBackendEnv) {
 			runSignedFrozenDELPenalty(t, e, profile, gateway, master, wrapper, sourceReader, govSetup, full, held, mode == frozenHeldLotBudgetMode)
 			return
 		}
-		if mode == "nft-penalty" || mode == "nft-penalty-zero-exit" || mode == activeHistoricalNFTPenaltyMode || mode == "frozen-nft-penalty" || mode == frozenNFTMaxUnitsMode || mode == frozenNFTBothEligibleMode || mode == frozenNFTWithHeldMode || mode == frozenNFTWithFrozenHeldMode {
+		if mode == activeHistoricalNFTPenaltyMode || mode == frozenHistoricalNFTPenaltyMode ||
+			mode == "nft-penalty" || mode == "nft-penalty-zero-exit" || mode == "frozen-nft-penalty" || mode == frozenNFTMaxUnitsMode || mode == frozenNFTBothEligibleMode || mode == frozenNFTWithHeldMode || mode == frozenNFTWithFrozenHeldMode {
 			runSignedActiveNFTPenalty(t, e, profile, gateway, master, wrapper, origin, vault, originAddress, sourceReader, govSetup, mode)
 			return
 		}
