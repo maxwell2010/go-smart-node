@@ -23,10 +23,11 @@ import (
 )
 
 const (
-	frozenNFTPenaltyPassed    = "frozen isolated NFT penalties preserve both receipts and roll back rejected reserve loss"
-	frozenNFTMaxUnitsMode     = "frozen-nft-penalty-max-units"
-	frozenNFTBothEligibleMode = "frozen-nft-penalty-both-eligible"
-	frozenNFTWithHeldMode     = "frozen-nft-and-held-penalty-max-units"
+	frozenNFTPenaltyPassed      = "frozen isolated NFT penalties preserve both receipts and roll back rejected reserve loss"
+	frozenNFTMaxUnitsMode       = "frozen-nft-penalty-max-units"
+	frozenNFTBothEligibleMode   = "frozen-nft-penalty-both-eligible"
+	frozenNFTWithHeldMode       = "frozen-nft-and-held-penalty-max-units"
+	frozenNFTWithFrozenHeldMode = "frozen-nft-and-frozen-held-penalty-max-units"
 )
 
 func TestOwnedAppSignedFrozenNFTPenalty(t *testing.T) {
@@ -196,14 +197,16 @@ func runSignedFrozenNFTPenalty(t *testing.T, f signedDELFixture, reader *nftview
 	t.Log(frozenNFTPenaltyPassed)
 }
 
-const frozenNFTWithHeldPassed = "frozen max-unit NFT and 128 active held DEL lots penalized and reconciled together"
+const frozenNFTWithHeldPassed = "frozen max-unit NFT and 128 held DEL lots penalized and reconciled together"
 
 func TestOwnedAppSignedMaxUnitFrozenNFTAndHeldPenalty(t *testing.T) {
-	testSignedHoldLotBudget(t, frozenNFTWithHeldMode, frozenNFTWithHeldPassed)
+	for _, mode := range []string{frozenNFTWithHeldMode, frozenNFTWithFrozenHeldMode} {
+		t.Run(mode, func(t *testing.T) { testSignedHoldLotBudget(t, mode, frozenNFTWithHeldPassed) })
+	}
 }
 
 func runSignedFrozenNFTAndHeldPenalty(t *testing.T, f signedDELFixture, reader *nftview.Reader, executor *settlement.Executor,
-	stake settlement.NFTIsolation, inclusion func(*evmtypes.MsgEthereumTxResponse) (sdk.Context, *ethtypes.Receipt),
+	stake settlement.NFTIsolation, freezeHold bool, inclusion func(*evmtypes.MsgEthereumTxResponse) (sdk.Context, *ethtypes.Receipt),
 ) {
 	t.Helper()
 	e := f.env
@@ -227,8 +230,46 @@ func runSignedFrozenNFTAndHeldPenalty(t *testing.T, f signedDELFixture, reader *
 		require.NoError(t, err)
 		return row
 	}
+	var heldWithdrawal settlement.DELTransition
+	beforeHeld := readHeld()
+	activeCount, frozenCount := 1, 1
+	activeReserve := lot.MulRaw(benchmarkHoldLots)
+	readFrozenHold := func() validatortypes.EVMFrozenBinding {
+		t.Helper()
+		row, err := keeper.GetEVMFrozenBinding(e.ctx(), f.target[:], heldWithdrawal.FrozenIndex[:])
+		require.NoError(t, err)
+		return row
+	}
+	var beforeFrozenHold validatortypes.EVMFrozenBinding
+	if freezeHold {
+		for e.ctx().BlockTime().Unix() <= deadline {
+			e.advance()
+		}
+		args := []interface{}{f.validator, f.wrapped, beforeHeld.RawAmount.BigInt(), big.NewInt(deadline)}
+		data, err := f.gateway.ABI.Pack("withdrawHold", args...)
+		require.NoError(t, err)
+		response := f.signed("withdrawHold", sdkmath.ZeroInt(), true, args...)
+		committed, receipt := inclusion(response)
+		heldWithdrawal, err = executor.VerifySignedDEL(committed,
+			core.Message{From: f.user, To: &f.target, Value: new(big.Int), Data: data}, receipt)
+		require.NoError(t, err)
+		require.NoError(t, keeper.ApplyGatewayDELWithdrawal(committed, validatorkeeper.GatewayDELStake{
+			Gateway: f.target, WrappedDEL: f.wrapped, Validator: f.validator, Beneficiary: f.user,
+			StakeID: heldID, Amount: heldWithdrawal.Remaining, HoldDeadline: deadline, HoldStartTime: heldWithdrawal.HoldStartTime,
+		}, heldWithdrawal.FrozenIndex, heldWithdrawal.Amount, heldWithdrawal.Deadline))
+		beforeFrozenHold = readFrozenHold()
+		activeCount, frozenCount = 0, 2
+		activeReserve = sdkmath.ZeroInt()
+	}
 	readLots := func() []*validatortypes.StakeHold {
 		t.Helper()
+		if freezeHold {
+			pending, err := keeper.GetUndelegation(e.ctx(), f.beneficiary, f.operator)
+			require.NoError(t, err)
+			require.Len(t, pending.Entries, 2)
+			require.Equal(t, validatortypes.StakeType_CoinHold, pending.Entries[1].Stake.Type)
+			return pending.Entries[1].Stake.Holds
+		}
 		row, err := keeper.GetDelegation(e.ctx(), f.beneficiary, f.operator, validatortypes.StakeType_CoinHold, identity.BaseDenom)
 		require.NoError(t, err)
 		return row.Stake.Holds
@@ -236,14 +277,14 @@ func runSignedFrozenNFTAndHeldPenalty(t *testing.T, f signedDELFixture, reader *
 	active, next, err := keeper.GetActiveStakePenaltyPage(e.ctx(), f.validator[:], nil, 2)
 	require.NoError(t, err)
 	require.Nil(t, next)
-	require.Len(t, active, 1, "the fully withdrawn NFT no longer has an active companion")
+	require.Len(t, active, activeCount, "the fully withdrawn NFT no longer has an active companion")
 	frozen, next, err := keeper.GetValidatorFrozenBindingsPage(e.ctx(), f.validator[:], nil, 2)
 	require.NoError(t, err)
 	require.Nil(t, next)
-	require.Len(t, frozen, 1)
-	beforeHeld, beforeLots := readHeld(), readLots()
+	require.Len(t, frozen, frozenCount)
+	beforeLots := readLots()
 	require.Len(t, beforeLots, benchmarkHoldLots)
-	f.activeReserve(lot.MulRaw(benchmarkHoldLots))
+	f.activeReserve(activeReserve)
 	f.backing(beforeHeld.RawAmount)
 	heldLoss := beforeHeld.RawAmount.QuoRaw(2)
 	nftLoss := claim.row.ReportedReserveAmount.QuoRaw(2)
@@ -263,19 +304,21 @@ func runSignedFrozenNFTAndHeldPenalty(t *testing.T, f signedDELFixture, reader *
 		const percentage uint16 = 50
 		infraction := claim.row.CreatedHeight
 		err := executor.AppendMasterPenalty(execution, f.validator, percentage, supply, func(ctx sdk.Context, master settlement.MasterPenaltyProof) error {
-			err := executor.ApplyHeldDELPenalty(ctx, beforeHeld, percentage, supply, func(ctx sdk.Context, proof settlement.ActiveDELPenaltyProof) error {
-				require.True(t, heldLoss.Equal(proof.Burned))
-				require.Equal(t, master.AfterCursor, common.BytesToHash(proof.After.PenaltyCursor))
-				return keeper.ApplyGatewayDELHoldPenalty(ctx, validatorkeeper.GatewayDELStake{
-					Gateway: f.target, WrappedDEL: f.wrapped, Validator: f.validator, Beneficiary: f.user,
-					StakeID: heldID, Amount: beforeHeld.RawAmount, PenaltyCursor: master.BeforeCursor,
-					HoldDeadline: deadline, HoldStartTime: beforeHeld.NativeHoldStartTime,
-				}, proof.After.RawAmount, master.AfterCursor)
-			})
-			if err != nil {
-				return err
+			if !freezeHold {
+				err := executor.ApplyHeldDELPenalty(ctx, beforeHeld, percentage, supply, func(ctx sdk.Context, proof settlement.ActiveDELPenaltyProof) error {
+					require.True(t, heldLoss.Equal(proof.Burned))
+					require.Equal(t, master.AfterCursor, common.BytesToHash(proof.After.PenaltyCursor))
+					return keeper.ApplyGatewayDELHoldPenalty(ctx, validatorkeeper.GatewayDELStake{
+						Gateway: f.target, WrappedDEL: f.wrapped, Validator: f.validator, Beneficiary: f.user,
+						StakeID: heldID, Amount: beforeHeld.RawAmount, PenaltyCursor: master.BeforeCursor,
+						HoldDeadline: deadline, HoldStartTime: beforeHeld.NativeHoldStartTime,
+					}, proof.After.RawAmount, master.AfterCursor)
+				})
+				if err != nil {
+					return err
+				}
 			}
-			err = executor.ApplyFrozenNFTPenalty(ctx, claim.row, infraction, percentage, supply, func(ctx sdk.Context, proof settlement.FrozenNFTPenaltyProof) error {
+			err := executor.ApplyFrozenNFTPenalty(ctx, claim.row, infraction, percentage, supply, func(ctx sdk.Context, proof settlement.FrozenNFTPenaltyProof) error {
 				require.True(t, proof.Eligible)
 				require.True(t, nftLoss.Equal(proof.Burned))
 				require.Equal(t, master.AfterCursor, proof.AfterCursor)
@@ -284,32 +327,55 @@ func runSignedFrozenNFTAndHeldPenalty(t *testing.T, f signedDELFixture, reader *
 			if err != nil {
 				return err
 			}
+			if freezeHold {
+				err := executor.ApplyFrozenDELPenalty(ctx, beforeFrozenHold, infraction, percentage, supply, func(ctx sdk.Context, proof settlement.FrozenDELPenaltyProof) error {
+					require.True(t, proof.Eligible)
+					require.True(t, heldLoss.Equal(proof.Burned))
+					require.Equal(t, master.AfterCursor, proof.AfterCursor)
+					return keeper.ApplyGatewayFrozenDELHoldPenalty(ctx, beforeFrozenHold, validatorkeeper.GatewayFrozenDELHold{
+						WrappedDEL: f.wrapped, HoldDeadline: proof.HoldDeadline, HoldStartTime: proof.HoldStartTime,
+					}, infraction, proof.BeforeCursor, proof.AfterCursor, proof.Remaining)
+				})
+				if err != nil {
+					return err
+				}
+			}
 			if err := keeper.RequireActiveStakePenaltyCatchup(ctx, f.validator[:], master.AfterCursor[:]); err != nil {
 				return err
 			}
 			return injected
 		})
 		if err == nil {
-			t.Logf("DEL hold penalty gas lots=%d sdk_gas=%d budget=%d frozen_nft_units=%d",
-				benchmarkHoldLots, execution.GasMeter().GasConsumed(), budget, stake.Position.OriginQuantity)
+			t.Logf("DEL hold penalty gas lots=%d sdk_gas=%d budget=%d frozen_nft_units=%d frozen_hold=%t",
+				benchmarkHoldLots, execution.GasMeter().GasConsumed(), budget, stake.Position.OriginQuantity, freezeHold)
 		}
 		return err
 	}
 	rejected := errors.New("reject both mixed penalty projections")
 	require.ErrorIs(t, apply(rejected), rejected)
-	require.Equal(t, beforeHeld, readHeld())
+	if freezeHold {
+		require.Equal(t, beforeFrozenHold, readFrozenHold())
+	} else {
+		require.Equal(t, beforeHeld, readHeld())
+	}
 	require.Equal(t, claim.row, readFrozen())
 	require.Equal(t, beforeLots, readLots())
 	require.True(t, initialSupply.Equal(supply(e.ctx())))
 
 	require.NoError(t, apply(nil))
-	heldAfter, nftAfter := readHeld(), readFrozen()
-	require.True(t, heldLoss.Equal(heldAfter.RawAmount))
+	nftAfter := readFrozen()
+	heldRemaining := beforeHeld.RawAmount.Sub(heldLoss)
+	if freezeHold {
+		require.True(t, heldRemaining.Equal(readFrozenHold().RawAmount))
+	} else {
+		require.True(t, heldRemaining.Equal(readHeld().RawAmount))
+		activeReserve = heldRemaining
+	}
 	require.True(t, nftLoss.Equal(nftAfter.ReportedReserveAmount))
 	require.Equal(t, claim.row.NFTPosition, nftAfter.NFTPosition)
 	require.True(t, initialSupply.Sub(totalLoss).Equal(supply(e.ctx())))
-	f.activeReserve(heldLoss)
-	f.backing(heldLoss)
+	f.activeReserve(activeReserve)
+	f.backing(heldRemaining)
 	afterLots := readLots()
 	require.Len(t, afterLots, benchmarkHoldLots)
 	for i, before := range beforeLots {
@@ -317,7 +383,22 @@ func runSignedFrozenNFTAndHeldPenalty(t *testing.T, f signedDELFixture, reader *
 		require.Equal(t, before.HoldEndTime, afterLots[i].HoldEndTime)
 		require.True(t, before.Amount.QuoRaw(2).Equal(afterLots[i].Amount))
 	}
-	completePenalizedNFTExit(t, f, reader, executor, nftAfter, claim.out, claim.lineage, inclusion, 0)
+	pending := frozenCount - 1
+	completePenalizedNFTExit(t, f, reader, executor, nftAfter, claim.out, claim.lineage, inclusion, pending)
+	if freezeHold {
+		for e.ctx().BlockTime().Before(heldWithdrawal.Deadline) {
+			e.advance()
+		}
+		heldClaim := readFrozenHold()
+		e.credit.Set(heldRemaining.BigInt())
+		response := f.signed("complete", sdkmath.ZeroInt(), true, []*big.Int{heldWithdrawal.FrozenIndex.Big()})
+		committed, receipt := inclusion(response)
+		_, err := executor.ValidateSigned(committed, heldClaim, receipt)
+		require.NoError(t, err)
+		require.NoError(t, keeper.ApplyWithdrawalCompletion(committed, heldClaim))
+		require.False(t, readFrozenHold().Active)
+		f.backing(sdkmath.ZeroInt())
+	}
 	require.True(t, initialSupply.Sub(totalLoss).Equal(supply(e.ctx())))
 	t.Log(frozenNFTWithHeldPassed)
 }

@@ -54,7 +54,8 @@ func runSignedActiveNFTPenalty(t *testing.T, e isolatedBackendEnv, profile owned
 	if zeroExit {
 		principal, percentage = sdkmath.ZeroInt(), 100
 	}
-	withHeld := mode == frozenNFTWithHeldMode
+	freezeHold := mode == frozenNFTWithFrozenHeldMode
+	withHeld := mode == frozenNFTWithHeldMode || freezeHold
 	if withHeld {
 		principal = sdkmath.ZeroInt()
 		gov(gateway, profile.Gateway, "setFreezeTime", big.NewInt(benchmarkHoldLots+signedDELFreezeSeconds), new(big.Int))
@@ -122,7 +123,7 @@ func runSignedActiveNFTPenalty(t *testing.T, e isolatedBackendEnv, profile owned
 	}
 	penalized := delegate(unitsPerPosition)
 	if withHeld {
-		runSignedFrozenNFTAndHeldPenalty(t, f, reader, executor, penalized, inclusion)
+		runSignedFrozenNFTAndHeldPenalty(t, f, reader, executor, penalized, freezeHold, inclusion)
 		return
 	}
 	sibling := delegate(unitsPerPosition)
