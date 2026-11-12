@@ -51,6 +51,32 @@ func testSignedHoldLotBudget(t *testing.T, mode, passed string) {
 	t.Log(prefix + strings.TrimSpace(line))
 }
 
+func fundSignedDELPenalty(t *testing.T, f signedDELFixture, executor *settlement.Executor, value sdkmath.Int, deadline int64) common.Hash {
+	e, gateway := f.env, f.gateway
+	keeper := e.app.NativeValidatorKeeper
+	t.Helper()
+	method := "delegateDEL"
+	args := []interface{}{f.validator}
+	if deadline != 0 {
+		method = "delegateHoldDEL"
+		args = append(args, big.NewInt(deadline))
+	}
+	data, err := gateway.ABI.Pack(method, args...)
+	require.NoError(t, err)
+	result := f.signed(method, value, true, args...)
+	msg := core.Message{From: f.user, To: &f.target, Value: value.BigInt(), Data: data}
+	receipt := &ethtypes.Receipt{Status: ethtypes.ReceiptStatusSuccessful, Logs: evmtypes.LogsToEthereum(result.Logs)}
+	inclusion := e.ctx().WithBlockHeight(e.app.LastBlockHeight()).WithBlockTime(e.ctx().BlockTime().Add(-time.Second))
+	proof, err := executor.VerifySignedDEL(inclusion, msg, receipt)
+	require.NoError(t, err)
+	require.NoError(t, keeper.ApplyGatewayDELDelegation(inclusion, validatorkeeper.GatewayDELStake{
+		Gateway: f.target, WrappedDEL: f.wrapped, Validator: f.validator, Beneficiary: f.user,
+		StakeID: proof.StakeID, Amount: proof.Remaining, HoldDeadline: proof.HoldDeadline,
+		HoldStartTime: proof.HoldStartTime, NFTBacked: proof.NFTBacked,
+	}, proof.Amount))
+	return proof.StakeID
+}
+
 func runSignedHeldDELPenalty(t *testing.T, e isolatedBackendEnv, profile ownedapp.WithdrawalProfile, gateway, master, wrapper contracts.Artifact,
 	reader *nftview.Reader, gov func(contracts.Artifact, common.Address, string, ...interface{}), mode string,
 ) {
@@ -61,29 +87,6 @@ func runSignedHeldDELPenalty(t *testing.T, e isolatedBackendEnv, profile ownedap
 	require.NoError(t, err)
 	keeper := e.app.NativeValidatorKeeper
 	del := func(n int64) sdkmath.Int { return sdkmath.NewIntWithDecimal(n, 18) }
-	deposit := func(value sdkmath.Int, deadline int64) common.Hash {
-		t.Helper()
-		method := "delegateDEL"
-		args := []interface{}{f.validator}
-		if deadline != 0 {
-			method = "delegateHoldDEL"
-			args = append(args, big.NewInt(deadline))
-		}
-		data, err := gateway.ABI.Pack(method, args...)
-		require.NoError(t, err)
-		result := f.signed(method, value, true, args...)
-		msg := core.Message{From: f.user, To: &f.target, Value: value.BigInt(), Data: data}
-		receipt := &ethtypes.Receipt{Status: ethtypes.ReceiptStatusSuccessful, Logs: evmtypes.LogsToEthereum(result.Logs)}
-		inclusion := e.ctx().WithBlockHeight(e.app.LastBlockHeight()).WithBlockTime(e.ctx().BlockTime().Add(-time.Second))
-		proof, err := executor.VerifySignedDEL(inclusion, msg, receipt)
-		require.NoError(t, err)
-		require.NoError(t, keeper.ApplyGatewayDELDelegation(inclusion, validatorkeeper.GatewayDELStake{
-			Gateway: f.target, WrappedDEL: f.wrapped, Validator: f.validator, Beneficiary: f.user,
-			StakeID: proof.StakeID, Amount: proof.Remaining, HoldDeadline: proof.HoldDeadline,
-			HoldStartTime: proof.HoldStartTime, NFTBacked: proof.NFTBacked,
-		}, proof.Amount))
-		return proof.StakeID
-	}
 	mixed := mode == mixedLotBudgetMode
 	lotCount, extraLots := 3, 0
 	if mode != heldPenaltyMode {
@@ -98,16 +101,16 @@ func runSignedHeldDELPenalty(t *testing.T, e isolatedBackendEnv, profile ownedap
 	if mixed {
 		secondDeadline = 0
 	}
-	firstID := deposit(del(3), firstDeadline)
-	require.Equal(t, firstID, deposit(del(2), firstDeadline))
+	firstID := fundSignedDELPenalty(t, f, executor, del(3), firstDeadline)
+	require.Equal(t, firstID, fundSignedDELPenalty(t, f, executor, del(2), firstDeadline))
 	// Five atoms incur an exact one-atom loss at 20% and keep each lot alive.
 	extraAmount := sdkmath.NewInt(5)
 	for range extraLots {
-		require.Equal(t, firstID, deposit(extraAmount, firstDeadline))
+		require.Equal(t, firstID, fundSignedDELPenalty(t, f, executor, extraAmount, firstDeadline))
 	}
 	firstAmount := del(5).Add(extraAmount.MulRaw(int64(extraLots)))
 	total := firstAmount.Add(del(7))
-	secondID := deposit(del(7), secondDeadline)
+	secondID := fundSignedDELPenalty(t, f, executor, del(7), secondDeadline)
 	require.NotEqual(t, firstID, secondID)
 	binding := func(ctx sdk.Context, id common.Hash) validatortypes.EVMStakeBinding {
 		row, err := keeper.GetEVMStakeBinding(ctx, validatortypes.EVMStakeBindingKind_EVM_STAKE_BINDING_COIN, f.target[:], id[:])
