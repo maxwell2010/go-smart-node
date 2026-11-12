@@ -306,7 +306,7 @@ func (e *Executor) invokeFrom(ctx sdk.Context, sender, target common.Address, da
 		if len(result.Ret) >= 4 {
 			var selector [4]byte
 			copy(selector[:], result.Ret[:4])
-			for _, contract := range []abi.ABI{e.gateway, e.master, e.wrapper} {
+			for _, contract := range []abi.ABI{e.gateway, e.master, e.wrapper, e.vault} {
 				if known, err := contract.ErrorByID(selector); err == nil {
 					return nil, msg, fmt.Errorf("Gateway call reverted: %s (%s)", result.VmError, known.Name)
 				}
