@@ -141,6 +141,18 @@ account and verified the treasury's 3-of-5 public key at genesis.
 [Four-validator CI](https://github.com/maxwell2010/go-smart-node/actions/runs/43226218714)
 [Public test evidence](https://github.com/maxwell2010/go-smart-node/actions/runs/43226218714/artifacts/13948965875)
 
+The test treasury on `fec0d83` rejected the 10 DEL transfer with two
+valid member signatures. App checks forced the rejected transaction through
+block execution and confirmed that balances, sequence and supply stayed
+unchanged after commit. On the isolated packaged network, `CheckTx` returned
+`sdk/4`, and the later snapshot showed no fee or sequence change. Adding a
+third member signature committed the transfer at height 25. The treasury
+debit was 11 DEL, the recipient credit was 10 DEL, the fee collector credit
+was 1 DEL, and the treasury sequence advanced from 0 to 1. The three remaining
+test validators and the ordinary peer agreed on the committed balances and AppHash.
+[Treasury CI](https://github.com/maxwell2010/go-smart-node/actions/runs/43229438556)
+[Treasury evidence](https://github.com/maxwell2010/go-smart-node/actions/runs/43229438556/artifacts/13950146919)
+
 ## Separate release tracks
 
 The selected architecture is a fresh network on a maintained modern stack,
