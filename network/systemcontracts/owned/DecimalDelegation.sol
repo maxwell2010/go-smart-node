@@ -4134,8 +4134,7 @@ library DelegationNFTLib {
         FrozenDELCheckpoint storage checkpoint = _frozenDELPenaltyStorage().checkpoints[index];
         if (checkpoint.creationHeight == 0 || checkpoint.penaltyCursor != beforeCursor ||
             checkpoint.creationHeight > block.number ||
-            infractionHeight == 0 || infractionHeight > block.number ||
-            (block.timestamp >= claim.unfreezeTimestamp && checkpoint.creationHeight >= infractionHeight)) {
+            infractionHeight == 0 || infractionHeight > block.number) {
             revert InvalidFrozenDELPenalty();
         }
         bool isNFT = claim.stake.tokenType == IDecimalDelegationCommon.TokenType.DRC721;
