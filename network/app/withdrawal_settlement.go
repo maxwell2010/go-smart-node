@@ -52,6 +52,7 @@ type WithdrawalProfile struct {
 	EnableNFTDelegation    bool           `json:"enable_nft_delegation,omitempty"`
 	EnableNativeConsensus  bool           `json:"enable_native_consensus,omitempty"`
 	EnableNativeFeeRewards bool           `json:"enable_native_fee_rewards,omitempty"`
+	EnableNativeIBCV1      bool           `json:"enable_native_ibc_v1,omitempty"`
 }
 
 type withdrawalController struct {
@@ -87,6 +88,9 @@ func (app *App) LoadWithdrawalSettlement(ctx sdk.Context) error {
 	if err := app.verifyNativeConsensusState(ctx, profile.EnableNativeConsensus); err != nil {
 		return err
 	}
+	if err := app.verifyNativeIBCState(ctx, profile); err != nil {
+		return err
+	}
 	if app.withdrawals != nil {
 		if app.withdrawals.profile != profile {
 			return errors.New("withdrawal profile changed without a coordinated restart")
@@ -102,6 +106,9 @@ func (app *App) LoadWithdrawalSettlement(ctx sdk.Context) error {
 }
 
 func (app *App) newWithdrawalController(profile WithdrawalProfile) (*withdrawalController, error) {
+	if profile.EnableNativeIBCV1 && !profile.EnableNativeConsensus {
+		return nil, errors.New("native IBC v1 requires native consensus")
+	}
 	if profile.EnableNativeFeeRewards && !profile.EnableNativeConsensus {
 		return nil, errors.New("native fee rewards require native consensus")
 	}

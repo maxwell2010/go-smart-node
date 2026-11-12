@@ -22,6 +22,8 @@ type GenesisLimits struct {
 	DELValidators []common.Address
 	ActiveDEL     []validatortypes.EVMStakeBinding
 	NFTOrigins    []NFTGenesisOrigin
+	// When positive, require this exact on-chain Gateway withdrawal delay.
+	DELWithdrawalSeconds int64
 }
 
 // AttestGenesis verifies a bounded settlement snapshot against the entire
@@ -37,7 +39,8 @@ func (e *Executor) AttestGenesis(ctx sdk.Context, rows []validatortypes.EVMFroze
 	if e == nil || e.evm == nil || limits.MaxRows == 0 || limits.MaxRows > validatortypes.MaxBindingPageSize || limits.SDKGas == 0 ||
 		len(rows) > int(limits.MaxRows) || len(limits.DELValidators) > int(limits.MaxRows) || len(limits.NFTOrigins) > int(limits.MaxRows) ||
 		(len(limits.DELValidators) != 0 && len(rows) != 0) || (len(limits.NFTOrigins) != 0 && len(limits.DELValidators) == 0) ||
-		len(limits.ActiveDEL) > int(limits.MaxRows) || (len(limits.ActiveDEL) != 0 && len(limits.DELValidators) == 0) {
+		len(limits.ActiveDEL) > int(limits.MaxRows) || (len(limits.ActiveDEL) != 0 && len(limits.DELValidators) == 0) ||
+		limits.DELWithdrawalSeconds < 0 || (limits.DELWithdrawalSeconds > 0 && len(limits.DELValidators) == 0) {
 		return errors.New("invalid Gateway genesis attestation limits or row count")
 	}
 	if ctx.BlockHeight() < 0 || ctx.BlockTime().Unix() <= 0 || len(ctx.BlockHeader().ProposerAddress) != common.AddressLength {
@@ -138,7 +141,7 @@ func (e *Executor) AttestGenesis(ctx sdk.Context, rows []validatortypes.EVMFroze
 		if len(limits.ActiveDEL) != 0 && count.Sign() != 0 {
 			return errors.New("active DEL genesis cannot import Gateway withdrawal history")
 		}
-		if err := e.attestDELGenesis(child, limits.DELValidators, limits.ActiveDEL); err != nil {
+		if err := e.attestDELGenesis(child, limits.DELValidators, limits.ActiveDEL, limits.DELWithdrawalSeconds); err != nil {
 			return err
 		}
 		if len(limits.NFTOrigins) != 0 {
@@ -149,7 +152,7 @@ func (e *Executor) AttestGenesis(ctx sdk.Context, rows []validatortypes.EVMFroze
 	return e.verifyGenesisBacking(child, claims)
 }
 
-func (e *Executor) attestDELGenesis(ctx sdk.Context, validators []common.Address, positions []validatortypes.EVMStakeBinding) error {
+func (e *Executor) attestDELGenesis(ctx sdk.Context, validators []common.Address, positions []validatortypes.EVMStakeBinding, expectedDelay int64) error {
 	state, err := e.payoutState(ctx, payout{asset: e.roles.WrappedDEL, beneficiary: Sender()}, common.Address{})
 	if err != nil {
 		return err
@@ -168,6 +171,9 @@ func (e *Executor) attestDELGenesis(ctx sdk.Context, validators []common.Address
 	delay := new(big.Int).SetBytes(freeze)
 	if !delay.IsInt64() || delay.Sign() == 0 {
 		return errors.New("DEL delegation genesis requires a positive withdrawal freeze time")
+	}
+	if expectedDelay > 0 && delay.Int64() != expectedDelay {
+		return errors.New("Gateway withdrawal freeze time differs from native unbonding duration")
 	}
 	reserves := make(map[common.Address]*big.Int, len(validators))
 	for _, validator := range validators {

@@ -66,13 +66,15 @@ func (app *App) newConsensusEVMReader() consensusEVMReader {
 	return consensusEVMReader{StakingKeeper: app.StakingKeeper, native: native, app: app}
 }
 
-// Until native economics and governance are enabled, the rehearsal uses only
-// bank transfers and the scoped EVM Gateway. SDK economic messages cannot be
-// dispatched through alternate SDK routes, including authz and proposals.
+// Native consensus admits bank transfers, the scoped EVM Gateway and opt-in
+// IBC v1 routes. Alternate SDK routes cannot dispatch economic messages.
 type nativeConsensusCircuit struct{ app *App }
 
 func (c nativeConsensusCircuit) IsAllowed(ctx context.Context, typeURL string) (bool, error) {
 	if !c.app.usesNativeConsensus(ctx) {
+		return true, nil
+	}
+	if c.app.withdrawals != nil && c.app.withdrawals.profile.EnableNativeIBCV1 && nativeIBCV1Message(typeURL) {
 		return true, nil
 	}
 	return typeURL == sdk.MsgTypeURL(&types.MsgEthereumTx{}) ||

@@ -56,6 +56,9 @@ func parseWithdrawalGenesisProfile(raw json.RawMessage) (*WithdrawalProfile, err
 	if profile.EnableNativeFeeRewards && !profile.EnableNativeConsensus {
 		return nil, errors.New("native fee rewards genesis requires native consensus")
 	}
+	if profile.EnableNativeIBCV1 && !profile.EnableNativeConsensus {
+		return nil, errors.New("native IBC v1 genesis requires native consensus")
+	}
 	seen := make(map[common.Address]bool)
 	for _, addr := range []common.Address{profile.Registry, profile.Gateway, profile.Library, profile.NFTCenter,
 		profile.PositionVault, profile.MasterValidator, profile.WrappedDEL} {
@@ -70,6 +73,11 @@ func parseWithdrawalGenesisProfile(raw json.RawMessage) (*WithdrawalProfile, err
 // The cold profile admits only the financial rows independently attested
 // against the approved Gateway during InitChain.
 func validateWithdrawalGenesisSnapshot(profile WithdrawalProfile, nft *nfttypes.GenesisState, validators *validatortypes.GenesisState) error {
+	if profile.EnableNativeIBCV1 {
+		if _, err := nativeIBCWithdrawalSeconds(validators.Params.UndelegationTime); err != nil {
+			return err
+		}
+	}
 	if validators.BindingDomain == nil || len(validators.Validators) > maxWithdrawalGenesisRows ||
 		len(validators.EVMFrozenBindings) > maxWithdrawalGenesisRows ||
 		len(validators.Undelegations) > maxWithdrawalGenesisRows || len(validators.Redelegations) != 0 ||
@@ -298,6 +306,12 @@ func (app *App) initWithdrawalGenesis(ctx sdk.Context, req *abci.RequestInitChai
 	limits := settlement.GenesisLimits{
 		MaxRows: maxWithdrawalGenesisRows, SDKGas: withdrawalGenesisGas,
 	}
+	if profile.EnableNativeIBCV1 {
+		limits.DELWithdrawalSeconds, err = nativeIBCWithdrawalSeconds(validators.Params.UndelegationTime)
+		if err != nil {
+			return nil, err
+		}
+	}
 	if profile.EnableNativeConsensus {
 		for _, row := range validators.EVMStakeBindings {
 			if err := app.NativeValidatorKeeper.VerifyGenesisGatewayDEL(read, profile.Gateway, profile.WrappedDEL, row); err != nil {
@@ -327,6 +341,18 @@ func (app *App) initWithdrawalGenesis(ctx sdk.Context, req *abci.RequestInitChai
 	}
 	if err := controller.executor.AttestGenesis(read, validators.EVMFrozenBindings, limits, controller.assets.AttestGenesisNFT); err != nil {
 		return nil, fmt.Errorf("authenticate withdrawal genesis: %w", err)
+	}
+	if profile.EnableNativeIBCV1 {
+		// Hermes reads the SDK staking query. The native duration is safe to
+		// expose here only after verifying the actual Gateway delay.
+		params, err := app.StakingKeeper.GetParams(child)
+		if err != nil {
+			return nil, err
+		}
+		params.UnbondingTime = validators.Params.UndelegationTime
+		if err := app.StakingKeeper.SetParams(child, params); err != nil {
+			return nil, err
+		}
 	}
 	encoded, err := json.Marshal(profile)
 	if err != nil {

@@ -559,17 +559,15 @@ func NewApp(
 	*/
 
 	// create IBC module from top to bottom of stack
-	var transferStack porttypes.IBCModule
-
-	transferStack = transfer.NewIBCModule(app.TransferKeeper)
+	bankTransfer := transfer.NewIBCModule(app.TransferKeeper)
+	erc20Transfer := erc20.NewIBCMiddleware(app.Erc20Keeper, bankTransfer)
 	maxCallbackGas := uint64(1_000_000)
-	transferStack = erc20.NewIBCMiddleware(app.Erc20Keeper, transferStack)
 	app.CallbackKeeper = ibccallbackskeeper.NewKeeper(
 		app.AccountKeeper,
 		app.EVMKeeper,
 		app.Erc20Keeper,
 	)
-	transferStack = ibccallbacks.NewIBCMiddleware(transferStack, app.IBCKeeper.ChannelKeeper, app.CallbackKeeper, maxCallbackGas)
+	transferStack := ibccallbacks.NewIBCMiddleware(erc20Transfer, app.IBCKeeper.ChannelKeeper, app.CallbackKeeper, maxCallbackGas)
 
 	var transferStackV2 ibcapi.IBCModule
 	transferStackV2 = transferv2.NewIBCModule(app.TransferKeeper)
@@ -577,7 +575,7 @@ func NewApp(
 
 	// Create static IBC router, add transfer route, then set and seal it
 	ibcRouter := porttypes.NewRouter()
-	ibcRouter.AddRoute(ibctransfertypes.ModuleName, transferStack)
+	ibcRouter.AddRoute(ibctransfertypes.ModuleName, nativeIBCTransferModule{Middleware: transferStack, bank: bankTransfer, app: app})
 	ibcRouterV2 := ibcapi.NewRouter()
 	ibcRouterV2.AddRoute(ibctransfertypes.ModuleName, transferStackV2)
 

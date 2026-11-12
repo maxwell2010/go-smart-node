@@ -132,5 +132,8 @@ func (app *App) verifyRestoredWithdrawalProfile(offer *withdrawalSnapshotOffer) 
 	if !bytes.Equal(raw, expected) {
 		return errors.New("restored withdrawal profile differs from the configured withdrawal profile")
 	}
-	return app.verifyNativeConsensusState(ctx, app.withdrawals.profile.EnableNativeConsensus)
+	if err := app.verifyNativeConsensusState(ctx, app.withdrawals.profile.EnableNativeConsensus); err != nil {
+		return err
+	}
+	return app.verifyNativeIBCState(ctx, app.withdrawals.profile)
 }
