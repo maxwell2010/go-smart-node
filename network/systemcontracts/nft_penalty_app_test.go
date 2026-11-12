@@ -51,6 +51,7 @@ func runSignedActiveNFTPenalty(t *testing.T, e isolatedBackendEnv, profile owned
 	principal, unitReserve := sdkmath.NewIntWithDecimal(3, 18), sdkmath.NewIntWithDecimal(2, 18)
 	percentage := uint16(25)
 	zeroExit := mode == "nft-penalty-zero-exit"
+	historical := mode == activeHistoricalNFTPenaltyMode
 	if zeroExit {
 		principal, percentage = sdkmath.ZeroInt(), 100
 	}
@@ -81,7 +82,16 @@ func runSignedActiveNFTPenalty(t *testing.T, e isolatedBackendEnv, profile owned
 		committed, receipt := inclusion(response)
 		proof, err := executor.VerifySignedDEL(committed, core.Message{From: f.user, To: &f.target, Value: principal.BigInt(), Data: data}, receipt)
 		require.NoError(t, err)
-		require.NoError(t, validators.ApplyGatewayDELDelegation(committed, position(proof, common.Hash{}), proof.Amount))
+		projection := committed
+		if historical {
+			// The ordinary DEL escrow is a real deposit. Seed only its native
+			// projection at fresh genesis height to activate exact provenance.
+			projection = committed.WithBlockHeight(0)
+		}
+		require.NoError(t, validators.ApplyGatewayDELDelegation(projection, position(proof, common.Hash{}), proof.Amount))
+		if historical {
+			require.NoError(t, validators.InitializeDELProvenance(projection, f.target, f.wrapped))
+		}
 	}
 
 	originID := common.BigToHash(new(big.Int).Add(new(big.Int).Lsh(big.NewInt(1), 224), big.NewInt(880)))
@@ -126,7 +136,12 @@ func runSignedActiveNFTPenalty(t *testing.T, e isolatedBackendEnv, profile owned
 		runSignedFrozenNFTAndHeldPenalty(t, f, reader, executor, penalized, freezeHold, inclusion)
 		return
 	}
+	lateBlock := e.ctx().BlockHeight()
 	sibling := delegate(unitsPerPosition)
+	if historical {
+		runSignedActiveHistoricalNFTPenalty(t, f, reader, executor, master, profile.MasterValidator, penalized, sibling, principal, unitReserve, lateBlock)
+		return
+	}
 	if mode == "frozen-nft-penalty" || mode == frozenNFTMaxUnitsMode || mode == frozenNFTBothEligibleMode {
 		runSignedFrozenNFTPenalty(t, f, reader, executor, penalized, sibling, unitReserve, mode == frozenNFTBothEligibleMode, inclusion)
 		return
