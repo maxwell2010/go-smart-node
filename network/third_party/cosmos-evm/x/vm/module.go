@@ -137,12 +137,16 @@ func (am AppModule) RegisterServices(cfg module.Configurator) {
 }
 
 func (am AppModule) PreBlock(goCtx context.Context) (appmodule.ResponsePreBlock, error) {
-	ctx := sdk.UnwrapSDKContext(goCtx)
-	coinInfo := am.keeper.GetEvmCoinInfo(ctx)
-	am.initializer.Do(func() {
-		SetGlobalConfigVariables(coinInfo)
-	})
+	am.InitGlobalConfig(sdk.UnwrapSDKContext(goCtx))
 	return &sdk.ResponsePreBlock{ConsensusParamsChanged: false}, nil
+}
+
+// InitGlobalConfig initializes the SDK and EVM denominations and EVM activators
+// from chain state. On a reopened app, call it before serving RPC queries.
+func (am AppModule) InitGlobalConfig(ctx sdk.Context) {
+	am.initializer.Do(func() {
+		SetGlobalConfigVariables(am.keeper.GetEvmCoinInfo(ctx))
+	})
 }
 
 // BeginBlock returns the begin blocker for the evm module.

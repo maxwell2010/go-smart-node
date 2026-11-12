@@ -1244,11 +1244,12 @@
     "x/vm/keeper/block_proposer.go": "50ea27632ae1910a2de1f78a6a20b848e44acac9b9c96ccef544153c9d9db79a",
     "x/vm/keeper/grpc_query.go": "e010d75efbc5686d35343b74c4d0a6af6751b695dadad50d580aeb0155cdaa10",
     "x/vm/keeper/keeper.go": "13b927ebddfe20b69599d62f07111fe8f4eb2f199d78573544dc6d763737c8f4",
-    "x/vm/keeper/state_transition.go": "899fb7a5a9b0376827cc6a83229fcfb86c56feef5a92160a9fafbcabc336497b"
+    "x/vm/keeper/state_transition.go": "899fb7a5a9b0376827cc6a83229fcfb86c56feef5a92160a9fafbcabc336497b",
+    "x/vm/module.go": "61bb2ef5596c3ae4cde20205795bb5c526424479a1cf7c076cba4fb1c6fe69fa"
   },
-  "patchVersion": "v0.6.3-mintcandy.3",
+  "patchVersion": "v0.6.3-mintcandy.4",
   "schemaVersion": 1,
-  "scope": "Decode SDK53 validator operator bytes for COINBASE; bounded and charged native post-processing, atomic rollback, and isolated matching gas estimation for the fresh network; application guard for internal commits outside signed transaction processing",
+  "scope": "Decode SDK53 validator operator bytes for COINBASE; bounded and charged native post-processing, atomic rollback, and isolated matching gas estimation for the fresh network; application guard for internal commits outside signed transaction processing; allow early EVM configuration from committed state",
   "upstreamCommit": "71c78b5072a248bae5273c34ad2f53d349799ccd",
   "upstreamModule": "github.com/cosmos/evm",
   "upstreamModuleSum": "h1:1G8+iqyQWslZ2g7873h90Fcr3pL6RV24PgOS1wiK2SY=",

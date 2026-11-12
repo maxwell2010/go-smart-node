@@ -13,8 +13,8 @@
     "ownedSourceReplacement": {
       "path": "./third_party/cosmos-evm",
       "manifest": "third_party/cosmos-evm/UPSTREAM.json",
-      "patchLabel": "v0.6.3-mintcandy.3",
-      "scope": "Decode validator operator for COINBASE; bounded, charged native post-processing with atomic rollback and matching gas estimation, plus an opt-in guard for internal commits. Fresh-network behavior only."
+      "patchLabel": "v0.6.3-mintcandy.4",
+      "scope": "Decode validator operator for COINBASE; bounded, charged native post-processing with atomic rollback and matching gas estimation, plus an opt-in guard for internal commits. Load EVM configuration from committed state before RPC starts. Fresh-network behavior only."
     }
   },
   "goToolchain": "go1.26.10 linux/amd64",

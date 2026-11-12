@@ -805,7 +805,7 @@ func NewApp(
 			logger.Error("error on loading last version", "err", err)
 			os.Exit(1)
 		}
-		if err := app.loadCommittedWithdrawalSettlement(); err != nil {
+		if err := app.loadCommittedState(); err != nil {
 			panic(err)
 		}
 	}
@@ -938,12 +938,20 @@ func (app *App) LoadHeight(height int64) error {
 	if err := app.LoadVersion(height); err != nil {
 		return err
 	}
-	return app.loadCommittedWithdrawalSettlement()
+	return app.loadCommittedState()
 }
 
-func (app *App) loadCommittedWithdrawalSettlement() error {
-	ctx := app.NewUncachedContext(false, cmtproto.Header{ChainID: app.chainID, Height: app.LastBlockHeight()})
-	return app.LoadWithdrawalSettlement(ctx)
+func (app *App) loadCommittedState() error {
+	height := app.LastBlockHeight()
+	ctx := app.NewUncachedContext(false, cmtproto.Header{ChainID: app.chainID, Height: height})
+	if err := app.LoadWithdrawalSettlement(ctx); err != nil {
+		return err
+	}
+	if height > 0 {
+		evmModule := app.ModuleManager.Modules[evmtypes.ModuleName].(vm.AppModule)
+		evmModule.InitGlobalConfig(ctx)
+	}
+	return nil
 }
 
 // LegacyAmino returns App's amino codec.

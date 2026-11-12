@@ -148,9 +148,8 @@ func runNativeHistoricalConsensusLifecycle(t *testing.T, dir, phase string) {
 		require.Equal(t, int64(4), app.LastBlockHeight())
 		require.Equal(t, checkpoint.BeforeHash, app.LastCommitID().Hash)
 		require.True(t, beforeSupply.Equal(l.supply()))
-		// The committed app hash authenticates EVM storage before the
-		// first reopened block initializes the EVM denomination globals.
 		l.assertNativePenaltyState(false)
+		l.assertMasterPenaltyState(false)
 		l.commit(l.finalizePenalty())
 		l.assertNativePenaltyState(true)
 		l.assertMasterPenaltyState(true)
@@ -163,6 +162,8 @@ func runNativeHistoricalConsensusLifecycle(t *testing.T, dir, phase string) {
 	require.Equal(t, int64(5), app.LastBlockHeight())
 	require.Equal(t, checkpoint.AfterHash, app.LastCommitID().Hash)
 	l.assertNativePenaltyState(true)
+	l.assertReopenedEVMQuery()
+	l.assertMasterPenaltyState(true)
 	clock, err := app.NativeValidatorKeeper.NativeEvidenceBlockAtSnapshot(l.context(5))
 	require.NoError(t, err)
 	require.Equal(t, int64(5), clock.Height)
@@ -170,9 +171,6 @@ func runNativeHistoricalConsensusLifecycle(t *testing.T, dir, phase string) {
 	beforePayout := app.BankKeeper.GetBalance(l.snapshot(), beneficiary, identity.BaseDenom).Amount
 	for height := int64(6); height <= 11; height++ {
 		l.commit(l.finalize(nil, nil))
-		if height == 6 {
-			l.assertMasterPenaltyState(true)
-		}
 		row, err := app.NativeValidatorKeeper.GetEVMFrozenBinding(l.snapshot(), expected.Gateway[:], make([]byte, 32))
 		require.NoError(t, err)
 		wantBalance := beforePayout
@@ -201,6 +199,24 @@ func runNativeHistoricalConsensusLifecycle(t *testing.T, dir, phase string) {
 		registration.testWeightedValidatorRegistration()
 	})
 	t.Log(historicalLifecyclePassed)
+}
+
+func (l nativeHistoricalLifecycle) assertReopenedEVMQuery() {
+	t := l.t
+	t.Helper()
+	want := l.app.BankKeeper.SpendableCoin(l.snapshot(), sdk.AccAddress(l.expect.Actor[:]), identity.BaseDenom).Amount
+	require.True(t, want.IsPositive())
+	codec := l.app.AppCodec()
+	query, err := l.app.Query(t.Context(), &abci.RequestQuery{
+		Path: "/cosmos.evm.vm.v1.Query/Balance",
+		Data: codec.MustMarshal(&evmtypes.QueryBalanceRequest{Address: l.expect.Actor.Hex()}),
+	})
+	require.NoError(t, err)
+	require.Zero(t, query.Code, query.Log)
+	require.Equal(t, l.app.LastBlockHeight(), query.Height)
+	var balance evmtypes.QueryBalanceResponse
+	require.NoError(t, codec.Unmarshal(query.Value, &balance))
+	require.Equal(t, want.String(), balance.Balance)
 }
 
 func (l nativeHistoricalLifecycle) context(height int64) sdk.Context {
