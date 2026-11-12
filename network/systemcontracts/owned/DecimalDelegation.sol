@@ -4165,7 +4165,37 @@ library DelegationNFTLib {
             return;
         }
         uint256 loss = eligible ? _getAmountToPenalty(expectedAmount, percentages[0]) : 0;
-        uint256 afterAmount = expectedAmount - loss;
+        _realizeFrozenDELPenalty($, claim, index, count, infractionHeight, loss, eligible);
+    }
+
+    function applyHistoricalPenaltyToFrozenDEL(
+        IDecimalDelegationCommon.DelegationStorage storage $,
+        uint256 index,
+        uint256 infractionHeight,
+        uint256 eligibleAmount
+    ) public {
+        IDecimalDelegationCommon.FrozenStake storage claim = $._frozenStakes[index];
+        FrozenDELCheckpoint storage checkpoint = _frozenDELPenaltyStorage().checkpoints[index];
+        if (checkpoint.creationHeight == 0 || checkpoint.creationHeight > block.number || !_isFrozenDEL($, claim) ||
+            eligibleAmount > claim.stake.amount || (checkpoint.creationHeight < infractionHeight && eligibleAmount != 0)) {
+            revert InvalidHistoricalPenalty();
+        }
+        uint256 count = _requireHistoricalPenalty($, claim.stake.validator, checkpoint.penaltyCursor, infractionHeight);
+        checkpoint.penaltyCursor = count;
+        _realizeFrozenDELPenalty($, claim, index, count, infractionHeight, eligibleAmount / 20, eligibleAmount != 0);
+    }
+
+    function _realizeFrozenDELPenalty(
+        IDecimalDelegationCommon.DelegationStorage storage $,
+        IDecimalDelegationCommon.FrozenStake storage claim,
+        uint256 index,
+        uint256 count,
+        uint256 infractionHeight,
+        uint256 loss,
+        bool eligible
+    ) private {
+        uint256 beforeAmount = claim.stake.amount;
+        uint256 afterAmount = beforeAmount - loss;
         if (loss != 0) {
             claim.stake.amount = afterAmount;
             if (afterAmount == 0) {
@@ -4174,7 +4204,7 @@ library DelegationNFTLib {
             // This claim already left the active reserve when frozen.
             _burnToken($, claim.stake.token, loss);
         }
-        emit FrozenDELPenaltyApplied(index, count, infractionHeight, expectedAmount, afterAmount, eligible);
+        emit FrozenDELPenaltyApplied(index, count, infractionHeight, beforeAmount, afterAmount, eligible);
         if (afterAmount == 0) emit FrozenDELClaimExtinguished(index, count);
     }
 
@@ -7414,6 +7444,11 @@ contract MintCandyIsolatedDelegation is DecimalDelegation {
     function applyHistoricalPenaltyToDELStake(bytes32 stakeId, uint256 infractionHeight, uint256 eligibleAmount)
         external onlyOwner whenNotPaused nonReentrant {
         DelegationNFTLib.applyHistoricalPenaltyToDELStake(_getDelegationStorage(), stakeId, infractionHeight, eligibleAmount);
+    }
+
+    function applyHistoricalPenaltyToFrozenDEL(uint256 index, uint256 infractionHeight, uint256 eligibleAmount)
+        external onlyOwner whenNotPaused nonReentrant {
+        DelegationNFTLib.applyHistoricalPenaltyToFrozenDEL(_getDelegationStorage(), index, infractionHeight, eligibleAmount);
     }
 
     function delegateNFT1155(address validator, address originContract, uint256 tokenId, uint256 quantity)
