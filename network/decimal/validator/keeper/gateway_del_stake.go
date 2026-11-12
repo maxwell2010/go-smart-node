@@ -310,6 +310,12 @@ func (k *StateKeeper) applyGatewayDELWithdrawal(ctx sdk.Context, next GatewayDEL
 	if err := k.appendGatewayUndelegation(child, owner, operator, entry); err != nil {
 		return err
 	}
+	if next.PenaltyCursor != (common.Hash{}) {
+		cursorKey := frozenDELPenaltyCursorKey(frozen.Gateway, frozen.FrozenIndex)
+		if err := k.service.OpenKVStore(child).Set(cursorKey, next.PenaltyCursor[:]); err != nil {
+			return err
+		}
+	}
 	child.EventManager().EmitEvent(sdk.NewEvent("decimal_del_withdrawal_requested",
 		sdk.NewAttribute("stake_id", next.StakeID.Hex()), sdk.NewAttribute("frozen_index", index.Hex()), sdk.NewAttribute("amount", amount.String())))
 	commit()

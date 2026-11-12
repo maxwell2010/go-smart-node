@@ -251,6 +251,18 @@ func (k *StateKeeper) ApplyWithdrawalCompletion(ctx sdk.Context, expected types.
 	if err != nil {
 		return err
 	}
+	if expected.SourceKind == gatewayDELCoinBinding && expected.NativeTarget.StakeType == types.StakeType_Coin {
+		cursorKey := frozenDELPenaltyCursorKey(expected.Gateway, expected.FrozenIndex)
+		hasCursor, err := state.Has(cursorKey)
+		if err != nil {
+			return err
+		}
+		if hasCursor {
+			if err := state.Delete(cursorKey); err != nil {
+				return err
+			}
+		}
+	}
 	child.EventManager().EmitEvent(sdk.NewEvent(
 		"decimal_withdrawal_completed",
 		sdk.NewAttribute("gateway", fmt.Sprintf("0x%x", completion.closed.frozen.Gateway)),
@@ -288,71 +300,87 @@ func (k *StateKeeper) planWithdrawalCompletion(ctx sdk.Context, row *bindingReco
 	if err != nil {
 		return nil, err
 	}
-	if err = k.checkBindingIndexes(ctx, row); err != nil {
+	key, pending, i, err := k.matchWithdrawalEntry(ctx, row)
+	if err != nil {
 		return nil, err
+	}
+	if pending.Entries[i].CompletionTime.After(ctx.BlockTime()) {
+		return nil, errors.New("native undelegation has not matured")
+	}
+	// Two requests may have byte-identical entries. Remove one copy.
+	pending.Entries = append(pending.Entries[:i], pending.Entries[i+1:]...)
+	next, err := encodeWithdrawalPair(pending)
+	if err != nil {
+		return nil, err
+	}
+	return &withdrawalCompletion{closed: closed, pairKey: key, nextPair: next}, nil
+}
+
+func encodeWithdrawalPair(pending types.Undelegation) ([]byte, error) {
+	if len(pending.Entries) == 0 {
+		return nil, nil
+	}
+	data, err := proto.Marshal(&pending)
+	if err != nil {
+		return nil, err
+	}
+	if len(data) > MaxRecordBytes {
+		return nil, errors.New("native undelegation pair exceeds size limit")
+	}
+	return data, nil
+}
+
+func (k *StateKeeper) matchWithdrawalEntry(ctx sdk.Context, row *bindingRecord) ([]byte, types.Undelegation, int, error) {
+	var pending types.Undelegation
+	if err := k.checkBindingIndexes(ctx, row); err != nil {
+		return nil, pending, 0, err
 	}
 	binding := row.frozen
 	owner, err := address.NewBech32Codec(identity.Bech32PrefixAccAddr).BytesToString(binding.Beneficiary)
 	if err != nil {
-		return nil, err
+		return nil, pending, 0, err
 	}
 	operator, err := k.ValidatorAddressCodec().BytesToString(binding.SourceValidator)
 	if err != nil {
-		return nil, err
+		return nil, pending, 0, err
 	}
 	key := composite(undelegationPrefix, owner, operator)
-	var pending types.Undelegation
 	if err = k.read(ctx, key, &pending); err != nil {
-		return nil, err
+		return nil, pending, 0, err
 	}
 	params, err := k.GetParams(ctx)
 	if err != nil {
-		return nil, err
+		return nil, pending, 0, err
 	}
 	if pending.Delegator != owner || pending.Validator != operator || uint64(len(pending.Entries)) > uint64(params.MaxEntries) {
-		return nil, errors.New("invalid native undelegation pair")
+		return nil, pending, 0, errors.New("invalid native undelegation pair")
 	}
 	for i := range pending.Entries {
 		entry := &pending.Entries[i]
 		hash, err := types.NativeQueueEntryHash(1, owner, operator, "", entry)
 		if err != nil {
-			return nil, err
+			return nil, pending, 0, err
 		}
 		if !bytes.Equal(hash, binding.NativeEntryHash) {
 			continue
 		}
 		if err = entry.Stake.Validate(); err != nil {
-			return nil, err
+			return nil, pending, 0, err
 		}
 		target := binding.NativeTarget
 		if entry.Stake.Type != target.StakeType || entry.Stake.ID != target.ID || entry.Stake.Stake.Denom != binding.ReserveAsset.NativeDenom || !slices.Equal(entry.Stake.SubTokenIDs, target.SubTokenIDs) {
-			return nil, errors.New("native undelegation stake differs from the frozen target")
+			return nil, pending, 0, errors.New("native undelegation stake differs from the frozen target")
 		}
 		if binding.SourceKind == types.EVMStakeBindingKind_EVM_STAKE_BINDING_COIN && !binding.RawAmount.Equal(entry.Stake.Stake.Amount) {
-			return nil, errors.New("native undelegation amount differs from the frozen coin amount")
+			return nil, pending, 0, errors.New("native undelegation amount differs from the frozen coin amount")
 		}
 		deadline := entry.CompletionTime.Unix()
 		var expectedTimestamp [32]byte
 		copy(expectedTimestamp[24:], sdk.Uint64ToBigEndian(uint64(deadline)))
 		if deadline <= 0 || !bytes.Equal(binding.CompletionTimestamp, expectedTimestamp[:]) {
-			return nil, errors.New("native undelegation deadline differs from the frozen binding")
+			return nil, pending, 0, errors.New("native undelegation deadline differs from the frozen binding")
 		}
-		if entry.CompletionTime.After(ctx.BlockTime()) {
-			return nil, errors.New("native undelegation has not matured")
-		}
-		// Two requests may have byte-identical entries. Remove one copy.
-		pending.Entries = append(pending.Entries[:i], pending.Entries[i+1:]...)
-		plan := &withdrawalCompletion{closed: closed, pairKey: key}
-		if len(pending.Entries) != 0 {
-			plan.nextPair, err = proto.Marshal(&pending)
-			if err != nil {
-				return nil, err
-			}
-			if len(plan.nextPair) > MaxRecordBytes {
-				return nil, errors.New("native undelegation pair exceeds size limit")
-			}
-		}
-		return plan, nil
+		return key, pending, i, nil
 	}
-	return nil, errors.New("frozen binding has no matching native undelegation")
+	return nil, pending, 0, errors.New("frozen binding has no matching native undelegation")
 }
