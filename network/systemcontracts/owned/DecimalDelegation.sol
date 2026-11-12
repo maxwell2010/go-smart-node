@@ -6546,23 +6546,8 @@ contract DecimalDelegation is
         uint256 amount,
         address token
     ) internal {
-        TokenType tokenType = TokenType.DRC20;
-        if (token == address(_getAddress("wdel"))) {
-            tokenType = TokenType.DEL;
-        }
-
-        bytes32 stakeId = _getStakeId(
-            Stake({
-                tokenType: tokenType,
-                validator: validator,
-                delegator: delegator,
-                token: token,
-                amount: amount,
-                tokenId: 0,
-                holdTimestamp: 0,
-                holdStartTime: 0
-            })
-        );
+        IWETH wrapped = WETH();
+        bytes32 stakeId = _getStakeId(validator, delegator, token, 0, 0);
         Stake storage currentStake = _getStake(stakeId);
 
         if (currentStake.amount < amount) {
@@ -6571,8 +6556,8 @@ contract DecimalDelegation is
 
         currentStake.amount -= amount;
 
-        if (currentStake.token == address(WETH())) {
-            WETH().withdraw(amount);
+        if (currentStake.token == address(wrapped)) {
+            wrapped.withdraw(amount);
             (bool success, ) = currentStake.delegator.call{value: amount}("");
             if (!success) {
                 revert WithdrawFailed(currentStake.delegator);
