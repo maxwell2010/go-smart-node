@@ -252,7 +252,9 @@ func verifyRecoveredDELDeposits(t *testing.T, f signedDELFixture, executor *sett
 			HoldDeadline: out.HoldDeadline, HoldStartTime: out.HoldStartTime}
 		if validator.Jailed {
 			require.ErrorContains(t, keeper.ApplyRecoveredGatewayDELDelegation(ctx, position, out.Amount), "unjailed")
-			f.activeReserve(existing)
+			unchanged, err := keeper.GetActiveDELReserve(ctx, f.operator)
+			require.NoError(t, err)
+			require.True(t, existing.Equal(unchanged))
 			validator.Jailed = false
 			require.NoError(t, keeper.SetValidator(e.ctx(), validator))
 		}
@@ -267,7 +269,7 @@ func verifyRecoveredDELDeposits(t *testing.T, f signedDELFixture, executor *sett
 	ordinary := existing.Add(one)
 	deposit("delegateDEL", one, ordinary, true, f.validator)
 	f.backing(ordinary)
-	f.activeReserve(ordinary)
+	f.activeReserveAtCursor(ordinary, cursor)
 	deadline := big.NewInt(e.ctx().BlockTime().Unix() + 120)
 	held := deposit("delegateHoldDEL", one, one, false, f.validator, deadline)
 	require.Equal(t, deadline.Int64(), held.HoldDeadline)
@@ -278,6 +280,6 @@ func verifyRecoveredDELDeposits(t *testing.T, f signedDELFixture, executor *sett
 	require.Len(t, row.Stake.Holds, 2)
 	require.True(t, row.Stake.Stake.Amount.Equal(one.Add(one)))
 	f.backing(ordinary.Add(one).Add(one))
-	f.activeReserve(ordinary.Add(one).Add(one))
+	f.activeReserveAtCursor(ordinary.Add(one).Add(one), cursor)
 	t.Log(recoveredDELDepositsPassed)
 }
