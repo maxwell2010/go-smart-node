@@ -158,6 +158,33 @@ genesis. Для Explorer и Hermes публикуйте отдельные ад�
 
 ## Подписанный пакет и проверка оператором
 
+GitHub CI собрал тестовый архив `mcnd-test-launch-linux-amd64.tar.gz` из
+`bin/mcnd` и `genesis.json` сети `mintcandy_990012-1`. Архив также содержит
+`provenance.json`, открытый ключ, `launch-SHA256SUMS` и его отдельную подпись
+OpenPGP. CI создал ключ для этого прогона, проверил подпись по отдельно
+экспортированному ключу и сверил SHA256 всех файлов, перечисленных в манифесте.
+Четыре валидатора стартовали с проверенными файлами. Наблюдающая нода
+синхронизировалась с блока 1 и подтвердила общий AppHash на высоте 21.
+[Пакет](https://github.com/maxwell2010/go-smart-node/actions/runs/43232698507/artifacts/13952121624) · [Отчёты](https://github.com/maxwell2010/go-smart-node/actions/runs/43232698507/artifacts/13952116559)
+
+Для проверки скачанного тестового архива из корня репозитория используйте
+отпечаток, опубликованный в журнале CI перед проверкой пакета. `LAUNCH_ARCHIVE`
+должен указывать на скачанный `.tar.gz`. Команда проверяет SHA256 архива,
+подпись манифеста и файлы, затем сохраняет их в новый каталог `verified`.
+[Журнал CI](https://github.com/maxwell2010/go-smart-node/actions/runs/43232698507)
+
+```sh
+set -eu
+work_dir=$(mktemp -d)
+printf '%s  %s\n' 101b50f13792e37b2fe2af9357fff1608d8b65be5e535da127aec6095806d5c3 \
+  "$LAUNCH_ARCHIVE" | sha256sum --check --strict
+tar -xOzf "$LAUNCH_ARCHIVE" release-key.gpg > "$work_dir/ci-keyring.gpg"
+python3 network/tools/native_launch_package.py verify --archive "$LAUNCH_ARCHIVE" \
+  --trusted-keyring "$work_dir/ci-keyring.gpg" \
+  --signer-fingerprint ED9E00DBF7D16E738B4FF2C6DBACA0EA4B684A9B \
+  --output-dir "$work_dir/verified"
+```
+
 Проект формата - отдельная OpenPGP-подпись файла `launch-SHA256SUMS`.
 Организаторы могут утвердить другой формат и опубликовать соответствующую
 команду проверки. Манифест привязывает итоговый `genesis.json`, описание сети

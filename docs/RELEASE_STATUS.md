@@ -153,6 +153,16 @@ test validators and the ordinary peer agreed on the committed balances and AppHa
 [Treasury CI](https://github.com/maxwell2010/go-smart-node/actions/runs/43229438556)
 [Treasury evidence](https://github.com/maxwell2010/go-smart-node/actions/runs/43229438556/artifacts/13950146919)
 
+The signed test launch package on `6f91783` contains Linux amd64 `mcnd`,
+the four-validator test genesis, provenance, and an OpenPGP-signed SHA256
+manifest. CI independently exported and pinned its per-run signing key,
+verified the manifest and every payload checksum, and booted the verified
+binary with the verified genesis. The isolated observer replayed from block 1
+and agreed on the AppHash at height 21. The signed files and the launch report
+share identical genesis, binary and archive hashes.
+[Signed package CI](https://github.com/maxwell2010/go-smart-node/actions/runs/43232698507)
+[Test package](https://github.com/maxwell2010/go-smart-node/actions/runs/43232698507/artifacts/13952121624) · [Evidence](https://github.com/maxwell2010/go-smart-node/actions/runs/43232698507/artifacts/13952116559)
+
 ## Separate release tracks
 
 The selected architecture is a fresh network on a maintained modern stack,
