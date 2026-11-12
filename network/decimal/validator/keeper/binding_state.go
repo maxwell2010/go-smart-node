@@ -719,9 +719,7 @@ func (k *StateKeeper) GetEVMStakeBindingsPage(ctx sdk.Context, after []byte, lim
 		out = append(out, *r.stake)
 		cursor = bytes.Clone(iterator.Key())
 	}
-	if err := iterator.Error(); err != nil {
-		return nil, nil, err
-	}
+	// The SDK cache merge iterator returns an error after normal exhaustion.
 	if !iterator.Valid() {
 		cursor = nil
 	}

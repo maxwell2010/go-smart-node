@@ -76,6 +76,32 @@ func bindingEnvironment(t *testing.T, active bool) (sdk.Context, store.KVStoreSe
 	require.NoError(t, k.InitGenesis(ctx, bindingGenesisState(t, active)))
 	return ctx, service, k
 }
+
+func TestEVMStakeBindingPageExhaustionInNestedCache(t *testing.T) {
+	ctx, _, k := bindingEnvironment(t, false)
+	outer, _ := ctx.CacheContext()
+	read, _ := outer.CacheContext()
+	page, cursor, err := k.GetEVMStakeBindingsPage(read, nil, 1)
+	require.NoError(t, err)
+	require.Empty(t, page)
+	require.Nil(t, cursor)
+
+	ordinary := gatewayDELFixture()
+	held := gatewayDELHoldFixture(ctx.BlockTime().Unix(), ctx.BlockTime().Unix()+60, 3)
+	require.NoError(t, k.ApplyGatewayDELDelegation(outer, ordinary, ordinary.Amount))
+	require.NoError(t, k.ApplyGatewayDELDelegation(outer, held, held.Amount))
+	read, _ = outer.CacheContext()
+	first, next, err := k.GetEVMStakeBindingsPage(read, nil, 1)
+	require.NoError(t, err)
+	require.Len(t, first, 1)
+	require.NotEmpty(t, next)
+	last, cursor, err := k.GetEVMStakeBindingsPage(read, next, 1)
+	require.NoError(t, err)
+	require.Len(t, last, 1)
+	require.Nil(t, cursor)
+	require.ElementsMatch(t, [][]byte{ordinary.StakeID.Bytes(), held.StakeID.Bytes()}, [][]byte{first[0].StakeID, last[0].StakeID})
+}
+
 func copyNativeBinding(t *testing.T, b types.EVMStakeBinding) types.EVMStakeBinding {
 	t.Helper()
 	data, err := proto.Marshal(&b)
