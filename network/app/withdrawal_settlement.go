@@ -65,16 +65,16 @@ type WithdrawalProfile struct {
 }
 
 type withdrawalController struct {
-	profile                   WithdrawalProfile
-	abi                       abi.ABI
-	topic                     common.Hash
-	keeper                    *validatorkeeper.StateKeeper
-	nft                       *nftkeeper.StateKeeper
-	executor                  *settlement.Executor
-	assets                    *withdrawalassets.Projector
-	customCollateral          *customCollateralRegistry
-	feeRewardRecipientAllowed func(sdk.AccAddress) bool
-	consensusParams           func(sdk.Context) cmtproto.ConsensusParams
+	profile             WithdrawalProfile
+	abi                 abi.ABI
+	topic               common.Hash
+	keeper              *validatorkeeper.StateKeeper
+	nft                 *nftkeeper.StateKeeper
+	executor            *settlement.Executor
+	assets              *withdrawalassets.Projector
+	customCollateral    *customCollateralRegistry
+	delRecipientAllowed func(sdk.AccAddress) bool
+	consensusParams     func(sdk.Context) cmtproto.ConsensusParams
 }
 
 // LoadWithdrawalSettlement wires the profile after store load. An absent
@@ -204,8 +204,8 @@ func (app *App) newWithdrawalController(profile WithdrawalProfile) (*withdrawalC
 		customCollateral: customCollateral,
 		consensusParams:  app.GetConsensusParams,
 	}
-	if profile.EnableNativeFeeRewards {
-		controller.feeRewardRecipientAllowed = app.nativeFeeRewardRecipientPolicy(profile)
+	if profile.EnableNativeFeeRewards || profile.EnableNFTDelegation {
+		controller.delRecipientAllowed = app.nativeDELRecipientPolicy(profile)
 	}
 	return controller, nil
 }
@@ -273,6 +273,12 @@ func (c *withdrawalController) isDELStakeCall(msg core.Message) bool {
 func (c *withdrawalController) PostTxProcessing(ctx sdk.Context, sender common.Address, msg core.Message, receipt *ethtypes.Receipt) error {
 	if receipt == nil || receipt.Status != ethtypes.ReceiptStatusSuccessful {
 		return nil
+	}
+	if c.isNFTReceiptRedemption(msg) {
+		if sender != msg.From {
+			return errors.New("NFT redemption requires the authenticated transaction sender")
+		}
+		return c.projectNFTReceiptRedemption(ctx, msg, receipt)
 	}
 	if c.isCollateralConversionCall(msg) {
 		if sender != msg.From {

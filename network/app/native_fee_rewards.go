@@ -13,7 +13,7 @@ import (
 	"github.com/maxwell2010/go-smart-node/network/identity"
 )
 
-func (app *App) nativeFeeRewardRecipientPolicy(profile WithdrawalProfile) func(sdk.AccAddress) bool {
+func (app *App) nativeDELRecipientPolicy(profile WithdrawalProfile) func(sdk.AccAddress) bool {
 	reserved := map[common.Address]bool{
 		profile.Registry: true, profile.Gateway: true, profile.Library: true,
 		profile.NFTCenter: true, profile.PositionVault: true, profile.MasterValidator: true,
@@ -33,7 +33,7 @@ func (app *App) validateNativeFeeRewardGenesis(ctx sdk.Context, controller *with
 	if !app.BankKeeper.GetBalance(ctx, collector, identity.BaseDenom).IsZero() {
 		return errors.New("native fee rewards require an empty genesis DEL fee collector")
 	}
-	return controller.keeper.ValidateNativeFeeRewardAdmission(ctx, controller.feeRewardRecipientAllowed)
+	return controller.keeper.ValidateNativeFeeRewardAdmission(ctx, controller.delRecipientAllowed)
 }
 
 func (app *App) beginNativeConsensus(ctx sdk.Context) (sdk.BeginBlock, error) {
@@ -84,7 +84,7 @@ func (app *App) distributeNativeFees(ctx sdk.Context, commit validatorkeeper.Ver
 	remaining := fees
 	for _, payout := range payouts {
 		if payout.Amount.IsNil() || !payout.Amount.IsPositive() || payout.Amount.GT(remaining) ||
-			!app.withdrawals.feeRewardRecipientAllowed(payout.Recipient) {
+			!app.withdrawals.delRecipientAllowed(payout.Recipient) {
 			return errors.New("invalid native fee reward payout")
 		}
 		remaining = remaining.Sub(payout.Amount)

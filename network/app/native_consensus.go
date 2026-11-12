@@ -207,7 +207,7 @@ func (c *withdrawalController) projectAndCheckConsensus(ctx sdk.Context, project
 		return fmt.Errorf("stake change would leave an invalid native validator set: %w", err)
 	}
 	if c.profile.EnableNativeFeeRewards {
-		if err := c.keeper.ValidateNativeFeeRewardAdmission(child, c.feeRewardRecipientAllowed); err != nil {
+		if err := c.keeper.ValidateNativeFeeRewardAdmission(child, c.delRecipientAllowed); err != nil {
 			return fmt.Errorf("stake change exceeds native fee reward admission: %w", err)
 		}
 	}
