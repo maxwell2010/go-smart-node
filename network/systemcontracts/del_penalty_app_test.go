@@ -1,9 +1,11 @@
 package systemcontracts_test
 
 import (
+	"bytes"
 	"errors"
 	"math/big"
 	"testing"
+	"time"
 
 	sdkmath "cosmossdk.io/math"
 	storetypes "cosmossdk.io/store/types"
@@ -23,13 +25,19 @@ import (
 )
 
 const delPenaltyPassed = "ordinary DEL penalty realized exactly once with native supply, WDEL and projection rollback"
+const recoveredDELDepositsPassed = "signed ordinary and held DEL deposits preserve the realized Master penalty cursor"
 
 func TestOwnedAppSignedOrdinaryDELPenalty(t *testing.T) {
 	testSignedDELFixture(t, "penalty", delPenaltyPassed)
 }
 
+func TestOwnedAppSignedRecoveredDELDeposits(t *testing.T) {
+	testSignedDELFixture(t, "recovered-deposits", recoveredDELDepositsPassed)
+}
+
 func runSignedOrdinaryDELPenalty(t *testing.T, e isolatedBackendEnv, profile ownedapp.WithdrawalProfile, gateway, master, wrapper contracts.Artifact,
 	reader *nftview.Reader, gov func(contracts.Artifact, common.Address, string, ...interface{}),
+	recoveredDeposits bool,
 ) {
 	t.Helper()
 	f := prepareSignedDELFixture(t, e, profile, gateway, master, wrapper, gov)
@@ -57,9 +65,15 @@ func runSignedOrdinaryDELPenalty(t *testing.T, e isolatedBackendEnv, profile own
 	f.backing(principal)
 	f.activeReserve(principal)
 	governed := uint16(10)
+	unpause, err := master.ABI.Pack("unpauseValidator", f.validator)
+	require.NoError(t, err)
 
 	e.app.EVMKeeper.SetInternalCommitGuard(func(ctx sdk.Context, msg core.Message, _ []*ethtypes.Log) error {
 		if !executor.AuthorizeMasterPenalty(ctx, msg) && !executor.AuthorizeOrdinaryDELPenalty(ctx, msg) {
+			if recoveredDeposits && msg.From == e.govOwner && msg.To != nil && *msg.To == profile.MasterValidator &&
+				msg.Value != nil && msg.Value.Sign() == 0 && bytes.Equal(msg.Data, unpause) {
+				return nil
+			}
 			return errors.New("test-only internal EVM call lacks exact penalty authorization")
 		}
 		return nil
@@ -135,6 +149,12 @@ func runSignedOrdinaryDELPenalty(t *testing.T, e isolatedBackendEnv, profile own
 	require.Equal(t, after, getRow())
 	require.ErrorContains(t, appendAndRealize(project), "unpaused candidate or approved validator")
 	require.Equal(t, int64(1), masterCount())
+	if recoveredDeposits {
+		f.signed("delegateDEL", sdkmath.NewIntWithDecimal(1, 18), false, f.validator)
+		gov(master, profile.MasterValidator, "unpauseValidator", f.validator)
+		verifyRecoveredDELDeposits(t, f, executor, want, initialSupply.Sub(burned))
+		return
+	}
 
 	withdraw := func(binding validatortypes.EVMStakeBinding, amount sdkmath.Int, expectAck bool) {
 		data, err := gateway.ABI.Pack("withdraw", f.validator, f.wrapped, amount.BigInt())
@@ -187,4 +207,77 @@ func runSignedOrdinaryDELPenalty(t *testing.T, e isolatedBackendEnv, profile own
 	_, err = keeper.GetEVMStakeBinding(e.ctx(), validatortypes.EVMStakeBindingKind_EVM_STAKE_BINDING_COIN, f.target[:], id[:])
 	require.ErrorIs(t, err, validatorkeeper.ErrNotFound)
 	t.Log(delPenaltyPassed)
+}
+
+func verifyRecoveredDELDeposits(t *testing.T, f signedDELFixture, executor *settlement.Executor, existing, supply sdkmath.Int) {
+	t.Helper()
+	e := f.env
+	keeper := e.app.NativeValidatorKeeper
+	validator, err := keeper.GetValidator(e.ctx(), f.operator)
+	require.NoError(t, err)
+	validator.Online, validator.Jailed = true, true
+	require.NoError(t, keeper.SetValidator(e.ctx(), validator))
+	one := sdkmath.NewIntWithDecimal(1, 18)
+	cursor := common.BigToHash(big.NewInt(1))
+	deposit := func(route string, amount, remaining sdkmath.Int, expectAck bool, args ...interface{}) settlement.DELTransition {
+		t.Helper()
+		response := f.signed(route, amount, true, args...)
+		data, err := f.gateway.ABI.Pack(route, args...)
+		require.NoError(t, err)
+		msg := core.Message{From: f.user, To: &f.target, Value: amount.BigInt(), Data: data}
+		receipt := &ethtypes.Receipt{Status: ethtypes.ReceiptStatusSuccessful, Logs: evmtypes.LogsToEthereum(response.Logs)}
+		included := e.ctx().WithBlockHeight(e.app.LastBlockHeight()).WithBlockTime(e.ctx().BlockTime().Add(-time.Second)).WithExecMode(sdk.ExecModeFinalize)
+		ctx := included.WithGasMeter(storetypes.NewGasMeter(24_000_000))
+		if expectAck {
+			require.Len(t, receipt.Logs, 4)
+			bad := *receipt
+			bad.Logs = append([]*ethtypes.Log(nil), receipt.Logs...)
+			ack := *bad.Logs[0]
+			ack.Data = append([]byte(nil), ack.Data...)
+			ack.Data[len(ack.Data)-1] = 1
+			bad.Logs[0] = &ack
+			_, err := executor.VerifySignedDELDepositWithDowntime(included.WithGasMeter(storetypes.NewGasMeter(24_000_000)), msg, &bad)
+			require.ErrorContains(t, err, "aggregate DEL penalty acknowledgement")
+		} else {
+			require.Len(t, receipt.Logs, 3)
+		}
+		out, err := executor.VerifySignedDELDepositWithDowntime(ctx, msg, receipt)
+		require.NoError(t, err)
+		require.Equal(t, cursor, out.PenaltyCursor)
+		require.True(t, out.Remaining.Equal(remaining))
+		_, err = executor.VerifySignedDEL(included.WithGasMeter(storetypes.NewGasMeter(24_000_000)), msg, receipt)
+		require.Error(t, err, "the historical route must still require the zero cursor")
+		position := validatorkeeper.GatewayDELStake{Gateway: f.target, WrappedDEL: f.wrapped, Beneficiary: f.user, Validator: f.validator,
+			StakeID: out.StakeID, PenaltyCursor: out.PenaltyCursor, Amount: out.Remaining,
+			HoldDeadline: out.HoldDeadline, HoldStartTime: out.HoldStartTime}
+		if validator.Jailed {
+			require.ErrorContains(t, keeper.ApplyRecoveredGatewayDELDelegation(ctx, position, out.Amount), "unjailed")
+			f.activeReserve(existing)
+			validator.Jailed = false
+			require.NoError(t, keeper.SetValidator(e.ctx(), validator))
+		}
+		require.NoError(t, keeper.ApplyRecoveredGatewayDELDelegation(ctx, position, out.Amount))
+		row, err := keeper.GetEVMStakeBinding(ctx, validatortypes.EVMStakeBindingKind_EVM_STAKE_BINDING_COIN, f.target.Bytes(), out.StakeID.Bytes())
+		require.NoError(t, err)
+		require.Equal(t, cursor.Bytes(), row.PenaltyCursor)
+		require.True(t, row.RawAmount.Equal(remaining))
+		require.True(t, supply.Equal(e.app.BankKeeper.GetSupply(ctx, identity.BaseDenom).Amount))
+		return out
+	}
+	ordinary := existing.Add(one)
+	deposit("delegateDEL", one, ordinary, true, f.validator)
+	f.backing(ordinary)
+	f.activeReserve(ordinary)
+	deadline := big.NewInt(e.ctx().BlockTime().Unix() + 120)
+	held := deposit("delegateHoldDEL", one, one, false, f.validator, deadline)
+	require.Equal(t, deadline.Int64(), held.HoldDeadline)
+	topUp := deposit("delegateHoldDEL", one, one.Add(one), false, f.validator, deadline)
+	require.Equal(t, held.HoldStartTime, topUp.HoldStartTime)
+	row, err := keeper.GetDelegation(e.ctx(), f.beneficiary, f.operator, validatortypes.StakeType_CoinHold, identity.BaseDenom)
+	require.NoError(t, err)
+	require.Len(t, row.Stake.Holds, 2)
+	require.True(t, row.Stake.Stake.Amount.Equal(one.Add(one)))
+	f.backing(ordinary.Add(one).Add(one))
+	f.activeReserve(ordinary.Add(one).Add(one))
+	t.Log(recoveredDELDepositsPassed)
 }

@@ -328,12 +328,20 @@ func (c *withdrawalController) projectSignedDEL(ctx sdk.Context, msg core.Messag
 		}
 		return c.keeper.ApplyGatewayDELHoldReset(ctx, c.delStakePosition(held), c.delStakePosition(ordinary), held.Amount)
 	}
-	result, err := c.executor.VerifySignedDEL(ctx, msg, receipt)
+	verify := c.executor.VerifySignedDEL
+	if c.profile.EnableNativeOrdinaryDELDowntime && (bytes.Equal(msg.Data[:4], c.abi.Methods["delegateDEL"].ID) ||
+		bytes.Equal(msg.Data[:4], c.abi.Methods["delegateHoldDEL"].ID)) {
+		verify = c.executor.VerifySignedDELDepositWithDowntime
+	}
+	result, err := verify(ctx, msg, receipt)
 	if err != nil {
 		return fmt.Errorf("verify signed DEL stake: %w", err)
 	}
 	position := c.delStakePosition(result)
 	if result.Deadline.IsZero() {
+		if position.PenaltyCursor != (common.Hash{}) {
+			return c.keeper.ApplyRecoveredGatewayDELDelegation(ctx, position, result.Amount)
+		}
 		return c.keeper.ApplyGatewayDELDelegation(ctx, position, result.Amount)
 	}
 	return c.keeper.ApplyGatewayDELWithdrawal(ctx, position, result.FrozenIndex, result.Amount, result.Deadline)
@@ -342,7 +350,7 @@ func (c *withdrawalController) projectSignedDEL(ctx sdk.Context, msg core.Messag
 func (c *withdrawalController) delStakePosition(result settlement.DELTransition) validatorkeeper.GatewayDELStake {
 	return validatorkeeper.GatewayDELStake{
 		Gateway: c.profile.Gateway, WrappedDEL: c.profile.WrappedDEL, Validator: result.Validator, Beneficiary: result.Beneficiary,
-		StakeID: result.StakeID, Amount: result.Remaining, NFTBacked: result.NFTBacked,
+		StakeID: result.StakeID, PenaltyCursor: result.PenaltyCursor, Amount: result.Remaining, NFTBacked: result.NFTBacked,
 		HoldDeadline: result.HoldDeadline, HoldStartTime: result.HoldStartTime,
 	}
 }

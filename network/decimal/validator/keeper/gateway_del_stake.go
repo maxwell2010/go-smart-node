@@ -177,6 +177,30 @@ func (k *StateKeeper) ApplyGatewayDELDelegation(ctx sdk.Context, next GatewayDEL
 	if err != nil {
 		return err
 	}
+	return k.applyGatewayDELDelegation(ctx, next, deposited, owner, operator)
+}
+
+// ApplyRecoveredGatewayDELDelegation projects a signed deposit whose current
+// nonzero Master cursor was verified against the exact EVM position.
+func (k *StateKeeper) ApplyRecoveredGatewayDELDelegation(ctx sdk.Context, next GatewayDELStake, deposited sdkmath.Int) error {
+	if next.PenaltyCursor == (common.Hash{}) {
+		return errors.New("recovered DEL delegation requires a verified nonzero penalty cursor")
+	}
+	owner, operator, err := next.nativePairIdentity()
+	if err != nil {
+		return err
+	}
+	validator, err := k.GetValidator(ctx, operator)
+	if err != nil {
+		return err
+	}
+	if validator.Jailed || !validator.Online {
+		return errors.New("recovered DEL delegation requires an online unjailed native validator")
+	}
+	return k.applyGatewayDELDelegation(ctx, next, deposited, owner, operator)
+}
+
+func (k *StateKeeper) applyGatewayDELDelegation(ctx sdk.Context, next GatewayDELStake, deposited sdkmath.Int, owner, operator string) error {
 	if deposited.IsNil() || !deposited.IsPositive() || next.Amount.LT(deposited) {
 		return errors.New("Gateway DEL position cannot account for the deposit")
 	}

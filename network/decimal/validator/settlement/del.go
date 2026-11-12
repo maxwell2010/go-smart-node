@@ -19,7 +19,7 @@ import (
 type DELTransition struct {
 	Validator, Beneficiary      common.Address
 	StakeID, FrozenIndex        common.Hash
-	PenaltyCursor               common.Hash // Nonzero only for an explicitly admitted penalized withdrawal.
+	PenaltyCursor               common.Hash // Nonzero only for an explicitly admitted downtime transition.
 	Amount, Remaining           sdkmath.Int // Call delta and direct DEL remaining after the call.
 	NFTBacked                   sdkmath.Int // Unchanged reserve included in the Gateway's gross coin position.
 	HoldDeadline, HoldStartTime int64       // Unix seconds, or zero for ordinary DEL.
@@ -30,7 +30,13 @@ type DELTransition struct {
 // transaction cache. The keeper checks the corresponding native prestate before
 // adding to the active position or moving part or all of it to the queue.
 func (e *Executor) VerifySignedDEL(ctx sdk.Context, msg core.Message, receipt *ethtypes.Receipt) (DELTransition, error) {
-	return e.verifySignedDEL(ctx, msg, receipt, nil)
+	return e.verifySignedDEL(ctx, msg, receipt, nil, false)
+}
+
+// VerifySignedDELDepositWithDowntime admits a deposit at the exact current
+// Master cursor. The native projector separately checks that jail has cleared.
+func (e *Executor) VerifySignedDELDepositWithDowntime(ctx sdk.Context, msg core.Message, receipt *ethtypes.Receipt) (DELTransition, error) {
+	return e.verifySignedDEL(ctx, msg, receipt, nil, true)
 }
 
 // VerifySignedPenalizedDELWithdrawal proves a direct DEL withdrawal against
@@ -48,10 +54,10 @@ func (e *Executor) VerifySignedPenalizedDELWithdrawal(ctx sdk.Context, msg core.
 	if _, _, _, err := e.activePenaltyIdentity(ctx, before, before.NativeTarget.StakeType == validatortypes.StakeType_CoinHold); err != nil {
 		return DELTransition{}, err
 	}
-	return e.verifySignedDEL(ctx, msg, receipt, &before)
+	return e.verifySignedDEL(ctx, msg, receipt, &before, false)
 }
 
-func (e *Executor) verifySignedDEL(ctx sdk.Context, msg core.Message, receipt *ethtypes.Receipt, penalized *validatortypes.EVMStakeBinding) (DELTransition, error) {
+func (e *Executor) verifySignedDEL(ctx sdk.Context, msg core.Message, receipt *ethtypes.Receipt, penalized *validatortypes.EVMStakeBinding, downtimeDeposit bool) (DELTransition, error) {
 	var out DELTransition
 	if msg.To == nil || *msg.To != e.roles.Gateway || msg.Value == nil || len(msg.Data) < 4 || len(msg.SetCodeAuthorizations) != 0 {
 		return out, errors.New("DEL stake requires a direct signed Gateway call")
@@ -75,6 +81,9 @@ func (e *Executor) verifySignedDEL(ctx sdk.Context, msg core.Message, receipt *e
 	}
 	if penalized != nil && (deposit || (holdArg >= 0) != (penalized.NativeTarget.StakeType == validatortypes.StakeType_CoinHold)) {
 		return out, errors.New("realized penalty path requires a withdrawal matching the active DEL stake type")
+	}
+	if downtimeDeposit && !deposit {
+		return out, errors.New("downtime DEL deposit verification requires a delegation call")
 	}
 	args, err := method.Inputs.Unpack(msg.Data[4:])
 	if err != nil {
@@ -108,7 +117,14 @@ func (e *Executor) verifySignedDEL(ctx sdk.Context, msg core.Message, receipt *e
 	out.Amount = sdkmath.NewIntFromBigInt(amount)
 	out.StakeID = crypto.Keccak256Hash(out.Validator.Bytes(), out.Beneficiary.Bytes(), e.roles.WrappedDEL.Bytes(), tokenID[:], holdWord[:])
 	var logs []*ethtypes.Log
-	if penalized == nil {
+	var depositReceipt downtimeDELDepositReceipt
+	if downtimeDeposit {
+		depositReceipt, err = e.verifyDowntimeDELDepositReceipt(ctx, receipt, out)
+		if err != nil {
+			return out, err
+		}
+		out.PenaltyCursor, logs = depositReceipt.cursor, depositReceipt.logs
+	} else if penalized == nil {
 		if err := e.verifyDELStakeReceipt(ctx, receipt, out.Validator, out.Beneficiary, 3); err != nil {
 			return out, err
 		}
@@ -172,6 +188,10 @@ func (e *Executor) verifySignedDEL(ctx sdk.Context, msg core.Message, receipt *e
 		return out, errors.New("Gateway position is smaller than the DEL deposit")
 	}
 	isNew := deposit && gross.Cmp(amount) == 0
+	if downtimeDeposit && (depositReceipt.emptyStakeAcknowledged && !isNew ||
+		!isNew && depositReceipt.reserveCursor != depositReceipt.cursor) {
+		return out, errors.New("DEL deposit did not prove the exact caught-up active position")
+	}
 	if isNew && holdArg >= 0 && out.HoldStartTime != ctx.BlockTime().Unix() {
 		return out, errors.New("new DEL hold must start in the deposit block")
 	}
