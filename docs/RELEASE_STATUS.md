@@ -2,6 +2,20 @@
 
 Status: NOT READY for a stable production IBC release. No stable tag or release should be published while a required gate below is outstanding.
 
+The historical duplicate-vote development branch verifies a 5% debit from
+surviving pre-infraction DEL principal and isolated NFT reserves. Later
+funding survives, including late tranches held in frozen claims. Signed EVM
+tests cover rollback and one successful retry for active and frozen DEL and
+NFT. The same Linux suite checks permanent exclusion of the old consensus
+key and preservation of a pending job on rollback.
+[Linux module and owned EVM tests](https://github.com/maxwell2010/go-smart-node/actions/runs/43192837081)
+
+The fresh profile wires this work to finalized Comet metadata, fixed genesis
+evidence age limits and the shared manual/automatic payout gate. Full genesis,
+validator transition and restart evidence for that profile are required before
+release. Published operational data must include the approved genesis and
+independent bootstrap and RPC endpoints for this separate network.
+
 ## Separate release tracks
 
 The selected architecture is a fresh network on a maintained modern stack,
