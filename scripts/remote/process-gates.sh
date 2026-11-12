@@ -434,7 +434,14 @@ if sys.argv[6]=='1':
     assert penalty['nftCollateralAtomic']==report['final']['nftCollateralAtomic']=='1980000000000000000',report
     assert approval['wrappedAtomic']==funding['wrappedAtomic']==penalty['wrappedAtomic']==report['final']['wrappedAtomic']=='6000000000000000000',report
     assert len(report['follower']['app_hash'])==64,report
-    print('NFT receipt custody and backing were preserved through the exact native DEL downtime burn.')
+    restored=report['stateSync']
+    assert restored['restoredHeight']>=restored['sourceSnapshotHeight']>=report['final']['height'],report
+    assert restored['verifiedHeight']>restored['restoredHeight'] and len(restored['app_hash'])==64,report
+    assert restored['powers']=={'a':3,'b':3} and restored['signers']==['a','b'],report
+    assert restored['jailed']==['c'] and restored['masterPenaltyCount']==restored['stakePenaltyCursor']==1,report
+    assert restored['nftCollateralAtomic']==report['final']['nftCollateralAtomic'],report
+    assert restored['bankSupplyAtomic']==report['final']['bankSupplyAtomic'],report
+    print('NFT receipt custody, backing and penalty survived a fresh observer P2P snapshot restore.')
 PY
 }
 if [[ "$native_del_downtime" == native-del-downtime ]]; then

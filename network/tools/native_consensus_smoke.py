@@ -824,10 +824,83 @@ def run_downtime_gate(binary, expected, replicas, env, owner, report, first, *, 
         withdraw_held_del(replicas, expected, report)
 
 
+def restore_nft_downtime_snapshot(binary, root, expected, genesis, replicas, env, owner, report):
+    report['phase'] = 'native-nft-snapshot-source'
+    source, witness = replicas[:2]
+    minimum = report['final']['height']
+    deadline = time.monotonic() + 100
+    while time.monotonic() < deadline:
+        snapshots = [int(row['height']) for row in log_records(source.log, 'completed state snapshot')
+                     if int(row['height']) >= minimum]
+        if snapshots:
+            break
+        check(source.child.poll() is None, 'source stopped before the NFT penalty snapshot')
+        time.sleep(0.5)
+    else:
+        raise TimeoutError('source did not produce a committed snapshot after the NFT penalty')
+
+    snapshot = max(snapshots)
+    trust_height = snapshot + 2
+    wait_replicas((source, witness), trust_height, 45, report)
+    trust = committed_header((source, witness), trust_height)
+    report['stateSync'] = {'sourceSnapshotHeight': snapshot, 'trustHeight': trust_height, 'trustHash': trust['block_hash']}
+
+    report['phase'] = 'native-nft-snapshot-restore'
+    home = root / 'snapshot-observer'
+    run_command(binary, home, ['init', 'native-nft-snapshot-observer', '--chain-id', CHAIN,
+                               '--evm.evm-chain-id', str(EVM_CHAIN)], env, secret=True)
+    validate_fresh_home(home)
+    private_write(home / 'config/genesis.json', genesis)
+    node_id = run_command(binary, home, ['comet', 'show-node-id'], env, secret=True).strip()
+    check(re.fullmatch(r'[0-9a-f]{40}', node_id) and node_id not in {node.node_id for node in replicas},
+          'snapshot observer must use a fresh peer identity')
+    observer = Replica('snapshot-observer', 3, home, node_id)
+    write_config(home, 'app.toml', {('api', 'address'): json.dumps(observer.rest.replace('http:', 'tcp:'))})
+    write_config(home, 'config.toml', {
+        ('p2p', 'persistent_peers'): json.dumps(f'{source.node_id}@127.0.0.1:{source.p2p}'),
+        ('p2p', 'pex'): 'false',
+        ('statesync', 'enable'): 'true',
+        ('statesync', 'rpc_servers'): json.dumps(','.join(f'http://127.0.0.1:{node.p2p + 1}' for node in (source, witness))),
+        ('statesync', 'trust_height'): str(trust_height),
+        ('statesync', 'trust_hash'): json.dumps(trust['block_hash']),
+        ('statesync', 'trust_period'): '"1h"',
+        ('statesync', 'discovery_time'): '"5s"',
+    })
+    observer.start(binary, env, owner, 'restore')
+    nodes = (source, witness, observer)
+    tip = wait_replicas(nodes, trust_height + 3, 135, report)
+    restored = log_records(observer.log, 'Snapshot restored')
+    check(len(restored) == 1, 'observer must restore exactly one P2P snapshot')
+    restored_height = int(restored[0]['height'])
+    check(restored_height >= snapshot, 'observer restored a snapshot from before the verified penalty checkpoint')
+    status = observer.rpc('status')
+    check(status['node_info']['id'] == observer.node_id and int(status['validator_info']['voting_power']) == 0 and
+          int(status['sync_info']['earliest_block_height']) >= restored_height,
+          'restored observer identity, voting power or retained block range differs')
+
+    report['phase'] = 'native-nft-snapshot-ledger'
+    height = max(tip - 1, restored_height + 1)
+    wait_replicas(nodes, height + 1, 45, report)
+    final = report['final']
+    ledger = check_ledger(nodes, expected, height, 2 * ATOMS - DOWNTIME_BURN, downtime=True, previous=final,
+                          wallet=int(final['walletAtomic']), collector=int(final['feeCollectorAtomic']))
+    penalty = check_downtime_state(nodes, expected, height, True)
+    powers = effective_set(nodes, expected['validators'], height, DOWNTIME_AFTER)
+    signers = check_signatures(nodes, expected['validators'], height, DOWNTIME_AFTER)
+    report['stateSync'].update(restoredHeight=restored_height, verifiedHeight=height, powers=powers, signers=signers,
+                               nftCollateralAtomic=ledger['nftCollateralAtomic'], bankSupplyAtomic=ledger['bankSupplyAtomic'],
+                               **penalty, **committed_header(nodes, height + 1))
+
+
 def run_gate(args, binary, root, expected, genesis, keys, env, owner, report):
     report['phase'] = 'create-replicas'
     replicas = create_replicas(binary, root, genesis, keys, env, full_mesh=args.downtime)
     source = replicas[0]
+    if args.nft_downtime:
+        write_config(source.home, 'app.toml', {
+            ('state-sync', 'snapshot-interval'): '12',
+            ('state-sync', 'snapshot-keep-recent'): '2',
+        })
     version = json.loads(run_command(binary, source.home, ['version', '--long', '--output', 'json'], env))
     check(version['server_name'] == 'mcnd' and version['commit'] == args.source_commit, 'daemon version differs from checked source')
     report['phase'] = 'validate-genesis'
@@ -865,6 +938,8 @@ def run_gate(args, binary, root, expected, genesis, keys, env, owner, report):
         if args.nft_downtime:
             first = activate_nft_del(replicas, expected, report, first)
         run_downtime_gate(binary, expected, replicas, env, owner, report, first, jail_recovery=args.jail_recovery)
+        if args.nft_downtime:
+            restore_nft_downtime_snapshot(binary, root, expected, genesis, replicas, env, owner, report)
         return
     report['initialSigners'] = check_signatures(replicas, validators, initial, INITIAL)
     report['initialBlock'] = committed_header(replicas, initial + 1)
