@@ -22,6 +22,8 @@ native_del_jail_recovery="${8:-off}"
 [[ "$native_del_jail_recovery" == off || "$native_del_jail_recovery" == native-del-jail-recovery ]] || { echo 'Unsupported native DEL jail recovery option.' >&2; exit 2; }
 native_held_del_downtime="${9:-off}"
 [[ "$native_held_del_downtime" == off || "$native_held_del_downtime" == native-held-del-downtime ]] || { echo 'Unsupported native held DEL downtime option.' >&2; exit 2; }
+native_upgrade_governance="${10:-off}"
+[[ "$native_upgrade_governance" == off || "$native_upgrade_governance" == native-upgrade-governance ]] || { echo 'Unsupported native upgrade governance option.' >&2; exit 2; }
 for tool in sudo unshare ip gcc python3 go; do command -v "$tool" >/dev/null; done
 python="$(command -v python3)"
 "$python" -c 'import sys,tomllib; assert sys.version_info >= (3,11), "Python >=3.11 required"'
@@ -34,7 +36,7 @@ mkdir -- "$output"
 evidence_owner="$(id -u):$(id -g)"
 preserve_public_reports() {
   local file
-  for file in "$output/daemon.json" "$output/hermes.json" "$output/withdrawal-genesis.json" "$output/del-delegation.json" "$output/ibc-client-upgrade.json" "$output/native-consensus.json" "$output/native-hermes.json" "$output/native-del-downtime.json" "$output/native-del-jail-recovery.json" "$output/native-held-del-downtime.json"; do
+  for file in "$output/daemon.json" "$output/hermes.json" "$output/withdrawal-genesis.json" "$output/del-delegation.json" "$output/ibc-client-upgrade.json" "$output/native-consensus.json" "$output/native-hermes.json" "$output/native-del-downtime.json" "$output/native-del-jail-recovery.json" "$output/native-held-del-downtime.json" "$output/native-governance-upgrade.json"; do
     if [[ -L "$file" ]]; then echo 'Refuse symbolic report file.' >&2; return 1; fi
     if [[ -f "$file" ]]; then
       sudo -n chown -- "$evidence_owner" "$file" || return 1
@@ -433,6 +435,36 @@ if [[ "$native_del_jail_recovery" == native-del-jail-recovery ]]; then
 fi
 if [[ "$native_held_del_downtime" == native-held-del-downtime ]]; then
   run_native_del_downtime native-held-del-downtime --held-downtime 0 1
+fi
+
+if [[ "$native_upgrade_governance" == native-upgrade-governance ]]; then
+  fixture="$work/native-governance-upgrade-fixture"
+  mkdir -m 700 -- "$fixture"
+  if ! MCND_NATIVE_CONSENSUS_FIXTURE_DIR="$fixture" MCND_NATIVE_CONSENSUS_UPGRADE_GOVERNANCE=1 \
+      go test -mod=readonly -tags= -trimpath -p 2 -count=1 -timeout 8m -json \
+      -run '^TestOwnedAppSignedRegistryBootstrap$/^authenticated_isolated_position_reader$' ./systemcontracts \
+      > "$work/native-governance-upgrade-fixture.log" 2>&1; then
+    private_fixture_diagnostic "$work/native-governance-upgrade-fixture.log"
+    exit 1
+  fi
+  sudo -n unshare --net -- bash -euc 'ip link set lo up; exec "$@"' _ \
+    env TMPDIR="$work" "$python" -B "$root/network/tools/native_governance_upgrade_smoke.py" \
+    --binary "$work/mcnd" --binary-sha256 "$mcnd_sha" --source-commit "$revision" \
+    --fixture "$fixture" --home-parent "$work" --report "$output/native-governance-upgrade.json" \
+    |& tee "$output/native-governance-upgrade.log"
+  preserve_public_reports
+  "$python" - "$output/native-governance-upgrade.json" "$revision" "$mcnd_sha" <<'PY'
+import json,sys
+from pathlib import Path
+report=json.loads(Path(sys.argv[1]).read_text())
+assert report['status']=='PASS' and 'error' not in report,report
+assert report['sourceCommit']==sys.argv[2] and report['binarySha256']==sys.argv[3],report
+assert report['rejected']['status']=='PROPOSAL_STATUS_REJECTED' and report['passed']['status']=='PROPOSAL_STATUS_PASSED',report
+plan,application,progress=report['schedule'],report['application'],report['progress']
+assert plan['scheduledAt'] < plan['targetHeight'] == application['appliedHeight'] <= progress['height']-3,report
+assert application['sameBinary'] is True and application['processRestarted'] is False,report
+print('Native governance tally, exact SDK upgrade height and continued three-node consensus passed.')
+PY
 fi
 
 if [[ "$native_ibc_v1" == native-ibc-v1 ]]; then

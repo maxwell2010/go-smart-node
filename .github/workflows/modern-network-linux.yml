@@ -9,10 +9,10 @@ on:
   workflow_dispatch:
     inputs:
       scope:
-        description: Module tests, contract generation, isolated daemon and Hermes, or held DEL downtime
+        description: Validation scenario to run on an isolated GitHub runner
         default: module
         type: choice
-        options: [module, contracts, process, held-downtime]
+        options: [module, contracts, process, held-downtime, native-upgrade-governance]
       remote_profile:
         description: Also validate the reusable remote-worker scripts
         default: 'off'
@@ -176,7 +176,7 @@ jobs:
           if-no-files-found: error
 
   isolated-process-gates:
-    if: github.event_name == 'workflow_dispatch' && (inputs.scope == 'process' || inputs.scope == 'held-downtime')
+    if: github.event_name == 'workflow_dispatch' && (inputs.scope == 'process' || inputs.scope == 'held-downtime' || inputs.scope == 'native-upgrade-governance')
     runs-on: ubuntu-24.04
     timeout-minutes: 45
     env:
@@ -210,7 +210,7 @@ jobs:
           NATIVE_DEL_JAIL_RECOVERY: ${{ inputs.native_del_jail_recovery }}
           VALIDATION_SCOPE: ${{ inputs.scope }}
         run: |
-          args=("$RUNNER_TEMP/process-evidence" off off off off off off off off)
+          args=("$RUNNER_TEMP/process-evidence" off off off off off off off off off)
           if [[ "$DEL_STATE_SYNC" == true ]]; then
             args[1]=withdrawal-genesis
             args[2]=del-state-sync
@@ -236,6 +236,8 @@ jobs:
           fi
           if [[ "$VALIDATION_SCOPE" == held-downtime ]]; then
             args[8]=native-held-del-downtime
+          elif [[ "$VALIDATION_SCOPE" == native-upgrade-governance ]]; then
+            args[9]=native-upgrade-governance
           fi
           bash scripts/remote/process-gates.sh "${args[@]}"
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
