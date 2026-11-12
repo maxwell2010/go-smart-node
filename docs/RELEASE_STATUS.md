@@ -63,6 +63,36 @@ assertion covers unbonding parameter continuity. The same-family pending
 packet rehearsal is tracked separately above.
 [Full-profile handoff](https://github.com/maxwell2010/go-smart-node/actions/runs/43204900931)
 
+Opt-in DRC20 admission verifies a real TokenCenter deployment, token supply
+and spendable native backing at genesis and restore. Signed conversion with
+`minOut` updates the token's native reserve record and the ordinary DEL stake
+in one transaction. The isolated NFT route updates the source DRC20, retires
+the selected origin units and funds the new receipt with DEL. Its signed
+withdrawal and automatic completion return that receipt after a restart.
+[Direct DEL stake](https://github.com/maxwell2010/go-smart-node/actions/runs/43210762436)
+[NFT reserve and completion](https://github.com/maxwell2010/go-smart-node/actions/runs/43212664914)
+
+The 1024-unit custom NFT fixture used 19,496,944 SDK gas with an EVM
+peak of 19,639,044 under the 24,000,000 transaction ceiling. The 1025th
+origin unit retained its reserve. The compiler reproduced the 24,536-byte
+Gateway and 24,530-byte linked NFT library within the EVM code-size limit.
+[Maximum-size workload](https://github.com/maxwell2010/go-smart-node/actions/runs/43213505574)
+
+The `de3851c` Linux amd64 archive passed clean installation and CycloneDX
+validation. Source and binary scans reported zero symbol advisories in the
+2026-11-11 scanner database.
+[Combined module and EVM tests](https://github.com/maxwell2010/go-smart-node/actions/runs/43213937326)
+[Archive and scanner](https://github.com/maxwell2010/go-smart-node/actions/runs/43213937130)
+
+On the same revision, three isolated nodes carried a genuine 1 DEL ICS-20
+commitment across the approved height-56 handoff. Hermes updated the
+counterparty client, delivered one success acknowledgement and returned the
+voucher for the original principal. Restoring closed checkpoints of both
+chains recovered the same pending commitment and escrow, the 28-day DEL
+claim and the exact AppHash after reapplying height 56. This rehearsal uses
+two builds of the same source revision.
+[Pending IBC packet and coordinated restore](https://github.com/maxwell2010/go-smart-node/actions/runs/43213910119)
+
 ## Separate release tracks
 
 The selected architecture is a fresh network on a maintained modern stack,
@@ -256,12 +286,10 @@ funded at and after the infraction height.
 
 Modern release blockers remain:
 
-- Finish authenticated DRC20 admission and the signed conversion-to-DEL
-  routes for custom staking and NFT reserves. The converter has isolated
-  signed EVM tests. The current withdrawal profile admits DEL-backed custody
-  and rejects custom allocations at genesis.
-  [Custom collateral design](../network/docs/ru/CUSTOM_COLLATERAL_CONVERSION.md)
-  [Ordinary conversion prototype](https://github.com/maxwell2010/go-smart-node/actions/runs/43202904626)
+- Complete the native `redeemPosition` projection for wallet-held NFT receipts
+  and check the resulting DEL payout. The existing signed withdrawal and
+  `complete` return the receipt with its DEL backing.
+  [Custom collateral routes](../network/docs/ru/CUSTOM_COLLATERAL_CONVERSION.md)
 - Run the actual release-state migration and rollback rehearsal on the
   agreed predecessor and successor, including a pending ICS-20 packet and
   financial claims. Existing same-family rehearsals provide evidence for
