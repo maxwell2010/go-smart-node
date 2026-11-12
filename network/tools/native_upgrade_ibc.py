@@ -18,8 +18,9 @@ class NativeUpgradeIBC:
     def __init__(self, args, root, env, report, signals):
         self.report = report
         self.lab = Lab(root, env, report, signals)
-        self.reference = binary(args.reference_binary, args.reference_sha256)
-        self.hermes = binary(args.hermes_binary, HERMES_SHA256)
+        self.reference, reference_hash = binary(args.reference_binary, args.reference_sha256)
+        self.hermes, hermes_hash = binary(args.hermes_binary, HERMES_SHA256)
+        self.report["ibcBinaries"] = {"referenceSha256": reference_hash, "hermesSha256": hermes_hash}
         self.value = 10**18
 
     def fund_relayer(self, mcnd, replicas, expected, genesis, height):
