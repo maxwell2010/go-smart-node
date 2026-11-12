@@ -29,8 +29,10 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestNativeGovernanceSignalRoutesAndTally(t *testing.T) {
-	a := testApp(t, "mintcandy_990001-1", 990001)
+func checkNativeGovernanceSignalRoutesAndTally(t *testing.T, a *App) {
+	t.Helper()
+	previous := a.withdrawals
+	t.Cleanup(func() { a.withdrawals = previous })
 	profile := WithdrawalProfile{EnableNativeConsensus: true, EnableNativeGovernance: true}
 	a.withdrawals = &withdrawalController{profile: profile}
 	circuit := nativeConsensusCircuit{app: a}

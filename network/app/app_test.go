@@ -137,6 +137,9 @@ func TestFreshOwnApplicationSignedNativeEVMTransfer(t *testing.T) {
 	assertOwnApplicationConstructorAndGenesis(t, a)
 	assertMountedNativeAssetsBeforeInit(t, a)
 	assertNativeValidatorBindingDomainAdmission(t, a)
+	t.Run("native_governance_signal_routes_and_tally", func(t *testing.T) {
+		checkNativeGovernanceSignalRoutesAndTally(t, a)
+	})
 	key, err := ethsecp.GenerateKey()
 	require.NoError(t, err)
 	account := authtypes.NewBaseAccount(key.PubKey().Address().Bytes(), key.PubKey(), 0, 0)
