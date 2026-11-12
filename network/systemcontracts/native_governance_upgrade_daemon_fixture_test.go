@@ -86,7 +86,7 @@ func nativeGovernanceUpgradeFixture(t *testing.T, e isolatedBackendEnv, genesis 
 	}
 
 	const planName = "mintcandy-native-sdk-migrations-v1"
-	height := ctx.BlockHeight() + 48
+	height := ctx.BlockHeight() + 32
 	metadata := fmt.Sprintf(`mintcandy-sdk-upgrade/v1:{"name":"%s","height":%d}`, planName, height)
 	propose := func(title string) sdk.Msg {
 		t.Helper()

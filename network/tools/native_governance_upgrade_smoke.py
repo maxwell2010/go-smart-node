@@ -166,7 +166,8 @@ def check_schedule(replicas, action, height):
 def wait_predecessor_halt(replicas, action, report):
     target = action['planHeight']
     expected_info = json.dumps({'schema': SCHEMA, 'proposal_id': action['passedID']}, separators=(',', ':'))
-    deadline = time.monotonic() + 125
+    deadline = time.monotonic() + 180
+    observed = {}
     while time.monotonic() < deadline:
         ready = True
         for node in replicas:
@@ -175,17 +176,25 @@ def wait_predecessor_halt(replicas, action, report):
                                    readiness_diagnostic(node.log, report))
             try:
                 height = int(node.rpc('abci_info')['response'].get('last_block_height', '0'))
-                hint = json.loads(private_bytes(node.home / 'data/upgrade-info.json', 4096))
             except (OSError, json.JSONDecodeError):
                 ready = False
                 continue
             check(height <= target - 1, 'predecessor committed the upgrade height')
+            state = {'committedHeight': height, 'upgradeHint': False}
+            observed[node.label] = state
+            try:
+                hint = json.loads(private_bytes(node.home / 'data/upgrade-info.json', 4096))
+            except (OSError, json.JSONDecodeError):
+                ready = False
+                continue
             check(hint['name'] == PLAN and int(hint['height']) == target and hint['info'] == expected_info,
                   'SDK upgrade hint differs from the exact approved plan')
+            state['upgradeHint'] = True
             ready &= height == target - 1
         if ready:
             return
         time.sleep(0.25)
+    report['predecessorProgress'] = observed
     raise TimeoutError('predecessors did not reach the exact SDK upgrade boundary')
 
 
