@@ -346,6 +346,20 @@ func checkSignedPagedPenalties(t *testing.T, keys []*ecdsa.PrivateKey, roles map
 			return token, id
 		}
 		oldToken, oldID := mint()
+		for _, input := range []struct {
+			ids       [][32]byte
+			errorName string
+		}{
+			{[][32]byte{}, "NoPenaltyToApply"},
+			{[][32]byte{oldID}, "NoPenaltyToApply"},
+			{make([][32]byte, 17), "InvalidAmount"},
+		} {
+			response := reject(0, "applyPenaltiesToNFTStakes", input.ids)
+			require.GreaterOrEqual(t, len(response.Ret), 4)
+			want, ok := artifacts["delegation"].ABI.Errors[input.errorName]
+			require.True(t, ok)
+			require.Equal(t, want.ID.Bytes()[:4], response.Ret[:4])
+		}
 		firstPair(validator)
 		call(1, "master-validator", "unpauseValidator", new(big.Int), validator)
 		lateToken, lateID := mint()

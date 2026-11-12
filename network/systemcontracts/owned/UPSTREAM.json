@@ -3,7 +3,7 @@
   "canonicalSource": "sources/DecimalDelegation.sol",
   "canonicalSha256": "4478ab6d8b4a7feb230d70715c72f3be816fdbfd0efe7743e3572cfd4ce010c2",
   "ownedSource": "owned/DecimalDelegation.sol",
-  "ownedSha256": "8b6d37c4681548d6ebf97400cf333f11b8de0e3d7ff2a3072a61e8ea8c10a893",
+  "ownedSha256": "844e735624c947b7ada4a211257fedccdd24368f335a66dae4ef385df53c1d89",
   "changedFunctions": [
     "DelegationNFTLib._applyPenaltiesToStake",
     "DecimalDelegation._applyPenaltiesToStake",
@@ -28,7 +28,7 @@
     "DelegationNFTLib._requireCoinPenaltyCaughtUp",
     "DelegationNFTLib._requireNFTPenaltyCaughtUp",
     "DelegationNFTLib._registerNFTStake",
-    "DelegationNFTLib.applyPenaltiesToNFTStakeWithLimit",
+    "DelegationNFTLib.applyPenaltiesToNFTStakeBatch",
     "DelegationNFTLib._applyPenaltiesToNFTStake",
     "DecimalDelegation.applyPenaltiesToStakes",
     "DecimalDelegation.applyPenaltiesToNFTStakes",

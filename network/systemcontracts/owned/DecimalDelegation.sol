@@ -5824,13 +5824,23 @@ library DelegationNFTLib {
         return _applyPenaltiesToNFTStake($, nftStakeId, 16);
     }
 
-    function applyPenaltiesToNFTStakeWithLimit(
+    function applyPenaltiesToNFTStakeBatch(
         IDecimalDelegationCommon.DelegationStorage storage $,
-        bytes32 nftStakeId,
-        uint256 maxItems
-    ) public returns (bool) {
-        if (maxItems == 0 || maxItems > 16) revert IDecimalDelegationCommon.InvalidAmount();
-        return _applyPenaltiesToNFTStake($, nftStakeId, maxItems);
+        bytes32[] memory nftStakeIds
+    ) public {
+        if (nftStakeIds.length > 16) revert IDecimalDelegationCommon.InvalidAmount();
+        bool hasPenalty = false;
+        uint256 remainingItems = 16;
+        // All IDs share this native-call budget, including partial catchup.
+        for (uint256 i; i < nftStakeIds.length && remainingItems != 0; i++) {
+            bytes32 id = nftStakeIds[i];
+            uint256 beforeCursor = $._nftStakePenaltyIndex[id];
+            hasPenalty = _applyPenaltiesToNFTStake($, id, remainingItems) || hasPenalty;
+            uint256 used = $._nftStakePenaltyIndex[id] - beforeCursor;
+            if (used >= remainingItems) remainingItems = 0;
+            else remainingItems -= used;
+        }
+        if (!hasPenalty) revert IDecimalDelegationCommon.NoPenaltyToApply();
     }
 
     function _applyPenaltiesToNFTStake(
@@ -7184,21 +7194,7 @@ contract DecimalDelegation is
     function applyPenaltiesToNFTStakes(
         bytes32[] memory nftStakeIds
     ) public virtual whenNotPaused {
-        if (nftStakeIds.length > 16) revert InvalidAmount();
-        DelegationStorage storage $ = _getDelegationStorage();
-        bool hasPenalty = false;
-        uint256 remainingItems = 16;
-        // The whole entrypoint, not each array element, shares the native-call
-        // budget. The EVM's existing total20 native-action guard is unchanged.
-        for (uint256 i; i < nftStakeIds.length && remainingItems != 0; i++) {
-            bytes32 id = nftStakeIds[i];
-            uint256 beforeCursor = $._nftStakePenaltyIndex[id];
-            hasPenalty = DelegationNFTLib.applyPenaltiesToNFTStakeWithLimit($, id, remainingItems) || hasPenalty;
-            uint256 used = $._nftStakePenaltyIndex[id] - beforeCursor;
-            if (used >= remainingItems) remainingItems = 0;
-            else remainingItems -= used;
-        }
-        if (!hasPenalty) revert NoPenaltyToApply();
+        DelegationNFTLib.applyPenaltiesToNFTStakeBatch(_getDelegationStorage(), nftStakeIds);
     }
 
     function getNFTStakePenaltyIndex(
