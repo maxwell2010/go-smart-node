@@ -82,7 +82,7 @@ func exportNativeConsensusDaemonFixture(t *testing.T, e isolatedBackendEnv, dir 
 		initial, after = [3]int64{3, 3, 2}, [3]int64{3, 3, 0}
 		keyScope = "mintcandy native ordinary del downtime process fixture "
 	}
-	const jailRecoveryDuration = 30 * time.Second
+	const jailRecoveryDuration = 60 * time.Second
 	if jailRecovery {
 		keyScope = "mintcandy native ordinary del jail recovery process fixture "
 	}

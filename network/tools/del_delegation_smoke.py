@@ -170,8 +170,9 @@ def submit(child, log, report, expected, name, success, nonce, event, fields):
     gas, price = int(receipt['gasUsed'], 16), int(receipt['effectiveGasPrice'], 16)
     check(receipt['transactionHash'] == result and receipt['from'].lower() == expected['actor'] and receipt['to'].lower() == expected['gateway'],
           'receipt identity differs from the signed fixture')
-    check(int(receipt['status'], 16) == int(success) and 0 < gas <= GAS_LIMIT and price == GAS_PRICE,
-          f'{name} status, gas or effective price differs')
+    status = int(receipt['status'], 16)
+    check(status == int(success) and 0 < gas <= GAS_LIMIT and price == GAS_PRICE,
+          f'{name} receipt at height {height} has status {status} (expected {int(success)}), gas {gas}, price {price}')
     txs = comet(f'block_results?height={height}')['txs_results']
     check(len(txs) == 1, 'fixture block must contain exactly one signed transaction')
     events = txs[0].get('events') or []
