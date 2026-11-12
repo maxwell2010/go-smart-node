@@ -59,6 +59,9 @@ func parseWithdrawalGenesisProfile(raw json.RawMessage) (*WithdrawalProfile, err
 	if profile.EnableNativeIBCV1 && !profile.EnableNativeConsensus {
 		return nil, errors.New("native IBC v1 genesis requires native consensus")
 	}
+	if profile.EnableNativeGovernance && !profile.EnableNativeConsensus {
+		return nil, errors.New("native governance genesis requires native consensus")
+	}
 	seen := make(map[common.Address]bool)
 	for _, addr := range []common.Address{profile.Registry, profile.Gateway, profile.Library, profile.NFTCenter,
 		profile.PositionVault, profile.MasterValidator, profile.WrappedDEL} {
@@ -253,6 +256,11 @@ func (app *App) initWithdrawalGenesis(ctx sdk.Context, req *abci.RequestInitChai
 		}
 	}
 	child, commit := ctx.CacheContext()
+	if profile.EnableNativeGovernance {
+		if err := app.validateNativeGovernanceGenesis(genesis); err != nil {
+			return nil, err
+		}
+	}
 	if profile.EnableNativeConsensus {
 		if req.InitialHeight < 0 || len(req.Validators) != 0 {
 			return nil, errors.New("native consensus requires fresh genesis with application-derived validators")

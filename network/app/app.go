@@ -10,6 +10,7 @@ import (
 	nativenftkeeper "github.com/maxwell2010/go-smart-node/network/decimal/nft/keeper"
 	nativenft "github.com/maxwell2010/go-smart-node/network/decimal/nft/module"
 	nativenfttypes "github.com/maxwell2010/go-smart-node/network/decimal/nft/types"
+	nativegov "github.com/maxwell2010/go-smart-node/network/decimal/validator/governance"
 	nativevalidatorkeeper "github.com/maxwell2010/go-smart-node/network/decimal/validator/keeper"
 	nativevalidator "github.com/maxwell2010/go-smart-node/network/decimal/validator/module"
 	nativevalidatortypes "github.com/maxwell2010/go-smart-node/network/decimal/validator/types"
@@ -203,6 +204,7 @@ type App struct {
 	MintKeeper            mintkeeper.Keeper
 	DistrKeeper           distrkeeper.Keeper
 	GovKeeper             govkeeper.Keeper
+	nativeGovernance      *nativegov.Sessions
 	UpgradeKeeper         *upgradekeeper.Keeper
 	AuthzKeeper           authzkeeper.Keeper
 	EvidenceKeeper        evidencekeeper.Keeper
@@ -444,16 +446,16 @@ func NewApp(
 		Example of setting gov params:
 		govConfig.MaxMetadataLen = 10000
 	*/
+	app.nativeGovernance, nativeErr = app.newNativeGovernanceSessions()
+	if nativeErr != nil {
+		panic(nativeErr)
+	}
 	govKeeper := govkeeper.NewKeeper(
 		appCodec, runtime.NewKVStoreService(keys[govtypes.StoreKey]), app.AccountKeeper, app.BankKeeper,
-		app.StakingKeeper, app.DistrKeeper, app.MsgServiceRouter(), govConfig, authAddr,
+		governanceStakingReader{StakingKeeper: app.StakingKeeper, app: app}, app.DistrKeeper, app.MsgServiceRouter(), govConfig, authAddr,
 	)
 
-	app.GovKeeper = *govKeeper.SetHooks(
-		govtypes.NewMultiGovHooks(
-		// register the governance hooks
-		),
-	)
+	app.GovKeeper = *govKeeper.SetHooks(nativeGovernanceHooks{app: app})
 
 	// create evidence keeper with router
 	evidenceKeeper := evidencekeeper.NewKeeper(
@@ -711,7 +713,9 @@ func NewApp(
 	// Uncomment if you want to set a custom migration order here.
 	// app.ModuleManager.SetOrderMigrations(custom order)
 
-	app.configurator = module.NewConfigurator(app.appCodec, app.MsgServiceRouter(), app.GRPCQueryRouter())
+	app.configurator = module.NewConfigurator(app.appCodec,
+		nativeGovernanceServices{ServiceRegistrar: app.MsgServiceRouter(), app: app},
+		nativeGovernanceServices{ServiceRegistrar: app.GRPCQueryRouter(), app: app})
 	app.SetCircuitBreaker(nativeConsensusCircuit{app: app})
 	if err = app.ModuleManager.RegisterServices(app.configurator); err != nil {
 		panic(fmt.Sprintf("failed to register services in module manager: %s", err.Error()))

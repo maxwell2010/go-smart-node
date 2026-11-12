@@ -53,6 +53,7 @@ type WithdrawalProfile struct {
 	EnableNativeConsensus  bool           `json:"enable_native_consensus,omitempty"`
 	EnableNativeFeeRewards bool           `json:"enable_native_fee_rewards,omitempty"`
 	EnableNativeIBCV1      bool           `json:"enable_native_ibc_v1,omitempty"`
+	EnableNativeGovernance bool           `json:"enable_native_governance,omitempty"`
 }
 
 type withdrawalController struct {
@@ -108,6 +109,9 @@ func (app *App) LoadWithdrawalSettlement(ctx sdk.Context) error {
 func (app *App) newWithdrawalController(profile WithdrawalProfile) (*withdrawalController, error) {
 	if profile.EnableNativeIBCV1 && !profile.EnableNativeConsensus {
 		return nil, errors.New("native IBC v1 requires native consensus")
+	}
+	if profile.EnableNativeGovernance && !profile.EnableNativeConsensus {
+		return nil, errors.New("native governance requires native consensus")
 	}
 	if profile.EnableNativeFeeRewards && !profile.EnableNativeConsensus {
 		return nil, errors.New("native fee rewards require native consensus")

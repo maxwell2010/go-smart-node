@@ -66,8 +66,8 @@ func (app *App) newConsensusEVMReader() consensusEVMReader {
 	return consensusEVMReader{StakingKeeper: app.StakingKeeper, native: native, app: app}
 }
 
-// Native consensus admits bank transfers, the scoped EVM Gateway and opt-in
-// IBC v1 routes. Alternate SDK routes cannot dispatch economic messages.
+// Native consensus admits bank transfers and the scoped EVM Gateway, with
+// optional IBC v1 and signal-only governance.
 type nativeConsensusCircuit struct{ app *App }
 
 func (c nativeConsensusCircuit) IsAllowed(ctx context.Context, typeURL string) (bool, error) {
@@ -79,7 +79,8 @@ func (c nativeConsensusCircuit) IsAllowed(ctx context.Context, typeURL string) (
 	}
 	return typeURL == sdk.MsgTypeURL(&types.MsgEthereumTx{}) ||
 		typeURL == sdk.MsgTypeURL(&banktypes.MsgSend{}) ||
-		typeURL == sdk.MsgTypeURL(&banktypes.MsgMultiSend{}), nil
+		typeURL == sdk.MsgTypeURL(&banktypes.MsgMultiSend{}) ||
+		(c.app.usesNativeGovernance() && nativeGovernanceMessage(typeURL)), nil
 }
 
 type sdkEconomicsPrecompile struct {
@@ -245,6 +246,11 @@ func (app *App) endNativeConsensus(ctx sdk.Context) (sdk.EndBlock, error) {
 	result.ValidatorUpdates, err = app.NativeValidatorKeeper.ScheduledStakeABCIEndBlock(child, eligible)
 	if err != nil {
 		return sdk.EndBlock{}, err
+	}
+	if app.usesNativeGovernance() {
+		if err := app.nativeGovernance.EndBlock(child, &app.GovKeeper); err != nil {
+			return sdk.EndBlock{}, err
+		}
 	}
 	result.Events = append(result.Events, child.EventManager().ABCIEvents()...)
 	write()
