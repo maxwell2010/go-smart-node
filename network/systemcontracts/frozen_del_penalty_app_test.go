@@ -23,16 +23,22 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-const frozenDELPenaltyPassed = "frozen DEL checkpoint, penalty burn and final claim settlement passed"
+const (
+	frozenDELPenaltyPassed  = "frozen DEL checkpoint, penalty burn and final claim settlement passed"
+	frozenHeldLotBudgetMode = "frozen-held-penalty-lot-budget"
+)
 
 func TestOwnedAppSignedFrozenDELPenalty(t *testing.T) {
 	for _, mode := range []string{"frozen-penalty-partial", "frozen-penalty-full", "frozen-held-penalty", "frozen-held-penalty-full"} {
 		t.Run(mode, func(t *testing.T) { testSignedDELFixture(t, mode, frozenDELPenaltyPassed) })
 	}
+	t.Run(frozenHeldLotBudgetMode, func(t *testing.T) {
+		testSignedHoldLotBudget(t, frozenHeldLotBudgetMode, frozenDELPenaltyPassed)
+	})
 }
 
 func runSignedFrozenDELPenalty(t *testing.T, e isolatedBackendEnv, profile ownedapp.WithdrawalProfile, gateway, master, wrapper contracts.Artifact,
-	reader *nftview.Reader, gov func(contracts.Artifact, common.Address, string, ...interface{}), full, held bool,
+	reader *nftview.Reader, gov func(contracts.Artifact, common.Address, string, ...interface{}), full, held, benchmark bool,
 ) {
 	t.Helper()
 	f := prepareSignedDELFixture(t, e, profile, gateway, master, wrapper, gov)
@@ -62,20 +68,32 @@ func runSignedFrozenDELPenalty(t *testing.T, e isolatedBackendEnv, profile owned
 			StakeID: proof.StakeID, Amount: proof.Remaining, HoldStartTime: proof.HoldStartTime, HoldDeadline: proof.HoldDeadline,
 		}
 	}
+	oldAmount, eligibleAmount := int64(4), int64(6)
+	deposits := []int64{3, 7}
+	if benchmark {
+		oldAmount, eligibleAmount = 1, benchmarkHoldLots-1
+		deposits = make([]int64, benchmarkHoldLots)
+		for i := range deposits {
+			deposits[i] = 1
+		}
+	}
+	total := amount(oldAmount + eligibleAmount)
 	var holdDeadline, holdStart int64
 	if held {
-		holdDeadline = e.ctx().BlockTime().Unix() + 4
-		first := signed("delegateHoldDEL", amount(3), f.validator, big.NewInt(holdDeadline))
-		require.NoError(t, keeper.ApplyGatewayDELDelegation(inclusion(), position(first), first.Amount))
-		holdStart = first.HoldStartTime
-		second := signed("delegateHoldDEL", amount(7), f.validator, big.NewInt(holdDeadline))
-		require.Equal(t, holdStart, second.HoldStartTime)
-		require.NoError(t, keeper.ApplyGatewayDELDelegation(inclusion(), position(second), second.Amount))
+		holdDeadline = e.ctx().BlockTime().Unix() + int64(len(deposits)) + 2
+		for _, quantity := range deposits {
+			transition := signed("delegateHoldDEL", amount(quantity), f.validator, big.NewInt(holdDeadline))
+			if holdStart == 0 {
+				holdStart = transition.HoldStartTime
+			}
+			require.Equal(t, holdStart, transition.HoldStartTime)
+			require.NoError(t, keeper.ApplyGatewayDELDelegation(inclusion(), position(transition), transition.Amount))
+		}
 		for e.ctx().BlockTime().Unix() <= holdDeadline {
 			e.advance()
 		}
 	} else {
-		funding := signed("delegateDEL", amount(10), f.validator)
+		funding := signed("delegateDEL", total, f.validator)
 		require.NoError(t, keeper.ApplyGatewayDELDelegation(inclusion(), position(funding), funding.Amount))
 	}
 	frozen := func(request settlement.DELTransition) validatortypes.EVMFrozenBinding {
@@ -97,15 +115,27 @@ func runSignedFrozenDELPenalty(t *testing.T, e isolatedBackendEnv, profile owned
 		require.NoError(t, keeper.ApplyGatewayDELWithdrawal(inclusion(), position(out), out.FrozenIndex, out.Amount, out.Deadline))
 		return out
 	}
-	oldRequest, eligibleRequest := withdraw(4), withdraw(6)
+	oldRequest, eligibleRequest := withdraw(oldAmount), withdraw(eligibleAmount)
 	oldRow, eligibleRow := frozen(oldRequest), frozen(eligibleRequest)
 	require.Equal(t, oldRow.CreatedHeight+1, eligibleRow.CreatedHeight)
 	f.activeReserve(sdkmath.ZeroInt())
-	f.backing(amount(10))
-	percent, wantLoss := uint16(50), amount(3)
+	f.backing(total)
+	percent, wantLoss := uint16(50), amount(eligibleAmount).QuoRaw(2)
 	if full {
-		percent, wantLoss = 100, amount(6)
+		percent, wantLoss = 100, amount(eligibleAmount)
 	}
+	infraction := eligibleRow.CreatedHeight
+	oldRemaining := oldRow.RawAmount
+	if benchmark {
+		infraction = oldRow.CreatedHeight
+		oldRemaining = oldRemaining.QuoRaw(2)
+		pending, err := keeper.GetUndelegation(e.ctx(), f.beneficiary, f.operator)
+		require.NoError(t, err)
+		require.Len(t, pending.Entries, 2)
+		require.Len(t, pending.Entries[0].Stake.Holds, 1)
+		require.Len(t, pending.Entries[1].Stake.Holds, benchmarkHoldLots-1)
+	}
+	totalLoss := oldRow.RawAmount.Sub(oldRemaining).Add(wantLoss)
 	f.signed("applyFrozenDELPenalty", sdkmath.ZeroInt(), false, eligibleRequest.FrozenIndex.Big(),
 		big.NewInt(eligibleRow.CreatedHeight), eligibleRow.RawAmount.BigInt(), new(big.Int))
 	e.app.EVMKeeper.SetInternalCommitGuard(func(ctx sdk.Context, msg core.Message, _ []*ethtypes.Log) error {
@@ -114,8 +144,9 @@ func runSignedFrozenDELPenalty(t *testing.T, e isolatedBackendEnv, profile owned
 		}
 		return nil
 	})
+	const attemptGas = uint64(24_000_000)
 	ctx := func() sdk.Context {
-		return e.ctx().WithExecMode(sdk.ExecModeFinalize).WithGasMeter(storetypes.NewGasMeter(24_000_000))
+		return e.ctx().WithExecMode(sdk.ExecModeFinalize).WithGasMeter(storetypes.NewGasMeter(attemptGas))
 	}
 	supply := func(ctx sdk.Context) sdkmath.Int {
 		return e.app.BankKeeper.GetSupply(ctx, identity.BaseDenom).Amount
@@ -126,10 +157,11 @@ func runSignedFrozenDELPenalty(t *testing.T, e isolatedBackendEnv, profile owned
 	}
 	rejected := errors.New("reject frozen queue projection after writes")
 	reconcile := func(fail bool) error {
-		return executor.AppendMasterPenalty(ctx(), f.validator, percent, supply, func(child sdk.Context, announcement settlement.MasterPenaltyProof) error {
+		execution := ctx()
+		err := executor.AppendMasterPenalty(execution, f.validator, percent, supply, func(child sdk.Context, announcement settlement.MasterPenaltyProof) error {
 			for _, row := range []validatortypes.EVMFrozenBinding{oldRow, eligibleRow} {
-				isEligible := row.CreatedHeight == eligibleRow.CreatedHeight
-				err := executor.ApplyFrozenDELPenalty(child, row, eligibleRow.CreatedHeight, percent, supply,
+				isEligible := row.CreatedHeight >= infraction
+				err := executor.ApplyFrozenDELPenalty(child, row, infraction, percent, supply,
 					func(projectCtx sdk.Context, proof settlement.FrozenDELPenaltyProof) error {
 						require.Equal(t, isEligible, proof.Eligible)
 						require.Equal(t, announcement.BeforeCursor, proof.BeforeCursor)
@@ -138,7 +170,7 @@ func runSignedFrozenDELPenalty(t *testing.T, e isolatedBackendEnv, profile owned
 						require.Equal(t, holdDeadline, proof.HoldDeadline)
 						expectedLoss := sdkmath.ZeroInt()
 						if isEligible {
-							expectedLoss = wantLoss
+							expectedLoss = row.RawAmount.MulRaw(int64(percent)).QuoRaw(100)
 						}
 						require.True(t, expectedLoss.Equal(proof.Burned))
 						var err error
@@ -153,7 +185,7 @@ func runSignedFrozenDELPenalty(t *testing.T, e isolatedBackendEnv, profile owned
 						if err != nil {
 							return err
 						}
-						if isEligible && fail {
+						if row.CreatedHeight == eligibleRow.CreatedHeight && fail {
 							return rejected
 						}
 						return nil
@@ -164,24 +196,29 @@ func runSignedFrozenDELPenalty(t *testing.T, e isolatedBackendEnv, profile owned
 			}
 			return nil
 		})
+		if err == nil && benchmark {
+			t.Logf("DEL hold penalty gas lots=%d sdk_gas=%d budget=%d frozen=true",
+				benchmarkHoldLots, execution.GasMeter().GasConsumed(), attemptGas)
+		}
+		return err
 	}
 	require.ErrorIs(t, reconcile(true), rejected)
 	require.Zero(t, count())
 	require.Equal(t, oldRow, frozen(oldRequest))
 	require.Equal(t, eligibleRow, frozen(eligibleRequest))
 	require.True(t, initialSupply.Equal(supply(ctx())))
-	f.backing(amount(10))
+	f.backing(total)
 
 	require.NoError(t, reconcile(false))
 	require.Equal(t, int64(1), count())
-	require.True(t, oldRow.RawAmount.Equal(frozen(oldRequest).RawAmount))
+	require.True(t, oldRemaining.Equal(frozen(oldRequest).RawAmount))
 	after := frozen(eligibleRequest)
 	require.True(t, eligibleRow.RawAmount.Sub(wantLoss).Equal(after.RawAmount))
 	require.Equal(t, eligibleRow.CompletionTimestamp, after.CompletionTimestamp)
 	require.Equal(t, !full, after.Active)
-	f.backing(amount(10).Sub(wantLoss))
+	f.backing(total.Sub(totalLoss))
 	f.activeReserve(sdkmath.ZeroInt())
-	require.True(t, initialSupply.Sub(wantLoss).Equal(supply(ctx())))
+	require.True(t, initialSupply.Sub(totalLoss).Equal(supply(ctx())))
 
 	for e.ctx().BlockTime().Before(eligibleRequest.Deadline) {
 		e.advance()
@@ -189,22 +226,30 @@ func runSignedFrozenDELPenalty(t *testing.T, e isolatedBackendEnv, profile owned
 	if full {
 		f.signed("complete", sdkmath.ZeroInt(), false, []*big.Int{eligibleRequest.FrozenIndex.Big()})
 		require.True(t, frozen(eligibleRequest).RawAmount.IsZero())
-		f.backing(amount(4))
+		f.backing(oldRemaining)
 	} else {
 		err := executor.ApplyFrozenDELPenalty(ctx(), after, eligibleRow.CreatedHeight, percent, supply,
 			func(sdk.Context, settlement.FrozenDELPenaltyProof) error {
 				return errors.New("mature claim reached penalty projection")
 			})
 		require.ErrorContains(t, err, "unmatured frozen DEL binding")
-		e.credit.Set(after.RawAmount.BigInt())
-		response := f.signed("complete", sdkmath.ZeroInt(), true, []*big.Int{eligibleRequest.FrozenIndex.Big()})
-		receipt := &ethtypes.Receipt{Status: ethtypes.ReceiptStatusSuccessful, Logs: evmtypes.LogsToEthereum(response.Logs)}
-		_, err = executor.ValidateSigned(e.ctx(), after, receipt)
-		require.NoError(t, err)
-		require.NoError(t, keeper.ApplyWithdrawalCompletion(e.ctx(), after))
-		require.False(t, frozen(eligibleRequest).Active)
-		f.backing(amount(4))
+		complete := func(request settlement.DELTransition, claim validatortypes.EVMFrozenBinding) {
+			t.Helper()
+			e.credit.Set(claim.RawAmount.BigInt())
+			response := f.signed("complete", sdkmath.ZeroInt(), true, []*big.Int{request.FrozenIndex.Big()})
+			receipt := &ethtypes.Receipt{Status: ethtypes.ReceiptStatusSuccessful, Logs: evmtypes.LogsToEthereum(response.Logs)}
+			_, err := executor.ValidateSigned(e.ctx(), claim, receipt)
+			require.NoError(t, err)
+			require.NoError(t, keeper.ApplyWithdrawalCompletion(e.ctx(), claim))
+			require.False(t, frozen(request).Active)
+		}
+		complete(eligibleRequest, after)
+		f.backing(oldRemaining)
+		if benchmark {
+			complete(oldRequest, frozen(oldRequest))
+			f.backing(sdkmath.ZeroInt())
+		}
 	}
-	require.True(t, initialSupply.Sub(wantLoss).Equal(supply(ctx())))
+	require.True(t, initialSupply.Sub(totalLoss).Equal(supply(ctx())))
 	t.Log(frozenDELPenaltyPassed)
 }
