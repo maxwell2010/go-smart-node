@@ -21,19 +21,29 @@ func (c *withdrawalController) applyActiveNFTDowntime(ctx sdk.Context, row valid
 		if proof.BeforeCursor != master.BeforeCursor || proof.AfterCursor != master.AfterCursor {
 			return errors.New("isolated NFT stake differs from the announced Master penalty")
 		}
-		lineage, err := c.nft.GetIsolatedLineage(next, row.TokenContract, row.TokenID)
+		penalty, err := c.activeNFTPenaltyProjection(next, row, proof)
 		if err != nil {
 			return err
 		}
-		companion := c.delStakePosition(proof.Companion)
-		companion.PenaltyCursor = proof.CompanionCursor
-		return c.keeper.ApplyGatewayNFTPenalty(next, c.nft, validatorkeeper.GatewayNFTPenalty{
-			Before: validatorkeeper.GatewayNFTPosition{
-				Companion: companion, StakeID: common.BytesToHash(row.StakeID), Lineage: lineage,
-			},
-			BeforeCursor: proof.BeforeCursor, AfterCursor: proof.AfterCursor, RemainingReserve: proof.RemainingReserve,
-		})
+		return c.keeper.ApplyGatewayNFTPenalty(next, c.nft, penalty)
 	})
+}
+
+func (c *withdrawalController) activeNFTPenaltyProjection(ctx sdk.Context, row validatortypes.EVMStakeBinding,
+	proof settlement.ActiveNFTPenaltyProof,
+) (validatorkeeper.GatewayNFTPenalty, error) {
+	lineage, err := c.nft.GetIsolatedLineage(ctx, row.TokenContract, row.TokenID)
+	if err != nil {
+		return validatorkeeper.GatewayNFTPenalty{}, err
+	}
+	companion := c.delStakePosition(proof.Companion)
+	companion.PenaltyCursor = proof.CompanionCursor
+	return validatorkeeper.GatewayNFTPenalty{
+		Before: validatorkeeper.GatewayNFTPosition{
+			Companion: companion, StakeID: common.BytesToHash(row.StakeID), Lineage: lineage,
+		},
+		BeforeCursor: proof.BeforeCursor, AfterCursor: proof.AfterCursor, RemainingReserve: proof.RemainingReserve,
+	}, nil
 }
 
 func (c *withdrawalController) applyFrozenNFTDowntime(ctx sdk.Context, row validatortypes.EVMFrozenBinding, master settlement.MasterPenaltyProof,
