@@ -4080,6 +4080,7 @@ library DelegationNFTLib {
         uint256 amountBefore, uint256 amountAfter, bool eligible
     );
     event FrozenDELClaimExtinguished(uint256 indexed index, uint256 indexed penaltyCursor);
+    event WithdrawCompleted(uint256 stakeIndex);
 
     struct FrozenDELCheckpoint {
         uint256 creationHeight;
@@ -4100,7 +4101,7 @@ library DelegationNFTLib {
         }
     }
 
-    function getFrozenDELCheckpoint(uint256 index) public view returns (uint256 creationHeight, uint256 penaltyCursor) {
+    function getFrozenDELCheckpoint(uint256 index) internal view returns (uint256 creationHeight, uint256 penaltyCursor) {
         FrozenDELCheckpoint storage checkpoint = _frozenDELPenaltyStorage().checkpoints[index];
         return (checkpoint.creationHeight, checkpoint.penaltyCursor);
     }
@@ -4167,6 +4168,30 @@ library DelegationNFTLib {
             stake.tokenType == IDecimalDelegationCommon.TokenType.DEL &&
             stake.tokenId == 0 && stake.holdTimestamp == 0 && stake.holdStartTime == 0 &&
             stake.amount != 0 && stake.token == address(WETH($));
+    }
+
+    function completeWithdrawal(IDecimalDelegationCommon.DelegationStorage storage $, uint256 stakeIndex) public {
+        IDecimalDelegationCommon.FrozenStake storage frozenStake = $._frozenStakes[stakeIndex];
+        if (frozenStake.unfreezeTimestamp > block.timestamp || frozenStake.unfreezeTimestamp == 0) {
+            revert IDecimalDelegationCommon.UnfreezeTimestampError(frozenStake.unfreezeTimestamp, block.timestamp);
+        }
+        if (frozenStake.freezeStatus == IDecimalDelegationCommon.FreezeStatus.Completed) {
+            revert IDecimalDelegationCommon.StakeAlreadyUnfrozen();
+        }
+        frozenStake.freezeStatus = IDecimalDelegationCommon.FreezeStatus.Completed;
+        IDecimalDelegationCommon.Stake memory stake = frozenStake.stake;
+        if (stake.tokenType == IDecimalDelegationCommon.TokenType.DRC721) {
+            IDRC721(stake.token).safeTransferFrom(address(this), stake.delegator, stake.tokenId);
+        } else if (stake.tokenType == IDecimalDelegationCommon.TokenType.DRC1155) {
+            IERC1155(stake.token).safeTransferFrom(address(this), stake.delegator, stake.tokenId, stake.amount, "");
+        } else if (stake.token == address(WETH($))) {
+            WETH($).withdraw(stake.amount);
+            (bool success, ) = stake.delegator.call{value: stake.amount}("");
+            if (!success) revert IDecimalDelegationCommon.WithdrawFailed(stake.delegator);
+        } else {
+            SafeERC20.safeTransfer(IERC20(stake.token), stake.delegator, stake.amount);
+        }
+        emit WithdrawCompleted(stakeIndex);
     }
 
     /* ========== EVENTS (redeclared, identical signatures) ========== */
@@ -6923,41 +6948,9 @@ contract DecimalDelegation is
     function _completeWithdraw(
         uint256 stakeIndex
     ) internal virtual override nonReentrant {
-        DelegationStorage storage $ = _getDelegationStorage();
-        FrozenStake storage frozenStake = $._frozenStakes[stakeIndex];
-        _checkFreezeTime(frozenStake.unfreezeTimestamp);
-        if (frozenStake.freezeStatus == FreezeStatus.Completed) {
-            revert StakeAlreadyUnfrozen();
-        }
-        frozenStake.freezeStatus = FreezeStatus.Completed;
-        Stake memory stake = frozenStake.stake;
-
-        // Handle NFT withdrawal - return NFT to delegator
-        if (stake.tokenType == TokenType.DRC721) {
-            IDRC721(stake.token).safeTransferFrom(
-                address(this),
-                stake.delegator,
-                stake.tokenId
-            );
-        } else if (stake.tokenType == TokenType.DRC1155) {
-            IERC1155(stake.token).safeTransferFrom(
-                address(this),
-                stake.delegator,
-                stake.tokenId,
-                stake.amount,
-                ""
-            );
-        } else if (stake.token == address(WETH())) {
-            WETH().withdraw(stake.amount);
-            (bool success, ) = stake.delegator.call{value: stake.amount}("");
-            if (!success) {
-                revert WithdrawFailed(stake.delegator);
-            }
-        } else {
-            IERC20(stake.token).safeTransfer(stake.delegator, stake.amount);
-        }
-
-        emit WithdrawCompleted(stakeIndex);
+        // A linked delegatecall retains the Gateway as the custody holder and
+        // event emitter. Keep the reentrancy lock on the Gateway entrypoint.
+        DelegationNFTLib.completeWithdrawal(_getDelegationStorage(), stakeIndex);
     }
 
     function _completeTransfer(uint256 stakeIndex) internal virtual override {
