@@ -88,7 +88,7 @@ type dueNativeUpgrade struct {
 func (app *App) dueNativeGovernanceActions(ctx sdk.Context) ([]dueNativeUpgrade, []govv1.Proposal, error) {
 	rng := collections.NewPrefixUntilPairRange[time.Time, uint64](ctx.BlockTime())
 	var upgrades []dueNativeUpgrade
-	var registrations []govv1.Proposal
+	var validatorActions []govv1.Proposal
 	count := 0
 	err := app.GovKeeper.ActiveProposalsQueue.Walk(ctx, rng, func(key collections.Pair[time.Time, uint64], id uint64) (bool, error) {
 		count++
@@ -112,12 +112,13 @@ func (app *App) dueNativeGovernanceActions(ctx sdk.Context) ([]dueNativeUpgrade,
 				upgrades = append(upgrades, dueNativeUpgrade{id: id, metadata: proposal.Metadata, manifest: *manifest})
 			}
 		}
-		if app.usesNativeValidatorRegistration() && strings.HasPrefix(proposal.Metadata, nativeValidatorRegistrationNamespace) {
-			registrations = append(registrations, proposal)
+		if app.usesNativeValidatorRegistration() && (strings.HasPrefix(proposal.Metadata, nativeValidatorRegistrationNamespace) ||
+			strings.HasPrefix(proposal.Metadata, nativeValidatorRetirementNamespace)) {
+			validatorActions = append(validatorActions, proposal)
 		}
 		return false, nil
 	})
-	return upgrades, registrations, err
+	return upgrades, validatorActions, err
 }
 
 func (app *App) endNativeGovernance(ctx sdk.Context) error {
@@ -128,7 +129,7 @@ func (app *App) endNativeGovernance(ctx sdk.Context) error {
 		return errors.New("native governance actions require FinalizeBlock")
 	}
 	return app.nativeGovernance.Run(ctx, func(scoped sdk.Context) error {
-		due, registrations, err := app.dueNativeGovernanceActions(scoped)
+		due, validatorActions, err := app.dueNativeGovernanceActions(scoped)
 		if err != nil {
 			return err
 		}
@@ -150,8 +151,8 @@ func (app *App) endNativeGovernance(ctx sdk.Context) error {
 				return err
 			}
 		}
-		for _, proposal := range registrations {
-			if err := app.applyNativeValidatorRegistration(scoped, proposal); err != nil {
+		for _, proposal := range validatorActions {
+			if err := app.applyNativeValidatorAction(scoped, proposal); err != nil {
 				return err
 			}
 		}

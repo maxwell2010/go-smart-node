@@ -80,8 +80,14 @@ func (k *StateKeeper) FinalizeNativeDuplicateVotePenalty(ctx sdk.Context, job Na
 		if err := k.service.OpenKVStore(child).Set(key, data[:]); err != nil {
 			return err
 		}
-		if err := k.updateNativeLiveValidatorRoster(child, validator.OperatorAddress, false); err != nil {
+		retired, err := k.IsNativeValidatorRetired(child, validator.OperatorAddress)
+		if err != nil {
 			return err
+		}
+		if !retired {
+			if err := k.updateNativeLiveValidatorRoster(child, validator.OperatorAddress, false); err != nil {
+				return err
+			}
 		}
 	}
 	commit()

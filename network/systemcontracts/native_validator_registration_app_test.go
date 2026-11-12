@@ -4,6 +4,8 @@ import (
 	"encoding/base64"
 	"encoding/binary"
 	"encoding/json"
+	"errors"
+	"math/big"
 	"strconv"
 	"testing"
 	"time"
@@ -20,6 +22,7 @@ import (
 	govv1 "github.com/cosmos/cosmos-sdk/x/gov/types/v1"
 	"github.com/cosmos/evm/crypto/ethsecp256k1"
 	"github.com/ethereum/go-ethereum/common"
+	"github.com/ethereum/go-ethereum/crypto"
 	validatorkeeper "github.com/maxwell2010/go-smart-node/network/decimal/validator/keeper"
 	validatortypes "github.com/maxwell2010/go-smart-node/network/decimal/validator/types"
 	"github.com/maxwell2010/go-smart-node/network/identity"
@@ -63,13 +66,12 @@ func (l nativeHistoricalLifecycle) testWeightedValidatorRegistration() {
 	initialSupply := l.supply()
 	deposit := sdk.NewCoins(sdk.NewCoin(identity.BaseDenom, sdkmath.NewIntWithDecimal(1, 18)))
 
-	propose := func(key cmted25519.PrivKey) (govv1.Proposal, *abci.ResponseFinalizeBlock) {
+	propose := func(metadata string) (govv1.Proposal, *abci.ResponseFinalizeBlock) {
 		t.Helper()
 		id, err := l.app.GovKeeper.ProposalID.Peek(l.snapshot())
 		require.NoError(t, err)
-		metadata := nativeRegistrationMetadata(t, l.doc.ChainID, operatorAddress, key, l.app.LastBlockHeight()+20, commission)
 		msg, err := govv1.NewMsgSubmitProposal(nil, deposit, proposer.String(), metadata, moniker,
-			"Register the operator and verified consensus key in the isolated network.", false)
+			"Vote on the operator's request in the isolated network.", false)
 		require.NoError(t, err)
 		l.signedGovernance(proposerKey, msg)
 		proposal, err := l.app.GovKeeper.Proposals.Get(l.snapshot(), id)
@@ -94,8 +96,11 @@ func (l nativeHistoricalLifecycle) testWeightedValidatorRegistration() {
 		require.Equal(t, sdkmath.NewIntWithDecimal(2, 18).String(), proposal.FinalTallyResult.NoCount)
 		return proposal, closeBlock
 	}
+	register := func(key cmted25519.PrivKey) (govv1.Proposal, *abci.ResponseFinalizeBlock) {
+		return propose(nativeRegistrationMetadata(t, l.doc.ChainID, operatorAddress, key, l.app.LastBlockHeight()+20, commission))
+	}
 
-	rejected, rejectedBlock := propose(old)
+	rejected, rejectedBlock := register(old)
 	require.Equal(t, govv1.StatusFailed, rejected.Status)
 	require.Contains(t, rejected.FailedReason, "unused consensus key")
 	require.Equal(t, strconv.FormatUint(rejected.Id, 10), registrationEvent(t, rejectedBlock, "decimal_native_validator_registration_failed")["proposal_id"])
@@ -107,7 +112,7 @@ func (l nativeHistoricalLifecycle) testWeightedValidatorRegistration() {
 	require.False(t, paused)
 	require.Zero(t, count)
 
-	approved, approvedBlock := propose(fresh)
+	approved, approvedBlock := register(fresh)
 	require.Equal(t, govv1.StatusPassed, approved.Status)
 	attributes := registrationEvent(t, approvedBlock, "decimal_native_validator_registered")
 	require.Equal(t, strconv.FormatUint(approved.Id, 10), attributes["proposal_id"])
@@ -163,6 +168,76 @@ func (l nativeHistoricalLifecycle) testWeightedValidatorRegistration() {
 	exclusion, err := keeper.GetNativeDuplicateVoteExclusion(l.snapshot(), oldAddress)
 	require.NoError(t, err)
 	require.Equal(t, validatorkeeper.NativeDuplicateVoteExclusion{InfractionHeight: 2, SettledHeight: 5}, exclusion)
+
+	// A matured, settled payout and a governance vote are separate from
+	// the operator's pending frozen custody.
+	l.signedGateway("withdraw", sdkmath.ZeroInt(), operatorAddress, l.expect.Wrapped, amount.BigInt())
+	const retirement = "mintcandy-validator-retirement/v1"
+	blocked, blockedBlock := propose(retirement)
+	require.Equal(t, govv1.StatusFailed, blocked.Status)
+	require.Contains(t, blocked.FailedReason, "requires no active stake or frozen custody")
+	validator, err = keeper.GetValidatorByConsAddr(l.snapshot(), freshAddress)
+	require.NoError(t, err)
+	require.True(t, validator.Online)
+	require.Equal(t, strconv.FormatUint(blocked.Id, 10), registrationEvent(t, blockedBlock, "decimal_native_validator_retirement_failed")["proposal_id"])
+	status, paused, count = l.masterValidatorState(operatorAddress)
+	require.Equal(t, uint8(2), status)
+	require.False(t, paused, "failed native retirement rolls back the Master pause")
+	require.Zero(t, count)
+
+	actor := sdk.AccAddress(l.expect.Actor[:]).String()
+	for range 12 {
+		_, err = keeper.GetUndelegation(l.snapshot(), actor, operator)
+		if !errors.Is(err, validatorkeeper.ErrNotFound) {
+			require.NoError(t, err)
+			l.commit(l.finalize(nil, nil))
+			continue
+		}
+		break
+	}
+	_, err = keeper.GetUndelegation(l.snapshot(), actor, operator)
+	require.ErrorIs(t, err, validatorkeeper.ErrNotFound)
+	live, err := keeper.NativeLiveValidatorOperators(l.snapshot())
+	require.NoError(t, err)
+	require.Contains(t, live, operator)
+	retired, retiredBlock := propose(retirement)
+	require.Equal(t, govv1.StatusPassed, retired.Status, retired.FailedReason)
+	require.Equal(t, operator, registrationEvent(t, retiredBlock, "decimal_native_validator_retired")["operator"])
+	require.Empty(t, retiredBlock.ValidatorUpdates)
+	active, err := keeper.NativeLiveValidatorOperators(l.snapshot())
+	require.NoError(t, err)
+	require.Len(t, active, len(live)-1)
+	require.NotContains(t, active, operator)
+	tombstone, err := keeper.IsNativeValidatorRetired(l.snapshot(), operator)
+	require.NoError(t, err)
+	require.True(t, tombstone)
+	validator, err = keeper.GetValidatorByConsAddr(l.snapshot(), freshAddress)
+	require.NoError(t, err)
+	require.Equal(t, operator, validator.OperatorAddress)
+	require.False(t, validator.Online)
+	require.False(t, validator.Jailed, "ordinary retirement preserves the historical penalty route")
+	require.ErrorIs(t, keeper.ReleaseNativeDowntimeJail(l.snapshot(), operator), validatorkeeper.ErrNativeValidatorRetired)
+	status, paused, count = l.masterValidatorState(operatorAddress)
+	require.Equal(t, uint8(2), status)
+	require.True(t, paused)
+	require.Zero(t, count)
+
+	revert := crypto.Keccak256([]byte("InvalidValidator()"))[:4]
+	assertRejects := func(method string, value sdkmath.Int, args ...interface{}) {
+		t.Helper()
+		block, result := l.finalizeSignedEthereum(l.signedGatewayTx(method, value, args...))
+		require.NotEmpty(t, result.VmError)
+		require.Equal(t, revert, result.Ret)
+		l.commit(block)
+	}
+	assertRejects("delegateDEL", amount, operatorAddress)
+	assertRejects("delegateHoldDEL", amount, operatorAddress, big.NewInt(l.snapshot().BlockTime().Unix()+3600))
+	assertRejects("delegateNFT1155", sdkmath.ZeroInt(), operatorAddress, l.expect.Wrapped, big.NewInt(1), big.NewInt(1))
+	require.True(t, initialSupply.Equal(l.supply()))
+
+	reusedOperator, _ := register(cmted25519.GenPrivKeyFromSecret([]byte(nativeHistoricalConsensusKeyScope + "another-key")))
+	require.Equal(t, govv1.StatusFailed, reusedOperator.Status)
+	require.Contains(t, reusedOperator.FailedReason, "unused operator address")
 }
 
 func nativeRegistrationMetadata(t *testing.T, chain string, operator common.Address, key cmted25519.PrivKey, expires int64, commission uint8) string {
