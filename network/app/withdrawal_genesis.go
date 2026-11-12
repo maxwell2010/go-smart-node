@@ -212,15 +212,20 @@ func freshNFTGenesisOrigins(profile WithdrawalProfile, nft *nfttypes.GenesisStat
 			binding, found := bindings[token.ID]
 			if !found || !bytes.Equal(binding.Contract, contract[:]) || token.IsolatedReceipt || token.ReserveLess ||
 				token.Burnt != 0 || token.Minted == 0 || int(token.Minted) != len(token.SubTokens) ||
-				token.Reserve.Denom != identity.BaseDenom || !token.Reserve.IsPositive() {
+				!token.Reserve.IsPositive() {
 				return nil, errors.New("NFT delegation genesis origin token differs from its fresh backed native binding")
 			}
+			if token.Reserve.Denom != identity.BaseDenom &&
+				(profile.TokenCenter == (common.Address{}) || profile.CurveConverter == (common.Address{})) {
+				return nil, errors.New("NFT genesis custom backing requires an attested conversion profile")
+			}
 			delete(bindings, token.ID)
-			origin := settlement.NFTGenesisOrigin{Contract: contract, TokenID: common.BytesToHash(binding.TokenID), Supply: token.Minted, UnitReserve: token.Reserve.Amount}
+			origin := settlement.NFTGenesisOrigin{Contract: contract, TokenID: common.BytesToHash(binding.TokenID),
+				Supply: token.Minted, UnitReserve: token.Reserve.Amount, ReserveDenom: token.Reserve.Denom}
 			ownerIndexes := make(map[common.Address]int)
 			for _, unit := range token.SubTokens {
 				if unit.Reserve != nil && !unit.Reserve.IsEqual(token.Reserve) {
-					return nil, errors.New("NFT delegation genesis origin units require one exact DEL rate")
+					return nil, errors.New("NFT delegation genesis origin units require one exact collateral rate")
 				}
 				owner, err := ownerCodec.StringToBytes(unit.Owner)
 				if err != nil || len(owner) != common.AddressLength {
@@ -380,6 +385,22 @@ func (app *App) initWithdrawalGenesis(ctx sdk.Context, req *abci.RequestInitChai
 		limits.NFTOrigins, err = freshNFTGenesisOrigins(*profile, &nft)
 		if err != nil {
 			return nil, err
+		}
+		for i := range limits.NFTOrigins {
+			origin := &limits.NFTOrigins[i]
+			if origin.ReserveDenom == identity.BaseDenom {
+				continue
+			}
+			// This address is a candidate from native metadata. The custom
+			// registry independently authenticates every such row before InitChain commits.
+			coin, err := app.NativeCoinKeeper.GetCoin(read, origin.ReserveDenom)
+			if err != nil {
+				return nil, fmt.Errorf("resolve custom NFT genesis collateral: %w", err)
+			}
+			origin.ReserveToken = common.HexToAddress(coin.DRC20Contract)
+			if origin.ReserveToken == (common.Address{}) {
+				return nil, errors.New("custom NFT genesis collateral requires a registered DRC20 address")
+			}
 		}
 	}
 	if err := controller.executor.AttestGenesis(read, validators.EVMFrozenBindings, limits, controller.assets.AttestGenesisNFT); err != nil {

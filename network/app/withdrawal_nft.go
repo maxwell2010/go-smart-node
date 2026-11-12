@@ -33,27 +33,35 @@ func (c *withdrawalController) isNFTStakeCall(msg core.Message) bool {
 	if !c.profile.EnableNFTDelegation || msg.To == nil || *msg.To != c.profile.Gateway || len(msg.Data) < 4 {
 		return false
 	}
-	return bytes.Equal(msg.Data[:4], c.abi.Methods["delegateNFT1155"].ID) || bytes.Equal(msg.Data[:4], c.abi.Methods["withdrawNFT"].ID)
+	return bytes.Equal(msg.Data[:4], c.abi.Methods["delegateNFT1155"].ID) ||
+		bytes.Equal(msg.Data[:4], c.abi.Methods["withdrawNFT"].ID) || c.isConvertedNFTDeposit(msg.Data)
+}
+
+func (c *withdrawalController) isConvertedNFTDeposit(data []byte) bool {
+	method, known := c.abi.Methods["delegateNFT1155WithConversion"]
+	return c.customCollateral != nil && known && len(data) >= 4 && bytes.Equal(data[:4], method.ID)
 }
 
 func (c *withdrawalController) projectSignedNFT(ctx sdk.Context, msg core.Message, receipt *ethtypes.Receipt) error {
 	child, commit := ctx.CacheContext()
-	if bytes.Equal(msg.Data[:4], c.abi.Methods["delegateNFT1155"].ID) {
-		verify := c.executor.VerifySignedNFTIsolation
-		if c.profile.EnableNativeNFTDowntime {
-			verify = c.executor.VerifySignedNFTIsolationWithDowntime
-		}
-		proof, err := verify(child, msg, receipt)
+	if converted := c.isConvertedNFTDeposit(msg.Data); converted || bytes.Equal(msg.Data[:4], c.abi.Methods["delegateNFT1155"].ID) {
+		proof, custom, err := c.verifyNFTDeposit(child, msg, receipt, converted)
 		if err != nil {
 			return fmt.Errorf("verify signed NFT isolation: %w", err)
 		}
 		p := proof.Position
-		lineage, err := c.nft.AdmitGatewayIsolation(child, nftkeeper.GatewayIsolation{
+		isolation := nftkeeper.GatewayIsolation{
 			Vault: p.Asset.Contract, Origin: p.Origin.Contract, Owner: msg.From, Gateway: c.profile.Gateway,
 			PositionID: p.Asset.TokenID, OriginTokenID: p.Origin.TokenID, NextPositionID: p.NextPositionID,
 			Quantity: p.OriginQuantity, OriginSupplyAfter: proof.OriginSupplyAfter,
 			Reserve: sdkmath.NewIntFromBigInt(p.ReserveAmount.Big()), OriginReserveAfter: proof.OriginReserveAfter,
-		})
+		}
+		var lineage nfttypes.IsolatedPositionLineage
+		if converted {
+			lineage, err = c.nft.AdmitGatewayConvertedIsolation(child, isolation, custom)
+		} else {
+			lineage, err = c.nft.AdmitGatewayIsolation(child, isolation)
+		}
 		if err != nil {
 			return fmt.Errorf("admit native NFT isolation: %w", err)
 		}
@@ -121,6 +129,32 @@ func (c *withdrawalController) projectSignedNFT(ctx sdk.Context, msg core.Messag
 	}
 	commit()
 	return nil
+}
+
+func (c *withdrawalController) verifyNFTDeposit(ctx sdk.Context, msg core.Message, receipt *ethtypes.Receipt,
+	converted bool,
+) (settlement.NFTIsolation, sdk.Coin, error) {
+	if !converted {
+		verify := c.executor.VerifySignedNFTIsolation
+		if c.profile.EnableNativeNFTDowntime {
+			verify = c.executor.VerifySignedNFTIsolationWithDowntime
+		}
+		proof, err := verify(ctx, msg, receipt)
+		return proof, sdk.Coin{}, err
+	}
+	proof, err := c.executor.VerifySignedNFTIsolationWithConversion(ctx, msg, receipt,
+		c.profile.CurveConverter, c.profile.TokenCenter, c.profile.EnableNativeNFTDowntime)
+	if err != nil {
+		return settlement.NFTIsolation{}, sdk.Coin{}, err
+	}
+	if err := c.applyConvertedCoin(ctx, proof.InputToken, proof.InputAmount.BigInt(), proof.NativeOutput.BigInt(), proof.ReserveLog); err != nil {
+		return settlement.NFTIsolation{}, sdk.Coin{}, err
+	}
+	coin, err := c.customCollateral.keeper.GetCoinByDRC(ctx, proof.InputToken.Hex())
+	if err != nil {
+		return settlement.NFTIsolation{}, sdk.Coin{}, err
+	}
+	return proof.NFTIsolation, sdk.NewCoin(coin.Denom, proof.InputAmount), nil
 }
 
 // checkNFTAdmission prevents an unrelated EVM operation from changing a known
