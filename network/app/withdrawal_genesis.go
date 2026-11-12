@@ -62,6 +62,9 @@ func parseWithdrawalGenesisProfile(raw json.RawMessage) (*WithdrawalProfile, err
 	if profile.EnableNativeGovernance && !profile.EnableNativeConsensus {
 		return nil, errors.New("native governance genesis requires native consensus")
 	}
+	if profile.EnableNativeUpgradeGovernance && !profile.EnableNativeGovernance {
+		return nil, errors.New("native upgrade governance genesis requires native governance")
+	}
 	if err := validateNativeOrdinaryDELDowntimeProfile(profile); err != nil {
 		return nil, err
 	}

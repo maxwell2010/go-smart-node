@@ -97,8 +97,13 @@ type nativeGovernanceMsgServer struct {
 }
 
 func (s nativeGovernanceMsgServer) SubmitProposal(ctx context.Context, msg *govv1.MsgSubmitProposal) (*govv1.MsgSubmitProposalResponse, error) {
-	if s.app.usesNativeGovernance() && (msg == nil || len(msg.Messages) != 0) {
-		return nil, errors.New("native governance proposals must have no executable messages")
+	if s.app.usesNativeGovernance() {
+		if msg == nil || len(msg.Messages) != 0 {
+			return nil, errors.New("native governance proposals must have no executable messages")
+		}
+		if err := s.app.validateNativeUpgradeProposal(sdk.UnwrapSDKContext(ctx), msg.Metadata); err != nil {
+			return nil, err
+		}
 	}
 	return s.MsgServer.SubmitProposal(ctx, msg)
 }

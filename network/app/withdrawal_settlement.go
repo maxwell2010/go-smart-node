@@ -54,6 +54,7 @@ type WithdrawalProfile struct {
 	EnableNativeFeeRewards          bool           `json:"enable_native_fee_rewards,omitempty"`
 	EnableNativeIBCV1               bool           `json:"enable_native_ibc_v1,omitempty"`
 	EnableNativeGovernance          bool           `json:"enable_native_governance,omitempty"`
+	EnableNativeUpgradeGovernance   bool           `json:"enable_native_upgrade_governance,omitempty"`
 	EnableNativeOrdinaryDELDowntime bool           `json:"enable_native_ordinary_del_downtime,omitempty"`
 	EnableNativeHeldDELDowntime     bool           `json:"enable_native_held_del_downtime,omitempty"`
 }
@@ -117,6 +118,9 @@ func (app *App) newWithdrawalController(profile WithdrawalProfile) (*withdrawalC
 	}
 	if profile.EnableNativeGovernance && !profile.EnableNativeConsensus {
 		return nil, errors.New("native governance requires native consensus")
+	}
+	if profile.EnableNativeUpgradeGovernance && !profile.EnableNativeGovernance {
+		return nil, errors.New("native upgrade governance requires native governance")
 	}
 	if profile.EnableNativeFeeRewards && !profile.EnableNativeConsensus {
 		return nil, errors.New("native fee rewards require native consensus")

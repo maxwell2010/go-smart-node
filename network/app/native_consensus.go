@@ -253,7 +253,7 @@ func (app *App) endNativeConsensus(ctx sdk.Context) (sdk.EndBlock, error) {
 		return sdk.EndBlock{}, err
 	}
 	if app.usesNativeGovernance() {
-		if err := app.nativeGovernance.EndBlock(child, &app.GovKeeper); err != nil {
+		if err := app.endNativeGovernance(child); err != nil {
 			return sdk.EndBlock{}, err
 		}
 	}

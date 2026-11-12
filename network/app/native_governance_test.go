@@ -153,4 +153,7 @@ func checkNativeGovernanceSignalRoutesAndTally(t *testing.T, a *App) {
 	require.Equal(t, unit.MulRaw(4).String(), proposal.FinalTallyResult.NoCount)
 	require.Equal(t, deposit.AmountOf(identity.BaseDenom), a.BankKeeper.GetBalance(ctx, proposer, identity.BaseDenom).Amount)
 	require.True(t, a.BankKeeper.GetBalance(ctx, authtypes.NewModuleAddress(govtypes.ModuleName), identity.BaseDenom).IsZero())
+	t.Run("typed_sdk_upgrade", func(t *testing.T) {
+		checkNativeGovernanceUpgrade(t, a, closing, proposer, voter, deposit)
+	})
 }
