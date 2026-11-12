@@ -14,32 +14,45 @@ import (
 	"github.com/ethereum/go-ethereum/core"
 	ethtypes "github.com/ethereum/go-ethereum/core/types"
 	ownedapp "github.com/maxwell2010/go-smart-node/network/app"
+	coinkeeper "github.com/maxwell2010/go-smart-node/network/decimal/coin/keeper"
 	nftview "github.com/maxwell2010/go-smart-node/network/decimal/nft/evmview"
 	nftkeeper "github.com/maxwell2010/go-smart-node/network/decimal/nft/keeper"
+	nftreceipts "github.com/maxwell2010/go-smart-node/network/decimal/nft/receipts"
 	nfttypes "github.com/maxwell2010/go-smart-node/network/decimal/nft/types"
 	validatorkeeper "github.com/maxwell2010/go-smart-node/network/decimal/validator/keeper"
 	"github.com/maxwell2010/go-smart-node/network/decimal/validator/settlement"
 	validatortypes "github.com/maxwell2010/go-smart-node/network/decimal/validator/types"
+	"github.com/maxwell2010/go-smart-node/network/decimal/validator/withdrawalassets"
 	"github.com/maxwell2010/go-smart-node/network/identity"
 	contracts "github.com/maxwell2010/go-smart-node/network/systemcontracts"
 	"github.com/stretchr/testify/require"
 )
 
 const nftPenaltyPassed = "active isolated NFT penalty burns only its DEL reserve and rolls back the bank, EVM and both native keepers on failure"
+const nftPenaltyZeroExitPassed = "zero-reserve isolated NFT withdrawal preserves its units and completes exactly once"
 
 func TestOwnedAppSignedActiveNFTPenalty(t *testing.T) {
 	testSignedDELFixture(t, "nft-penalty", nftPenaltyPassed)
 }
 
+func TestOwnedAppSignedZeroReserveNFTExit(t *testing.T) {
+	testSignedDELFixture(t, "nft-penalty-zero-exit", nftPenaltyZeroExitPassed)
+}
+
 func runSignedActiveNFTPenalty(t *testing.T, e isolatedBackendEnv, profile ownedapp.WithdrawalProfile,
 	gateway, master, wrapper, origin, vault contracts.Artifact, originAddress common.Address,
 	reader *nftview.Reader, gov func(contracts.Artifact, common.Address, string, ...interface{}),
+	zeroExit bool,
 ) {
 	t.Helper()
 	f := prepareSignedDELFixture(t, e, profile, gateway, master, wrapper, gov)
 	f.declareValidator()
 	nft, validators := e.app.NativeNFTKeeper, e.app.NativeValidatorKeeper
 	principal, unitReserve := sdkmath.NewIntWithDecimal(3, 18), sdkmath.NewIntWithDecimal(2, 18)
+	percentage := uint16(25)
+	if zeroExit {
+		principal, percentage = sdkmath.ZeroInt(), 100
+	}
 	executor, err := settlement.NewExecutor(e.app.EVMKeeper, reader, settlement.Config{EVMGas: 750_000, MaxLogs: 32, MaxLogBytes: 16384})
 	require.NoError(t, err)
 	position := func(transition settlement.DELTransition, cursor common.Hash) validatorkeeper.GatewayDELStake {
@@ -54,17 +67,19 @@ func runSignedActiveNFTPenalty(t *testing.T, e isolatedBackendEnv, profile owned
 		receipt.BlockNumber = big.NewInt(height)
 		return ctx, receipt
 	}
-	data, err := gateway.ABI.Pack("delegateDEL", f.validator)
-	require.NoError(t, err)
-	response := f.signed("delegateDEL", principal, true, f.validator)
-	committed, receipt := inclusion(response)
-	proof, err := executor.VerifySignedDEL(committed, core.Message{From: f.user, To: &f.target, Value: principal.BigInt(), Data: data}, receipt)
-	require.NoError(t, err)
-	require.NoError(t, validators.ApplyGatewayDELDelegation(committed, position(proof, common.Hash{}), proof.Amount))
+	if principal.IsPositive() {
+		data, err := gateway.ABI.Pack("delegateDEL", f.validator)
+		require.NoError(t, err)
+		response := f.signed("delegateDEL", principal, true, f.validator)
+		committed, receipt := inclusion(response)
+		proof, err := executor.VerifySignedDEL(committed, core.Message{From: f.user, To: &f.target, Value: principal.BigInt(), Data: data}, receipt)
+		require.NoError(t, err)
+		require.NoError(t, validators.ApplyGatewayDELDelegation(committed, position(proof, common.Hash{}), proof.Amount))
+	}
 
 	originID := common.BigToHash(new(big.Int).Add(new(big.Int).Lsh(big.NewInt(1), 224), big.NewInt(880)))
 	seedActiveNFTPenaltyOrigin(t, f, profile, origin, vault, originAddress, originID, unitReserve)
-	data, err = origin.ABI.Pack("setApprovalForAll", f.target, true)
+	data, err := origin.ABI.Pack("setApprovalForAll", f.target, true)
 	require.NoError(t, err)
 	e.send(e.keys[0], &originAddress, new(big.Int), data, true)
 	delegate := func() settlement.NFTIsolation {
@@ -102,7 +117,7 @@ func runSignedActiveNFTPenalty(t *testing.T, e isolatedBackendEnv, profile owned
 		return getRow(validatortypes.EVMStakeBindingKind_EVM_STAKE_BINDING_NFT, id)
 	}
 	getCoin := func() validatortypes.EVMStakeBinding {
-		return getRow(validatortypes.EVMStakeBindingKind_EVM_STAKE_BINDING_COIN, proof.StakeID)
+		return getRow(validatortypes.EVMStakeBindingKind_EVM_STAKE_BINDING_COIN, penalized.Companion.StakeID)
 	}
 	getLineage := func(id common.Hash) nfttypes.IsolatedPositionLineage {
 		t.Helper()
@@ -121,8 +136,7 @@ func runSignedActiveNFTPenalty(t *testing.T, e isolatedBackendEnv, profile owned
 	require.NoError(t, err)
 	initialCustody := sdkmath.NewIntFromBigInt(initialVault.HeldCurrencyReserve.Big())
 	initialReserve := principal.Add(unitReserve.MulRaw(2))
-	const percentage uint16 = 25
-	loss := unitReserve.QuoRaw(4)
+	loss := unitReserve.MulRaw(int64(percentage)).QuoRaw(100)
 	remaining := unitReserve.Sub(loss)
 	check := func(applied bool) {
 		t.Helper()
@@ -199,7 +213,91 @@ func runSignedActiveNFTPenalty(t *testing.T, e isolatedBackendEnv, profile owned
 		return nil
 	}))
 	check(true)
+	if zeroExit {
+		id := penalized.Position.Asset.TokenID
+		data, err := gateway.ABI.Pack("withdrawNFT", f.validator, profile.PositionVault, id.Big())
+		require.NoError(t, err)
+		msg := core.Message{From: f.user, To: &f.target, Value: new(big.Int), Data: data}
+		exactID, err := executor.SignedNFTWithdrawalStakeID(msg)
+		require.NoError(t, err)
+		require.Equal(t, penalized.StakeID, exactID)
+		response := f.signed("withdrawNFT", sdkmath.ZeroInt(), true, f.validator, profile.PositionVault, id.Big())
+		committed, receipt := inclusion(response)
+		out, err := executor.VerifySignedPenalizedNFTWithdrawal(committed, msg, receipt, after)
+		require.NoError(t, err)
+		require.True(t, out.CompanionCursorAcknowledged)
+		require.Equal(t, common.Hash{}, out.Position.ReserveAmount)
+		bad := *receipt
+		bad.Logs = append([]*ethtypes.Log(nil), receipt.Logs...)
+		changed := *bad.Logs[0]
+		changed.Data = append([]byte(nil), changed.Data...)
+		changed.Data[len(changed.Data)-1] = 1
+		bad.Logs[0] = &changed
+		_, err = executor.VerifySignedPenalizedNFTWithdrawal(committed, msg, &bad, after)
+		require.Error(t, err, "signed exit cannot report a coin reserve change")
+		_, err = executor.VerifySignedNFTWithdrawal(committed, msg, receipt)
+		require.Error(t, err)
+		lineage := getLineage(id)
+		require.NoError(t, validators.ApplyGatewayPenalizedNFTWithdrawal(committed, validatorkeeper.GatewayNFTPosition{
+			Companion: position(out.Companion, out.Companion.PenaltyCursor), StakeID: out.StakeID, Lineage: lineage,
+		}, out.FrozenIndex, out.Deadline, out.PenaltyCursor, out.CompanionCursorAcknowledged))
+		frozen, err := validators.GetEVMFrozenBinding(e.ctx(), f.target[:], out.FrozenIndex[:])
+		require.NoError(t, err)
+		require.True(t, frozen.Active)
+		require.True(t, frozen.RawAmount.Equal(sdkmath.OneInt()))
+		require.True(t, frozen.ReportedReserveAmount.IsZero())
+		require.Equal(t, lineage.OriginSubTokenIDs, frozen.NFTPosition.Origin.NativeSubTokenIDs)
+		require.Equal(t, []uint32{lineage.ReceiptSubTokenID}, frozen.NativeTarget.SubTokenIDs)
+		require.Equal(t, out.PenaltyCursor, common.BytesToHash(getCoin().PenaltyCursor))
+		require.Equal(t, siblingBefore, getNFT(sibling.StakeID))
+		completePenalizedNFTExit(t, f, reader, executor, frozen, out, lineage, inclusion)
+		require.True(t, initialSupply.Sub(loss).Equal(supply(ctx())))
+		f.backing(sdkmath.ZeroInt())
+		t.Log(nftPenaltyZeroExitPassed)
+	}
 	t.Log(nftPenaltyPassed)
+}
+
+func completePenalizedNFTExit(t *testing.T, f signedDELFixture, reader *nftview.Reader, executor *settlement.Executor,
+	frozen validatortypes.EVMFrozenBinding, out settlement.NFTWithdrawal, lineage nfttypes.IsolatedPositionLineage,
+	inclusion func(*evmtypes.MsgEthereumTxResponse) (sdk.Context, *ethtypes.Receipt),
+) {
+	t.Helper()
+	e := f.env
+	nft, validators := e.app.NativeNFTKeeper, e.app.NativeValidatorKeeper
+	coinABI, err := contracts.CompiledABI("DRC20")
+	require.NoError(t, err)
+	reserve, err := coinkeeper.NewReserveHook(e.app.NativeCoinKeeper, coinABI,
+		func(sdk.Context, common.Address) (sdkmath.Int, sdkmath.Int, error) {
+			return sdkmath.Int{}, sdkmath.Int{}, errors.New("unexpected custom reserve transition in NFT exit")
+		}, 32)
+	require.NoError(t, err)
+	assets, err := withdrawalassets.New(reserve, nft, reader, validators, nftreceipts.Limits{
+		MaxLogs: 32, MaxBytes: 16384, MaxAssets: 1, MaxIDs: 1, MaxUnits: 1,
+	}, false)
+	require.NoError(t, err)
+	for i := 0; e.ctx().BlockTime().Before(out.Deadline); i++ {
+		require.Less(t, i, signedDELFreezeSeconds)
+		e.advance()
+	}
+	args := []*big.Int{out.FrozenIndex.Big()}
+	response := f.signed("complete", sdkmath.ZeroInt(), true, args)
+	committed, receipt := inclusion(response)
+	child, commit := committed.CacheContext()
+	proof, err := executor.ValidateSigned(child, frozen, receipt)
+	require.NoError(t, err)
+	require.NoError(t, assets.Project(child, frozen, proof.Receipt))
+	require.NoError(t, validators.ApplyWithdrawalCompletion(child, frozen))
+	commit()
+	unit, err := nft.GetSubToken(e.ctx(), lineage.ReceiptNativeTokenID, lineage.ReceiptSubTokenID)
+	require.NoError(t, err)
+	require.Equal(t, f.beneficiary, unit.Owner)
+	p, err := reader.Position(e.ctx(), out.Position.Asset.TokenID)
+	require.NoError(t, err)
+	require.Equal(t, f.user, p.Owner)
+	require.Equal(t, common.Hash{}, p.ReserveAmount)
+	require.Empty(t, f.native().Undelegations)
+	f.signed("complete", sdkmath.ZeroInt(), false, args)
 }
 
 func seedActiveNFTPenaltyOrigin(t *testing.T, f signedDELFixture, profile ownedapp.WithdrawalProfile,
