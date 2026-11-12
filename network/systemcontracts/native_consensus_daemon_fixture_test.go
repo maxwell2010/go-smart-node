@@ -71,7 +71,8 @@ func exportNativeConsensusDaemonFixture(t *testing.T, e isolatedBackendEnv, dir 
 	feeRewards := os.Getenv(nativeConsensusFeeRewardsEnv) == "1"
 	ibcV1 := os.Getenv(nativeConsensusIBCV1Env) == "1"
 	upgradeGovernance := os.Getenv(nativeConsensusUpgradeGovernanceEnv) == "1"
-	downtime := os.Getenv(nativeConsensusDowntimeEnv) == "1"
+	historical := os.Getenv(nativeHistoricalConsensusPhaseEnv) == "seed"
+	downtime := os.Getenv(nativeConsensusDowntimeEnv) == "1" || historical
 	jailRecovery := os.Getenv(nativeConsensusJailRecoveryEnv) == "1"
 	heldDowntime := os.Getenv(nativeConsensusHeldDowntimeEnv) == "1"
 	require.False(t, jailRecovery && !downtime, "the jail recovery fixture requires the downtime profile")
@@ -96,6 +97,11 @@ func exportNativeConsensusDaemonFixture(t *testing.T, e isolatedBackendEnv, dir 
 	if nft != nil {
 		initial, after = [3]int64{3, 3, 0}, [3]int64{3, 3, 2}
 		keyScope = "mintcandy native NFT downtime process fixture "
+	}
+	if historical {
+		require.False(t, feeRewards || ibcV1 || upgradeGovernance || jailRecovery || heldDowntime || nft != nil)
+		initial, after = [3]int64{4, 4, 2}, [3]int64{4, 4, 0}
+		keyScope = "mintcandy native historical ABCI fixture "
 	}
 	commission := sdkmath.LegacyZeroDec()
 	if feeRewards {
@@ -142,8 +148,10 @@ func exportNativeConsensusDaemonFixture(t *testing.T, e isolatedBackendEnv, dir 
 			Initial: initial[i], AfterStake: after[i],
 			Reward: reward.Hex(), RewardNative: rewardNative,
 		})
-		pv := privval.NewFilePV(signer, filepath.Join(dir, "priv_validator_key_"+name+".json"), filepath.Join(dir, "unused_sign_state_"+name+".json"))
-		pv.Key.Save()
+		if !historical {
+			pv := privval.NewFilePV(signer, filepath.Join(dir, "priv_validator_key_"+name+".json"), filepath.Join(dir, "unused_sign_state_"+name+".json"))
+			pv.Key.Save()
+		}
 	}
 	for _, validator := range masterValidators {
 		gov(master, profile.MasterValidator, "addValidators", []masterValidator{validator})
@@ -151,6 +159,9 @@ func exportNativeConsensusDaemonFixture(t *testing.T, e isolatedBackendEnv, dir 
 	withdrawalSeconds := int64(20)
 	if ibcV1 {
 		withdrawalSeconds = int64(validatortypes.DefaultParams().UndelegationTime / time.Second)
+	}
+	if historical {
+		withdrawalSeconds = 2
 	}
 	gov(gateway, profile.Gateway, "setFreezeTime", big.NewInt(withdrawalSeconds), new(big.Int))
 	e.ctx().KVStore(e.app.GetKey(validatortypes.StoreKey)).Set([]byte{ownedapp.WithdrawalProfileKey}, config)
@@ -198,6 +209,13 @@ func exportNativeConsensusDaemonFixture(t *testing.T, e isolatedBackendEnv, dir 
 	if jailRecovery {
 		nativeGenesis.Params.DowntimeJailDuration = jailRecoveryDuration
 	}
+	if historical {
+		nativeGenesis.Params.SlashFractionDoubleSign = sdkmath.LegacyMustNewDecFromStr("0.05")
+		for i := range nativeGenesis.EVMStakeBindings {
+			row := &nativeGenesis.EVMStakeBindings[i]
+			row.CreatedHeight, row.UpdatedHeight = 1, 1
+		}
+	}
 	nativeGenesis.BindingRevision = 0
 	genesis[validatortypes.ModuleName] = cdc.MustMarshalJSON(&nativeGenesis)
 
@@ -231,6 +249,7 @@ func exportNativeConsensusDaemonFixture(t *testing.T, e isolatedBackendEnv, dir 
 	profile.EnableNativeFeeRewards = feeRewards
 	profile.EnableNativeIBCV1 = ibcV1
 	profile.EnableNativeOrdinaryDELDowntime = downtime
+	profile.EnableNativeDuplicateVote = historical
 	profile.EnableDELHold = heldDowntime
 	profile.EnableNativeHeldDELDowntime = heldDowntime
 	var governanceFixture []byte
@@ -256,6 +275,11 @@ func exportNativeConsensusDaemonFixture(t *testing.T, e isolatedBackendEnv, dir 
 	}
 	doc := cmttypes.GenesisDoc{ChainID: ctx.ChainID(), InitialHeight: ctx.BlockHeight(),
 		GenesisTime: genesisTime, ConsensusParams: cmttypes.DefaultConsensusParams()}
+	if historical {
+		doc.InitialHeight = 1
+		doc.ConsensusParams.Evidence.MaxAgeNumBlocks = 5
+		doc.ConsensusParams.Evidence.MaxAgeDuration = 4 * time.Second
+	}
 	doc.AppState, err = json.Marshal(genesis)
 	require.NoError(t, err)
 	body, err := cmtjson.MarshalIndent(doc, "", "  ")

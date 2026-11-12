@@ -92,6 +92,7 @@ func (h nativeBurnReceiptControl) PostTxProcessing(_ sdk.Context, _ common.Addre
 func TestOwnedAppSignedRegistryBootstrap(t *testing.T) {
 	const chainID = "mintcandy_990001-1"
 	nftFixturePhase := os.Getenv(signedNFTAdmissionPhaseEnv)
+	deterministicAccounts := nftFixturePhase != "" || os.Getenv(nativeHistoricalConsensusPhaseEnv) == "seed"
 	var withdrawalDeferrals []string
 	a := ownedapp.NewApp(log.NewLogger(withdrawalFixtureLog{t: t, deferrals: &withdrawalDeferrals}), dbm.NewMemDB(), true, appOptions{flags.FlagHome: t.TempDir(), flags.FlagChainID: chainID, srvflags.EVMChainID: uint64(990001)})
 	t.Cleanup(func() { require.NoError(t, a.Close()) })
@@ -106,7 +107,7 @@ func TestOwnedAppSignedRegistryBootstrap(t *testing.T) {
 	balances := make([]banktypes.Balance, 5)
 	funds := sdk.NewCoins(sdk.NewCoin(identity.BaseDenom, math.NewInt(10000).Mul(math.NewInt(1_000_000_000_000_000_000))))
 	for i := range keys {
-		key, err := registryFixtureKey(i, nftFixturePhase != "")
+		key, err := registryFixtureKey(i, deterministicAccounts)
 		require.NoError(t, err)
 		keys[i], err = crypto.ToECDSA(key.Bytes())
 		require.NoError(t, err)
