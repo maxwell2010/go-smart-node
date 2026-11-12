@@ -163,6 +163,14 @@ share identical genesis, binary and archive hashes.
 [Signed package CI](https://github.com/maxwell2010/go-smart-node/actions/runs/43232698507)
 [Test package](https://github.com/maxwell2010/go-smart-node/actions/runs/43232698507/artifacts/13952121624) · [Evidence](https://github.com/maxwell2010/go-smart-node/actions/runs/43232698507/artifacts/13952116559)
 
+The systemd rehearsal on `4d828e3` downloaded that same signed test archive,
+verified its signature and checksums, and installed `mcnd` into a clean prefix.
+The transient service ran as UID 65534 in the test validators' isolated network
+namespace. Its MainPID executable and genesis matched the signed package.
+The observer synchronized from block 1 and agreed on the AppHash at height 21.
+The rehearsal stopped its service after verification.
+[Systemd CI](https://github.com/maxwell2010/go-smart-node/actions/runs/43237343370) · [Evidence](https://github.com/maxwell2010/go-smart-node/actions/runs/43237343370/artifacts/13953721863)
+
 ## Separate release tracks
 
 The selected architecture is a fresh network on a maintained modern stack,
