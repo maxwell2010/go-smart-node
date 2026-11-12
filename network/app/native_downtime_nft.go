@@ -51,14 +51,15 @@ func (c *withdrawalController) applyFrozenNFTDowntime(ctx sdk.Context, row valid
 ) error {
 	apply := c.executor.ApplyFrozenNFTPenalty
 	if mature {
-		apply = c.executor.ApplyCustodiedNFTCheckpoint
+		apply = c.executor.ApplyCustodiedNFTPenalty
 	}
 	return apply(ctx, row, infractionHeight, percent, supply, func(next sdk.Context, proof settlement.FrozenNFTPenaltyProof) error {
 		if proof.BeforeCursor != master.BeforeCursor || proof.AfterCursor != master.AfterCursor {
 			return errors.New("isolated NFT claim differs from the announced Master penalty")
 		}
 		if mature {
-			return c.keeper.ApplyGatewayCustodiedNFTCheckpoint(next, c.nft, row, infractionHeight, proof.BeforeCursor, proof.AfterCursor)
+			return c.keeper.ApplyGatewayCustodiedNFTPenalty(next, c.nft, row, infractionHeight, percent,
+				proof.BeforeCursor, proof.AfterCursor, proof.RemainingReserve)
 		}
 		return c.keeper.ApplyGatewayFrozenNFTPenalty(next, c.nft, row, infractionHeight, proof.BeforeCursor, proof.AfterCursor, proof.RemainingReserve)
 	})

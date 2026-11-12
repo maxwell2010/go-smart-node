@@ -311,7 +311,7 @@ func (app *App) executeOrdinaryDELDowntime(ctx sdk.Context, candidate validatork
 			}
 			apply := c.executor.ApplyFrozenDELPenalty
 			if mature {
-				apply = c.executor.ApplyCustodiedDELCheckpoint
+				apply = c.executor.ApplyCustodiedDELPenalty
 			}
 			err := apply(project, row, candidate.InfractionHeight, percent, supply, func(next sdk.Context, proof settlement.FrozenDELPenaltyProof) error {
 				if proof.BeforeCursor != master.BeforeCursor || proof.AfterCursor != master.AfterCursor {
@@ -324,7 +324,8 @@ func (app *App) executeOrdinaryDELDowntime(ctx sdk.Context, candidate validatork
 					}
 				}
 				if mature {
-					return c.keeper.ApplyGatewayCustodiedDELCheckpoint(next, row, hold, candidate.InfractionHeight, proof.BeforeCursor, proof.AfterCursor)
+					return c.keeper.ApplyGatewayCustodiedDELPenalty(next, row, hold, candidate.InfractionHeight, percent,
+						proof.BeforeCursor, proof.AfterCursor, proof.Remaining)
 				}
 				if hold != nil {
 					return c.keeper.ApplyGatewayFrozenDELHoldPenalty(next, row, *hold, candidate.InfractionHeight, proof.BeforeCursor, proof.AfterCursor, proof.Remaining)
