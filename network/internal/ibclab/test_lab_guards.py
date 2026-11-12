@@ -264,7 +264,8 @@ class ProcessLifecycleGuards(unittest.TestCase):
     def test_signal_between_cleanup_iterations_after_success_fails_report_and_closes_all(self):
         child, second, unrelated = FakeChild(), FakeChild(), FakeChild()
         guard = lab.SignalGuard()
-        def interrupted_fake_suite(owner, *_):
+        def interrupted_fake_suite(owner, *_, native_fixture=None):
+            self.assertIsNone(native_fixture)
             owner.children = SignalBetweenChildren([child, second], lambda: guard.handle(lab.signal.SIGTERM, None))
             owner.report.update(status="TWO_PROCESS_HERMES_PASS", release_gate=True)
         with tempfile.TemporaryDirectory() as directory:
