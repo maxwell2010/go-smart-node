@@ -44,6 +44,7 @@ func TestNativeFeeRewardsUseCommitAndActiveDELExactlyOnce(t *testing.T) {
 		}},
 	}}
 	g.Redelegations = nil
+	ctx, _ = ctx.CacheContext()
 	require.NoError(t, k.InitGenesis(ctx, g))
 	allow := func(sdk.AccAddress) bool { return true }
 	require.NoError(t, k.ValidateNativeFeeRewardAdmission(ctx, allow))

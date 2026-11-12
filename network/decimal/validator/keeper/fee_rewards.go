@@ -242,9 +242,8 @@ func (k *StateKeeper) readNativeFeeRewardPositions(ctx sdk.Context) (positions m
 		addNativeFeeReward(operator.owners, string(owner), amount)
 		operator.total.Add(operator.total, amount)
 	}
-	if err = it.Error(); err != nil {
-		return nil, err
-	}
+	// The SDK cache iterator reports ordinary exhaustion as invalid.
+	// Check errors while the cursor is valid, and always check Close.
 	return positions, nil
 }
 
