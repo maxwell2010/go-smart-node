@@ -12,7 +12,9 @@ import (
 	abci "github.com/cometbft/cometbft/abci/types"
 	dbm "github.com/cosmos/cosmos-db"
 	"github.com/cosmos/cosmos-sdk/baseapp"
+	"github.com/cosmos/cosmos-sdk/runtime"
 	"github.com/ethereum/go-ethereum/common"
+	validatorkeeper "github.com/maxwell2010/go-smart-node/network/decimal/validator/keeper"
 	validatortypes "github.com/maxwell2010/go-smart-node/network/decimal/validator/types"
 	"github.com/stretchr/testify/require"
 )
@@ -29,7 +31,9 @@ func newWithdrawalSnapshotTestApp(t *testing.T) *App {
 	base.MountKVStores(keys)
 	require.NoError(t, base.LoadLatestVersion())
 	t.Cleanup(func() { require.NoError(t, base.Close()) })
-	return &App{BaseApp: base, keys: keys}
+	keeper, err := validatorkeeper.NewStateKeeper(runtime.NewKVStoreService(keys[validatortypes.StoreKey]))
+	require.NoError(t, err)
+	return &App{BaseApp: base, keys: keys, NativeValidatorKeeper: keeper}
 }
 
 func TestWithdrawalProfileStateSync(t *testing.T) {
@@ -45,6 +49,10 @@ func TestWithdrawalProfileStateSync(t *testing.T) {
 	different.EnableDELDelegation = false
 	mismatch, err := json.Marshal(different)
 	require.NoError(t, err)
+	native := profile
+	native.EnableNativeConsensus = true
+	nativeJSON, err := json.Marshal(native)
+	require.NoError(t, err)
 
 	for _, tc := range []struct {
 		name        string
@@ -56,6 +64,7 @@ func TestWithdrawalProfileStateSync(t *testing.T) {
 		accept      bool
 	}{
 		{name: "financial genesis profile", prepared: true, installed: &profile, restored: canonical, accept: true},
+		{name: "native consensus missing its anchor", prepared: true, installed: &native, restored: nativeJSON},
 		{name: "changed profile", prepared: true, installed: &profile, restored: mismatch},
 		{name: "missing profile", prepared: true, installed: &profile},
 		{name: "different encoding", prepared: true, installed: &profile, restored: append(bytes.Clone(canonical), '\n')},
