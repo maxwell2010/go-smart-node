@@ -66,7 +66,8 @@ func (k *StateKeeper) recordDELProvenanceDeposit(ctx sdk.Context, position Gatew
 	if ctx.BlockHeight() <= 0 {
 		return errors.New("DEL deposit provenance requires a positive block height")
 	}
-	updated, err := combineDELProvenance(lots, []DELProvenanceTranche{{FundedHeight: ctx.BlockHeight(), FundedAt: ctx.BlockTime(), Amount: deposited}})
+	funding := DELProvenanceTranche{FundedHeight: ctx.BlockHeight(), FundedAt: ctx.BlockTime(), Amount: deposited}
+	updated, err := combineDELProvenance(lots, []DELProvenanceTranche{funding})
 	if err != nil {
 		return err
 	}
@@ -76,8 +77,20 @@ func (k *StateKeeper) recordDELProvenanceDeposit(ctx sdk.Context, position Gatew
 			return err
 		}
 		// Leave one slot for a partial withdrawal to split one funding tranche.
-		if count >= maxDELProvenanceTranches-1 {
-			return errors.New("DEL deposit exceeds the validator provenance tranche limit")
+		const depositLimit = maxDELProvenanceTranches - 1
+		if count >= depositLimit {
+			if position.HoldDeadline == 0 {
+				compacted, err := k.compactActiveDELProvenance(ctx, position.Validator, lots, count+1-depositLimit)
+				if err != nil {
+					return err
+				}
+				if len(compacted) < len(lots) {
+					updated = append(compacted, funding)
+				}
+			}
+			if count-len(lots)+len(updated) > depositLimit {
+				return errors.New("DEL deposit exceeds the validator provenance tranche limit")
+			}
 		}
 	}
 	if position.HoldDeadline != 0 {
