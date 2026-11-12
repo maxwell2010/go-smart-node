@@ -122,7 +122,7 @@ func exportNativeConsensusDaemonFixture(t *testing.T, e isolatedBackendEnv, dir 
 		signer := cmted25519.GenPrivKeyFromSecret([]byte(keyScope + name))
 		pub := signer.PubKey()
 		address := common.BytesToAddress(pub.Address())
-		if jailRecovery && name == "c" {
+		if (jailRecovery || historical) && name == "c" {
 			address = crypto.PubkeyToAddress(e.keys[2].PublicKey)
 			require.NotEqual(t, common.BytesToAddress(pub.Address()), address)
 		}

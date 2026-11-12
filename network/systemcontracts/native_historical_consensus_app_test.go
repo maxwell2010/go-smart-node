@@ -57,7 +57,8 @@ func TestOwnedAppNativeHistoricalConsensusLifecycle(t *testing.T) {
 	}
 	binary, err := os.Executable()
 	require.NoError(t, err)
-	dir := t.TempDir()
+	dir := filepath.Join(t.TempDir(), "native-historical")
+	require.NoError(t, os.Mkdir(dir, 0700))
 	for _, phase := range []string{"seed", "uncommitted", "commit", "restart"} {
 		if !t.Run(phase, func(t *testing.T) {
 			filter := "^TestOwnedAppNativeHistoricalConsensusLifecycle$"
@@ -319,6 +320,7 @@ func (l nativeHistoricalLifecycle) assertPenaltyState(applied bool) {
 	t.Helper()
 	keeper, ctx := l.app.NativeValidatorKeeper, l.snapshot()
 	consensus := sdk.ConsAddress(common.FromHex(l.target.Consensus))
+	require.NotEqual(t, common.HexToAddress(l.target.EVM).Bytes(), []byte(consensus))
 	validator, err := keeper.GetValidatorByConsAddr(ctx, consensus)
 	require.NoError(t, err)
 	require.Equal(t, l.target.Operator, validator.OperatorAddress)
