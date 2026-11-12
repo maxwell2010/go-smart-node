@@ -95,7 +95,7 @@ func (e *Executor) AppendMasterPenalty(ctx sdk.Context, validator common.Address
 		return err
 	}
 	authorized := child.WithValue(masterPenaltyKey{}, masterPenaltyCall{executor: e, height: child.BlockHeight(), validator: validator, percentage: percentage})
-	result, _, err := e.invokeFrom(authorized, sender, e.roles.MasterValidator, data, true)
+	result, err := e.invokePenalty(authorized, sender, e.roles.MasterValidator, data)
 	if err != nil {
 		return err
 	}

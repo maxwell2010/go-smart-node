@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"math/big"
 
+	storetypes "cosmossdk.io/store/types"
 	sdk "github.com/cosmos/cosmos-sdk/types"
 	authtypes "github.com/cosmos/cosmos-sdk/x/auth/types"
 	govtypes "github.com/cosmos/cosmos-sdk/x/gov/types"
@@ -302,9 +303,37 @@ func (e *Executor) invokeFrom(ctx sdk.Context, sender, target common.Address, da
 		return nil, msg, errors.New("invalid Gateway completion gas result")
 	}
 	if result.VmError != "" {
+		if len(result.Ret) >= 4 {
+			var selector [4]byte
+			copy(selector[:], result.Ret[:4])
+			for _, contract := range []abi.ABI{e.gateway, e.master, e.wrapper} {
+				if known, err := contract.ErrorByID(selector); err == nil {
+					return nil, msg, fmt.Errorf("Gateway call reverted: %s (%s)", result.VmError, known.Name)
+				}
+			}
+		}
 		return nil, msg, fmt.Errorf("Gateway call reverted: %s", result.VmError)
 	}
 	return result, msg, nil
+}
+
+// The nested native burn uses the current SDK meter consumption when it
+// initializes its forwarded EVM gas budget. Prior authentication and getter
+// work belongs to the enclosing operation, so meter each execution separately
+// and debit the full measured work to that enclosing budget.
+func (e *Executor) invokePenalty(ctx sdk.Context, sender, target common.Address, data []byte) (result *evmtypes.MsgEthereumTxResponse, err error) {
+	meter := storetypes.NewGasMeter(ctx.GasMeter().GasRemaining())
+	defer func() {
+		if recovered := recover(); recovered != nil {
+			if _, ok := recovered.(storetypes.ErrorOutOfGas); !ok {
+				panic(recovered)
+			}
+			result, err = nil, errors.New("penalty execution exceeded the remaining SDK gas budget")
+		}
+		ctx.GasMeter().ConsumeGas(meter.GasConsumedToLimit(), "metered penalty execution")
+	}()
+	result, _, err = e.invokeFrom(ctx.WithGasMeter(meter), sender, target, data, true)
+	return result, err
 }
 
 func (e *Executor) read(ctx sdk.Context, target common.Address, contract abi.ABI, method string, size int, args ...interface{}) ([]byte, error) {

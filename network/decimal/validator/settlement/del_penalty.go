@@ -96,7 +96,7 @@ func (e *Executor) ApplyOrdinaryDELPenalty(ctx sdk.Context, row validatortypes.E
 		return err
 	}
 	authorized := child.WithValue(ordinaryDELPenaltyKey{}, ordinaryDELPenaltyCall{executor: e, height: child.BlockHeight(), id: id})
-	result, _, err := e.invoke(authorized, e.roles.Gateway, data, true)
+	result, err := e.invokePenalty(authorized, Sender(), e.roles.Gateway, data)
 	if err != nil {
 		return err
 	}
