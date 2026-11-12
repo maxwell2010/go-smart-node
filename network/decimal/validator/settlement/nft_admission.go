@@ -230,29 +230,45 @@ func (e *Executor) isolationOriginPoststate(ctx sdk.Context, origin common.Addre
 }
 
 func (e *Executor) readNFTCompanion(ctx sdk.Context, validator, beneficiary common.Address) (DELTransition, []byte, error) {
+	position, post, cursor, err := e.readNFTCompanionState(ctx, validator, beneficiary)
+	if err != nil {
+		return DELTransition{}, nil, err
+	}
+	if cursor != (common.Hash{}) {
+		return DELTransition{}, nil, errors.New("DEL position has an unsupported penalty cursor")
+	}
+	return position, post, nil
+}
+
+func (e *Executor) readNFTCompanionState(ctx sdk.Context, validator, beneficiary common.Address) (DELTransition, []byte, common.Hash, error) {
 	var zero common.Hash
 	coinID := crypto.Keccak256Hash(validator[:], beneficiary[:], e.roles.WrappedDEL[:], zero[:], zero[:])
-	if err := e.verifyDELStakeCursor(ctx, coinID); err != nil {
-		return DELTransition{}, nil, err
+	cursor, err := e.read(ctx, e.roles.Gateway, e.gateway, "getStakePenaltyIndex", common.HashLength, coinID)
+	if err != nil {
+		return DELTransition{}, nil, zero, err
 	}
 	post, err := e.read(ctx, e.roles.Gateway, e.gateway, "getStake", delStakeBytes, validator, beneficiary, e.roles.WrappedDEL)
 	if err != nil {
-		return DELTransition{}, nil, err
+		return DELTransition{}, nil, zero, err
 	}
 	grossWord := common.BytesToHash(post[3*common.HashLength : 4*common.HashLength])
 	if !matchesNFTWords(post, common.BytesToHash(validator[:]), common.BytesToHash(beneficiary[:]), common.BytesToHash(e.roles.WrappedDEL[:]),
 		grossWord, zero, smallWord(tokenDEL), zero, zero) {
-		return DELTransition{}, nil, errors.New("NFT companion is not the expected ordinary DEL position")
+		return DELTransition{}, nil, zero, errors.New("NFT companion is not the expected ordinary DEL position")
 	}
 	direct, backed, err := e.directDELPoststate(ctx, validator, beneficiary, 0, grossWord.Big())
 	if err != nil {
-		return DELTransition{}, nil, err
+		return DELTransition{}, nil, zero, err
 	}
 	return DELTransition{Validator: validator, Beneficiary: beneficiary, StakeID: coinID,
-		Remaining: sdkmath.NewIntFromBigInt(direct), NFTBacked: sdkmath.NewIntFromBigInt(backed)}, post, nil
+		Remaining: sdkmath.NewIntFromBigInt(direct), NFTBacked: sdkmath.NewIntFromBigInt(backed)}, post, common.BytesToHash(cursor), nil
 }
 
 func (e *Executor) verifyNFTStake(ctx sdk.Context, position evmview.PositionSnapshot, validator, beneficiary common.Address, active bool) (common.Hash, error) {
+	return e.verifyNFTStakeAtCursor(ctx, position, validator, beneficiary, active, common.Hash{})
+}
+
+func (e *Executor) verifyNFTStakeAtCursor(ctx sdk.Context, position evmview.PositionSnapshot, validator, beneficiary common.Address, active bool, expectedCursor common.Hash) (common.Hash, error) {
 	var zero common.Hash
 	vault := position.Asset.Contract
 	id := crypto.Keccak256Hash([]byte("NFT"), vault[:], position.Asset.TokenID[:], beneficiary[:], validator[:], zero[:])
@@ -268,7 +284,7 @@ func (e *Executor) verifyNFTStake(ctx sdk.Context, position evmview.PositionSnap
 	if err != nil {
 		return common.Hash{}, err
 	}
-	if common.BytesToHash(cursor) != (common.Hash{}) {
+	if common.BytesToHash(cursor) != expectedCursor {
 		return common.Hash{}, errors.New("NFT position has an unsupported penalty cursor")
 	}
 	return id, nil
