@@ -28,7 +28,9 @@ func delProvenanceGenesis(t *testing.T) (sdk.Context, *StateKeeper, GatewayDELSt
 	genesis.Delegations = []types.Delegation{{Delegator: owner, Validator: operator, Stake: types.NewStakeCoin(sdk.NewCoin(identity.BaseDenom, position.Amount))}}
 	require.NoError(t, k.InitGenesis(ctx, genesis))
 	require.ErrorContains(t, k.InitializeDELProvenance(ctx.WithBlockHeight(10), position.Gateway, position.WrappedDEL), "fresh height-one genesis")
-	require.NoError(t, k.InitializeDELProvenance(ctx, position.Gateway, position.WrappedDEL))
+	child, commit := ctx.CacheContext()
+	require.NoError(t, k.InitializeDELProvenance(child, position.Gateway, position.WrappedDEL))
+	commit()
 	require.ErrorContains(t, k.InitializeDELProvenance(ctx, position.Gateway, position.WrappedDEL), "already initialized")
 	return ctx.WithBlockHeight(1), k, position
 }

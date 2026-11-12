@@ -51,7 +51,7 @@ func (k *StateKeeper) NativeStakeProvenanceEnabled(ctx sdk.Context) (bool, error
 // height-one network, after the caller attests the exact EVM genesis escrow.
 // The fresh profile must disallow frozen claims and nonordinary active stakes.
 func (k *StateKeeper) InitializeDELProvenance(ctx sdk.Context, gateway, wrapped common.Address) error {
-	if ctx.BlockHeight() != 0 || ctx.MultiStore().LatestVersion() != 0 || ctx.BlockTime().Unix() <= 0 {
+	if ctx.BlockHeight() != 0 || ctx.BlockTime().Unix() <= 0 {
 		return errors.New("native stake provenance requires fresh height-one genesis")
 	}
 	enabled, err := k.NativeStakeProvenanceEnabled(ctx)
