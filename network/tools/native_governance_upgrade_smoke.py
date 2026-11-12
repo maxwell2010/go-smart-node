@@ -2,6 +2,7 @@
 
 import argparse
 import base64
+from dataclasses import replace
 from datetime import datetime
 import hashlib
 import json
@@ -388,10 +389,14 @@ def run_gate(args, binary, replacement, root, expected, genesis, keys, actions, 
     if args.full_profile:
         report['withdrawal']['before'] = check_pending_withdrawal(replicas, expected, target - 1, due)
     if ibc:
-        ibc.assert_pending()
+        ibc.mark_checkpoint()
     for node in reversed(replicas):
         owner.stop(node.child)
         check(node.child.poll() is not None, 'predecessor is still running')
+    if ibc:
+        report['phase'] = 'backup-closed-pre-upgrade-homes'
+        ibc.backup_closed_homes()
+        ibc.start_reference('reference-primary-branch')
 
     report['phase'] = 'successor-replay-and-exact-preblock-application'
     for node in replicas:
@@ -417,8 +422,28 @@ def run_gate(args, binary, replacement, root, expected, genesis, keys, actions, 
                           'signers': check_signatures(replicas, expected['validators'], final, powers),
                           **committed_header(replicas, final)}
     if ibc:
+        applied_app_hash = committed_header(replicas, target + 1)['app_hash']
         report['phase'] = 'hermes-post-upgrade-acknowledgement-and-return'
         ibc.settle_after_handoff(target)
+        report['phase'] = 'restore-closed-private-checkpoint'
+        for node in reversed(replicas):
+            owner.stop(node.child)
+        restored = ibc.restore_closed_homes(replicas)
+        restored_replicas = [replace(node, home=restored / node.label, child=None, log=None) for node in replicas]
+        for node in restored_replicas:
+            node.start(replacement, env, owner, 'upgrade-restored-replay')
+        ibc.start_reference('reference-restored-copy')
+        wait_replicas(restored_replicas, target + 2, 125, report)
+        check(committed_header(restored_replicas, target - 1) == before and
+              committed_header(restored_replicas, target) == boundary, 'restored native copy changed the signed pre-upgrade boundary')
+        for node in restored_replicas:
+            check(applied_height(node, target) == target and current_plan(node, target) is None,
+                  'restored native copy did not replay the approved plan')
+        restored_claim = check_pending_withdrawal(restored_replicas, expected, target, due)
+        check(restored_claim['appHash'] == applied_app_hash, 'restored replay produced a different application hash')
+        report['rollback'] = {**ibc.verify_restored_ledger(restored_replicas), 'predecessorHeight': target - 1,
+                              'replayedHeight': target, 'boundaryBlockHash': boundary['block_hash'],
+                              'primaryAppliedAppHash': applied_app_hash, 'restoredClaim': restored_claim}
 
 
 def main(argv=None, signals=None):
