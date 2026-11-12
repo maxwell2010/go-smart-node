@@ -538,7 +538,8 @@ if pending_ibc == '1':
     assert len(packet['packets'])==1 and packet['escrowAtomic']=='1000000000000000000',report
     assert packet['clientHeightBefore']<plan['targetHeight']<packet['clientHeightAfter'],report
     phases=report['phases']
-    assert set(phases)=={'client_connection_channel_handshake','pending_packet_across_native_upgrade',
+    assert set(phases)=={'client_connection_channel_handshake','pending_packet_submit_before_native_upgrade',
+                         'pending_packet_across_native_upgrade',
                          'post_native_upgrade_voucher_return'},report
     assert all(phase['status']=='PASS' and (phase['owned_fees'] or phase['counterparty_fees']) for phase in phases.values()),report
     rollback=report['rollback']

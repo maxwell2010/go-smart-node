@@ -54,13 +54,13 @@ class NativeUpgradeIBC:
         self.client = connection[1][0].decode()
         require(re.fullmatch(r"07-tendermint-\d+", self.client) is not None, "unexpected counterparty light client type")
         self.initial_client_height = self.client_height()
-        self.before = phase_before(self.a, self.b)
+        before = phase_before(self.a, self.b)
         self.send(A_ID, B_ID, self.a_channel, "del", self.b["address"])
         self.lab.wait(lambda: len(commitments(self.a["rpc"], self.a_channel)) == 1, "one genuine outbound packet before upgrade")
         self.pending = commitments(self.a["rpc"], self.a_channel)
         self.assert_pending()
         def send_events():
-            return [event for event in new_events(self.a, self.before["a_tx"], "send_packet")
+            return [event for event in new_events(self.a, before["a_tx"], "send_packet")
                     if event.get("packet_sequence") == str(self.pending[0]["sequence"])]
 
         self.lab.wait(lambda: bool(send_events()), "commit and index the genuine outgoing packet")
@@ -68,6 +68,9 @@ class NativeUpgradeIBC:
         require(len(sends) == 1, "one committed send event must identify the pending packet")
         self.deadline = int(sends[0]["packet_timeout_timestamp"])
         require(self.deadline > self.lab.committed_time_ns(host), "pending packet already expired")
+        phase_after(self.lab, "pending_packet_submit_before_native_upgrade", self.a, self.b, before, -self.value)
+        self.submitted_balances = (amount(self.a["rpc"], self.a["address"], "del"),
+                                   amount(host, self.b["address"], "stake"))
         self.report["ibcPacket"] = {"packets": self.pending, "escrowAtomic": str(self.value), "client": self.client,
                                     "clientHeightBefore": self.initial_client_height}
 
@@ -160,6 +163,11 @@ class NativeUpgradeIBC:
     def settle_after_handoff(self, target):
         self.assert_pending()
         require(self.lab.committed_time_ns(self.b["rpc"]) < self.deadline, "pending packet expired before successor relay")
+        # Governance and the signed withdrawal use a separate operator. The
+        # send already accounted for the relayer principal and fee.
+        before = phase_before(self.a, self.b)
+        require((before["a"], before["b"]) == self.submitted_balances,
+                "unrelated upgrade activity changed a relayer balance")
         self.run("update", "client", "--host-chain", B_ID, "--client", self.client)
         self.lab.wait(lambda: self.client_height() > max(target, self.initial_client_height),
                       "counterparty must verify a post-upgrade Tendermint header")
@@ -167,8 +175,8 @@ class NativeUpgradeIBC:
         self.clear()
         require(escrow(self.a["rpc"], "del") == self.value and amount(self.b["rpc"], self.b["address"], self.voucher) == self.value,
                 "pending packet did not credit one voucher with matching source escrow")
-        phase_after(self.lab, "pending_packet_across_native_upgrade", self.a, self.b, self.before, -self.value)
-        acks = [event for event in new_events(self.b, self.before["b_tx"], "write_acknowledgement")
+        phase_after(self.lab, "pending_packet_across_native_upgrade", self.a, self.b, before)
+        acks = [event for event in new_events(self.b, before["b_tx"], "write_acknowledgement")
                 if event.get("packet_sequence") == str(self.pending[0]["sequence"])]
         require(len(acks) == 1 and json.loads(bytes.fromhex(acks[0]["packet_ack_hex"])).get("result"),
                 "pending packet requires exactly one committed success acknowledgement")
