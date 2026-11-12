@@ -4753,14 +4753,17 @@ library DelegationNFTLib {
         IDecimalDelegationCommon.Stake storage stake = _getStake($, stakeId);
 
         uint256 currentPenaltyIndex = getStakePenaltyIndex($, stakeId);
-        (uint16[] memory percentages, uint256 count) = _getPenaltyPage($, stake.validator, currentPenaltyIndex, 32);
-        if (currentPenaltyIndex == count) return false;
         if (stake.amount == 0) {
+            uint256 count = _getValidatorPenaltyCount($, stake.validator);
+            if (currentPenaltyIndex > count || $._nftBackedAmounts[stakeId] != 0) revert IDecimalDelegationCommon.InvalidAmount();
+            if (currentPenaltyIndex == count) return false;
             _setStakePenaltyIndex($, stakeId, count);
             emit PenaltyAppliedToStake(stakeId, count);
             return true;
         }
 
+        (uint16[] memory percentages, uint256 count) = _getPenaltyPage($, stake.validator, currentPenaltyIndex, 32);
+        if (currentPenaltyIndex == count) return false;
         uint256 nftBackedAmount = $._nftBackedAmounts[stakeId];
         if (nftBackedAmount > stake.amount) revert IDecimalDelegationCommon.InvalidAmount();
         uint256 currentAmount = stake.amount - nftBackedAmount;
