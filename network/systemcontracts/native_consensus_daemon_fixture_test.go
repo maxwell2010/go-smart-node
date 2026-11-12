@@ -70,11 +70,13 @@ func exportNativeConsensusDaemonFixture(t *testing.T, e isolatedBackendEnv, dir 
 	beneficiary := sdk.AccAddress(actor.Bytes()).String()
 	feeRewards := os.Getenv(nativeConsensusFeeRewardsEnv) == "1"
 	ibcV1 := os.Getenv(nativeConsensusIBCV1Env) == "1"
+	upgradeGovernance := os.Getenv(nativeConsensusUpgradeGovernanceEnv) == "1"
 	downtime := os.Getenv(nativeConsensusDowntimeEnv) == "1"
 	jailRecovery := os.Getenv(nativeConsensusJailRecoveryEnv) == "1"
 	heldDowntime := os.Getenv(nativeConsensusHeldDowntimeEnv) == "1"
 	require.False(t, jailRecovery && !downtime, "the jail recovery fixture requires the downtime profile")
 	require.False(t, heldDowntime && (!downtime || jailRecovery), "held downtime has its own isolated fixture")
+	require.False(t, upgradeGovernance && (feeRewards || ibcV1 || downtime), "the upgrade governance fixture has a separate profile")
 	initial, after := [3]int64{2, 1, 0}, [3]int64{2, 0, 3}
 	keyScope := "mintcandy native consensus process fixture "
 	if downtime {
@@ -226,6 +228,12 @@ func exportNativeConsensusDaemonFixture(t *testing.T, e isolatedBackendEnv, dir 
 	profile.EnableNativeOrdinaryDELDowntime = downtime
 	profile.EnableDELHold = heldDowntime
 	profile.EnableNativeHeldDELDowntime = heldDowntime
+	var governanceFixture []byte
+	if upgradeGovernance {
+		profile.EnableNativeGovernance = true
+		profile.EnableNativeUpgradeGovernance = true
+		governanceFixture = nativeGovernanceUpgradeFixture(t, e, genesis)
+	}
 	genesis[ownedapp.WithdrawalGenesisKey], err = json.Marshal(profile)
 	require.NoError(t, err)
 	require.NoError(t, ownedapp.ReconcileNativeGenesisAllocation(cdc, genesis))
@@ -252,6 +260,9 @@ func exportNativeConsensusDaemonFixture(t *testing.T, e isolatedBackendEnv, dir 
 		require.NoError(t, closeErr)
 	}
 	write("genesis.json", body)
+	if upgradeGovernance {
+		write("governance.json", governanceFixture)
+	}
 
 	target := common.HexToAddress(validators[2].EVM)
 	var zero common.Hash
