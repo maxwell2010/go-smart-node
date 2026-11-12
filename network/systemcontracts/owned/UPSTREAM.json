@@ -3,7 +3,7 @@
   "canonicalSource": "sources/DecimalDelegation.sol",
   "canonicalSha256": "4478ab6d8b4a7feb230d70715c72f3be816fdbfd0efe7743e3572cfd4ce010c2",
   "ownedSource": "owned/DecimalDelegation.sol",
-  "ownedSha256": "2b409b99cdb1a75242e60cf7f1ae55c57e6b1374c141c6e15d2e4f60cde08801",
+  "ownedSha256": "10aee9af82b71c43a09ffc33a76e6e2b8d7376a700c403913c666ac48d0ea683",
   "changedFunctions": [
     "DelegationNFTLib._applyPenaltiesToStake",
     "DecimalDelegation._applyPenaltiesToStake",

@@ -4071,7 +4071,6 @@ interface IMintCandyIsolationOrigin {
 }
 interface IMintCandyIsolationVault {
     function nextPositionId() external view returns (uint256);
-    function maxOriginQuantity() external pure returns (uint256);
 }
 
 library DelegationNFTLib {
@@ -4979,13 +4978,12 @@ library DelegationNFTLib {
         if (!state.active || !state.withReserve || state.nftType != NFTType.DRC1155)
             revert NFTNotRegistered(originContract);
         address vault = _getAddress($, "nft-position-vault");
-        if (vault == address(0) || vault.code.length == 0 ||
-            IMintCandyIsolationOrigin(originContract).isolationVault() != vault)
+        if (IMintCandyIsolationOrigin(originContract).isolationVault() != vault)
             revert NFTNotRegistered(originContract);
-        uint256 maximum = IMintCandyIsolationVault(vault).maxOriginQuantity();
-        if (quantity == 0 || quantity > maximum) revert IDecimalDelegationCommon.InvalidAmount();
+        if (quantity == 0) revert IDecimalDelegationCommon.InvalidAmount();
+        // The origin checks the same live vault and the shared quantity cap
+        // before burning any units.
         uint256 expectedId = IMintCandyIsolationVault(vault).nextPositionId();
-        if (expectedId == 0) revert IDecimalDelegationCommon.InvalidAmount();
         emit NFTIsolationStarted(expectedId, delegator, originContract, originTokenId, quantity);
         IERC1155(originContract).safeTransferFrom(delegator, address(this), originTokenId, quantity, "");
         uint256 actualId = IMintCandyIsolationOrigin(originContract).isolateForDelegation(
