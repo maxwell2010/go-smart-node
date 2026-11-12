@@ -34,6 +34,93 @@ type DELProvenanceTranche struct {
 	Amount       sdkmath.Int
 }
 
+// HistoricalDELPenaltyPercent is the direct DEL duplicate-vote rate for the
+// history-enabled profile.
+const HistoricalDELPenaltyPercent = 5
+
+// DELHistoricalPenaltyPlan describes a read-only debit against the current
+// direct principal. Tranches contains all surviving parts, including late
+// funds. FrozenAt is set only for a frozen claim.
+type DELHistoricalPenaltyPlan struct {
+	Before, Eligible, Loss, Remaining sdkmath.Int
+	Tranches                          []DELProvenanceTranche
+	FrozenAt                          time.Time
+}
+
+// PlanActiveDELHistoricalPenalty calculates the direct DEL loss for one
+// active position. Held DEL retains the original start times of all parts.
+func (k *StateKeeper) PlanActiveDELHistoricalPenalty(ctx sdk.Context, row types.EVMStakeBinding, infractionHeight int64) (DELHistoricalPenaltyPlan, error) {
+	if err := k.checkDELHistoricalPenaltyContext(ctx, infractionHeight); err != nil {
+		return DELHistoricalPenaltyPlan{}, err
+	}
+	lots, err := k.GetActiveDELProvenance(ctx, row)
+	if err != nil {
+		return DELHistoricalPenaltyPlan{}, err
+	}
+	return planDELHistoricalPenalty(lots, infractionHeight), nil
+}
+
+// PlanFrozenDELHistoricalPenalty calculates the direct DEL loss for one
+// still-custodied frozen claim. Only claims moved from active stake at or
+// after the infraction height can retain exposure to that infraction.
+func (k *StateKeeper) PlanFrozenDELHistoricalPenalty(ctx sdk.Context, row types.EVMFrozenBinding, infractionHeight int64) (DELHistoricalPenaltyPlan, error) {
+	if err := k.checkDELHistoricalPenaltyContext(ctx, infractionHeight); err != nil {
+		return DELHistoricalPenaltyPlan{}, err
+	}
+	lots, frozenAt, err := k.GetFrozenDELProvenance(ctx, row)
+	if err != nil {
+		return DELHistoricalPenaltyPlan{}, err
+	}
+	cutoff := infractionHeight
+	if row.CreatedHeight < infractionHeight {
+		cutoff = 0 // No funding height qualifies once a claim predates the infraction.
+	}
+	plan := planDELHistoricalPenalty(lots, cutoff)
+	plan.FrozenAt = frozenAt
+	return plan, nil
+}
+
+func (k *StateKeeper) checkDELHistoricalPenaltyContext(ctx sdk.Context, height int64) error {
+	if height <= 0 || height > ctx.BlockHeight() {
+		return errors.New("invalid DEL historical penalty infraction height")
+	}
+	enabled, err := k.NativeStakeProvenanceEnabled(ctx)
+	if err != nil {
+		return err
+	}
+	if !enabled {
+		return errors.New("DEL historical penalty requires native stake provenance")
+	}
+	return nil
+}
+
+func planDELHistoricalPenalty(lots []DELProvenanceTranche, cutoff int64) DELHistoricalPenaltyPlan {
+	before := sdkmath.ZeroInt()
+	remainingLots := make([]DELProvenanceTranche, 0, len(lots))
+	var eligible, loss, cumulativeLoss, partLoss big.Int
+	percent, denominator := big.NewInt(HistoricalDELPenaltyPercent), big.NewInt(100)
+	for _, lot := range lots {
+		before = before.Add(lot.Amount)
+		if lot.FundedHeight < cutoff {
+			// Adjacent cumulative floors apply the exact rate to every
+			// chronological prefix without losing atoms at tranche boundaries.
+			eligible.Add(&eligible, lot.Amount.BigInt())
+			cumulativeLoss.Mul(&eligible, percent).Quo(&cumulativeLoss, denominator)
+			partLoss.Sub(&cumulativeLoss, &loss)
+			lot.Amount = lot.Amount.Sub(sdkmath.NewIntFromBigInt(&partLoss))
+			loss.Set(&cumulativeLoss)
+		}
+		if lot.Amount.IsPositive() {
+			remainingLots = append(remainingLots, lot)
+		}
+	}
+	debited := sdkmath.NewIntFromBigInt(&loss)
+	return DELHistoricalPenaltyPlan{
+		Before: before, Eligible: sdkmath.NewIntFromBigInt(&eligible), Loss: debited,
+		Remaining: before.Sub(debited), Tranches: remainingLots,
+	}
+}
+
 // NativeStakeProvenanceEnabled reports whether the profile initialized an
 // exact native provenance ledger from fresh genesis.
 func (k *StateKeeper) NativeStakeProvenanceEnabled(ctx sdk.Context) (bool, error) {
