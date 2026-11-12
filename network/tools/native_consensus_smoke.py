@@ -16,7 +16,7 @@ import time
 from configure_history import validate_fresh_home
 from del_delegation_smoke import DELEGATED, GAS_LIMIT, GAS_PRICE, WITHDRAWAL_REQUESTED, balance, native_positions, read_words, submit, write_config
 from mcnd_process_smoke import ProcessOwner, SignalGuard, private_environment, private_namespace, run_command
-from withdrawal_genesis_smoke import ADDRESS, CHAIN, EVM_CHAIN, MAX_BLOCKS, SHA256, WORD, bech32_payload, block_time, check, comet, ethereum, native, private_bytes, private_write, readiness_diagnostic, safe_diagnostic, scan_blocks, wait_height
+from withdrawal_genesis_smoke import ADDRESS, CHAIN, EVM_CHAIN, MAX_BLOCKS, SHA256, WITHDRAWAL_ATTEMPT_GAS_LIMIT, WORD, bech32_payload, block_time, check, comet, ethereum, log_records, native, private_bytes, private_write, readiness_diagnostic, safe_diagnostic, scan_blocks, wait_height
 
 
 ATOMS = 10**18
@@ -509,6 +509,39 @@ def downtime_events(result):
     return [event for event in result['finalize_block_events'] or [] if event['type'] == 'decimal_native_downtime_applied']
 
 
+def record_downtime_attempts(node, first, last, report):
+    attempts = {'firstHeight': first, 'lastHeight': last, 'applied': [], 'deferred': []}
+    report['penaltyAttempts'] = attempts
+    event_types = {'decimal_native_downtime_applied': 'applied', 'decimal_native_downtime_deferred': 'deferred'}
+    for height in range(first, last + 1):
+        result = node.rpc(f'block_results?height={height}')
+        check(int(result['height']) == height, 'downtime observation queried the wrong height')
+        for event in result['finalize_block_events'] or []:
+            name = event_types.get(event['type'])
+            if name is None:
+                continue
+            gas_fields = [item['value'] for item in event['attributes'] if item['key'] == 'gas_used']
+            entry = {'height': height, 'gasUsed': None}
+            attempts[name].append(entry)
+            if gas_fields:
+                check(len(gas_fields) == 1 and re.fullmatch(r'[0-9]{1,8}', gas_fields[0]), 'invalid downtime gas value')
+                gas = int(gas_fields[0])
+                check(0 < gas <= WITHDRAWAL_ATTEMPT_GAS_LIMIT, 'downtime gas exceeded its SDK limit')
+                entry['gasUsed'] = gas
+    for kind in ('applied', 'deferred'):
+        attempts[kind + 'Count'] = len(attempts[kind])
+    if attempts['deferred']:
+        known = ('native ordinary DEL downtime exceeded the block work budget',
+                 'penalty execution exceeded the remaining SDK gas budget', 'NFT view SDK gas limit exceeded',
+                 'isolated NFT stake differs from the prior Master penalty cursor',
+                 'DEL stake differs from the prior Master penalty cursor', 'Gateway DEL penalty cursor or isolated collateral differs',
+                 'NativeReserveBurnFailed', 'NativeBurnFailed')
+        records = log_records(node.log, 'native ordinary DEL downtime deferred')
+        attempts['deferredReasons'] = [reason for reason in known
+                                       if any(isinstance(log.get('error'), str) and reason in log['error'] for log in records)]
+    return attempts['applied']
+
+
 def wait_downtime_activation(replicas, expected, report, height):
     validators = expected['validators']
     ready = wait_replicas(replicas, height + 5, 60, report)
@@ -707,15 +740,17 @@ def run_downtime_gate(binary, expected, replicas, env, owner, report, first, *, 
     owner.stop(c.child)
     # The surviving 6/8 voting power can advance blocks while C is offline.
     tip = wait_replicas(quorum, max(first + 9, last_seen + 8), 85, report)
-    penalty_heights = [height for height in range(baseline + 1, tip)
-                       if downtime_events(a.rpc(f'block_results?height={height}'))]
-    check(len(penalty_heights) == 1, 'expected exactly one ordinary DEL downtime event while C was stopped')
-    height = penalty_heights[0]
+    applied = record_downtime_attempts(a, baseline + 1, tip - 1, report)
+    check(len(applied) == 1, 'expected exactly one ordinary DEL downtime event while C was stopped')
+    height = applied[0]['height']
     infraction = height - 1
     check(height >= baseline + DOWNTIME_WINDOW + 1 and c.child.poll() is not None,
           'C must be absent for the full signing window')
     fields = {'operator': validators[2]['operator'], 'infraction_height': str(infraction),
               'burned': str(DOWNTIME_BURN), 'mode': 'BeginBlock'}
+    gas_used = applied[0]['gasUsed']
+    if gas_used is not None:
+        fields['gas_used'] = str(gas_used)
     for node in quorum:
         result = node.rpc(f'block_results?height={height}')
         events = downtime_events(result)
@@ -732,6 +767,9 @@ def run_downtime_gate(binary, expected, replicas, env, owner, report, first, *, 
         missed[str(observed)] = check_signatures(quorum, validators, observed, DOWNTIME_INITIAL, missing=('c',))
     report['downtime'] = {'height': height, 'infractionHeight': infraction, 'burnedAtomic': str(DOWNTIME_BURN),
                           'missedCommits': missed, 'abciUpdates': {'c': 0}}
+    if gas_used is not None:
+        report['downtime'].update(sdkGasCharged=gas_used, sdkGasLimit=WITHDRAWAL_ATTEMPT_GAS_LIMIT,
+                                  sdkGasHeadroom=WITHDRAWAL_ATTEMPT_GAS_LIMIT - gas_used)
 
     report['phase'] = 'verify-penalty-and-effective-h-plus-two'
     wait_replicas(quorum, height + 3, 65, report)
