@@ -1,5 +1,6 @@
 import hashlib, json, os, pathlib, subprocess, tarfile, tempfile, unittest
 from unittest.mock import patch
+from binary_provenance import MAIN_MODULE
 from configure_history import PROFILE, configure, render
 from install_mcnd import install, pinned_go_version, validate_revision
 from package_mcnd import package
@@ -9,7 +10,10 @@ class OperatorToolsTest(unittest.TestCase):
     def setUp(self):
         # Archive/config tests use inert bytes. The metadata policy is tested
         # independently and on the real Linux CI daemon, never by running these.
-        verifier = patch('package_mcnd.verify_binary_build', return_value={'fixture': 'archive-only'})
+        verifier = patch('package_mcnd.verify_binary_build', return_value={
+            'goVersion': 'go1.26.11', 'module': {'path': MAIN_MODULE},
+            'settings': {'vcs.revision': 'a'*40}, 'dependencies': {},
+        })
         self.binary_verifier = verifier.start()
         self.addCleanup(verifier.stop)
 
@@ -160,6 +164,11 @@ class OperatorToolsTest(unittest.TestCase):
                 manifest=package(binary,source,'a'*40,target)
             with tarfile.open(target,'r:gz') as archive:
                 self.assertEqual({'sourceRevision':'a'*40,'files':{}},json.loads(archive.extractfile('SOURCE_INPUTS.json').read()))
+                sbom = archive.extractfile('SBOM.cdx.json').read()
+                application = json.loads(sbom)['metadata']['component']
+                self.assertEqual('mcnd', application['name'])
+                self.assertEqual(manifest['binarySha256'], application['hashes'][0]['content'])
+                self.assertEqual(hashlib.sha256(sbom).hexdigest(), manifest['files']['SBOM.cdx.json'])
                 for name,content in notices.items():
                     member='provenance/network/third_party/cosmos-geth/'+name
                     self.assertEqual(content,archive.extractfile(member).read())

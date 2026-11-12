@@ -3,6 +3,7 @@ import argparse, hashlib, io, json, os, pathlib, platform, subprocess, sys, tarf
 from install_mcnd import pinned_go_version, validate_revision
 from source_inventory import production_environment, verify_build_inputs
 from binary_provenance import verify_binary_build
+from mcnd_sbom import make_sbom
 
 def package(binary,source,revision,output,source_inputs=None):
  validate_revision(revision);source=pathlib.Path(source).resolve(strict=True);binary=pathlib.Path(binary).resolve(strict=True)
@@ -37,7 +38,9 @@ def package(binary,source,revision,output,source_inputs=None):
  notices=sorted({path for pattern in ("LICENSE*","COPYING*","NOTICE*") for path in third_party.rglob(pattern) if path.is_file()})
  for path in [source/"LICENSE",source/"network/LICENSE",*sorted((source/"network/systemcontracts").glob("LICENSE*")),*notices,*sorted(third_party.glob("*/UPSTREAM.json"))]:
   if path.is_file():data["provenance/"+path.relative_to(source).as_posix()]=path.read_bytes()
- manifest={"schemaVersion":1,"status":"development","sourceRevision":revision,"binarySha256":hashlib.sha256(data["bin/mcnd"]).hexdigest(),"files":{name:hashlib.sha256(value).hexdigest() for name,value in data.items()},"dependencyScope":"Go build information records effective module replacements. UPSTREAM manifests identify local owned patches; this is not a complete security audit or signed provenance."}
+ binary_sha256=hashlib.sha256(data["bin/mcnd"]).hexdigest()
+ data["SBOM.cdx.json"]=(json.dumps(make_sbom(verified_build,inventory,data,binary_sha256),sort_keys=True,indent=2)+"\n").encode()
+ manifest={"schemaVersion":1,"status":"development","sourceRevision":revision,"binarySha256":binary_sha256,"files":{name:hashlib.sha256(value).hexdigest() for name,value in data.items()},"dependencyScope":"Go build information records effective module replacements. UPSTREAM manifests identify local owned patches; this is not a complete security audit or signed provenance."}
  data["MANIFEST.json"]=(json.dumps(manifest,indent=2)+"\n").encode()
  output=pathlib.Path(output);output.parent.mkdir(parents=True,exist_ok=True)
  if os.path.lexists(output.with_name(output.name+".sha256")):raise ValueError("checksum sidecar already exists")

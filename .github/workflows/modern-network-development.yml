@@ -35,6 +35,8 @@ jobs:
         with:
           go-version: '1.26.11'
           cache-dependency-path: network/go.sum
+      - name: Install isolated SBOM schema validator
+        run: python3 -m pip install --disable-pip-version-check --target "$RUNNER_TEMP/sbom-validator" --requirement scripts/release/requirements-sbom.txt
       - name: Verify sources and operator tooling
         run: |
           python3 network/scripts/verify_owned_evm.py
@@ -60,7 +62,9 @@ jobs:
             cd development-artifacts
             sha256sum --check --strict mcnd-development-linux-amd64.tar.gz.sha256
             tar -xOzf mcnd-development-linux-amd64.tar.gz bin/mcnd > "$install_dir/mcnd"
+            tar -xOzf mcnd-development-linux-amd64.tar.gz SBOM.cdx.json > "$install_dir/SBOM.cdx.json"
           )
+          PYTHONPATH="$RUNNER_TEMP/sbom-validator" python3 scripts/release/validate_sbom.py "$install_dir/SBOM.cdx.json"
           cmp "$RUNNER_TEMP/mcnd" "$install_dir/mcnd"
           chmod 0755 "$install_dir/mcnd"
           "$install_dir/mcnd" version
