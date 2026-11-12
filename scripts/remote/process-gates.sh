@@ -452,6 +452,11 @@ fi
 
 if [[ "$native_upgrade_governance" == native-upgrade-governance ]]; then
   fixture="$work/native-governance-upgrade-fixture"
+  successor="$work/mcnd-native-sdk-migration-v1"
+  go build -mod=readonly -tags=mcnd_native_sdk_migration_v1 -buildvcs=true -p 2 -trimpath \
+    -ldflags "-X main.buildCommit=$revision" -o "$successor" ./cmd/mcnd
+  go version -m "$successor" > "$output/native-governance-upgrade-successor-build.log"
+  successor_sha="$(sha256sum "$successor" | awk '{print $1}')"
   mkdir -m 700 -- "$fixture"
   if ! MCND_NATIVE_CONSENSUS_FIXTURE_DIR="$fixture" MCND_NATIVE_CONSENSUS_UPGRADE_GOVERNANCE=1 \
       go test -mod=readonly -tags= -trimpath -p 2 -count=1 -timeout 8m -json \
@@ -463,20 +468,30 @@ if [[ "$native_upgrade_governance" == native-upgrade-governance ]]; then
   sudo -n unshare --net -- bash -euc 'ip link set lo up; exec "$@"' _ \
     env TMPDIR="$work" "$python" -B "$root/network/tools/native_governance_upgrade_smoke.py" \
     --binary "$work/mcnd" --binary-sha256 "$mcnd_sha" --source-commit "$revision" \
+    --replacement-binary "$successor" --replacement-sha256 "$successor_sha" \
     --fixture "$fixture" --home-parent "$work" --report "$output/native-governance-upgrade.json" \
     |& tee "$output/native-governance-upgrade.log"
   preserve_public_reports
-  "$python" - "$output/native-governance-upgrade.json" "$revision" "$mcnd_sha" <<'PY'
+  "$python" - "$output" "$root" "$revision" "$mcnd_sha" "$successor_sha" <<'PY'
 import json,sys
 from pathlib import Path
-report=json.loads(Path(sys.argv[1]).read_text())
+out,root=map(Path,sys.argv[1:3]); revision,predecessor_sha,successor_sha=sys.argv[3:]
+sys.path.insert(0,str(root/'network/tools'))
+from binary_provenance import parse_build_info
+predecessor=parse_build_info((out/'mcnd-build.log').read_text())
+successor=parse_build_info((out/'native-governance-upgrade-successor-build.log').read_text())
+assert successor['settings'].pop('-tags') == 'mcnd_native_sdk_migration_v1'
+assert successor==predecessor, 'successor build changed inputs beyond the planned build tag'
+report=json.loads((out/'native-governance-upgrade.json').read_text())
 assert report['status']=='PASS' and 'error' not in report,report
-assert report['sourceCommit']==sys.argv[2] and report['binarySha256']==sys.argv[3],report
+assert report['sourceCommit']==revision and report['binarySha256']==predecessor_sha,report
+assert report['replacementSha256']==successor_sha and successor_sha!=predecessor_sha,report
 assert report['rejected']['status']=='PROPOSAL_STATUS_REJECTED' and report['passed']['status']=='PROPOSAL_STATUS_PASSED',report
 plan,application,progress=report['schedule'],report['application'],report['progress']
 assert plan['scheduledAt'] < plan['targetHeight'] == application['appliedHeight'] <= progress['height']-3,report
-assert application['sameBinary'] is True and application['processRestarted'] is False,report
-print('Native governance tally, exact SDK upgrade height and continued three-node consensus passed.')
+assert report['predecessor']['committedHeight']+1==plan['targetHeight']==report['predecessor']['boundaryHeight'],report
+assert application['sameBinary'] is False and application['processRestarted'] is True,report
+print('Native governance tally, exact predecessor halt, successor migration and continued three-node consensus passed.')
 PY
 fi
 

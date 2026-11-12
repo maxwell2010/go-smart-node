@@ -1,4 +1,4 @@
-"""Rehearse one native governance SDK migration on three loopback replicas."""
+"""Rehearse one native governance SDK migration across two binaries."""
 
 import argparse
 import base64
@@ -27,7 +27,8 @@ TX_FAILURES = ('account sequence mismatch', 'incorrect account sequence', 'signa
 
 
 def load_governance_fixture(directory):
-    expected, genesis, keys, initial = load_fixture(directory, False, False, False)
+    expected, genesis, keys, initial = load_fixture(
+        directory, fee_rewards=False, downtime=False, jail_recovery=False, held_downtime=False, nft_downtime=False)
     doc = json.loads(genesis)['app_state']
     profile = doc['withdrawal_settlement']
     check(profile.get('enable_native_governance') is True and profile.get('enable_native_upgrade_governance') is True,
@@ -162,12 +163,39 @@ def check_schedule(replicas, action, height):
         check(applied_height(node, height) == 0, 'SDK migration executed before its scheduled height')
 
 
-def run_gate(args, binary, root, expected, genesis, keys, action, env, owner, report):
+def wait_predecessor_halt(replicas, action, report):
+    target = action['planHeight']
+    expected_info = json.dumps({'schema': SCHEMA, 'proposal_id': action['passedID']}, separators=(',', ':'))
+    deadline = time.monotonic() + 125
+    while time.monotonic() < deadline:
+        ready = True
+        for node in replicas:
+            if node.child.poll() is not None:
+                raise RuntimeError('predecessor exited before its upgrade boundary was verified: ' +
+                                   readiness_diagnostic(node.log, report))
+            try:
+                height = int(node.rpc('abci_info')['response'].get('last_block_height', '0'))
+                hint = json.loads(private_bytes(node.home / 'data/upgrade-info.json', 4096))
+            except (OSError, json.JSONDecodeError):
+                ready = False
+                continue
+            check(height <= target - 1, 'predecessor committed the upgrade height')
+            check(hint['name'] == PLAN and int(hint['height']) == target and hint['info'] == expected_info,
+                  'SDK upgrade hint differs from the exact approved plan')
+            ready &= height == target - 1
+        if ready:
+            return
+        time.sleep(0.25)
+    raise TimeoutError('predecessors did not reach the exact SDK upgrade boundary')
+
+
+def run_gate(args, binary, replacement, root, expected, genesis, keys, action, env, owner, report):
     report['phase'] = 'create-replicas'
     replicas = create_replicas(binary, root, genesis, keys, env)
     source = replicas[0]
-    version = json.loads(run_command(binary, source.home, ['version', '--long', '--output', 'json'], env))
-    check(version['server_name'] == 'mcnd' and version['commit'] == args.source_commit, 'daemon version differs from checked source')
+    for executable in (binary, replacement):
+        version = json.loads(run_command(executable, source.home, ['version', '--long', '--output', 'json'], env))
+        check(version['server_name'] == 'mcnd' and version['commit'] == args.source_commit, 'daemon version differs from checked source')
     report['phase'] = 'validate-genesis'
     try:
         run_command(binary, source.home, ['genesis', 'validate-genesis'], env)
@@ -177,7 +205,6 @@ def run_gate(args, binary, root, expected, genesis, keys, action, env, owner, re
     report['phase'] = 'initial-native-consensus'
     for node in replicas:
         node.start(binary, env, owner, 'upgrade-governance')
-    started = tuple(node.child.pid for node in replicas)
     initial = report['initialHeight']
     first = wait_replicas(replicas, initial + 2, 85, report)
     report['initialPower'] = effective_set(replicas, expected['validators'], initial, INITIAL)
@@ -223,18 +250,31 @@ def run_gate(args, binary, root, expected, genesis, keys, action, env, owner, re
     check_schedule(replicas, action, scheduled_at)
     report['schedule'] = {'proposalID': proposal_id, 'name': PLAN, 'scheduledAt': scheduled_at, 'targetHeight': target}
 
-    report['phase'] = 'exact-preblock-application'
+    report['phase'] = 'predecessor-halt-at-upgrade'
+    wait_predecessor_halt(replicas, action, report)
+    check_schedule(replicas, action, target - 1)
+    before = committed_header(replicas, target - 1)
+    boundary = committed_header(replicas, target)
+    report['predecessor'] = {'committedHeight': target - 1, 'boundaryHeight': target, 'boundary': boundary}
+    for node in reversed(replicas):
+        owner.stop(node.child)
+        check(node.child.poll() is not None, 'predecessor is still running')
+
+    report['phase'] = 'successor-replay-and-exact-preblock-application'
+    for node in replicas:
+        node.start(replacement, env, owner, 'upgrade-successor')
     tip = wait_replicas(replicas, target + 4, 125, report)
     final = tip - 1
+    check(committed_header(replicas, target - 1) == before and committed_header(replicas, target) == boundary,
+          'successor changed the predecessor checkpoint or signed boundary block')
     check_schedule(replicas, action, target - 1)
     for node in replicas:
         check(applied_height(node, target) == target and current_plan(node, target) is None and
               applied_height(node, final) == target and current_plan(node, final) is None,
               'SDK handler did not finish at its exact PreBlock height')
-    check(started == tuple(node.child.pid for node in replicas) and all(node.child.poll() is None for node in replicas),
-          'same-binary migration should leave the original daemon processes running')
-    report['application'] = {'name': PLAN, 'appliedHeight': target, 'sameBinary': True, 'processRestarted': False,
-                             'before': committed_header(replicas, target - 1), 'block': committed_header(replicas, target)}
+    check(all(node.child.poll() is None for node in replicas), 'one successor did not remain running')
+    report['application'] = {'name': PLAN, 'appliedHeight': target, 'sameBinary': False, 'processRestarted': True,
+                             'before': before, 'block': boundary}
     report['progress'] = {'height': final, 'powers': effective_set(replicas, expected['validators'], final, INITIAL),
                           'signers': check_signatures(replicas, expected['validators'], final, INITIAL),
                           **committed_header(replicas, final)}
@@ -244,24 +284,31 @@ def main(argv=None, signals=None):
     parser = argparse.ArgumentParser(description=__doc__)
     for name in ('binary', 'binary-sha256', 'source-commit', 'fixture', 'home-parent', 'report'):
         parser.add_argument('--' + name, required=True)
+    parser.add_argument('--replacement-binary', required=True)
+    parser.add_argument('--replacement-sha256', required=True)
     args = parser.parse_args(argv)
     report = {'status': 'FAIL', 'phase': 'fixture-provenance',
-              'scope': 'three loopback processes with a same-binary native governance SDK migration'}
+              'scope': 'three loopback replicas across a native governance SDK binary upgrade'}
     with pathlib.Path(args.report).open('x', encoding='utf8') as stream:
         try:
             private_namespace()
-            check(re.fullmatch(SHA256, args.binary_sha256) and re.fullmatch(r'[0-9a-f]{40}', args.source_commit), 'invalid build provenance')
+            check(re.fullmatch(SHA256, args.binary_sha256) and re.fullmatch(SHA256, args.replacement_sha256) and
+                  args.binary_sha256 != args.replacement_sha256 and re.fullmatch(r'[0-9a-f]{40}', args.source_commit),
+                  'invalid predecessor or successor build provenance')
             binary = str(pathlib.Path(args.binary).resolve(strict=True))
-            with open(binary, 'rb') as binary_stream:
-                check(hashlib.file_digest(binary_stream, 'sha256').hexdigest() == args.binary_sha256, 'daemon SHA256 mismatch')
+            replacement = str(pathlib.Path(args.replacement_binary).resolve(strict=True))
+            for executable, expected_hash in ((binary, args.binary_sha256), (replacement, args.replacement_sha256)):
+                with open(executable, 'rb') as binary_stream:
+                    check(hashlib.file_digest(binary_stream, 'sha256').hexdigest() == expected_hash, 'daemon SHA256 mismatch')
             expected, genesis, keys, initial, action = load_governance_fixture(pathlib.Path(args.fixture))
-            report.update(sourceCommit=args.source_commit, binarySha256=args.binary_sha256, initialHeight=initial,
+            report.update(sourceCommit=args.source_commit, binarySha256=args.binary_sha256,
+                          replacementSha256=args.replacement_sha256, initialHeight=initial,
                           genesisSha256=hashlib.sha256(genesis).hexdigest(), chainID=CHAIN, evmChainID=EVM_CHAIN)
             with tempfile.TemporaryDirectory(prefix='mcnd-native-governance-upgrade-', dir=args.home_parent) as directory:
                 root = pathlib.Path(directory)
                 owner = ProcessOwner(signals)
                 try:
-                    run_gate(args, binary, root, expected, genesis, keys, action, private_environment(root), owner, report)
+                    run_gate(args, binary, replacement, root, expected, genesis, keys, action, private_environment(root), owner, report)
                 finally:
                     owner.close()
             report.update(status='PASS', phase='complete')

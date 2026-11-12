@@ -7,7 +7,10 @@ import (
 	"time"
 
 	coreheader "cosmossdk.io/core/header"
+	sdkupgrade "cosmossdk.io/x/upgrade"
+	upgradekeeper "cosmossdk.io/x/upgrade/keeper"
 	upgradetypes "cosmossdk.io/x/upgrade/types"
+	"github.com/cosmos/cosmos-sdk/runtime"
 	sdk "github.com/cosmos/cosmos-sdk/types"
 	authtypes "github.com/cosmos/cosmos-sdk/x/auth/types"
 	govtypes "github.com/cosmos/cosmos-sdk/x/gov/types"
@@ -59,7 +62,6 @@ func checkNativeGovernanceUpgrade(t *testing.T, app *App, ctx sdk.Context, propo
 	require.ErrorContains(t, err, "upgrade governance is disabled")
 	app.withdrawals.profile.EnableNativeUpgradeGovernance = true
 	t.Cleanup(func() { app.withdrawals.profile.EnableNativeUpgradeGovernance = false })
-	require.True(t, app.UpgradeKeeper.HasHandler(nativeSDKMigrationPlan))
 
 	_, err = submit(ctx, metadata("unlisted-software-upgrade", height))
 	require.ErrorContains(t, err, "requires a listed handler")
@@ -136,12 +138,22 @@ func checkNativeGovernanceUpgrade(t *testing.T, app *App, ctx sdk.Context, propo
 	forged.Info = fmt.Sprintf("{\"schema\":%q,\"proposal_id\":%d}", nativeUpgradeSchema, rejected)
 	_, err = app.runNativeSDKMigration(atUpgrade, forged, from)
 	require.ErrorContains(t, err, "does not match the scheduled plan")
-	// Keep this child-store rehearsal from changing the reused BaseApp's
-	// in-memory protocol version outside the test scope.
-	setter := app.UpgradeKeeper.GetVersionSetter()
-	app.UpgradeKeeper.SetVersionSetter(nil)
-	defer app.UpgradeKeeper.SetVersionSetter(setter)
-	require.NoError(t, app.UpgradeKeeper.ApplyUpgrade(atUpgrade, plan))
+	// Use a successor keeper on the same child store, with its own handler
+	// registry and no in-memory protocol version setter on the shared App.
+	oldKeeper := app.UpgradeKeeper
+	app.UpgradeKeeper = upgradekeeper.NewKeeper(nil, runtime.NewKVStoreService(app.keys[upgradetypes.StoreKey]),
+		app.appCodec, t.TempDir(), nil, govAddress)
+	defer func() { app.UpgradeKeeper = oldKeeper }()
+	early := atUpgrade.WithBlockHeight(plan.Height - 1).WithHeaderInfo(coreheader.Info{
+		ChainID: ctx.ChainID(), Height: plan.Height - 1, Time: ctx.BlockTime(),
+	})
+	_, err = sdkupgrade.PreBlocker(early, app.UpgradeKeeper)
+	require.NoError(t, err)
+	app.UpgradeKeeper.SetUpgradeHandler(nativeSDKMigrationPlan, app.runNativeSDKMigration)
+	_, err = sdkupgrade.PreBlocker(early, app.UpgradeKeeper)
+	require.ErrorContains(t, err, "BINARY UPDATED BEFORE TRIGGER")
+	_, err = sdkupgrade.PreBlocker(atUpgrade, app.UpgradeKeeper)
+	require.NoError(t, err)
 	name, doneHeight, err := app.UpgradeKeeper.GetLastCompletedUpgrade(atUpgrade)
 	require.NoError(t, err)
 	require.Equal(t, plan.Name, name)

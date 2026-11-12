@@ -73,8 +73,8 @@ func (app *App) validateNativeUpgradeProposal(ctx sdk.Context, metadata string) 
 	if !app.usesNativeUpgradeGovernance() {
 		return errors.New("native SDK upgrade governance is disabled")
 	}
-	if !app.UpgradeKeeper.HasHandler(manifest.Name) || manifest.Height <= ctx.BlockHeight() {
-		return errors.New("native SDK upgrade proposal requires a registered handler and future height")
+	if manifest.Height <= ctx.BlockHeight() {
+		return errors.New("native SDK upgrade proposal requires a future height")
 	}
 	return nil
 }
@@ -153,8 +153,6 @@ func (app *App) scheduleNativeUpgrade(ctx sdk.Context, proposal govv1.Proposal, 
 	switch {
 	case manifest.Height <= ctx.BlockHeight():
 		reason = "native SDK upgrade height is no longer in the future"
-	case !app.UpgradeKeeper.HasHandler(manifest.Name):
-		reason = "native SDK upgrade handler is unavailable"
 	default:
 		_, err := app.UpgradeKeeper.GetUpgradePlan(ctx)
 		if err == nil {
@@ -192,10 +190,6 @@ func (app *App) scheduleNativeUpgrade(ctx sdk.Context, proposal govv1.Proposal, 
 		sdk.NewAttribute("proposal_id", id), sdk.NewAttribute("name", manifest.Name),
 		sdk.NewAttribute("height", strconv.FormatInt(manifest.Height, 10))))
 	return nil
-}
-
-func (app *App) registerNativeGovernanceUpgradeHandlers() {
-	app.UpgradeKeeper.SetUpgradeHandler(nativeSDKMigrationPlan, app.runNativeSDKMigration)
 }
 
 func (app *App) runNativeSDKMigration(ctx context.Context, plan upgradetypes.Plan, from module.VersionMap) (module.VersionMap, error) {
