@@ -33,10 +33,12 @@ class LaunchAllocationTest(unittest.TestCase):
                 },
                 'bank': {
                     'balances': [{'address': address(i), 'coins': [coin(value)]}
-                                 for i, value in ((1, 20), (3, 8), (4, 25), (8, 90))],
-                    'supply': [coin(143)],
+                                 for i, value in ((0, 2), (1, 20), (3, 8), (4, 25), (7, 3), (8, 90))],
+                    'supply': [coin(148)],
                 },
-                'coin': {'params': {'base_denom': 'del', 'base_volume': '143'},
+                'auth': {'accounts': [{'@type': '/cosmos.auth.v1beta1.ModuleAccount',
+                                      'base_account': {'address': address(7)}, 'name': 'fixture'}]},
+                'coin': {'params': {'base_denom': 'del', 'base_volume': '148'},
                          'coins': [{'drc20_address': evm(4), 'reserve': '25'}]},
                 'nft': {'collections': [{'addressDRC': evm(3)}]},
                 'validator': {
@@ -58,9 +60,10 @@ class LaunchAllocationTest(unittest.TestCase):
         data = self.encode()
         report = allocation_report(data)
         self.assertEqual(report['genesisSha256'], hashlib.sha256(data).hexdigest())
-        self.assertEqual(report['initialSupplyAtomic'], '143')
+        self.assertEqual(report['initialSupplyAtomic'], '148')
         self.assertEqual(report['allocationTotalsAtomic'], {
             'wrapped_del_backing': '20', 'nft_origin_backing': '8', 'drc20_backing': '25', 'other_bank_balances': '90',
+            'zero_address_balance': '2', 'module_accounts': '3',
         })
         self.assertEqual(report['initialStakingAtomicAlreadyInBankSupply'], '10')
         self.assertEqual(report['validators'][0]['consensusAddressHex'], hashlib.sha256(self.public_key).hexdigest()[:40].upper())

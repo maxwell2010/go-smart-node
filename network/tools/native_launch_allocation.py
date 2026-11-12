@@ -64,6 +64,10 @@ def allocation_report(data):
     role_addresses = {key: evm_address(profile[key]) for key in (*RESERVE_ROLES, *SYSTEM_ROLES) if key in profile}
     role_addresses = {key: value for key, value in role_addresses.items() if int(value, 16) != 0}
     categories = {value: RESERVE_ROLES.get(key, 'system_contracts') for key, value in role_addresses.items()}
+    categories['0x' + '0' * 40] = 'zero_address_balance'
+    for account in state.get('auth', {}).get('accounts') or []:
+        if account.get('@type') == '/cosmos.auth.v1beta1.ModuleAccount':
+            categories.setdefault(bech32_payload(account['base_account']['address']), 'module_accounts')
     for collection in state['nft'].get('collections') or []:
         if collection.get('addressDRC'):
             categories.setdefault(evm_address(collection['addressDRC']), 'nft_origin_backing')
