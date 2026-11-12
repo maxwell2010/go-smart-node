@@ -77,9 +77,8 @@ func NewRootCmd() *cobra.Command {
 			// set the default command outputs
 			cmd.SetOut(cmd.OutOrStdout())
 			cmd.SetErr(cmd.ErrOrStderr())
-			// Informational commands need no client config, keyring or RPC client.
-			// Return before the SDK flag reader can initialize those resources.
-			if informationalCommand(cmd) {
+			// Stateless commands require no client config, keyring or RPC client.
+			if statelessCommand(cmd) {
 				return nil
 			}
 
@@ -152,16 +151,17 @@ func NewRootCmd() *cobra.Command {
 		panic(err)
 	}
 	addDomainFlags(rootCmd)
+	rootCmd.AddCommand(nativeValidatorRegistrationMetadataCmd())
 
 	return rootCmd
 }
 
-func informationalCommand(cmd *cobra.Command) bool {
+func statelessCommand(cmd *cobra.Command) bool {
 	for cmd.Parent() != nil && cmd.Parent() != cmd.Root() {
 		cmd = cmd.Parent()
 	}
 	switch cmd.Name() {
-	case "version", "completion", "help":
+	case "version", "completion", "help", nativeValidatorRegistrationMetadataCommandName:
 		return true
 	default:
 		return false

@@ -30,6 +30,37 @@ type nativeValidatorRegistration struct {
 	CommissionPercent uint8
 }
 
+// BuildNativeValidatorRegistrationMetadata signs a registration ownership
+// proof for the proposer account with its separate Ed25519 consensus key.
+func BuildNativeValidatorRegistrationMetadata(chainID string, evmChainID uint64, proposer []byte, expiresHeight int64, commissionPercent uint8, key ed25519.PrivateKey) (string, error) {
+	if len(key) != ed25519.PrivateKeySize {
+		return "", errors.New("invalid Ed25519 consensus private key size")
+	}
+	canonicalKey := ed25519.NewKeyFromSeed(key[:ed25519.SeedSize])
+	defer clear(canonicalKey)
+	if !key.Equal(canonicalKey) {
+		return "", errors.New("Ed25519 consensus private key does not match its public key")
+	}
+	candidate := nativeValidatorRegistration{ExpiresHeight: expiresHeight, CommissionPercent: commissionPercent}
+	if len(proposer) != len(candidate.Operator) {
+		return "", errors.New("native validator registration requires a 20-byte proposer address")
+	}
+	copy(candidate.Operator[:], proposer)
+	copy(candidate.ConsensusPubKey[:], key[ed25519.SeedSize:])
+	message, err := candidate.signBytes(chainID, evmChainID)
+	if err != nil {
+		return "", err
+	}
+	if candidate.ExpiresHeight <= 1 {
+		return "", errors.New("native validator registration proof must expire after height 1")
+	}
+	data := binary.BigEndian.AppendUint64(make([]byte, 0, nativeValidatorRegistrationWireSize), uint64(candidate.ExpiresHeight))
+	data = append(data, candidate.CommissionPercent)
+	data = append(data, candidate.ConsensusPubKey[:]...)
+	data = append(data, ed25519.Sign(key, message)...)
+	return nativeValidatorRegistrationSchema + base64.RawURLEncoding.EncodeToString(data), nil
+}
+
 // validateNativeValidatorRegistrationProposal authenticates only the versioned
 // registration metadata. The caller provides the SDK-authenticated proposer's
 // raw address and must check registration uniqueness against state.

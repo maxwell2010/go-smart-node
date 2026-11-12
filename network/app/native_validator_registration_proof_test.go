@@ -50,6 +50,21 @@ func TestValidateNativeValidatorRegistrationProposal(t *testing.T) {
 	require.Nil(t, got)
 }
 
+func TestBuildNativeValidatorRegistrationMetadata(t *testing.T) {
+	want, data := validatorRegistrationProofFixture(t, 0)
+	key := ed25519.NewKeyFromSeed(bytes.Repeat([]byte{0x42}, ed25519.SeedSize))
+	metadata, err := BuildNativeValidatorRegistrationMetadata(registrationProofTestChain, registrationProofTestEVM, want.Operator[:], want.ExpiresHeight, want.CommissionPercent, key)
+	require.NoError(t, err)
+	require.Equal(t, encodeValidatorRegistrationProofForTest(data), metadata)
+	got, err := validateNativeValidatorRegistrationProposal(metadata, registrationProofTestChain, registrationProofTestEVM, want.Operator[:], want.ExpiresHeight-1)
+	require.NoError(t, err)
+	require.Equal(t, &want, got)
+	key[0] ^= 1
+	metadata, err = BuildNativeValidatorRegistrationMetadata(registrationProofTestChain, registrationProofTestEVM, want.Operator[:], want.ExpiresHeight, want.CommissionPercent, key)
+	require.ErrorContains(t, err, "does not match its public key")
+	require.Empty(t, metadata)
+}
+
 func TestNativeValidatorRegistrationProofBindsTermsAndSigningDomains(t *testing.T) {
 	candidate, data := validatorRegistrationProofFixture(t, 7)
 	metadata := encodeValidatorRegistrationProofForTest(data)
