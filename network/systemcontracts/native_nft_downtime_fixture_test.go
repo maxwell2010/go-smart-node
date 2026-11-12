@@ -20,22 +20,48 @@ import (
 )
 
 type nativeNFTDowntimeFixture struct {
-	origin  contracts.Artifact
-	address common.Address
-	tokenID common.Hash
-	units   uint32
+	origin       contracts.Artifact
+	address      common.Address
+	tokenID      common.Hash
+	units        uint32
+	reserveDenom string
 }
 
 const nativeConsensusNFTDowntimeEnv = "MCND_NATIVE_CONSENSUS_NFT_DOWNTIME"
 
 func mintNativeNFTDowntimeFixture(t *testing.T, e isolatedBackendEnv, origin contracts.Artifact, address, beneficiary common.Address, units uint32) nativeNFTDowntimeFixture {
 	t.Helper()
-	tokenID := common.BigToHash(new(big.Int).Add(new(big.Int).Lsh(big.NewInt(1), 224), big.NewInt(401)))
-	input, err := origin.ABI.Pack("mintByDEL", beneficiary, tokenID.Big(), big.NewInt(int64(units)), "ipfs://native-nft-downtime")
+	fixture := newNativeNFTFixture(origin, address, units)
+	input, err := origin.ABI.Pack("mintByDEL", beneficiary, fixture.tokenID.Big(), big.NewInt(int64(units)), "ipfs://native-nft-downtime")
 	require.NoError(t, err)
 	e.nextGasLimit(24_000_000)
 	e.send(e.keys[0], &address, sdkmath.NewIntWithDecimal(2*int64(units), 18).BigInt(), input, true)
-	return nativeNFTDowntimeFixture{origin: origin, address: address, tokenID: tokenID, units: units}
+	return fixture
+}
+
+func newNativeNFTFixture(origin contracts.Artifact, address common.Address, units uint32) nativeNFTDowntimeFixture {
+	tokenID := common.BigToHash(new(big.Int).Add(new(big.Int).Lsh(big.NewInt(1), 224), big.NewInt(401)))
+	return nativeNFTDowntimeFixture{origin: origin, address: address, tokenID: tokenID, units: units, reserveDenom: identity.BaseDenom}
+}
+
+func (f *nativeNFTDowntimeFixture) mintCustom(t *testing.T, e isolatedBackendEnv, custom *nativeCustomCollateralGenesisFixture, beneficiary common.Address) {
+	t.Helper()
+	token := e.load("DRC20")
+	currency := common.HexToAddress(custom.coin.DRC20Contract)
+	creator := crypto.PubkeyToAddress(e.keys[0].PublicKey)
+	reserve := sdkmath.NewIntWithDecimal(2*int64(f.units), 18).BigInt()
+	send := func(signer int, artifact contracts.Artifact, target common.Address, method string, args ...interface{}) {
+		t.Helper()
+		data, err := artifact.ABI.Pack(method, args...)
+		require.NoError(t, err)
+		e.nextGasLimit(24_000_000)
+		e.send(e.keys[signer], &target, new(big.Int), data, true)
+	}
+	send(3, token, currency, "transfer", creator, reserve)
+	send(0, token, currency, "approve", f.address, reserve)
+	send(0, f.origin, f.address, "mint", beneficiary, f.tokenID.Big(), big.NewInt(int64(f.units)),
+		"ipfs://native-nft-downtime", reserve, currency)
+	f.reserveDenom = custom.coin.Denom
 }
 
 func (f nativeNFTDowntimeFixture) addGenesis(t *testing.T, e isolatedBackendEnv, profile ownedapp.WithdrawalProfile, genesis map[string]json.RawMessage, beneficiary string) {
@@ -56,7 +82,7 @@ func (f nativeNFTDowntimeFixture) addGenesis(t *testing.T, e isolatedBackendEnv,
 	nft.Collections = []nfttypes.Collection{
 		{Creator: beneficiary, Denom: signedNFTNativeOriginDenom, Supply: 1, TypeNft: nfttypes.NftType_NFT1155,
 			AddressDRC: f.address.Hex(), Tokens: nfttypes.Tokens{{Creator: beneficiary, Denom: signedNFTNativeOriginDenom,
-				ID: signedNFTNativeOriginID, URI: "ipfs://native-nft-downtime", Reserve: sdk.NewCoin(identity.BaseDenom, sdkmath.NewIntWithDecimal(2, 18)),
+				ID: signedNFTNativeOriginID, URI: "ipfs://native-nft-downtime", Reserve: sdk.NewCoin(f.reserveDenom, sdkmath.NewIntWithDecimal(2, 18)),
 				Minted: f.units, SubTokens: units}}},
 		{Creator: creator, Denom: signedNFTNativeVaultDenom, TypeNft: nfttypes.NftType_NFT721, AddressDRC: profile.PositionVault.Hex()},
 	}
@@ -103,13 +129,15 @@ func (f nativeNFTDowntimeFixture) expectations(t *testing.T, e isolatedBackendEn
 	out["nftNonce"] = nonce
 	price := big.NewInt(1_000_000_000_000)
 	signer := ethtypes.NewEIP155Signer(big.NewInt(990001))
-	calls := []struct {
+	type fixtureCall struct {
 		name   string
 		target common.Address
 		input  []byte
-	}{
-		{"nftApprove", f.address, pack(f.origin, "setApprovalForAll", profile.Gateway, true)},
-		{"nftDelegate", profile.Gateway, pack(gateway, "delegateNFT1155", target, f.address, f.tokenID.Big(), big.NewInt(int64(f.units)))},
+	}
+	calls := []fixtureCall{{"nftApprove", f.address, pack(f.origin, "setApprovalForAll", profile.Gateway, true)}}
+	if f.reserveDenom == identity.BaseDenom {
+		calls = append(calls, fixtureCall{"nftDelegate", profile.Gateway,
+			pack(gateway, "delegateNFT1155", target, f.address, f.tokenID.Big(), big.NewInt(int64(f.units)))})
 	}
 	for i, call := range calls {
 		tx := ethtypes.NewTx(&ethtypes.LegacyTx{Nonce: nonce + uint64(i), To: &call.target,

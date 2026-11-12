@@ -110,7 +110,7 @@ func exportNativeConsensusDaemonFixture(t *testing.T, e isolatedBackendEnv, dir 
 	if historical {
 		require.False(t, feeRewards || ibcV1 || upgradeGovernance || jailRecovery || heldDowntime)
 		if nft != nil {
-			require.Equal(t, "seed", os.Getenv(nativeHistoricalMaxNFTPhaseEnv))
+			require.True(t, os.Getenv(nativeHistoricalMaxNFTPhaseEnv) == "seed" || os.Getenv(nativeCustomNFTPhaseEnv) == "seed")
 		}
 		initial, after = [3]int64{4, 4, 2}, [3]int64{4, 4, 0}
 		keyScope = nativeHistoricalConsensusKeyScope
@@ -125,6 +125,10 @@ func exportNativeConsensusDaemonFixture(t *testing.T, e isolatedBackendEnv, dir 
 	if os.Getenv(nativeCustomCollateralGenesisPhaseEnv) == "seed" {
 		require.True(t, historical)
 		custom = seedNativeCustomCollateralGenesis(t, e, profile, gov)
+		if os.Getenv(nativeCustomNFTPhaseEnv) == "seed" {
+			require.NotNil(t, nft)
+			nft.mintCustom(t, e, custom, actor)
+		}
 	}
 	config, err := json.Marshal(profile)
 	require.NoError(t, err)
