@@ -3,6 +3,7 @@ package settlement
 import (
 	"bytes"
 	"errors"
+	"fmt"
 	"math/big"
 
 	sdk "github.com/cosmos/cosmos-sdk/types"
@@ -39,7 +40,7 @@ func (e *Executor) verifyPenalizedDELWithdrawalReceipt(ctx sdk.Context, receipt 
 	logs := receipt.Logs
 	if len(logs) == 4 {
 		if err := e.verifyDELReserveAcknowledgement(logs[0], withdrawal.Validator, withdrawal.PenaltyCursor); err != nil {
-			return nil, err
+			return nil, fmt.Errorf("penalized DEL withdrawal has an %w", err)
 		}
 		logs = logs[1:]
 	}
@@ -55,7 +56,7 @@ func (e *Executor) verifyDELReserveAcknowledgement(log *ethtypes.Log, validator 
 	}
 	if log.Address != e.roles.Gateway || len(log.Topics) != 2 || log.Topics[0] != ack.ID ||
 		log.Topics[1] != common.BytesToHash(validator[:]) || !bytes.Equal(log.Data, data) {
-		return errors.New("invalid aggregate DEL penalty acknowledgement")
+		return errors.New("invalid aggregate penalty acknowledgement")
 	}
 	return nil
 }
