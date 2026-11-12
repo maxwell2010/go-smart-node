@@ -12,6 +12,14 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+func requireNFTHistoricalPenaltyPlan(t *testing.T, want, got NFTHistoricalPenaltyPlan) {
+	t.Helper()
+	require.Equal(t, want.Eligible, got.Eligible)
+	require.True(t, want.Before.Equal(got.Before), "reserve before penalty: want %s, got %s", want.Before, got.Before)
+	require.True(t, want.Loss.Equal(got.Loss), "penalty loss: want %s, got %s", want.Loss, got.Loss)
+	require.True(t, want.Remaining.Equal(got.Remaining), "reserve after penalty: want %s, got %s", want.Remaining, got.Remaining)
+}
+
 func TestGatewayNFTHistoricalPenaltyPlansExactExposure(t *testing.T) {
 	ctx, k, companion := delProvenanceGenesis(t)
 	ctx = ctx.WithBlockHeight(10).WithBlockTime(time.Unix(2010, 0).UTC())
@@ -32,13 +40,13 @@ func TestGatewayNFTHistoricalPenaltyPlansExactExposure(t *testing.T) {
 	eligible := NFTHistoricalPenaltyPlan{Before: sdkmath.NewInt(101), Eligible: true, Loss: sdkmath.NewInt(5), Remaining: sdkmath.NewInt(96)}
 	plan, err := k.PlanActiveNFTHistoricalPenalty(ctx, active, 11)
 	require.NoError(t, err)
-	require.Equal(t, eligible, plan)
+	requireNFTHistoricalPenaltyPlan(t, eligible, plan)
 	plan, err = k.PlanActiveNFTHistoricalPenalty(ctx, active, 10)
 	require.NoError(t, err)
-	require.Equal(t, NFTHistoricalPenaltyPlan{Before: eligible.Before, Loss: sdkmath.ZeroInt(), Remaining: eligible.Before}, plan)
+	requireNFTHistoricalPenaltyPlan(t, NFTHistoricalPenaltyPlan{Before: eligible.Before, Loss: sdkmath.ZeroInt(), Remaining: eligible.Before}, plan)
 	plan, err = k.PlanActiveNFTHistoricalPenalty(ctx, late, 10)
 	require.NoError(t, err)
-	require.Equal(t, NFTHistoricalPenaltyPlan{Before: sdkmath.NewInt(19), Loss: sdkmath.ZeroInt(), Remaining: sdkmath.NewInt(19)}, plan)
+	requireNFTHistoricalPenaltyPlan(t, NFTHistoricalPenaltyPlan{Before: sdkmath.NewInt(19), Loss: sdkmath.ZeroInt(), Remaining: sdkmath.NewInt(19)}, plan)
 	_, err = k.PlanActiveNFTHistoricalPenalty(ctx, active, 12)
 	require.ErrorContains(t, err, "invalid NFT infraction height")
 	stale := active
@@ -68,7 +76,7 @@ func TestGatewayNFTHistoricalPenaltyPlansExactExposure(t *testing.T) {
 	ctx = ctx.WithBlockHeight(12).WithBlockTime(time.Unix(2012, 0).UTC())
 	plan, err = k.PlanActiveNFTHistoricalPenalty(ctx, late, 12)
 	require.NoError(t, err)
-	require.Equal(t, NFTHistoricalPenaltyPlan{Before: sdkmath.NewInt(19), Eligible: true, Loss: sdkmath.ZeroInt(), Remaining: sdkmath.NewInt(19)}, plan)
+	requireNFTHistoricalPenaltyPlan(t, NFTHistoricalPenaltyPlan{Before: sdkmath.NewInt(19), Eligible: true, Loss: sdkmath.ZeroInt(), Remaining: sdkmath.NewInt(19)}, plan)
 	first.Companion.NFTBacked = sdkmath.NewInt(19)
 	index := common.Hash{31: 7}
 	require.NoError(t, k.ApplyGatewayNFTWithdrawal(ctx, first, index, time.Unix(2030, 0).UTC()))
@@ -87,9 +95,9 @@ func TestGatewayNFTHistoricalPenaltyPlansExactExposure(t *testing.T) {
 		plan, err := k.PlanFrozenNFTHistoricalPenalty(ctx, frozen, test.height)
 		require.NoError(t, err)
 		if test.eligible {
-			require.Equal(t, eligible, plan)
+			requireNFTHistoricalPenaltyPlan(t, eligible, plan)
 		} else {
-			require.Equal(t, NFTHistoricalPenaltyPlan{Before: eligible.Before, Loss: sdkmath.ZeroInt(), Remaining: eligible.Before}, plan)
+			requireNFTHistoricalPenaltyPlan(t, NFTHistoricalPenaltyPlan{Before: eligible.Before, Loss: sdkmath.ZeroInt(), Remaining: eligible.Before}, plan)
 		}
 	}
 	child, _ = ctx.CacheContext()
@@ -110,5 +118,5 @@ func TestGatewayNFTHistoricalPenaltyReadsSurvivingReserveAfterProjection(t *test
 	require.NoError(t, err)
 	plan, err := k.PlanActiveNFTHistoricalPenalty(ctx, row, 11)
 	require.NoError(t, err)
-	require.Equal(t, NFTHistoricalPenaltyPlan{Before: penalty.RemainingReserve, Eligible: true, Loss: sdkmath.ZeroInt(), Remaining: penalty.RemainingReserve}, plan)
+	requireNFTHistoricalPenaltyPlan(t, NFTHistoricalPenaltyPlan{Before: penalty.RemainingReserve, Eligible: true, Loss: sdkmath.ZeroInt(), Remaining: penalty.RemainingReserve}, plan)
 }
