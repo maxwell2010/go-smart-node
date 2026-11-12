@@ -163,7 +163,10 @@ func (e *Executor) appendMasterPenalty(ctx sdk.Context, proof MasterPenaltyProof
 	status := common.BytesToHash(state[:common.HashLength])
 	paused := common.BytesToHash(state[common.HashLength : 2*common.HashLength])
 	if (status != smallWord(1) && status != smallWord(2)) || (paused != (common.Hash{}) && (!historical || paused != smallWord(1))) {
-		return errors.New("Master penalty requires an eligible candidate or approved validator")
+		if !historical {
+			return errors.New("Master penalty requires an unpaused candidate or approved validator")
+		}
+		return errors.New("historical Master penalty requires an eligible candidate or approved validator")
 	}
 	proof.BeforeCursor = common.BytesToHash(state[2*common.HashLength:])
 	next := new(big.Int).Add(proof.BeforeCursor.Big(), big.NewInt(1))
