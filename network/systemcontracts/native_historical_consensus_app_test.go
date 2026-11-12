@@ -287,10 +287,10 @@ func (l nativeHistoricalLifecycle) signedGateway(method string, value sdkmath.In
 		Value: value.BigInt(), Gas: 24_000_000, GasPrice: big.NewInt(1_000_000_000_000), Data: data})
 	signed, err := ethtypes.SignTx(raw, signer, privateKey)
 	require.NoError(t, err)
-	l.submitSignedEthereum(signed)
+	return l.submitSignedEthereum(signed)
 }
 
-func (l nativeHistoricalLifecycle) submitSignedEthereum(signed *ethtypes.Transaction) {
+func (l nativeHistoricalLifecycle) submitSignedEthereum(signed *ethtypes.Transaction) *abci.ResponseFinalizeBlock {
 	t := l.t
 	t.Helper()
 	msg := &evmtypes.MsgEthereumTx{}
