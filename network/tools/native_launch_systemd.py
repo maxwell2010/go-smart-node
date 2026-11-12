@@ -2,12 +2,14 @@
 
 from contextlib import nullcontext
 import hashlib
+import json
 import os
 from pathlib import Path
 import shutil
 import stat
 import subprocess
 import tempfile
+import time
 import uuid
 
 from mcnd_process_smoke import private_namespace
@@ -16,6 +18,35 @@ from mcnd_process_smoke import private_namespace
 def digest(path):
     with Path(path).open("rb") as stream:
         return hashlib.file_digest(stream, "sha256").hexdigest()
+
+
+def home_records(home):
+    records = {}
+    for path in (home, *sorted(home.rglob("*"))):
+        metadata = path.lstat()
+        if not (stat.S_ISDIR(metadata.st_mode) or stat.S_ISREG(metadata.st_mode)):
+            raise RuntimeError("unexpected file type in the offline follower home")
+        records[path.relative_to(home).as_posix()] = (
+            metadata.st_uid, metadata.st_gid, stat.S_IMODE(metadata.st_mode),
+            digest(path) if stat.S_ISREG(metadata.st_mode) else None,
+        )
+    return records
+
+
+def home_digest(records):
+    return hashlib.sha256(json.dumps(records, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
+
+
+def copy_offline_home(source, target):
+    records = home_records(source)
+    shutil.copytree(source, target)
+    for relative, (uid, gid, mode, _) in records.items():
+        path = target / relative
+        os.chown(path, uid, gid, follow_symlinks=False)
+        path.chmod(mode)
+    if home_records(target) != records:
+        raise RuntimeError("offline follower home copy differs from its source")
+    return home_digest(records)
 
 
 class SystemdFollower:
@@ -81,6 +112,11 @@ class SystemdFollower:
         with path.open("x"):
             path.chmod(0o600)
         os.chown(path, self.user.pw_uid, self.user.pw_gid, follow_symlinks=False)
+        self.args, self.log, self.gomaxprocs = tuple(args), path, env['GOMAXPROCS']
+        self._start()
+        return self
+
+    def _start(self):
         guard = self.signals.finish_owned_operation() if self.signals else nullcontext()
         with guard:
             self.submitted = True
@@ -88,14 +124,86 @@ class SystemdFollower:
                 "systemd-run", "--system", "--quiet", "--collect", f"--unit={self.unit}", "--service-type=exec",
                 f"--property=User={self.user.pw_name}", f"--property=Group={self.user.pw_gid}",
                 f"--property=NetworkNamespacePath={self.namespace_path}", f"--property=WorkingDirectory={self.home}",
-                f"--property=StandardOutput=append:{path}", "--property=StandardError=inherit",
+                f"--property=StandardOutput=append:{self.log}", "--property=StandardError=inherit",
                 "--property=NoNewPrivileges=yes", "--property=UMask=0077", "--property=KillSignal=SIGINT",
                 "--property=TimeoutStartSec=15s", "--property=TimeoutStopSec=20s", "--property=RuntimeMaxSec=10min",
-                f"--setenv=HOME={self.home}", f"--setenv=GOMAXPROCS={env['GOMAXPROCS']}", "--", *args,
+                f"--setenv=HOME={self.home}", f"--setenv=GOMAXPROCS={self.gomaxprocs}", "--", *self.args,
             ], capture_output=True, text=True, timeout=25)
             if result.returncode:
                 raise RuntimeError(f"could not start transient systemd follower: {result.stderr.strip()[:300]}")
-        return self
+
+    def _stop(self, *, require_unloaded=False):
+        if not self.submitted:
+            return
+        subprocess.run(["systemctl", "--system", "--quiet", "stop", self.unit],
+                       capture_output=True, text=True, timeout=30)
+        deadline = time.monotonic() + 10
+        while True:
+            props = self._properties("LoadState", "ActiveState", "MainPID")
+            if props.get("LoadState") == "not-found" or (not require_unloaded and
+                props.get("ActiveState") in ("inactive", "failed") and int(props.get("MainPID", "0")) == 0
+            ):
+                self.submitted = False
+                return
+            if time.monotonic() >= deadline:
+                raise RuntimeError("transient follower service did not stop and unload")
+            time.sleep(0.2)
+
+    def _replace_binary(self, source, expected_sha256):
+        staged = Path(self.binary).with_name("mcnd.next")
+        with Path(source).open("rb") as original, staged.open("xb") as replacement:
+            shutil.copyfileobj(original, replacement)
+        if digest(staged) != expected_sha256:
+            raise RuntimeError("staged binary SHA256 differs from the signed package or backup")
+        staged.chmod(0o755)
+        staged.replace(self.binary)
+        self.expected_sha256 = expected_sha256
+
+    def _transition_evidence(self, previous):
+        current = self.evidence()
+        if current["mainPid"] == previous["mainPid"] or current["invocationId"] == previous["invocationId"]:
+            raise RuntimeError("package transition did not start a new follower invocation")
+        return {"previousMainPid": previous["mainPid"], "restartedMainPid": current["mainPid"],
+                "previousInvocationId": previous["invocationId"], "restartedInvocationId": current["invocationId"],
+                "previousBinarySha256": previous["binarySha256"], "binarySha256": current["binarySha256"],
+                "backupHomeSha256": self.backup_home_sha256, "backupBinarySha256": self.backup_binary_sha256,
+                "sameHome": True}
+
+    def upgrade(self, binary, expected_sha256):
+        private_namespace()
+        previous = self.evidence()
+        if expected_sha256 == previous["binarySha256"] or digest(binary) != expected_sha256:
+            raise RuntimeError("upgrade requires a different verified binary")
+        self.backup = self.root / "backup"
+        self.backup.mkdir(mode=0o700)
+        previous_data = (self.home / "data").stat()
+        self._stop(require_unloaded=True)
+        self.backup_home_sha256 = copy_offline_home(self.home, self.backup / "home")
+        backup_binary = self.backup / "mcnd"
+        shutil.copyfile(self.binary, backup_binary)
+        self.backup_binary_sha256 = digest(backup_binary)
+        if self.backup_binary_sha256 != previous["binarySha256"]:
+            raise RuntimeError("backup binary differs from the original signed package")
+        self._replace_binary(binary, expected_sha256)
+        self._start()
+        if not os.path.samestat(previous_data, (self.home / "data").stat()):
+            raise RuntimeError("upgrade changed the follower data directory")
+        return self._transition_evidence(previous)
+
+    def rollback(self):
+        private_namespace()
+        previous = self.evidence()
+        if previous["binarySha256"] == self.backup_binary_sha256:
+            raise RuntimeError("rollback requires the upgraded follower")
+        self._stop(require_unloaded=True)
+        restored = self.root / "restored-home"
+        if copy_offline_home(self.backup / "home", restored) != self.backup_home_sha256:
+            raise RuntimeError("restored follower home differs from the offline backup")
+        self.home.rename(self.root / "upgraded-home")
+        restored.rename(self.home)
+        self._replace_binary(self.backup / "mcnd", self.backup_binary_sha256)
+        self._start()
+        return self._transition_evidence(previous)
 
     def poll(self):
         props = self._properties("ActiveState", "MainPID")
@@ -153,12 +261,5 @@ class SystemdFollower:
     def __exit__(self, *_):
         guard = self.signals.finish_owned_operation() if self.signals else nullcontext()
         with guard:
-            if self.submitted:
-                subprocess.run(["systemctl", "--system", "--quiet", "stop", self.unit],
-                               capture_output=True, text=True, timeout=30)
-                props = self._properties("LoadState", "ActiveState", "MainPID")
-                if props.get("LoadState") != "not-found" and not (
-                    props.get("ActiveState") in ("inactive", "failed") and int(props.get("MainPID", "0")) == 0
-                ):
-                    raise RuntimeError("transient follower service did not stop")
+            self._stop()
             shutil.rmtree(self.root)

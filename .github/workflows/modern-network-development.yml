@@ -35,6 +35,10 @@ on:
         description: Restart the systemd follower and restore a separate peer from a P2P snapshot
         default: false
         type: boolean
+      systemd_upgrade_rollback:
+        description: Upgrade the systemd follower from a new signed package and restore its offline backup
+        default: false
+        type: boolean
   push:
     branches: ['integration/**', 'release/**']
     paths: ['network/**', '.github/workflows/modern-network-development.yml']
@@ -117,7 +121,7 @@ jobs:
           timeout 150 gh run download "$SYSTEMD_PACKAGE_RUN" --repo "$GITHUB_REPOSITORY" \
             --pattern 'mcnd-signed-test-launch-*' --dir "$RUNNER_TEMP/mcnd-systemd-download"
       - name: Rehearse fresh launch using the exact packaged daemon
-        if: inputs.launch_rehearsal || inputs.launch_four_validators || inputs.launch_treasury || inputs.launch_signed_package || inputs.systemd_package_run
+        if: inputs.launch_rehearsal || inputs.launch_four_validators || inputs.launch_treasury || inputs.launch_signed_package || inputs.systemd_package_run || inputs.systemd_upgrade_rollback
         shell: bash
         env:
           LAUNCH_FOUR_VALIDATORS: ${{ inputs.launch_four_validators }}
@@ -127,6 +131,7 @@ jobs:
           SYSTEMD_PACKAGE_SHA256: ${{ inputs.systemd_package_sha256 }}
           SYSTEMD_PACKAGE_FINGERPRINT: ${{ inputs.systemd_package_fingerprint }}
           SYSTEMD_RESTART_SNAPSHOT: ${{ inputs.systemd_restart_snapshot }}
+          SYSTEMD_UPGRADE_ROLLBACK: ${{ inputs.systemd_upgrade_rollback }}
         run: |
           set -euo pipefail
           umask 077
@@ -143,6 +148,9 @@ jobs:
           if [[ "$SYSTEMD_RESTART_SNAPSHOT" == true ]]; then
             [[ -n "$SYSTEMD_PACKAGE_RUN" ]]
             launch_options+=(--restart-and-snapshot)
+          fi
+          if [[ "$SYSTEMD_UPGRADE_ROLLBACK" == true ]]; then
+            [[ -n "$SYSTEMD_PACKAGE_RUN" ]]
           fi
           if [[ "$LAUNCH_FOUR_VALIDATORS" == true || "$LAUNCH_TREASURY" == true || "$LAUNCH_SIGNED_PACKAGE" == true || -n "$SYSTEMD_PACKAGE_RUN" ]]; then
             export MCND_NATIVE_LAUNCH_REHEARSAL=4
@@ -198,33 +206,55 @@ jobs:
           if [[ -n "$SYSTEMD_PACKAGE_RUN" ]]; then
             launch_genesis="$verified_package/genesis.json"
           fi
-          if [[ "$LAUNCH_SIGNED_PACKAGE" == true ]]; then
+          if [[ "$LAUNCH_SIGNED_PACKAGE" == true || "$SYSTEMD_UPGRADE_ROLLBACK" == true ]]; then
+            signed_binary="$launch_binary"
+            signed_report="$evidence/package.json"
+            signed_extract="$launch_work/verified-package"
+            if [[ "$SYSTEMD_UPGRADE_ROLLBACK" == true ]]; then
+              signed_binary="$launch_work/mcnd-upgrade"
+              signed_report="$evidence/upgrade-package.json"
+              signed_extract="$launch_work/verified-upgrade"
+              [[ "$GITHUB_SHA" != "$launch_revision" ]]
+              (
+                cd network
+                go mod verify
+                go build -mod=readonly -tags= -p 2 -trimpath -ldflags "-X main.buildCommit=$GITHUB_SHA" \
+                  -o "$signed_binary" ./cmd/mcnd
+              )
+            fi
             signer_home=$(mktemp -d "$launch_work/gnupg.XXXXXXXX")
             gpg --homedir "$signer_home" --batch --no-tty --pinentry-mode loopback --passphrase '' \
               --quick-generate-key "MintCandy launch CI ${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}" ed25519 sign 0
             signer_fingerprint=$(gpg --homedir "$signer_home" --batch --with-colons --list-keys | awk -F: '$1 == "fpr" {print $10}')
             [[ "$signer_fingerprint" =~ ^[A-F0-9]{40}$ ]]
-            trusted_keyring="$launch_work/trusted-keyring.gpg"
+            trusted_keyring="$launch_work/new-signing-keyring.gpg"
             gpg --homedir "$signer_home" --batch --export "$signer_fingerprint" > "$trusted_keyring"
             printf 'Trusted test signing fingerprint: %s\n' "$signer_fingerprint"
             signed_archive="$evidence/mcnd-test-launch-linux-amd64.tar.gz"
-            verified_package="$launch_work/verified-package"
             python3 -B network/tools/native_launch_package.py build \
-              --binary "$launch_binary" --genesis "$launch_genesis" --source-commit "$GITHUB_SHA" \
+              --binary "$signed_binary" --genesis "$launch_genesis" --source-commit "$GITHUB_SHA" \
               --output "$signed_archive" --signer-home "$signer_home" --signer-fingerprint "$signer_fingerprint"
             python3 -B network/tools/native_launch_package.py verify \
               --archive "$signed_archive" --trusted-keyring "$trusted_keyring" --signer-fingerprint "$signer_fingerprint" \
-              --output-dir "$verified_package" > "$evidence/package.json"
-            launch_binary="$verified_package/bin/mcnd"
-            archive_sha=$(sha256sum "$signed_archive" | awk '{print $1}')
+              --output-dir "$signed_extract" > "$signed_report"
+            signed_archive_sha=$(sha256sum "$signed_archive" | awk '{print $1}')
+            signed_binary_sha=$(sha256sum "$signed_binary" | awk '{print $1}')
             genesis_sha=$(sha256sum "$launch_genesis" | awk '{print $1}')
-            jq -e --arg commit "$GITHUB_SHA" --arg signer "$signer_fingerprint" --arg binary "$binary_sha" \
-              --arg genesis "$genesis_sha" --arg archive "$archive_sha" \
+            jq -e --arg commit "$GITHUB_SHA" --arg signer "$signer_fingerprint" --arg binary "$signed_binary_sha" \
+              --arg genesis "$genesis_sha" --arg archive "$signed_archive_sha" \
               '.sourceCommit == $commit and .signerFingerprint == $signer and .binarySha256 == $binary and
-               .genesisSha256 == $genesis and .archiveSha256 == $archive' "$evidence/package.json" > /dev/null
-            cat "$evidence/package.json"
-            launch_genesis="$verified_package/genesis.json"
-            launch_options+=(--package-genesis "$launch_genesis")
+               .genesisSha256 == $genesis and .archiveSha256 == $archive' "$signed_report" > /dev/null
+            cat "$signed_report"
+            if [[ "$SYSTEMD_UPGRADE_ROLLBACK" == true ]]; then
+              [[ "$signed_archive_sha" != "$archive_sha" && "$signed_binary_sha" != "$binary_sha" ]]
+              launch_options+=(--upgrade-package "$signed_extract" --upgrade-package-report "$signed_report")
+            else
+              [[ "$signed_binary_sha" == "$binary_sha" ]]
+              launch_binary="$signed_extract/bin/mcnd"
+              archive_sha="$signed_archive_sha"
+              launch_genesis="$signed_extract/genesis.json"
+              launch_options+=(--package-genesis "$launch_genesis")
+            fi
           fi
           launch_status=0
           sudo -n unshare --net -- bash -euc 'ip link set lo up; exec "$@"' _ \
@@ -249,9 +279,10 @@ jobs:
             ${{ runner.temp }}/mcnd-launch-evidence/allocation.json
             ${{ runner.temp }}/mcnd-launch-evidence/network.json
             ${{ runner.temp }}/mcnd-launch-evidence/package.json
+            ${{ runner.temp }}/mcnd-launch-evidence/upgrade-package.json
           retention-days: 14
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
-        if: inputs.launch_signed_package
+        if: inputs.launch_signed_package || inputs.systemd_upgrade_rollback
         with:
           name: mcnd-signed-test-launch-${{ github.sha }}-${{ github.run_attempt }}
           path: ${{ runner.temp }}/mcnd-launch-evidence/mcnd-test-launch-linux-amd64.tar.gz

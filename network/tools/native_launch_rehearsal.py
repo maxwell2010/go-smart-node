@@ -267,22 +267,16 @@ def wait_caught_up(node):
     return status
 
 
-def verify_systemd_restart(systemd, follower, validators, expected, report):
-    report["phase"] = "systemd-follower-restart"
-    before = int(follower.rpc("abci_info")["response"]["last_block_height"])
-    check(before > 0, "systemd follower must commit state before restarting")
-    message = "ABCI Handshake App Info"
-    previous_handshakes = len(log_records(follower.log, message))
-    check(previous_handshakes > 0, "systemd follower has no startup handshake record")
-    restart = systemd.restart()
+def verify_follower_resume(follower, validators, expected, report, previous_handshakes, minimum_loaded,
+                           minimum_height=0):
     wait_peer_pair(validators[0], follower, 60, report)
-    handshakes = log_records(follower.log, message)[previous_handshakes:]
-    check(len(handshakes) == 1, "restart must produce one new application handshake")
+    handshakes = log_records(follower.log, "ABCI Handshake App Info")[previous_handshakes:]
+    check(len(handshakes) == 1, "service startup must produce one new application handshake")
     loaded = int(handshakes[0]["height"])
-    check(loaded >= before, "restarted follower did not load its previously committed application state")
+    check(loaded >= minimum_loaded > 0, "follower did not load its previously committed application state")
 
     nodes = [*validators, follower]
-    height = wait_replicas(nodes, loaded + 4, 100, report) - 1
+    height = wait_replicas(nodes, max(loaded + 4, minimum_height + 1), 100, report) - 1
     loaded_hash = committed_header(validators, loaded + 1)["app_hash"]
     check(handshakes[0]["hash"].upper() == loaded_hash.upper(), "restarted follower loaded a different AppHash")
     status = wait_caught_up(follower)
@@ -292,13 +286,50 @@ def verify_systemd_restart(systemd, follower, validators, expected, report):
     app_hash = committed_header(nodes, height + 1)["app_hash"]
     values = {balance(expected["actor"], expected["actorNative"], height, node.evm, node.rest) for node in nodes}
     check(len(values) == 1 and next(iter(values)) > 0, "restarted follower disagrees on the committed DEL balance")
-    report["systemdRestart"] = {**restart, "beforeHeight": before, "loadedHeight": loaded, "loadedAppHash": loaded_hash,
-                                "verifiedHeight": height, "appHash": app_hash, "sameNodeId": True, "catchingUp": False}
-    return height
+    return {"loadedHeight": loaded, "loadedAppHash": loaded_hash, "verifiedHeight": height,
+            "appHash": app_hash, "sameNodeId": True, "catchingUp": False}
+
+
+def verify_systemd_restart(systemd, follower, validators, expected, report):
+    report["phase"] = "systemd-follower-restart"
+    before = int(follower.rpc("abci_info")["response"]["last_block_height"])
+    previous_handshakes = len(log_records(follower.log, "ABCI Handshake App Info"))
+    check(before > 0 and previous_handshakes > 0, "systemd follower must commit state before restarting")
+    restart = systemd.restart()
+    synced = verify_follower_resume(follower, validators, expected, report, previous_handshakes, before)
+    report["systemdRestart"] = {**restart, "beforeHeight": before, **synced}
+    return synced["verifiedHeight"]
+
+
+def verify_systemd_upgrade(systemd, follower, validators, expected, genesis, upgrade_binary, report):
+    report["phase"] = "systemd-follower-upgrade"
+    before = int(follower.rpc("abci_info")["response"]["last_block_height"])
+    previous_handshakes = len(log_records(follower.log, "ABCI Handshake App Info"))
+    check(before > 0 and previous_handshakes > 0, "systemd follower must commit state before upgrading")
+    package = report["upgradePackage"]
+    genesis_path = follower.home / "config/genesis.json"
+    upgraded = systemd.upgrade(upgrade_binary, package["binarySha256"])
+    check(upgraded["binarySha256"] == package["binarySha256"] and upgraded["backupBinarySha256"] == report["binarySha256"],
+          "updated service or backup executable differs from its signed package")
+    check(private_bytes(genesis_path, GENESIS_LIMIT) == genesis, "upgrade changed the follower genesis")
+    synced = verify_follower_resume(follower, validators, expected, report, previous_handshakes, before)
+    report["systemdUpgrade"] = {**upgraded, "beforeHeight": before, **synced}
+
+    report["phase"] = "systemd-follower-rollback"
+    previous_handshakes = len(log_records(follower.log, "ABCI Handshake App Info"))
+    rollback = systemd.rollback()
+    check(rollback["binarySha256"] == report["binarySha256"] and rollback["backupHomeSha256"] == upgraded["backupHomeSha256"],
+          "rollback used a different executable or backup")
+    check(private_bytes(genesis_path, GENESIS_LIMIT) == genesis, "rollback changed the follower genesis")
+    restored = verify_follower_resume(follower, validators, expected, report, previous_handshakes, synced["loadedHeight"],
+                                      minimum_height=synced["verifiedHeight"] + 1)
+    check((restored["loadedHeight"], restored["loadedAppHash"]) == (synced["loadedHeight"], synced["loadedAppHash"]),
+          "rollback did not load the offline backup checkpoint")
+    report["systemdRollback"] = {**rollback, **restored}
 
 
 def run_launch(binary, root, genesis, expected, keys, env, owner, report, *, four_validators=False, treasury=None,
-               systemd=None, restart_snapshot=False):
+               systemd=None, restart_snapshot=False, upgrade_binary=None):
     rows = expected["validators"]
     powers = tuple(row["initialPower"] for row in rows)
     options = {"chain_id": expected["chainId"], "evm_chain_id": expected["evmChainId"]}
@@ -391,6 +422,8 @@ def run_launch(binary, root, genesis, expected, keys, env, owner, report, *, fou
         restarted_height = verify_systemd_restart(systemd, follower, live_validators, expected, report)
         rehearse_snapshot(follower_binary, root, genesis, expected, env, owner, report,
                           source=live_validators[0], witness=follower, replicas=nodes, minimum_height=restarted_height)
+    if upgrade_binary is not None:
+        verify_systemd_upgrade(systemd, follower, live_validators, expected, genesis, upgrade_binary, report)
 
 
 def main(argv=None, signals=None):
@@ -402,6 +435,8 @@ def main(argv=None, signals=None):
     parser.add_argument("--package-genesis", type=Path, help="use genesis extracted from the verified launch package")
     parser.add_argument("--systemd-follower", action="store_true", help="start the clean installed follower as a systemd service")
     parser.add_argument("--restart-and-snapshot", action="store_true", help="verify systemd restart and a fresh state-sync peer")
+    parser.add_argument("--upgrade-package", type=Path, help="verified replacement package directory")
+    parser.add_argument("--upgrade-package-report", type=Path, help="signature and checksum report for the replacement package")
     args = parser.parse_args(argv)
     if args.treasury_transfer and not args.four_validators:
         parser.error("--treasury-transfer requires --four-validators")
@@ -409,6 +444,8 @@ def main(argv=None, signals=None):
         parser.error("--systemd-follower requires --package-genesis")
     if args.restart_and_snapshot and not args.systemd_follower:
         parser.error("--restart-and-snapshot requires --systemd-follower")
+    if (args.upgrade_package is None) != (args.upgrade_package_report is None) or (args.upgrade_package and not args.systemd_follower):
+        parser.error("--upgrade-package and --upgrade-package-report require each other and --systemd-follower")
     report = {"status": "FAIL", "phase": "fixture-provenance", "initialHeight": 1}
     with Path(args.report).open("x", encoding="utf8") as stream:
         try:
@@ -432,6 +469,20 @@ def main(argv=None, signals=None):
                 env = private_environment(root)
                 version = json.loads(run_command(binary, root, ["version", "--long", "--output", "json"], env))
                 check(version["server_name"] == "mcnd" and version["commit"] == args.source_commit, "packaged daemon revision differs")
+                upgrade_binary = None
+                if args.upgrade_package:
+                    report["phase"] = "upgrade-package-provenance"
+                    package = json.loads(private_bytes(args.upgrade_package_report, 8192))
+                    upgrade_binary = str((args.upgrade_package / "bin/mcnd").resolve(strict=True))
+                    check(package["archiveSha256"] != args.archive_sha256 and package["binarySha256"] != args.binary_sha256 and
+                          package["sourceCommit"] != args.source_commit, "upgrade requires a distinct signed archive, binary and source revision")
+                    check(private_bytes(args.upgrade_package / "genesis.json", GENESIS_LIMIT) == genesis,
+                          "upgrade package genesis differs from the original signed package")
+                    with open(upgrade_binary, "rb") as daemon:
+                        check(hashlib.file_digest(daemon, "sha256").hexdigest() == package["binarySha256"], "upgrade binary hash differs")
+                    version = json.loads(run_command(upgrade_binary, root, ["version", "--long", "--output", "json"], env))
+                    check(version["server_name"] == "mcnd" and version["commit"] == package["sourceCommit"], "upgrade daemon revision differs")
+                    report["upgradePackage"] = package
                 owner = ProcessOwner(signals)
                 try:
                     service = nullcontext()
@@ -443,7 +494,7 @@ def main(argv=None, signals=None):
                     with service as systemd:
                         run_launch(binary, root, genesis, expected, keys, env, owner, report,
                                    four_validators=args.four_validators, treasury=treasury, systemd=systemd,
-                                   restart_snapshot=args.restart_and_snapshot)
+                                   restart_snapshot=args.restart_and_snapshot, upgrade_binary=upgrade_binary)
                 finally:
                     owner.close()
             report.update(status="PASS", phase="complete")
