@@ -12,6 +12,7 @@ import (
 
 const (
 	nativeInfractionPrefix byte = 0x46
+	nativeActiveJailPrefix byte = 0x47
 	nativeDowntimeReason   byte = 1
 )
 
@@ -103,11 +104,66 @@ func (k *StateKeeper) ApplyNativeDowntimeOutcome(ctx sdk.Context, candidate Nati
 		data[0] = 1
 		binary.BigEndian.PutUint64(data[1:9], uint64(want.JailUntil.Unix()))
 		binary.BigEndian.PutUint32(data[9:], uint32(want.JailUntil.Nanosecond()))
-		if err := k.service.OpenKVStore(child).Set(key, data[:]); err != nil {
+		store := k.service.OpenKVStore(child)
+		if err := store.Set(key, data[:]); err != nil {
+			return err
+		}
+		active := append([]byte{nativeActiveJailPrefix}, want.ConsensusAddress...)
+		if err := store.Set(active, binary.BigEndian.AppendUint64(nil, uint64(want.InfractionHeight))); err != nil {
 			return err
 		}
 		commit()
 		return nil
 	}
 	return errors.New("native downtime outcome differs from the authenticated current candidate")
+}
+
+// ReleaseNativeDowntimeJail clears a matured native jail after the caller
+// verifies the operator's exact signed MasterValidator unpause and that its
+// positions have caught up. The historical infraction marker is retained.
+func (k *StateKeeper) ReleaseNativeDowntimeJail(ctx sdk.Context, operator string) error {
+	child, write := ctx.CacheContext()
+	validator, err := k.GetValidator(child, operator)
+	if err != nil {
+		return err
+	}
+	if !validator.Jailed {
+		return errors.New("operator has no active native jail")
+	}
+	consensus, err := validator.GetConsAddr()
+	if err != nil {
+		return err
+	}
+	store := k.service.OpenKVStore(child)
+	active := append([]byte{nativeActiveJailPrefix}, consensus...)
+	value, err := store.Get(active)
+	if err != nil {
+		return err
+	}
+	if len(value) != 8 {
+		return errors.New("active native jail has no downtime outcome reference")
+	}
+	outcome, err := k.GetNativeDowntimeOutcome(child, consensus, int64(binary.BigEndian.Uint64(value)))
+	if err != nil {
+		return err
+	}
+	if ctx.BlockTime().Before(outcome.JailUntil) {
+		return errors.New("native downtime jail period has not elapsed")
+	}
+	validator.Jailed = false
+	if err := k.SetValidator(child, validator); err != nil {
+		return err
+	}
+	window, err := operatorKey(signingWindowPrefix, operator)
+	if err != nil {
+		return err
+	}
+	if err := store.Delete(window); err != nil {
+		return err
+	}
+	if err := store.Delete(active); err != nil {
+		return err
+	}
+	write()
+	return nil
 }

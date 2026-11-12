@@ -244,6 +244,14 @@ func (c *withdrawalController) PostTxProcessing(ctx sdk.Context, sender common.A
 	if receipt == nil || receipt.Status != ethtypes.ReceiptStatusSuccessful {
 		return nil
 	}
+	if c.profile.EnableNativeOrdinaryDELDowntime && msg.To != nil && *msg.To == c.profile.MasterValidator {
+		if sender != msg.From {
+			return errors.New("native unjail requires the authenticated transaction sender")
+		}
+		return c.projectAndCheckConsensus(ctx, func(child sdk.Context) error {
+			return c.projectDowntimeUnjail(child, msg, receipt)
+		})
+	}
 	managed, completion := c.withdrawalActivity(ctx, msg, receipt.Logs)
 	if c.profile.EnableNativeConsensus && (msg.To == nil || *msg.To != c.profile.Gateway || !managed) {
 		return errors.New("isolated native consensus admits only the approved Gateway EVM transactions")

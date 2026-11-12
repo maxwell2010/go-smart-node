@@ -142,4 +142,15 @@ func TestNativeDowntimeOutcomeIsAtomicAndRemovalTakesEffectAtHPlusTwo(t *testing
 		require.Equal(t, set.Hash(), info.Header.ValidatorsHash)
 	}
 	require.ErrorIs(t, k.ApplyNativeDowntimeOutcome(h2, candidate), ErrNativeDowntimeAlreadyApplied)
+	release := h2.WithBlockHeight(5).WithBlockTime(outcome.JailUntil)
+	require.ErrorContains(t, k.ReleaseNativeDowntimeJail(release.WithBlockTime(outcome.JailUntil.Add(-time.Nanosecond)), operator), "has not elapsed")
+	require.NoError(t, k.ReleaseNativeDowntimeJail(release, operator))
+	recovered, err := k.GetValidator(release, operator)
+	require.NoError(t, err)
+	require.False(t, recovered.Jailed)
+	_, err = k.GetSigningWindow(release, operator)
+	require.ErrorIs(t, err, ErrNotFound)
+	historical, err := k.GetNativeDowntimeOutcome(release, consensus, candidate.InfractionHeight)
+	require.NoError(t, err)
+	require.Equal(t, outcome, historical)
 }

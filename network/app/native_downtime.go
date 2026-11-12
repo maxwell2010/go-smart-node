@@ -220,3 +220,22 @@ func (c *withdrawalController) projectPenalizedDELWithdrawal(ctx sdk.Context, ms
 	next.PenaltyCursor = transition.PenaltyCursor
 	return true, c.keeper.ApplyPenalizedGatewayDELWithdrawal(ctx, next, transition.FrozenIndex, transition.Amount, transition.Deadline)
 }
+
+func (c *withdrawalController) projectDowntimeUnjail(ctx sdk.Context, msg core.Message, receipt *ethtypes.Receipt) error {
+	cursor, err := c.executor.VerifySignedDowntimeUnjail(ctx, msg, receipt)
+	if err != nil {
+		return err
+	}
+	if err := c.keeper.RequireActiveStakePenaltyCatchup(ctx, msg.From[:], cursor[:]); err != nil {
+		return err
+	}
+	operator, err := c.keeper.ValidatorAddressCodec().BytesToString(msg.From[:])
+	if err != nil {
+		return err
+	}
+	if err := c.keeper.ReleaseNativeDowntimeJail(ctx, operator); err != nil {
+		return err
+	}
+	ctx.EventManager().EmitEvent(sdk.NewEvent("decimal_native_downtime_unjailed", sdk.NewAttribute("operator", operator)))
+	return nil
+}
