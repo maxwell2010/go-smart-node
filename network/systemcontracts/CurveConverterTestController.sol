@@ -11,6 +11,8 @@ contract CurveConverterTestController {
     address private immutable OWNER;
     IOrdinaryCurveConverter private immutable CONVERTER;
     bool public rejectNative;
+    mapping(address => mapping(address => uint256)) public delegated;
+    error DelegationRejected();
     constructor(address owner, address converter) {
         require(owner != address(0) && converter != address(0));
         OWNER = owner;
@@ -26,6 +28,11 @@ contract CurveConverterTestController {
         require(IERC20(token).approve(address(CONVERTER), amount));
         CONVERTER.convert(token, amount, minimum, deadline);
         revert("ordinary late financial rejection");
+    }
+    function delegateDELTo(address delegator, address validator) external payable {
+        require(msg.sender == address(CONVERTER), "fixture converter required");
+        delegated[delegator][validator] += msg.value;
+        if (rejectNative) revert DelegationRejected();
     }
     receive() external payable { require(!rejectNative, "ordinary native recipient rejection"); }
 }
