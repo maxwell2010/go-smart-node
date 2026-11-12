@@ -25,6 +25,7 @@ import (
 
 const nativeConsensusUpgradeGovernanceEnv = "MCND_NATIVE_CONSENSUS_UPGRADE_GOVERNANCE"
 const nativeConsensusFullUpgradeEnv = "MCND_NATIVE_CONSENSUS_FULL_PROFILE_UPGRADE"
+const nativeConsensusPendingIBCUpgradeEnv = "MCND_NATIVE_CONSENSUS_UPGRADE_PENDING_IBC"
 
 func nativeGovernanceUpgradeFixture(t *testing.T, e isolatedBackendEnv, genesis map[string]json.RawMessage, fullUpgrade bool) []byte {
 	t.Helper()
@@ -87,32 +88,48 @@ func nativeGovernanceUpgradeFixture(t *testing.T, e isolatedBackendEnv, genesis 
 	}
 
 	const planName = "mintcandy-native-sdk-migrations-v1"
+	build := func(height int64) map[string]any {
+		sequence = actor.GetSequence()
+		metadata := fmt.Sprintf(`mintcandy-sdk-upgrade/v1:{"name":"%s","height":%d}`, planName, height)
+		propose := func(title string) sdk.Msg {
+			t.Helper()
+			msg, err := govv1.NewMsgSubmitProposal(nil, deposit, address.String(), metadata, title,
+				"Execute the registered SDK migration handler in the isolated network.", false)
+			require.NoError(t, err)
+			return msg
+		}
+		rejected, passed := gov.StartingProposalId, gov.StartingProposalId+1
+		rejectedProposal := sign(propose("Reject SDK migration"))
+		rejectedVote := sign(govv1.NewMsgVote(address, rejected, govv1.OptionNo, ""))
+		passedProposal := sign(propose("Approve SDK migration"))
+		passedVote := sign(govv1.NewMsgVote(address, passed, govv1.OptionYes, ""))
+		return map[string]any{
+			"planName": planName, "planHeight": height, "metadata": metadata, "actorNative": address.String(),
+			"accountNumber": actor.GetAccountNumber(), "sequence": actor.GetSequence(), "depositAtomic": deposit[0].Amount.String(),
+			"rejectedID": rejected, "passedID": passed,
+			"rejectedProposal": rejectedProposal, "rejectedVote": rejectedVote,
+			"passedProposal": passedProposal, "passedVote": passedVote,
+		}
+	}
+	if os.Getenv(nativeConsensusPendingIBCUpgradeEnv) == "1" {
+		require.True(t, fullUpgrade, "pending IBC upgrade requires the full native profile")
+		// Select one signed plan after the real handshake. Each alternative
+		// has the same sequence so only one can be used by this disposable chain.
+		plans := make([]map[string]any, 0, 21)
+		for height := int64(48); height <= 208; height += 8 {
+			plans = append(plans, build(height))
+		}
+		data, err := json.Marshal(plans)
+		require.NoError(t, err)
+		return data
+	}
 	height := ctx.BlockHeight() + 32
 	if fullUpgrade {
 		// Give the genesis-at-height-one fixture time to commit the signed
 		// withdrawal after approval and still finish before the handoff.
 		height = 32
 	}
-	metadata := fmt.Sprintf(`mintcandy-sdk-upgrade/v1:{"name":"%s","height":%d}`, planName, height)
-	propose := func(title string) sdk.Msg {
-		t.Helper()
-		msg, err := govv1.NewMsgSubmitProposal(nil, deposit, address.String(), metadata, title,
-			"Execute the registered SDK migration handler in the isolated network.", false)
-		require.NoError(t, err)
-		return msg
-	}
-	rejected, passed := gov.StartingProposalId, gov.StartingProposalId+1
-	rejectedProposal := sign(propose("Reject SDK migration"))
-	rejectedVote := sign(govv1.NewMsgVote(address, rejected, govv1.OptionNo, ""))
-	passedProposal := sign(propose("Approve SDK migration"))
-	passedVote := sign(govv1.NewMsgVote(address, passed, govv1.OptionYes, ""))
-	expectations, err := json.Marshal(map[string]any{
-		"planName": planName, "planHeight": height, "metadata": metadata, "actorNative": address.String(),
-		"accountNumber": actor.GetAccountNumber(), "sequence": actor.GetSequence(), "depositAtomic": deposit[0].Amount.String(),
-		"rejectedID": rejected, "passedID": passed,
-		"rejectedProposal": rejectedProposal, "rejectedVote": rejectedVote,
-		"passedProposal": passedProposal, "passedVote": passedVote,
-	})
+	expectations, err := json.Marshal(build(height))
 	require.NoError(t, err)
 	return expectations
 }

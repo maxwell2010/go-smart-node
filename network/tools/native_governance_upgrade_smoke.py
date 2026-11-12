@@ -29,7 +29,7 @@ TX_FAILURES = ('account sequence mismatch', 'incorrect account sequence', 'signa
                'not in voting period', 'circuit breaker', 'native sdk upgrade proposal')
 
 
-def load_governance_fixture(directory, *, full_profile=False):
+def load_governance_fixture(directory, *, full_profile=False, pending_ibc=False):
     expected, genesis, keys, initial = load_fixture(
         directory, fee_rewards=full_profile, downtime=False, jail_recovery=False, held_downtime=False,
         nft_downtime=False, full_upgrade=full_profile)
@@ -39,17 +39,45 @@ def load_governance_fixture(directory, *, full_profile=False):
           'fixture must explicitly enable native upgrade governance')
     check(not any(doc['gov'].get(name) for name in ('proposals', 'votes', 'deposits')),
           'fixture must begin with fresh governance state')
-    action = json.loads(private_bytes(directory / 'governance.json', 8192))
+    payload = json.loads(private_bytes(directory / 'governance.json', 65536 if pending_ibc else 8192))
+    actions = payload if pending_ibc else [payload]
+    if pending_ibc:
+        check([action['planHeight'] for action in actions] == list(range(48, 209, 8)), 'unexpected signed plan height grid')
+    for action in actions:
+        validate_signed_plan(action, expected['actorNative'], doc['gov'], initial)
+        check(action['sequence'] == actions[0]['sequence'] and action['accountNumber'] == actions[0]['accountNumber'],
+              'signed plans must share the same initial actor state')
+    if full_profile:
+        check(initial == 1 and all(profile.get(flag) is True for flag in (
+            'enable_native_duplicate_vote', 'enable_native_ibc_v1', 'enable_del_hold', 'enable_del_hold_reset',
+            'enable_nft_delegation',
+        )), 'combined fixture requires a fresh historical profile with native IBC, hold and NFT admission')
+        claim = expected['upgradeWithdrawal']
+        first = expected['validators'][0]
+        check(claim['validator'].lower() == first['evm'] and claim['validatorNative'] == first['operator'] and
+              claim['nonce'] == actions[0]['sequence'] + 4 and
+              int(claim['activeAtomic']) == 7 * ATOMS // 4 and int(claim['pendingAtomic']) == ATOMS // 4 and
+              len(claim['frozenData']) == 1 and re.fullmatch(r'0x[0-9a-f]{72}', claim['frozenData'][0]) and
+              re.fullmatch(WORD, claim['hash']) and re.fullmatch(r'0x(?:[0-9a-f]{2}){100,512}', claim['raw']),
+              'invalid signed full-profile withdrawal fixture')
+        claim['validator'] = first['evm']
+    else:
+        check('upgradeWithdrawal' not in expected and not profile.get('enable_native_duplicate_vote'),
+              'basic fixture must use its original profile')
+    return expected, genesis, keys, initial, actions
+
+
+def validate_signed_plan(action, actor, gov, initial):
     height = action['planHeight']
     check(action['planName'] == PLAN and type(height) is int and initial + 20 <= height < initial + MAX_BLOCKS - 4,
           'invalid fixture upgrade name or height')
     metadata = SCHEMA + ':' + json.dumps({'name': PLAN, 'height': height}, separators=(',', ':'))
-    check(action['metadata'] == metadata and action['actorNative'] == expected['actorNative'],
+    check(action['metadata'] == metadata and action['actorNative'] == actor,
           'fixture upgrade manifest or voter differs')
     rejected, passed = action['rejectedID'], action['passedID']
     check(type(rejected) is int and type(passed) is int and rejected > 0 and passed == rejected + 1 and
-          rejected == int(doc['gov']['starting_proposal_id']), 'invalid fixture proposal IDs')
-    check(action['depositAtomic'] == '1000000000000000000' and doc['gov']['params']['min_deposit'] ==
+          rejected == int(gov['starting_proposal_id']), 'invalid fixture proposal IDs')
+    check(action['depositAtomic'] == '1000000000000000000' and gov['params']['min_deposit'] ==
           [{'denom': 'del', 'amount': action['depositAtomic']}], 'fixture native governance deposit differs')
     for field in ('accountNumber', 'sequence'):
         check(type(action[field]) is int and 0 <= action[field] < 2**64 - 4, 'invalid fixture account sequence or number')
@@ -61,24 +89,6 @@ def load_governance_fixture(directory, *, full_profile=False):
               hashlib.sha256(raw).hexdigest() == signed['hash'], 'invalid signed Cosmos governance fixture transaction')
         hashes.add(signed['hash'])
     check(len(hashes) == 4, 'fixture signed Cosmos transactions must be distinct')
-    if full_profile:
-        check(initial == 1 and all(profile.get(flag) is True for flag in (
-            'enable_native_duplicate_vote', 'enable_native_ibc_v1', 'enable_del_hold', 'enable_del_hold_reset',
-            'enable_nft_delegation',
-        )), 'combined fixture requires a fresh historical profile with native IBC, hold and NFT admission')
-        claim = expected['upgradeWithdrawal']
-        first = expected['validators'][0]
-        check(claim['validator'].lower() == first['evm'] and claim['validatorNative'] == first['operator'] and
-              claim['nonce'] == action['sequence'] + len(hashes) and
-              int(claim['activeAtomic']) == 7 * ATOMS // 4 and int(claim['pendingAtomic']) == ATOMS // 4 and
-              len(claim['frozenData']) == 1 and re.fullmatch(r'0x[0-9a-f]{72}', claim['frozenData'][0]) and
-              re.fullmatch(WORD, claim['hash']) and re.fullmatch(r'0x(?:[0-9a-f]{2}){100,512}', claim['raw']),
-              'invalid signed full-profile withdrawal fixture')
-        claim['validator'] = first['evm']
-    else:
-        check('upgradeWithdrawal' not in expected and not profile.get('enable_native_duplicate_vote'),
-              'basic fixture must use its original profile')
-    return expected, genesis, keys, initial, action
 
 
 def check_tx_result(result, label, phase):
@@ -277,10 +287,28 @@ def check_pending_withdrawal(replicas, expected, height, due):
             'appHash': committed_header(replicas, height + 1)['app_hash']}
 
 
-def run_gate(args, binary, replacement, root, expected, genesis, keys, action, env, owner, report):
+def select_pending_plan(node, actions, report):
+    height = committed_height(node)
+    low = max(report['initialHeight'], height - 4)
+    check(height > low, 'not enough committed blocks to schedule upgrade after the handshake')
+    times = [datetime.fromisoformat(node.rpc(f'block?height={h}')['block']['header']['time'].replace('Z', '+00:00'))
+             for h in (low, height)]
+    seconds = (times[1] - times[0]).total_seconds() / (height - low)
+    lead = 24 if seconds >= 2 else 32
+    action = next((plan for plan in actions if plan['planHeight'] >= height + lead), None)
+    check(action is not None, 'Hermes handshake consumed the private fixture height budget')
+    report['ibcPacket']['planSelectionHeight'] = height
+    return action
+
+
+def run_gate(args, binary, replacement, root, expected, genesis, keys, actions, env, owner, report, ibc=None):
     report['phase'] = 'create-replicas'
     replicas = create_replicas(binary, root, genesis, keys, env)
     source = replicas[0]
+    initial = report['initialHeight']
+    if ibc:
+        report['phase'] = 'fund-native-relayer'
+        ibc.fund_relayer(binary, replicas, expected, genesis, initial)
     for executable in (binary, replacement):
         version = json.loads(run_command(executable, source.home, ['version', '--long', '--output', 'json'], env))
         check(version['server_name'] == 'mcnd' and version['commit'] == args.source_commit, 'daemon version differs from checked source')
@@ -293,15 +321,20 @@ def run_gate(args, binary, replacement, root, expected, genesis, keys, action, e
     report['phase'] = 'initial-native-consensus'
     for node in replicas:
         node.start(binary, env, owner, 'upgrade-governance')
-    initial = report['initialHeight']
     first = wait_replicas(replicas, initial + 2, 85, report)
     report['initialPower'] = effective_set(replicas, expected['validators'], initial, INITIAL)
     report['initialSigners'] = check_signatures(replicas, expected['validators'], initial, INITIAL)
+    action = actions[0]
     account = native('/cosmos/auth/v1beta1/accounts/' + action['actorNative'], first, base=source.rest)['account']
     check(account['address'] == action['actorNative'] and int(account['sequence']) == action['sequence'] and
           int(account['account_number']) == action['accountNumber'], 'fixture signed Cosmos account did not survive genesis import')
     for node in replicas:
         check(current_plan(node, first) is None and applied_height(node, first) == 0, 'unexpected upgrade before any proposal')
+
+    if ibc:
+        report['phase'] = 'hermes-handshake-and-pending-packet'
+        ibc.start_packet(binary)
+        action = select_pending_plan(source, actions, report)
 
     for accepted, label in ((False, 'rejected'), (True, 'passed')):
         report['phase'] = label + '-signed-proposal'
@@ -354,6 +387,8 @@ def run_gate(args, binary, replacement, root, expected, genesis, keys, action, e
     report['predecessor'] = {'committedHeight': target - 1, 'boundaryHeight': target, 'boundary': boundary}
     if args.full_profile:
         report['withdrawal']['before'] = check_pending_withdrawal(replicas, expected, target - 1, due)
+    if ibc:
+        ibc.assert_pending()
     for node in reversed(replicas):
         owner.stop(node.child)
         check(node.child.poll() is not None, 'predecessor is still running')
@@ -381,6 +416,9 @@ def run_gate(args, binary, replacement, root, expected, genesis, keys, action, e
     report['progress'] = {'height': final, 'powers': effective_set(replicas, expected['validators'], final, powers),
                           'signers': check_signatures(replicas, expected['validators'], final, powers),
                           **committed_header(replicas, final)}
+    if ibc:
+        report['phase'] = 'hermes-post-upgrade-acknowledgement-and-return'
+        ibc.settle_after_handoff(target)
 
 
 def main(argv=None, signals=None):
@@ -390,6 +428,9 @@ def main(argv=None, signals=None):
     parser.add_argument('--replacement-binary', required=True)
     parser.add_argument('--replacement-sha256', required=True)
     parser.add_argument('--full-profile', action='store_true', help='Use the fresh historical, IBC and fee-enabled fixture with a pending DEL claim')
+    parser.add_argument('--pending-ibc', action='store_true', help='Carry a real ICS-20 packet across the private native handoff')
+    for name in ('reference-binary', 'reference-sha256', 'hermes-binary'):
+        parser.add_argument('--' + name)
     args = parser.parse_args(argv)
     report = {'status': 'FAIL', 'phase': 'fixture-provenance',
               'scope': 'three loopback replicas across a native governance SDK binary upgrade'}
@@ -404,20 +445,32 @@ def main(argv=None, signals=None):
             for executable, expected_hash in ((binary, args.binary_sha256), (replacement, args.replacement_sha256)):
                 with open(executable, 'rb') as binary_stream:
                     check(hashlib.file_digest(binary_stream, 'sha256').hexdigest() == expected_hash, 'daemon SHA256 mismatch')
-            expected, genesis, keys, initial, action = load_governance_fixture(pathlib.Path(args.fixture), full_profile=args.full_profile)
+            check(not args.pending_ibc or (args.full_profile and args.reference_binary and args.reference_sha256 and args.hermes_binary),
+                  'pending IBC mode requires the full profile and both IBC tools')
+            expected, genesis, keys, initial, actions = load_governance_fixture(
+                pathlib.Path(args.fixture), full_profile=args.full_profile, pending_ibc=args.pending_ibc)
             report.update(sourceCommit=args.source_commit, binarySha256=args.binary_sha256,
                           replacementSha256=args.replacement_sha256, initialHeight=initial,
                           genesisSha256=hashlib.sha256(genesis).hexdigest(), chainID=CHAIN, evmChainID=EVM_CHAIN,
                           fullProfile=args.full_profile, planKind='same-source-handler-rehearsal')
             if args.full_profile:
-                report['ibcCoverage'] = 'unbonding-state-only'
+                report['ibcCoverage'] = 'pending-packet-after-client-update' if args.pending_ibc else 'unbonding-state-only'
             with tempfile.TemporaryDirectory(prefix='mcnd-native-governance-upgrade-', dir=args.home_parent) as directory:
                 root = pathlib.Path(directory)
                 owner = ProcessOwner(signals)
+                env = private_environment(root)
+                ibc = None
                 try:
-                    run_gate(args, binary, replacement, root, expected, genesis, keys, action, private_environment(root), owner, report)
+                    if args.pending_ibc:
+                        from native_upgrade_ibc import NativeUpgradeIBC
+                        ibc = NativeUpgradeIBC(args, root, env, report, signals)
+                    run_gate(args, binary, replacement, root, expected, genesis, keys, actions, env, owner, report, ibc)
                 finally:
-                    owner.close()
+                    try:
+                        if ibc:
+                            ibc.lab.close()
+                    finally:
+                        owner.close()
             report.update(status='PASS', phase='complete')
         except Exception as error:
             report['error'] = ' '.join(str(error).split())[:520]
