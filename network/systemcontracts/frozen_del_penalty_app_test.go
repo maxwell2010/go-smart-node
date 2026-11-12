@@ -23,16 +23,16 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-const frozenDELPenaltyPassed = "ordinary frozen DEL checkpoint, penalty burn and final claim settlement passed"
+const frozenDELPenaltyPassed = "frozen DEL checkpoint, penalty burn and final claim settlement passed"
 
 func TestOwnedAppSignedFrozenDELPenalty(t *testing.T) {
-	for _, mode := range []string{"frozen-penalty-partial", "frozen-penalty-full"} {
+	for _, mode := range []string{"frozen-penalty-partial", "frozen-penalty-full", "frozen-held-penalty", "frozen-held-penalty-full"} {
 		t.Run(mode, func(t *testing.T) { testSignedDELFixture(t, mode, frozenDELPenaltyPassed) })
 	}
 }
 
 func runSignedFrozenDELPenalty(t *testing.T, e isolatedBackendEnv, profile ownedapp.WithdrawalProfile, gateway, master, wrapper contracts.Artifact,
-	reader *nftview.Reader, gov func(contracts.Artifact, common.Address, string, ...interface{}), full bool,
+	reader *nftview.Reader, gov func(contracts.Artifact, common.Address, string, ...interface{}), full, held bool,
 ) {
 	t.Helper()
 	f := prepareSignedDELFixture(t, e, profile, gateway, master, wrapper, gov)
@@ -41,6 +41,10 @@ func runSignedFrozenDELPenalty(t *testing.T, e isolatedBackendEnv, profile owned
 	require.NoError(t, err)
 	keeper := e.app.NativeValidatorKeeper
 	amount := func(n int64) sdkmath.Int { return sdkmath.NewIntWithDecimal(n, 18) }
+	inclusion := func() sdk.Context {
+		// The fixture read context otherwise points to the next block.
+		return e.ctx().WithBlockHeight(e.app.LastBlockHeight()).WithBlockTime(e.ctx().BlockTime().Add(-time.Second))
+	}
 	signed := func(method string, value sdkmath.Int, args ...interface{}) settlement.DELTransition {
 		t.Helper()
 		data, err := gateway.ABI.Pack(method, args...)
@@ -48,18 +52,32 @@ func runSignedFrozenDELPenalty(t *testing.T, e isolatedBackendEnv, profile owned
 		result := f.signed(method, value, true, args...)
 		msg := core.Message{From: f.user, To: &f.target, Value: value.BigInt(), Data: data}
 		receipt := &ethtypes.Receipt{Status: ethtypes.ReceiptStatusSuccessful, Logs: evmtypes.LogsToEthereum(result.Logs)}
-		proof, err := executor.VerifySignedDEL(e.ctx(), msg, receipt)
+		proof, err := executor.VerifySignedDEL(inclusion(), msg, receipt)
 		require.NoError(t, err)
 		return proof
 	}
 	position := func(proof settlement.DELTransition) validatorkeeper.GatewayDELStake {
 		return validatorkeeper.GatewayDELStake{
 			Gateway: f.target, WrappedDEL: f.wrapped, Validator: f.validator, Beneficiary: f.user,
-			StakeID: proof.StakeID, Amount: proof.Remaining,
+			StakeID: proof.StakeID, Amount: proof.Remaining, HoldStartTime: proof.HoldStartTime, HoldDeadline: proof.HoldDeadline,
 		}
 	}
-	funding := signed("delegateDEL", amount(10), f.validator)
-	require.NoError(t, keeper.ApplyGatewayDELDelegation(e.ctx(), position(funding), funding.Amount))
+	var holdDeadline, holdStart int64
+	if held {
+		holdDeadline = e.ctx().BlockTime().Unix() + 4
+		first := signed("delegateHoldDEL", amount(3), f.validator, big.NewInt(holdDeadline))
+		require.NoError(t, keeper.ApplyGatewayDELDelegation(inclusion(), position(first), first.Amount))
+		holdStart = first.HoldStartTime
+		second := signed("delegateHoldDEL", amount(7), f.validator, big.NewInt(holdDeadline))
+		require.Equal(t, holdStart, second.HoldStartTime)
+		require.NoError(t, keeper.ApplyGatewayDELDelegation(inclusion(), position(second), second.Amount))
+		for e.ctx().BlockTime().Unix() <= holdDeadline {
+			e.advance()
+		}
+	} else {
+		funding := signed("delegateDEL", amount(10), f.validator)
+		require.NoError(t, keeper.ApplyGatewayDELDelegation(inclusion(), position(funding), funding.Amount))
+	}
 	frozen := func(request settlement.DELTransition) validatortypes.EVMFrozenBinding {
 		row, err := keeper.GetEVMFrozenBinding(e.ctx(), f.target[:], request.FrozenIndex[:])
 		require.NoError(t, err)
@@ -67,11 +85,16 @@ func runSignedFrozenDELPenalty(t *testing.T, e isolatedBackendEnv, profile owned
 	}
 	withdraw := func(n int64) settlement.DELTransition {
 		t.Helper()
-		out := signed("withdraw", sdkmath.ZeroInt(), f.validator, f.wrapped, amount(n).BigInt())
-		// The test mirrors the committed signed request at its actual inclusion
-		// height. The fixture read context otherwise points to the next block.
-		inclusion := e.ctx().WithBlockHeight(e.app.LastBlockHeight()).WithBlockTime(e.ctx().BlockTime().Add(-time.Second))
-		require.NoError(t, keeper.ApplyGatewayDELWithdrawal(inclusion, position(out), out.FrozenIndex, out.Amount, out.Deadline))
+		method := "withdraw"
+		args := []interface{}{f.validator, f.wrapped, amount(n).BigInt()}
+		if held {
+			method = "withdrawHold"
+			args = append(args, big.NewInt(holdDeadline))
+		}
+		out := signed(method, sdkmath.ZeroInt(), args...)
+		require.Equal(t, holdStart, out.HoldStartTime)
+		require.Equal(t, holdDeadline, out.HoldDeadline)
+		require.NoError(t, keeper.ApplyGatewayDELWithdrawal(inclusion(), position(out), out.FrozenIndex, out.Amount, out.Deadline))
 		return out
 	}
 	oldRequest, eligibleRequest := withdraw(4), withdraw(6)
@@ -111,13 +134,23 @@ func runSignedFrozenDELPenalty(t *testing.T, e isolatedBackendEnv, profile owned
 						require.Equal(t, isEligible, proof.Eligible)
 						require.Equal(t, announcement.BeforeCursor, proof.BeforeCursor)
 						require.Equal(t, announcement.AfterCursor, proof.AfterCursor)
+						require.Equal(t, holdStart, proof.HoldStartTime)
+						require.Equal(t, holdDeadline, proof.HoldDeadline)
 						expectedLoss := sdkmath.ZeroInt()
 						if isEligible {
 							expectedLoss = wantLoss
 						}
 						require.True(t, expectedLoss.Equal(proof.Burned))
-						if err := keeper.ApplyGatewayFrozenDELPenalty(projectCtx, row, proof.InfractionHeight,
-							proof.BeforeCursor, proof.AfterCursor, proof.Remaining); err != nil {
+						var err error
+						if held {
+							err = keeper.ApplyGatewayFrozenDELHoldPenalty(projectCtx, row, validatorkeeper.GatewayFrozenDELHold{
+								WrappedDEL: f.wrapped, HoldStartTime: proof.HoldStartTime, HoldDeadline: proof.HoldDeadline,
+							}, proof.InfractionHeight, proof.BeforeCursor, proof.AfterCursor, proof.Remaining)
+						} else {
+							err = keeper.ApplyGatewayFrozenDELPenalty(projectCtx, row, proof.InfractionHeight,
+								proof.BeforeCursor, proof.AfterCursor, proof.Remaining)
+						}
+						if err != nil {
 							return err
 						}
 						if isEligible && fail {
