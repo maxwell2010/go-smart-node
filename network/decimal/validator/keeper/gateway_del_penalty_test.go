@@ -105,21 +105,41 @@ func TestGatewayDELPenaltyReconcilesPartialRoundedAndFullLoss(t *testing.T) {
 	require.Equal(t, "0", amount.Value)
 }
 
-func TestGatewayDELPenaltyRejectsHoldAndNFTCompanion(t *testing.T) {
+func TestGatewayDELPenaltyPreservesNFTBackingAndAdvancesCoinCursor(t *testing.T) {
 	ctx, _, k := bindingEnvironment(t, false)
 	held := gatewayDELHoldFixture(2000, 2020, 12)
 	require.NoError(t, k.ApplyGatewayDELDelegation(ctx, held, held.Amount))
-	position, _ := seedGatewayDELNFTCompanion(t, ctx, k)
+	position, nft := seedGatewayDELNFTCompanion(t, ctx, k)
 	position.Amount = sdkmath.NewInt(12)
 	require.NoError(t, k.ApplyGatewayDELDelegation(ctx, position, position.Amount))
-	before, err := k.ExportGenesis(ctx)
+	owner, operator, err := position.nativePair()
 	require.NoError(t, err)
+	before, err := k.GetActiveDELReserve(ctx, operator)
+	require.NoError(t, err)
+
+	ctx = ctx.WithBlockHeight(ctx.BlockHeight() + 1)
 	cursor := common.Hash{31: 1}
 	require.ErrorContains(t, k.ApplyGatewayDELPenalty(ctx, held, sdkmath.OneInt(), cursor), "invalid ordinary")
-	require.ErrorContains(t, k.ApplyGatewayDELPenalty(ctx, position, sdkmath.OneInt(), cursor), "invalid ordinary")
-	position.NFTBacked = sdkmath.ZeroInt()
-	require.ErrorContains(t, k.ApplyGatewayDELPenalty(ctx, position, sdkmath.OneInt(), cursor), "differs from the active native binding")
-	unchanged, err := k.ExportGenesis(ctx)
+	wrong := position
+	wrong.NFTBacked = sdkmath.ZeroInt()
+	require.ErrorContains(t, k.ApplyGatewayDELPenalty(ctx, wrong, sdkmath.OneInt(), cursor), "differs from the active native binding")
+	require.NoError(t, k.ApplyGatewayDELPenalty(ctx, position, sdkmath.ZeroInt(), cursor))
+	_, err = k.GetDelegation(ctx, owner, operator, types.StakeType_Coin, identity.BaseDenom)
+	require.ErrorIs(t, err, ErrNotFound)
+	after, err := k.GetActiveDELReserve(ctx, operator)
 	require.NoError(t, err)
-	assertGenesisBytes(t, before, unchanged)
+	require.Equal(t, before.Sub(position.Amount), after)
+
+	position.Amount, position.PenaltyCursor = sdkmath.ZeroInt(), cursor
+	cursor[31]++
+	require.NoError(t, k.ApplyGatewayDELPenalty(ctx, position, sdkmath.ZeroInt(), cursor))
+	row, err := k.GetEVMStakeBinding(ctx, gatewayDELCoinBinding, position.Gateway[:], position.StakeID[:])
+	require.NoError(t, err)
+	require.Equal(t, cursor.Bytes(), row.PenaltyCursor)
+	require.Equal(t, position.NFTBacked, row.RawAmount)
+	require.Equal(t, position.NFTBacked, row.RawNftBackedAmount)
+	require.Equal(t, nft, readNativeBinding(t, ctx, k, nft))
+	remaining, err := k.GetActiveDELReserve(ctx, operator)
+	require.NoError(t, err)
+	require.Equal(t, after, remaining)
 }

@@ -31,7 +31,8 @@ func (k *StateKeeper) applyGatewayDELPenalty(ctx sdk.Context, before GatewayDELS
 	if err != nil {
 		return err
 	}
-	if held != (before.HoldDeadline != 0) || !before.nftBackedAmount().IsZero() || !before.Amount.IsPositive() ||
+	backed := before.nftBackedAmount()
+	if held != (before.HoldDeadline != 0) || (before.Amount.IsZero() && backed.IsZero()) ||
 		afterAmount.IsNil() || afterAmount.IsNegative() || afterAmount.GT(before.Amount) {
 		if held {
 			return errors.New("invalid held Gateway DEL penalty amount or position")
@@ -67,7 +68,7 @@ func (k *StateKeeper) applyGatewayDELPenalty(ctx sdk.Context, before GatewayDELS
 		change.Next = &remaining
 	}
 	var mutation BindingMutation
-	if afterAmount.IsZero() {
+	if afterAmount.IsZero() && backed.IsZero() {
 		mutation.Remove = &BindingReference{Kind: active.Kind, Gateway: active.Gateway, ID: active.StakeID}
 	} else {
 		next := before
@@ -82,8 +83,10 @@ func (k *StateKeeper) applyGatewayDELPenalty(ctx sdk.Context, before GatewayDELS
 	if err != nil {
 		return err
 	}
-	if err := k.ApplyDelegationBatch(child, []DelegationChange{change}); err != nil {
-		return err
+	if loss.IsPositive() {
+		if err := k.ApplyDelegationBatch(child, []DelegationChange{change}); err != nil {
+			return err
+		}
 	}
 	if err := k.ApplyBindingPlan(child, plan); err != nil {
 		return err

@@ -60,7 +60,7 @@ func (e *Executor) authorizeActiveDELPenalty(ctx sdk.Context, msg core.Message, 
 
 // ApplyOrdinaryDELPenalty realizes one already announced MasterValidator
 // penalty against one ordinary position. This cannot append a penalty, update
-// validator eligibility, or settle held, NFT-backed or frozen balances. The
+// validator eligibility, or settle held, NFT or frozen balances. The
 // caller must reconcile all affected positions under its policy before making
 // an announcement durable. Rejection of the projection rolls back the burn.
 func (e *Executor) ApplyOrdinaryDELPenalty(ctx sdk.Context, row validatortypes.EVMStakeBinding, percentage uint16,
@@ -114,7 +114,8 @@ func (e *Executor) applyActiveDELPenalty(ctx sdk.Context, row validatortypes.EVM
 	if err != nil {
 		return err
 	}
-	burned := new(big.Int).Mul(row.RawAmount.BigInt(), new(big.Int).SetUint64(uint64(percentage)))
+	direct := row.RawAmount.Sub(row.RawNftBackedAmount)
+	burned := new(big.Int).Mul(direct.BigInt(), new(big.Int).SetUint64(uint64(percentage)))
 	burned.Quo(burned, big.NewInt(100))
 	remaining := row.RawAmount.Sub(sdkmath.NewIntFromBigInt(burned))
 	data, err := e.gateway.Pack("applyPenaltiesToStakes", [][32]byte{id})
@@ -197,11 +198,11 @@ func (e *Executor) activePenaltyIdentity(ctx sdk.Context, row validatortypes.EVM
 		row.Kind != validatortypes.EVMStakeBindingKind_EVM_STAKE_BINDING_COIN ||
 		row.NativeTarget.StakeType != stakeType || row.NativeTarget.ID != identity.BaseDenom ||
 		row.ReserveAsset.ReserveKind != 1 || row.ReserveAsset.NativeDenom != identity.BaseDenom ||
-		!row.RawNftBackedAmount.IsZero() ||
+		(held && !row.RawNftBackedAmount.IsZero()) ||
 		common.BytesToAddress(row.Gateway) != e.roles.Gateway || common.BytesToAddress(row.TokenContract) != e.roles.WrappedDEL ||
 		owner == Sender() || row.UpdatedHeight > ctx.BlockHeight() ||
 		id != crypto.Keccak256Hash(validator[:], owner[:], e.roles.WrappedDEL[:], tokenID[:], deadline[:]) {
-		return id, validator, owner, errors.New("penalty requires one active direct DEL binding without NFT backing")
+		return id, validator, owner, errors.New("penalty requires one active DEL binding with the exact Gateway asset and hold identity")
 	}
 	return id, validator, owner, nil
 }
@@ -268,7 +269,7 @@ func (e *Executor) activePenaltyState(ctx sdk.Context, row validatortypes.EVMSta
 	if err != nil {
 		return out, err
 	}
-	if common.BytesToHash(gotCursor) != cursor || nft.Sign() != 0 {
+	if common.BytesToHash(gotCursor) != cursor || nft.Cmp(row.RawNftBackedAmount.BigInt()) != 0 {
 		return out, errors.New("Gateway DEL penalty cursor or isolated collateral differs")
 	}
 	reserve, err := e.read(ctx, e.roles.Gateway, e.gateway, "getValidatorReserve", 2*common.HashLength, validator, e.roles.WrappedDEL)
@@ -281,7 +282,8 @@ func (e *Executor) activePenaltyState(ctx sdk.Context, row validatortypes.EVMSta
 		return out, err
 	}
 	supply := nativeSupply(ctx)
-	if supply.IsNil() || supply.IsNegative() || reserveAmount.Cmp(amount.BigInt()) < 0 || balance.wrapped.Cmp(amount.BigInt()) < 0 {
+	if supply.IsNil() || supply.IsNegative() || reserveAmount.Cmp(amount.BigInt()) < 0 ||
+		balance.wrapped.Cmp(amount.Sub(row.RawNftBackedAmount).BigInt()) < 0 {
 		return out, errors.New("invalid reserve, WDEL custody or native DEL supply for penalty")
 	}
 	return activeDELPenaltyState{payoutState: balance, stake: stake, reserve: reserveAmount,

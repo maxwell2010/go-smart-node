@@ -164,8 +164,9 @@ func (e *Executor) verifySignedDEL(ctx sdk.Context, msg core.Message, receipt *e
 	if err != nil {
 		return out, err
 	}
-	if penalized != nil && (backed.Sign() != 0 || new(big.Int).Add(remaining, amount).Cmp(penalized.RawAmount.BigInt()) != 0) {
-		return out, errors.New("penalized DEL withdrawal differs from the native active amount or includes NFT backing")
+	if penalized != nil && (backed.Cmp(penalized.RawNftBackedAmount.BigInt()) != 0 ||
+		new(big.Int).Add(gross, amount).Cmp(penalized.RawAmount.BigInt()) != 0) {
+		return out, errors.New("penalized DEL withdrawal differs from the native active amount or its NFT backing")
 	}
 	if deposit && remaining.Cmp(amount) < 0 {
 		return out, errors.New("Gateway position is smaller than the DEL deposit")
