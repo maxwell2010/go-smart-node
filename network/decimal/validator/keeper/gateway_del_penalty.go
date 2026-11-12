@@ -16,12 +16,26 @@ import (
 // bound and real native burn and uses the same outer transaction cache.
 // This method changes only active metadata and its indexes.
 func (k *StateKeeper) ApplyGatewayDELPenalty(ctx sdk.Context, before GatewayDELStake, afterAmount sdkmath.Int, afterCursor common.Hash) error {
+	return k.applyGatewayDELPenalty(ctx, before, afterAmount, afterCursor, false)
+}
+
+// ApplyGatewayDELHoldPenalty projects a verified active DEL hold-bucket
+// penalty. Only lots with that exact deadline participate in its loss. The
+// caller authenticates the unchanged EVM hold identity and actual native burn.
+func (k *StateKeeper) ApplyGatewayDELHoldPenalty(ctx sdk.Context, before GatewayDELStake, afterAmount sdkmath.Int, afterCursor common.Hash) error {
+	return k.applyGatewayDELPenalty(ctx, before, afterAmount, afterCursor, true)
+}
+
+func (k *StateKeeper) applyGatewayDELPenalty(ctx sdk.Context, before GatewayDELStake, afterAmount sdkmath.Int, afterCursor common.Hash, held bool) error {
 	owner, operator, err := before.nativePairIdentity()
 	if err != nil {
 		return err
 	}
-	if before.HoldDeadline != 0 || !before.nftBackedAmount().IsZero() || !before.Amount.IsPositive() ||
+	if held != (before.HoldDeadline != 0) || !before.nftBackedAmount().IsZero() || !before.Amount.IsPositive() ||
 		afterAmount.IsNil() || afterAmount.IsNegative() || afterAmount.GT(before.Amount) {
+		if held {
+			return errors.New("invalid held Gateway DEL penalty amount or position")
+		}
 		return errors.New("invalid ordinary Gateway DEL penalty amount or position")
 	}
 	if bytes.Compare(afterCursor[:], before.PenaltyCursor[:]) <= 0 {
@@ -42,6 +56,16 @@ func (k *StateKeeper) ApplyGatewayDELPenalty(ctx sdk.Context, before GatewayDELS
 	}
 	loss := before.Amount.Sub(afterAmount)
 	change := DelegationChange{Expected: previous}
+	if held {
+		change.Next, err = before.penalizeHold(previous, loss)
+		if err != nil {
+			return err
+		}
+	} else if afterAmount.IsPositive() {
+		remaining := *previous
+		remaining.Stake = types.NewStakeCoin(sdk.NewCoin(identity.BaseDenom, afterAmount))
+		change.Next = &remaining
+	}
 	var mutation BindingMutation
 	if afterAmount.IsZero() {
 		mutation.Remove = &BindingReference{Kind: active.Kind, Gateway: active.Gateway, ID: active.StakeID}
@@ -53,9 +77,6 @@ func (k *StateKeeper) ApplyGatewayDELPenalty(ctx sdk.Context, before GatewayDELS
 			return err
 		}
 		mutation.Stake = &row
-		remaining := *previous
-		remaining.Stake = types.NewStakeCoin(sdk.NewCoin(identity.BaseDenom, afterAmount))
-		change.Next = &remaining
 	}
 	plan, err := k.PrepareBindingPlan(child, []BindingMutation{mutation})
 	if err != nil {
