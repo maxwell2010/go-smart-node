@@ -34,10 +34,10 @@ type activeDELPenaltyCall struct {
 	height     int64
 	id         common.Hash
 	held       bool
-	historical *historicalActiveDELPenalty
+	historical *historicalDELPenalty
 }
 
-type historicalActiveDELPenalty struct {
+type historicalDELPenalty struct {
 	master   MasterPenaltyProof
 	eligible sdkmath.Int
 }
@@ -111,20 +111,17 @@ func (e *Executor) ApplyHeldDELPenalty(ctx sdk.Context, row validatortypes.EVMSt
 func (e *Executor) ApplyActiveHistoricalDELPenalty(ctx sdk.Context, row validatortypes.EVMStakeBinding, master MasterPenaltyProof,
 	eligible sdkmath.Int, nativeSupply func(sdk.Context) sdkmath.Int, project func(sdk.Context, ActiveDELPenaltyProof) error,
 ) error {
-	scope, _ := ctx.Value(penaltySourceKey{}).(*penaltySourceScope)
-	if e == nil || scope == nil || !scope.active || scope.executor != e || scope.height != ctx.BlockHeight() ||
-		master.InfractionHeight <= 0 || master.InfractionHeight != scope.infractionHeight || master.Percentage != scope.percentage ||
-		master.Validator != scope.validator || master.Validator != common.BytesToAddress(row.Validator) ||
+	if !e.hasHistoricalPenaltyScope(ctx, master, common.BytesToAddress(row.Validator)) ||
 		eligible.IsNil() || eligible.IsNegative() {
 		return errors.New("active historical DEL penalty requires the active typed Master reconciliation")
 	}
 	held := common.BytesToHash(row.HoldTimestamp) != (common.Hash{})
 	return e.applyActiveDELPenalty(ctx, row, master.Percentage, nativeSupply, project, held,
-		&historicalActiveDELPenalty{master: master, eligible: eligible})
+		&historicalDELPenalty{master: master, eligible: eligible})
 }
 
 func (e *Executor) applyActiveDELPenalty(ctx sdk.Context, row validatortypes.EVMStakeBinding, percentage uint16,
-	nativeSupply func(sdk.Context) sdkmath.Int, project func(sdk.Context, ActiveDELPenaltyProof) error, held bool, historical *historicalActiveDELPenalty,
+	nativeSupply func(sdk.Context) sdkmath.Int, project func(sdk.Context, ActiveDELPenaltyProof) error, held bool, historical *historicalDELPenalty,
 ) error {
 	if e == nil || e.evm == nil || nativeSupply == nil || project == nil ||
 		ctx.ExecMode() != sdk.ExecModeFinalize || ctx.BlockHeight() <= 0 || percentage == 0 || percentage > 100 {

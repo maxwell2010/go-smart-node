@@ -46,6 +46,13 @@ type penaltySourceScope struct {
 	active           bool
 }
 
+func (e *Executor) hasHistoricalPenaltyScope(ctx sdk.Context, master MasterPenaltyProof, validator common.Address) bool {
+	scope, _ := ctx.Value(penaltySourceKey{}).(*penaltySourceScope)
+	return e != nil && scope != nil && scope.active && scope.executor == e && scope.height == ctx.BlockHeight() &&
+		master.InfractionHeight > 0 && master.InfractionHeight == scope.infractionHeight && master.Percentage == scope.percentage &&
+		master.Validator == scope.validator && master.Validator == validator
+}
+
 // Each realization still verifies its exact Master entry, receipt and
 // balance deltas. Within an append, authenticate the shared roles at both
 // ends of the same outer cache instead of repeating that read per position.
