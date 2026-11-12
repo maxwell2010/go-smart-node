@@ -35,6 +35,7 @@ import (
 )
 
 const nativeHistoricalConsensusPhaseEnv = "MCND_NATIVE_HISTORICAL_CONSENSUS_PHASE"
+const nativeHistoricalConsensusKeyScope = "mintcandy native historical ABCI fixture "
 const historicalLifecyclePassed = "fresh native ABCI historical penalty and payout lifecycle passed"
 
 type nativeHistoricalExpectations struct {
@@ -194,6 +195,11 @@ func runNativeHistoricalConsensusLifecycle(t *testing.T, dir, phase string) {
 	exclusion, err := app.NativeValidatorKeeper.GetNativeDuplicateVoteExclusion(l.snapshot(), sdk.ConsAddress(common.FromHex(l.target.Consensus)))
 	require.NoError(t, err)
 	require.Equal(t, validatorkeeper.NativeDuplicateVoteExclusion{InfractionHeight: 2, SettledHeight: 5}, exclusion)
+	t.Run("weighted validator registration", func(t *testing.T) {
+		registration := l
+		registration.t = t
+		registration.testWeightedValidatorRegistration()
+	})
 	t.Log(historicalLifecyclePassed)
 }
 
@@ -248,7 +254,7 @@ func (l nativeHistoricalLifecycle) commit(result *abci.ResponseFinalizeBlock) {
 	require.Equal(l.t, result.AppHash, l.app.LastCommitID().Hash)
 }
 
-func (l nativeHistoricalLifecycle) signedGateway(method string, value sdkmath.Int, args ...interface{}) {
+func (l nativeHistoricalLifecycle) signedGateway(method string, value sdkmath.Int, args ...interface{}) *abci.ResponseFinalizeBlock {
 	t := l.t
 	t.Helper()
 	gateway, err := contracts.CompiledABI("MintCandyIsolatedDelegation")
@@ -281,6 +287,7 @@ func (l nativeHistoricalLifecycle) signedGateway(method string, value sdkmath.In
 	require.NoError(t, response.Unmarshal(messages.MsgResponses[0].Value))
 	require.Empty(t, response.VmError)
 	l.commit(block)
+	return block
 }
 
 func (l nativeHistoricalLifecycle) finalizePenalty() *abci.ResponseFinalizeBlock {
@@ -369,9 +376,17 @@ func (l nativeHistoricalLifecycle) assertMasterPenaltyState(applied bool) {
 	if applied {
 		cursor = 1
 	}
+	_, paused, count := l.masterValidatorState(common.HexToAddress(l.target.EVM))
+	require.Equal(t, applied, paused)
+	require.Equal(t, cursor, count)
+}
+
+func (l nativeHistoricalLifecycle) masterValidatorState(operator common.Address) (uint8, bool, int64) {
+	t := l.t
+	t.Helper()
 	master, err := contracts.CompiledABI("NewNetworkMasterValidator")
 	require.NoError(t, err)
-	data, err := master.Pack("getValidatorState", common.HexToAddress(l.target.EVM))
+	data, err := master.Pack("getValidatorState", operator)
 	require.NoError(t, err)
 	child, _ := l.snapshot().CacheContext()
 	child = child.WithGasMeter(storetypes.NewGasMeter(3_000_000))
@@ -383,8 +398,7 @@ func (l nativeHistoricalLifecycle) assertMasterPenaltyState(applied bool) {
 	state, err := master.Unpack("getValidatorState", response.Ret)
 	require.NoError(t, err)
 	require.Len(t, state, 3)
-	require.Equal(t, applied, state[1].(bool))
-	require.Equal(t, cursor, state[2].(*big.Int).Int64())
+	return state[0].(uint8), state[1].(bool), state[2].(*big.Int).Int64()
 }
 
 func readNativeHistoricalJSON(t *testing.T, path string, value interface{}) {
