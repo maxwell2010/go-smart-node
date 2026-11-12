@@ -135,5 +135,56 @@ func runSignedOrdinaryDELPenalty(t *testing.T, e isolatedBackendEnv, profile own
 	require.Equal(t, after, getRow())
 	require.ErrorContains(t, appendAndRealize(project), "unpaused candidate or approved validator")
 	require.Equal(t, int64(1), masterCount())
+
+	withdraw := func(binding validatortypes.EVMStakeBinding, amount sdkmath.Int, expectAck bool) {
+		data, err := gateway.ABI.Pack("withdraw", f.validator, f.wrapped, amount.BigInt())
+		require.NoError(t, err)
+		msg := core.Message{From: f.user, To: &f.target, Value: new(big.Int), Data: data}
+		response := f.signed("withdraw", sdkmath.ZeroInt(), true, f.validator, f.wrapped, amount.BigInt())
+		receipt := &ethtypes.Receipt{Status: ethtypes.ReceiptStatusSuccessful, Logs: evmtypes.LogsToEthereum(response.Logs)}
+		if expectAck {
+			require.Len(t, receipt.Logs, 4, "first withdrawal advances the aggregate reserve cursor")
+			// A nonzero amount in the aggregate acknowledgement is not a
+			// valid penalty-free withdrawal even when the receipt has four logs.
+			bad := *receipt
+			bad.Logs = append([]*ethtypes.Log(nil), receipt.Logs...)
+			ack := *bad.Logs[0]
+			ack.Data = append([]byte(nil), ack.Data...)
+			ack.Data[len(ack.Data)-1] = 1
+			bad.Logs[0] = &ack
+			_, err = executor.VerifySignedPenalizedDELWithdrawal(ctx(), msg, &bad, binding)
+			require.ErrorContains(t, err, "aggregate penalty acknowledgement")
+		} else {
+			require.Len(t, receipt.Logs, 3, "subsequent withdrawal leaves the aggregate cursor unchanged")
+		}
+		_, err = executor.VerifySignedDEL(ctx(), msg, receipt)
+		require.Error(t, err, "ordinary admission remains closed to a penalized validator")
+		badBinding := binding
+		badBinding.RawAmount = badBinding.RawAmount.Add(sdkmath.OneInt())
+		_, err = executor.VerifySignedPenalizedDELWithdrawal(ctx(), msg, receipt, badBinding)
+		require.ErrorContains(t, err, "native active amount")
+		out, err := executor.VerifySignedPenalizedDELWithdrawal(ctx(), msg, receipt, binding)
+		require.NoError(t, err)
+		require.Equal(t, common.BigToHash(big.NewInt(1)), out.PenaltyCursor)
+		require.True(t, binding.RawAmount.Sub(amount).Equal(out.Remaining))
+		require.True(t, amount.Equal(out.Amount))
+		require.NoError(t, keeper.ApplyPenalizedGatewayDELWithdrawal(ctx(), validatorkeeper.GatewayDELStake{
+			Gateway: f.target, WrappedDEL: f.wrapped, Beneficiary: f.user, Validator: f.validator,
+			StakeID: id, Amount: out.Remaining, PenaltyCursor: out.PenaltyCursor,
+		}, out.FrozenIndex, out.Amount, out.Deadline))
+		frozen, err := keeper.GetEVMFrozenBinding(e.ctx(), f.target[:], out.FrozenIndex[:])
+		require.NoError(t, err)
+		require.True(t, amount.Equal(frozen.RawAmount))
+		active, err := keeper.GetActiveDELReserve(e.ctx(), f.operator)
+		require.NoError(t, err)
+		require.True(t, out.Remaining.Equal(active))
+		require.True(t, initialSupply.Sub(burned).Equal(supply(ctx())), "withdrawal must not implicitly burn any additional DEL")
+		f.backing(want)
+	}
+	withdraw(after, sdkmath.NewIntWithDecimal(2, 18), true)
+	last := getRow()
+	withdraw(last, last.RawAmount, false)
+	_, err = keeper.GetEVMStakeBinding(e.ctx(), validatortypes.EVMStakeBindingKind_EVM_STAKE_BINDING_COIN, f.target[:], id[:])
+	require.ErrorIs(t, err, validatorkeeper.ErrNotFound)
 	t.Log(delPenaltyPassed)
 }

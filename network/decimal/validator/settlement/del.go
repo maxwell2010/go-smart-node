@@ -12,12 +12,14 @@ import (
 	"github.com/ethereum/go-ethereum/core"
 	ethtypes "github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/crypto"
+	validatortypes "github.com/maxwell2010/go-smart-node/network/decimal/validator/types"
 )
 
 // DELTransition is the verified result of a direct, signed DEL call.
 type DELTransition struct {
 	Validator, Beneficiary      common.Address
 	StakeID, FrozenIndex        common.Hash
+	PenaltyCursor               common.Hash // Nonzero only for an explicitly admitted penalized withdrawal.
 	Amount, Remaining           sdkmath.Int // Call delta and direct DEL remaining after the call.
 	NFTBacked                   sdkmath.Int // Unchanged reserve included in the Gateway's gross coin position.
 	HoldDeadline, HoldStartTime int64       // Unix seconds, or zero for ordinary DEL.
@@ -28,6 +30,28 @@ type DELTransition struct {
 // transaction cache. The keeper checks the corresponding native prestate before
 // adding to the active position or moving part or all of it to the queue.
 func (e *Executor) VerifySignedDEL(ctx sdk.Context, msg core.Message, receipt *ethtypes.Receipt) (DELTransition, error) {
+	return e.verifySignedDEL(ctx, msg, receipt, nil)
+}
+
+// VerifySignedPenalizedDELWithdrawal proves an ordinary withdrawal against
+// an exact active native binding whose penalty has already been realized.
+func (e *Executor) VerifySignedPenalizedDELWithdrawal(ctx sdk.Context, msg core.Message, receipt *ethtypes.Receipt, before validatortypes.EVMStakeBinding) (DELTransition, error) {
+	if e == nil || e.evm == nil {
+		return DELTransition{}, errors.New("penalized DEL withdrawal requires a Gateway executor")
+	}
+	if err := before.Validate(); err != nil {
+		return DELTransition{}, err
+	}
+	if common.BytesToHash(before.PenaltyCursor) == (common.Hash{}) {
+		return DELTransition{}, errors.New("penalized DEL withdrawal requires a nonzero realized native penalty cursor")
+	}
+	if _, _, _, err := e.ordinaryPenaltyIdentity(ctx, before); err != nil {
+		return DELTransition{}, err
+	}
+	return e.verifySignedDEL(ctx, msg, receipt, &before)
+}
+
+func (e *Executor) verifySignedDEL(ctx sdk.Context, msg core.Message, receipt *ethtypes.Receipt, penalized *validatortypes.EVMStakeBinding) (DELTransition, error) {
 	var out DELTransition
 	if msg.To == nil || *msg.To != e.roles.Gateway || msg.Value == nil || len(msg.Data) < 4 || len(msg.SetCodeAuthorizations) != 0 {
 		return out, errors.New("DEL stake requires a direct signed Gateway call")
@@ -35,6 +59,9 @@ func (e *Executor) VerifySignedDEL(ctx sdk.Context, msg core.Message, receipt *e
 	method, err := e.gateway.MethodById(msg.Data[:4])
 	if err != nil {
 		return out, errors.New("DEL profile admits only direct DEL delegation and withdrawal requests")
+	}
+	if penalized != nil && method.Sig != "withdraw(address,address,uint256)" {
+		return out, errors.New("realized penalty path admits only ordinary direct DEL withdrawal")
 	}
 	deposit := false
 	holdArg := -1
@@ -80,11 +107,24 @@ func (e *Executor) VerifySignedDEL(ctx sdk.Context, msg core.Message, receipt *e
 	}
 	out.Amount = sdkmath.NewIntFromBigInt(amount)
 	out.StakeID = crypto.Keccak256Hash(out.Validator.Bytes(), out.Beneficiary.Bytes(), e.roles.WrappedDEL.Bytes(), tokenID[:], holdWord[:])
-	if err := e.verifyDELStakeReceipt(ctx, receipt, out.Validator, out.Beneficiary, 3); err != nil {
-		return out, err
-	}
-	if err := e.verifyDELStakeCursor(ctx, out.StakeID); err != nil {
-		return out, err
+	var logs []*ethtypes.Log
+	if penalized == nil {
+		if err := e.verifyDELStakeReceipt(ctx, receipt, out.Validator, out.Beneficiary, 3); err != nil {
+			return out, err
+		}
+		if err := e.verifyDELStakeCursor(ctx, out.StakeID); err != nil {
+			return out, err
+		}
+		logs = receipt.Logs
+	} else {
+		if common.BytesToHash(penalized.StakeID) != out.StakeID {
+			return out, errors.New("penalized DEL withdrawal differs from the bound position")
+		}
+		out.PenaltyCursor = common.BytesToHash(penalized.PenaltyCursor)
+		logs, err = e.verifyPenalizedDELWithdrawalReceipt(ctx, receipt, out)
+		if err != nil {
+			return out, err
+		}
 	}
 	stake := [8]common.Hash{
 		common.BytesToHash(out.Validator.Bytes()), common.BytesToHash(out.Beneficiary.Bytes()), common.BytesToHash(e.roles.WrappedDEL.Bytes()),
@@ -121,6 +161,9 @@ func (e *Executor) VerifySignedDEL(ctx sdk.Context, msg core.Message, receipt *e
 	if err != nil {
 		return out, err
 	}
+	if penalized != nil && (backed.Sign() != 0 || new(big.Int).Add(remaining, amount).Cmp(penalized.RawAmount.BigInt()) != 0) {
+		return out, errors.New("penalized DEL withdrawal differs from the native active amount or includes NFT backing")
+	}
 	if deposit && remaining.Cmp(amount) < 0 {
 		return out, errors.New("Gateway position is smaller than the DEL deposit")
 	}
@@ -145,10 +188,10 @@ func (e *Executor) VerifySignedDEL(ctx sdk.Context, msg core.Message, receipt *e
 	if !deposit {
 		delta.Neg(delta)
 	}
-	if err := e.checkDELStakeLogs(receipt.Logs, out.StakeID, post, delta, isNew); err != nil {
+	if err := e.checkDELStakeLogs(logs, out.StakeID, post, delta, isNew); err != nil {
 		return out, err
 	}
-	last := receipt.Logs[2]
+	last := logs[2]
 	if deposit {
 		if last.Address != e.roles.WrappedDEL || len(last.Topics) != 3 || last.Topics[0] != e.wrapper.Events["Transfer"].ID ||
 			last.Topics[1] != (common.Hash{}) || last.Topics[2] != common.BytesToHash(e.roles.Gateway.Bytes()) ||
@@ -174,11 +217,18 @@ func (e *Executor) directDELPoststate(ctx sdk.Context, validator, beneficiary co
 }
 
 func (e *Executor) verifyDELStakeReceipt(ctx sdk.Context, receipt *ethtypes.Receipt, validator, beneficiary common.Address, count int) error {
+	if err := e.verifyDELReceiptEnvelope(ctx, receipt, beneficiary, count, count); err != nil {
+		return err
+	}
+	return e.verifyUnpenalizedValidator(ctx, validator)
+}
+
+func (e *Executor) verifyDELReceiptEnvelope(ctx sdk.Context, receipt *ethtypes.Receipt, beneficiary common.Address, minLogs, maxLogs int) error {
 	markers, err := e.completions(receipt)
 	if err != nil {
 		return err
 	}
-	if len(markers) != 0 || len(receipt.Logs) != count {
+	if len(markers) != 0 || len(receipt.Logs) < minLogs || len(receipt.Logs) > maxLogs {
 		return errors.New("unexpected DEL stake receipt logs")
 	}
 	if err := signedMetadata(ctx, receipt); err != nil {
@@ -190,7 +240,7 @@ func (e *Executor) verifyDELStakeReceipt(ctx sdk.Context, receipt *ethtypes.Rece
 	if err := e.requireInert(ctx, beneficiary); err != nil {
 		return err
 	}
-	return e.verifyUnpenalizedValidator(ctx, validator)
+	return nil
 }
 
 func (e *Executor) verifyDELStakeCursor(ctx sdk.Context, id common.Hash) error {
