@@ -33,7 +33,11 @@ func checkNativeGovernanceSignalRoutesAndTally(t *testing.T, a *App) {
 	t.Helper()
 	previous := a.withdrawals
 	t.Cleanup(func() { a.withdrawals = previous })
-	profile := WithdrawalProfile{EnableNativeConsensus: true, EnableNativeGovernance: true}
+	profile := WithdrawalProfile{
+		Gateway: common.HexToAddress("0x1111"), WrappedDEL: common.HexToAddress("0x2222"),
+		SettlementOnly: true, EnableDELDelegation: true, EnableDELHold: true,
+		EnableNativeConsensus: true, EnableNativeGovernance: true,
+	}
 	a.withdrawals = &withdrawalController{profile: profile}
 	circuit := nativeConsensusCircuit{app: a}
 	for _, msg := range []sdk.Msg{&govv1.MsgSubmitProposal{}, &govv1.MsgDeposit{}, &govv1.MsgVote{}, &govv1.MsgVoteWeighted{}} {
@@ -56,8 +60,13 @@ func checkNativeGovernanceSignalRoutesAndTally(t *testing.T, a *App) {
 	v, err := validatortypes.NewValidator(operator.String(), proposer.String(), ed25519.GenPrivKeyFromSecret([]byte("governance-fixture")).PubKey(),
 		validatortypes.Description{Moniker: "isolated fixture"}, sdkmath.LegacyZeroDec())
 	require.NoError(t, err)
-	v.Status, v.Stake, v.Online = validatortypes.BondStatus_Bonded, 10, true
+	v.Online = true
+	domain, configured := a.NativeValidatorKeeper.ConfiguredEVMSourceDomain()
+	require.True(t, configured)
+	require.Equal(t, a.chainID, domain.ChainID)
+	require.Equal(t, a.evmChainID, domain.EVMChainID)
 	validatorGenesis := validatortypes.DefaultGenesisState()
+	validatorGenesis.BindingDomain = &domain
 	validatorGenesis.Validators = []validatortypes.Validator{v}
 	require.NoError(t, a.NativeValidatorKeeper.InitGenesis(ctx, validatorGenesis))
 	unit := sdkmath.NewInt(nativekeeper.NativeDELAtomsPerPower)
@@ -66,7 +75,7 @@ func checkNativeGovernanceSignalRoutesAndTally(t *testing.T, a *App) {
 		amount int64
 		hold   bool
 	}{{proposer, 6, false}, {voter, 2, false}, {voter, 2, true}} {
-		position := nativekeeper.GatewayDELStake{Gateway: common.HexToAddress("0x1111"), WrappedDEL: common.HexToAddress("0x2222"),
+		position := nativekeeper.GatewayDELStake{Gateway: profile.Gateway, WrappedDEL: profile.WrappedDEL,
 			Beneficiary: common.BytesToAddress(row.owner), Validator: common.BytesToAddress(operator), Amount: unit.MulRaw(row.amount)}
 		var words [64]byte
 		if row.hold {
@@ -76,15 +85,21 @@ func checkNativeGovernanceSignalRoutesAndTally(t *testing.T, a *App) {
 		position.StakeID = crypto.Keccak256Hash(position.Validator[:], position.Beneficiary[:], position.WrappedDEL[:], words[:])
 		require.NoError(t, a.NativeValidatorKeeper.ApplyGatewayDELDelegation(ctx, position, position.Amount))
 	}
+	// Derive voting power from the same bound positions queried in the tally.
+	updates, err := a.NativeValidatorKeeper.BootstrapStakeABCIConsensus(ctx.WithBlockHeight(0), 1, []string{operator.String()})
+	require.NoError(t, err)
+	require.Len(t, updates, 1)
+	require.EqualValues(t, 10, updates[0].Power)
 
 	defaults := a.DefaultGenesis()
 	var govGenesis govv1.GenesisState
 	a.appCodec.MustUnmarshalJSON(defaults[govtypes.ModuleName], &govGenesis)
 	require.NoError(t, a.validateNativeGovernanceGenesis(defaults))
 	deposit := sdk.NewCoins(govGenesis.Params.MinDeposit...)
-	var authGenesis authtypes.GenesisState
-	a.appCodec.MustUnmarshalJSON(defaults[authtypes.ModuleName], &authGenesis)
-	a.AccountKeeper.InitGenesis(ctx, authGenesis)
+	authGenesis := authtypes.NewGenesisState(authtypes.DefaultParams(), authtypes.GenesisAccounts{
+		authtypes.NewBaseAccountWithAddress(proposer), authtypes.NewBaseAccountWithAddress(voter),
+	})
+	a.AccountKeeper.InitGenesis(ctx, *authGenesis)
 	var bankGenesis banktypes.GenesisState
 	a.appCodec.MustUnmarshalJSON(defaults[banktypes.ModuleName], &bankGenesis)
 	bankGenesis.Balances = []banktypes.Balance{{Address: proposer.String(), Coins: deposit}}
