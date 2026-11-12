@@ -274,6 +274,9 @@ func (k *StateKeeper) applyGatewayNFTWithdrawal(ctx sdk.Context, position Gatewa
 	if err := k.appendGatewayUndelegation(child, owner, operator, entry); err != nil {
 		return err
 	}
+	if err := k.recordGatewayFrozenNFTProvenance(child, &frozen, active.CreatedHeight); err != nil {
+		return err
+	}
 	if cursor != (common.Hash{}) {
 		if err := k.service.OpenKVStore(child).Set(frozenDELPenaltyCursorKey(frozen.Gateway, frozen.FrozenIndex), cursor[:]); err != nil {
 			return err

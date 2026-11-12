@@ -268,6 +268,17 @@ func (k *StateKeeper) ApplyWithdrawalCompletion(ctx sdk.Context, expected types.
 			}
 		}
 	}
+	if expected.SourceKind == gatewayNFTBinding {
+		enabled, err := k.NativeStakeProvenanceEnabled(child)
+		if err != nil {
+			return err
+		}
+		if enabled {
+			if err := state.Delete(gatewayFrozenNFTProvenanceKey(&expected)); err != nil {
+				return err
+			}
+		}
+	}
 	child.EventManager().EmitEvent(sdk.NewEvent(
 		"decimal_withdrawal_completed",
 		sdk.NewAttribute("gateway", fmt.Sprintf("0x%x", completion.closed.frozen.Gateway)),

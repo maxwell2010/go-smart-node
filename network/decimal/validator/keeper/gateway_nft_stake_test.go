@@ -92,6 +92,11 @@ func TestGatewayNFTNativeLifecycleWithDirectDELAndSibling(t *testing.T) {
 
 	frozen, err := k.GetEVMFrozenBinding(ctx, companion.Gateway[:], frozenID[:])
 	require.NoError(t, err)
+	hasProvenance, err := service.OpenKVStore(ctx).Has(gatewayFrozenNFTProvenanceKey(&frozen))
+	require.NoError(t, err)
+	require.False(t, hasProvenance)
+	_, err = k.GatewayFrozenNFTStakeEntryHeight(ctx, frozen)
+	require.ErrorIs(t, err, ErrNotFound)
 	require.Equal(t, first.StakeID.Bytes(), frozen.SourceStakeID)
 	require.Equal(t, sdkmath.OneInt(), frozen.RawAmount)
 	require.Equal(t, sdkmath.NewInt(5), frozen.ReportedReserveAmount)
