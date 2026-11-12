@@ -10,13 +10,15 @@ import (
 
 	abci "github.com/cometbft/cometbft/abci/types"
 	cmtproto "github.com/cometbft/cometbft/proto/tendermint/types"
+	cointypes "github.com/maxwell2010/go-smart-node/network/decimal/coin/types"
 	validatortypes "github.com/maxwell2010/go-smart-node/network/decimal/validator/types"
 )
 
 type withdrawalStateSync struct {
-	mu       sync.Mutex
-	prepared bool
-	offer    *withdrawalSnapshotOffer
+	mu             sync.Mutex
+	prepared       bool
+	offer          *withdrawalSnapshotOffer
+	customManifest []byte
 }
 
 type withdrawalSnapshotOffer struct {
@@ -51,6 +53,17 @@ func (app *App) PrepareStateSyncGenesis(state GenesisState) error {
 		controller, err := app.newWithdrawalController(*profile)
 		if err != nil {
 			return err
+		}
+		if profile.customCollateralEnabled() {
+			var genesis cointypes.GenesisState
+			if err := app.appCodec.UnmarshalJSON(state[cointypes.ModuleName], &genesis); err != nil {
+				return err
+			}
+			manifest, err := customCollateralManifest(genesis.Coins)
+			if err != nil {
+				return err
+			}
+			syncState.customManifest = manifest
 		}
 		app.installWithdrawalController(controller)
 	}
@@ -139,6 +152,9 @@ func (app *App) verifyRestoredWithdrawalProfile(offer *withdrawalSnapshotOffer) 
 		return err
 	}
 	if err := app.verifyNativeDuplicateVoteState(ctx, app.withdrawals.profile.EnableNativeDuplicateVote); err != nil {
+		return err
+	}
+	if err := app.withdrawals.customCollateral.verifyRestored(ctx, app.stateSync.customManifest); err != nil {
 		return err
 	}
 	return app.verifyNativeIBCState(ctx, app.withdrawals.profile)

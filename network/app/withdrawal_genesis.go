@@ -83,6 +83,9 @@ func parseWithdrawalGenesisProfile(raw json.RawMessage) (*WithdrawalProfile, err
 	if err := validateNativeOrdinaryDELDowntimeProfile(profile); err != nil {
 		return nil, err
 	}
+	if err := validateCustomCollateralProfile(profile); err != nil {
+		return nil, err
+	}
 	seen := make(map[common.Address]bool)
 	for _, addr := range []common.Address{profile.Registry, profile.Gateway, profile.Library, profile.NFTCenter,
 		profile.PositionVault, profile.MasterValidator, profile.WrappedDEL} {
@@ -405,6 +408,9 @@ func (app *App) initWithdrawalGenesis(ctx sdk.Context, req *abci.RequestInitChai
 	}
 	if err := controller.executor.AttestGenesis(read, validators.EVMFrozenBindings, limits, controller.assets.AttestGenesisNFT); err != nil {
 		return nil, fmt.Errorf("authenticate withdrawal genesis: %w", err)
+	}
+	if err := controller.customCollateral.attestGenesis(child); err != nil {
+		return nil, fmt.Errorf("authenticate DRC20 genesis: %w", err)
 	}
 	if profile.EnableNativeDuplicateVote {
 		if err := app.NativeValidatorKeeper.InitializeDELProvenance(child, profile.Gateway, profile.WrappedDEL); err != nil {
