@@ -23,29 +23,38 @@ func WithdrawalEvidenceWindowElapsed(
 	maxAgeNumBlocks int64,
 	maxAgeDuration time.Duration,
 ) (bool, error) {
+	return nativeEvidenceWindowElapsed(executionHeight, previousBlock, requestCreatedBlock, maxAgeNumBlocks, maxAgeDuration)
+}
+
+func nativeEvidenceWindowElapsed(
+	executionHeight int64,
+	previousBlock, subject CommittedEvidenceBlock,
+	maxAgeNumBlocks int64,
+	maxAgeDuration time.Duration,
+) (bool, error) {
 	if maxAgeNumBlocks <= 0 || maxAgeDuration <= 0 {
 		return false, errors.New("evidence age limits must be positive")
 	}
 	if executionHeight <= 1 || previousBlock.Height != executionHeight-1 || previousBlock.Time.IsZero() {
-		return false, errors.New("previous committed block required for withdrawal evidence window")
+		return false, errors.New("previous committed block required for native evidence window")
 	}
-	if requestCreatedBlock.Height <= 0 || requestCreatedBlock.Height > previousBlock.Height || requestCreatedBlock.Time.IsZero() {
-		return false, errors.New("committed request creation block required for withdrawal evidence window")
+	if subject.Height <= 0 || subject.Height > previousBlock.Height || subject.Time.IsZero() {
+		return false, errors.New("committed subject block required for native evidence window")
 	}
 
 	previousTime := previousBlock.Time.UTC()
-	createdTime := requestCreatedBlock.Time.UTC()
-	if requestCreatedBlock.Height == previousBlock.Height {
-		if !previousTime.Equal(createdTime) {
+	subjectTime := subject.Time.UTC()
+	if subject.Height == previousBlock.Height {
+		if !previousTime.Equal(subjectTime) {
 			return false, errors.New("conflicting times for the same committed block")
 		}
 		return false, nil
 	}
-	if !previousTime.After(createdTime) {
+	if !previousTime.After(subjectTime) {
 		return false, errors.New("committed block times must increase with height")
 	}
 
 	// CometBFT v0.38 expires evidence only after both strict age limits.
-	return previousBlock.Height-requestCreatedBlock.Height > maxAgeNumBlocks &&
-		previousTime.Sub(createdTime) > maxAgeDuration, nil
+	return previousBlock.Height-subject.Height > maxAgeNumBlocks &&
+		previousTime.Sub(subjectTime) > maxAgeDuration, nil
 }
