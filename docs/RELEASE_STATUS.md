@@ -179,6 +179,15 @@ RPC processes on the isolated runner. Its first available block was 41.
 It reached a common AppHash and DEL balance at height 44.
 [Restart and snapshot CI](https://github.com/maxwell2010/go-smart-node/actions/runs/43239340819) · [Evidence](https://github.com/maxwell2010/go-smart-node/actions/runs/43239340819/artifacts/13954741374)
 
+The systemd update rehearsal upgraded the observer from signed `6f91783` to
+signed `6802845` with identical genesis bytes. The stopped service's home and
+binary were copied and checked before updating. The new binary loaded height
+22 and agreed on the AppHash at height 25. After verifying and restoring the
+offline backup, the original binary loaded the same height 22 AppHash and
+caught up to a common AppHash at height 26. Both binaries use the same Go
+application code and database schema.
+[Upgrade and rollback CI](https://github.com/maxwell2010/go-smart-node/actions/runs/43243377624) · [Evidence](https://github.com/maxwell2010/go-smart-node/actions/runs/43243377624/artifacts/13957190361)
+
 ## Separate release tracks
 
 The selected architecture is a fresh network on a maintained modern stack,
