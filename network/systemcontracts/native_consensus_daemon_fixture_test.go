@@ -28,6 +28,7 @@ import (
 	ethtypes "github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/crypto"
 	ownedapp "github.com/maxwell2010/go-smart-node/network/app"
+	cointypes "github.com/maxwell2010/go-smart-node/network/decimal/coin/types"
 	validatortypes "github.com/maxwell2010/go-smart-node/network/decimal/validator/types"
 	contracts "github.com/maxwell2010/go-smart-node/network/systemcontracts"
 	"github.com/stretchr/testify/require"
@@ -120,6 +121,11 @@ func exportNativeConsensusDaemonFixture(t *testing.T, e isolatedBackendEnv, dir 
 	}
 	collector := authtypes.NewModuleAddress(authtypes.FeeCollectorName)
 	nativeKeeper := e.app.NativeValidatorKeeper
+	var custom *nativeCustomCollateralGenesisFixture
+	if os.Getenv(nativeCustomCollateralGenesisPhaseEnv) == "seed" {
+		require.True(t, historical)
+		custom = seedNativeCustomCollateralGenesis(t, e, profile, gov)
+	}
 	config, err := json.Marshal(profile)
 	require.NoError(t, err)
 	type masterValidator struct {
@@ -278,6 +284,14 @@ func exportNativeConsensusDaemonFixture(t *testing.T, e isolatedBackendEnv, dir 
 		profile.EnableNFTDelegation = true
 		profile.EnableNativeNFTDowntime = true
 		nft.addGenesis(t, e, profile, genesis, beneficiary)
+	}
+	if custom != nil {
+		var coins cointypes.GenesisState
+		require.NoError(t, cdc.UnmarshalJSON(genesis[cointypes.ModuleName], &coins))
+		require.Empty(t, coins.Coins)
+		coins.Coins = []cointypes.Coin{custom.coin}
+		genesis[cointypes.ModuleName] = cdc.MustMarshalJSON(&coins)
+		profile.TokenCenter, profile.CurveConverter = custom.center, custom.converter
 	}
 	genesis[ownedapp.WithdrawalGenesisKey], err = json.Marshal(profile)
 	require.NoError(t, err)
