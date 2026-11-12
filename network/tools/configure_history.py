@@ -1,5 +1,5 @@
 """Apply a development history profile to a freshly initialized, stopped home only."""
-import argparse, json, os, pathlib, re, tomllib
+import argparse, json, os, pathlib, re
 
 PROFILE = {
  "app.toml": {(None,"pruning"): '"custom"', (None,"pruning-keep-recent"): '"10000"', (None,"pruning-interval"): '"100"', (None,"min-retain-blocks"): '1000000', ("state-sync","snapshot-interval"): '0', ("state-sync","snapshot-keep-recent"): '2'},
@@ -21,6 +21,7 @@ def validate_fresh_home(home):
    raise ValueError("validator has existing signature: fresh homes only")
 
 def render(text, changes):
+ import tomllib
  section=None; seen=set(); lines=[]
  for line in text.splitlines():
   match=re.fullmatch(r"\s*\[([^]]+)\]\s*(?:#.*)?",line)
@@ -35,6 +36,7 @@ def render(text, changes):
  result="\n".join(lines)+"\n";tomllib.loads(result);return result
 
 def configure(home, apply=False, role="rpc-ibc"):
+ import tomllib
  if role not in {"rpc-ibc", "consensus"}:raise ValueError("unknown role")
  home=pathlib.Path(home).resolve(strict=True)
  # A zeroed init signing-state file is allowed; unknown data is never guessed safe.
