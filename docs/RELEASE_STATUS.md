@@ -133,6 +133,25 @@ processes agreed through a same-home restart and height 40. This run used
 an empty SDK staking ledger and real Gateway-backed DEL positions.
 [Process evidence](https://github.com/maxwell2010/go-smart-node/actions/runs/43154836869)
 
+The native consensus profile has also passed the isolated fee-only reward,
+hold downtime, jail recovery and active NFT downtime scenarios. The active
+NFT path burned 0.02 DEL from the affected 2 DEL reserve, preserved receipt
+custody and WDEL supply, and took 17,312,534 of the 24,000,000 SDK gas budget.
+The combined module suite on `496ee4b` processed two frozen 1024-unit receipts
+in 21,543,784 SDK gas, with one claim eligible and one ineligible. It checked
+atomic rollback, retry and receipt return at zero reserve.
+[Hold payout](https://github.com/maxwell2010/go-smart-node/actions/runs/43167145189)
+[Signed jail recovery](https://github.com/maxwell2010/go-smart-node/actions/runs/43167339181)
+[Active NFT downtime](https://github.com/maxwell2010/go-smart-node/actions/runs/43169900579)
+[Combined module suite](https://github.com/maxwell2010/go-smart-node/actions/runs/43172175492)
+
+On `496ee4b`, a rejected governance proposal left the upgrade state unchanged.
+A second proposal passed at height 40 and scheduled an upgrade at 64. The
+predecessor committed through 63, the successor applied the approved plan at
+64, and three isolated nodes agreed on continued consensus through 67. Both
+binaries use the same source and the plan is dedicated to this rehearsal.
+[Two-binary governance rehearsal](https://github.com/maxwell2010/go-smart-node/actions/runs/43172176025)
+
 Modern release blockers remain:
 
 - Complete native Decimal coin, NFT, validator, rewards and fee integration.
