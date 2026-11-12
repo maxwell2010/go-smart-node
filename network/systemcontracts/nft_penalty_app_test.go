@@ -79,11 +79,11 @@ func runSignedActiveNFTPenalty(t *testing.T, e isolatedBackendEnv, profile owned
 	}
 
 	originID := common.BigToHash(new(big.Int).Add(new(big.Int).Lsh(big.NewInt(1), 224), big.NewInt(880)))
-	lateUnits := uint32(1)
+	unitsPerPosition := uint32(1)
 	if mode == "frozen-nft-penalty-max-units" {
-		lateUnits = nfttypes.MaxIsolatedOriginUnits
+		unitsPerPosition = nfttypes.MaxIsolatedOriginUnits
 	}
-	seedActiveNFTPenaltyOrigin(t, f, profile, origin, vault, originAddress, originID, unitReserve, lateUnits+1)
+	seedActiveNFTPenaltyOrigin(t, f, profile, origin, vault, originAddress, originID, unitReserve, 2*unitsPerPosition)
 	data, err := origin.ABI.Pack("setApprovalForAll", f.target, true)
 	require.NoError(t, err)
 	e.send(e.keys[0], &originAddress, new(big.Int), data, true)
@@ -111,7 +111,7 @@ func runSignedActiveNFTPenalty(t *testing.T, e isolatedBackendEnv, profile owned
 		commit()
 		return proof
 	}
-	penalized, sibling := delegate(1), delegate(lateUnits)
+	penalized, sibling := delegate(unitsPerPosition), delegate(unitsPerPosition)
 	if mode == "frozen-nft-penalty" || mode == "frozen-nft-penalty-max-units" {
 		runSignedFrozenNFTPenalty(t, f, reader, executor, penalized, sibling, unitReserve, inclusion)
 		return

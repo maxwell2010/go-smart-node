@@ -30,7 +30,7 @@ func TestOwnedAppSignedFrozenNFTPenalty(t *testing.T) {
 
 func TestOwnedAppSignedMaxUnitFrozenNFTPenalty(t *testing.T) {
 	output := testSignedDELFixture(t, "frozen-nft-penalty-max-units", frozenNFTPenaltyPassed)
-	const prefix = "frozen NFT penalty gas origin_units=1024 "
+	const prefix = "frozen NFT penalty gas origin_units=1024+1024 "
 	_, measurement, found := strings.Cut(output, prefix)
 	require.True(t, found, "isolated fixture did not report the 1024-unit measurement")
 	line, _, _ := strings.Cut(measurement, "\n")
@@ -74,7 +74,9 @@ func runSignedFrozenNFTPenalty(t *testing.T, f signedDELFixture, reader *nftview
 		return withdrawal{out, getRow(out.FrozenIndex), lineage}
 	}
 	early, late := withdraw(first), withdraw(second)
+	earlyReserve := unitReserve.MulRaw(int64(first.Position.OriginQuantity))
 	lateReserve := unitReserve.MulRaw(int64(second.Position.OriginQuantity))
+	require.Len(t, early.lineage.OriginSubTokenIDs, int(first.Position.OriginQuantity))
 	require.Len(t, late.lineage.OriginSubTokenIDs, int(second.Position.OriginQuantity))
 	require.Less(t, early.row.CreatedHeight, late.row.CreatedHeight)
 	infraction := late.row.CreatedHeight
@@ -115,7 +117,7 @@ func runSignedFrozenNFTPenalty(t *testing.T, f signedDELFixture, reader *nftview
 			used := execution.GasMeter().GasConsumed()
 			require.Positive(t, used)
 			require.LessOrEqual(t, used, attemptGas)
-			t.Logf("frozen NFT penalty gas origin_units=%d sdk_gas=%d budget=%d", second.Position.OriginQuantity, used, attemptGas)
+			t.Logf("frozen NFT penalty gas origin_units=%d+%d sdk_gas=%d budget=%d", first.Position.OriginQuantity, second.Position.OriginQuantity, used, attemptGas)
 		}
 		return err
 	}
@@ -136,7 +138,7 @@ func runSignedFrozenNFTPenalty(t *testing.T, f signedDELFixture, reader *nftview
 	require.True(t, initialSupply.Sub(lateReserve).Equal(supply(ctx())))
 	noLoss, exhausted := getRow(early.out.FrozenIndex), getRow(late.out.FrozenIndex)
 	require.Equal(t, early.row.NativeEntryHash, noLoss.NativeEntryHash)
-	require.True(t, noLoss.ReportedReserveAmount.Equal(unitReserve))
+	require.True(t, noLoss.ReportedReserveAmount.Equal(earlyReserve))
 	require.True(t, exhausted.Active)
 	require.True(t, exhausted.RawAmount.Equal(sdkmath.OneInt()))
 	require.True(t, exhausted.ReportedReserveAmount.IsZero())
