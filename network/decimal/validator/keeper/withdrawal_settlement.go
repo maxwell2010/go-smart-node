@@ -251,7 +251,7 @@ func (k *StateKeeper) ApplyWithdrawalCompletion(ctx sdk.Context, expected types.
 	if err != nil {
 		return err
 	}
-	if expected.SourceKind == gatewayDELCoinBinding && expected.NativeTarget.StakeType == types.StakeType_Coin {
+	if expected.SourceKind == gatewayDELCoinBinding {
 		cursorKey := frozenDELPenaltyCursorKey(expected.Gateway, expected.FrozenIndex)
 		hasCursor, err := state.Has(cursorKey)
 		if err != nil {

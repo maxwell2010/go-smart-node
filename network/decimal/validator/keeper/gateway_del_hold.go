@@ -111,19 +111,29 @@ func (s GatewayDELStake) takeHold(previous *types.Delegation, withdrawn sdkmath.
 	return queued, &next, nil
 }
 
-// penalizeHold uses the difference of adjacent cumulative floors in canonical
-// start-time order. Every lot's share is within one atom of exact pro rata and
-// the shares add up to the entire authenticated bucket loss. The widened
-// product avoids truncation when two valid uint256 amounts are multiplied.
 func (s GatewayDELStake) penalizeHold(previous *types.Delegation, loss sdkmath.Int) (*types.Delegation, error) {
 	if loss.IsZero() {
 		return previous, nil
 	}
-	bucketAmount, lossAmount := s.Amount.BigInt(), loss.BigInt()
+	kept, err := reduceDELHoldLots(previous.Stake.Holds, s.HoldDeadline, s.Amount, loss)
+	if err != nil || len(kept) == 0 {
+		return nil, err
+	}
+	next := *previous
+	next.Stake = gatewayDELHoldStake(previous.Stake.Stake.Amount.Sub(loss), kept)
+	return &next, nil
+}
+
+// reduceDELHoldLots uses the difference of adjacent cumulative floors in
+// canonical start-time order. Each selected lot's share is within one atom
+// of exact pro rata and the shares add up to the entire bucket loss. The
+// widened product supports multiplication of two valid uint256 amounts.
+func reduceDELHoldLots(lots []*types.StakeHold, deadline int64, amount, loss sdkmath.Int) ([]*types.StakeHold, error) {
+	bucketAmount, lossAmount := amount.BigInt(), loss.BigInt()
 	var prefix, charged, cumulativeLoss, lotLoss big.Int
-	kept := make([]*types.StakeHold, 0, len(previous.Stake.Holds))
-	for _, lot := range previous.Stake.Holds {
-		if lot.HoldEndTime != s.HoldDeadline {
+	kept := make([]*types.StakeHold, 0, len(lots))
+	for _, lot := range lots {
+		if lot.HoldEndTime != deadline {
 			kept = append(kept, lot)
 			continue
 		}
@@ -141,10 +151,5 @@ func (s GatewayDELStake) penalizeHold(previous *types.Delegation, loss sdkmath.I
 	if prefix.Cmp(bucketAmount) != 0 || charged.Cmp(lossAmount) != 0 {
 		return nil, errors.New("native DEL hold lots do not cover the penalty")
 	}
-	if len(kept) == 0 {
-		return nil, nil
-	}
-	next := *previous
-	next.Stake = gatewayDELHoldStake(previous.Stake.Stake.Amount.Sub(loss), kept)
-	return &next, nil
+	return kept, nil
 }
