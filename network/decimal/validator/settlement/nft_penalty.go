@@ -27,6 +27,7 @@ type ActiveNFTPenaltyProof struct {
 	CompanionCursor           common.Hash
 	BeforeCursor, AfterCursor common.Hash
 	RemainingReserve, Burned  sdkmath.Int
+	Eligible                  bool
 }
 
 // The extra Gateway library and Vault frames need to forward gas to the
@@ -35,23 +36,52 @@ const nftPenaltyEVMGas = 2_000_000
 
 type activeNFTPenaltyKey struct{}
 type activeNFTPenaltyCall struct {
-	executor *Executor
-	height   int64
-	id       common.Hash
+	executor   *Executor
+	height     int64
+	id         common.Hash
+	historical *historicalNFTPenalty
+}
+
+type historicalNFTPenalty struct {
+	master   MasterPenaltyProof
+	eligible bool
 }
 
 // AuthorizeActiveNFTPenalty is an internal EVM commit capability for exactly
 // one authenticated Gateway position. Signed calls do not receive it.
 func (e *Executor) AuthorizeActiveNFTPenalty(ctx sdk.Context, msg core.Message) bool {
+	return e.authorizeActiveNFTPenalty(ctx, msg, false)
+}
+
+// AuthorizeActiveHistoricalNFTPenalty is the exact typed settlement capability.
+func (e *Executor) AuthorizeActiveHistoricalNFTPenalty(ctx sdk.Context, msg core.Message) bool {
+	return e.authorizeActiveNFTPenalty(ctx, msg, true)
+}
+
+func (e *Executor) authorizeActiveNFTPenalty(ctx sdk.Context, msg core.Message, historical bool) bool {
 	call, ok := ctx.Value(activeNFTPenaltyKey{}).(activeNFTPenaltyCall)
 	if !ok || e == nil || call.executor != e || call.height != ctx.BlockHeight() ||
-		ctx.ExecMode() != sdk.ExecModeFinalize || msg.From != Sender() ||
+		(call.historical != nil) != historical || ctx.ExecMode() != sdk.ExecModeFinalize || msg.From != call.sender() ||
 		msg.To == nil || *msg.To != e.roles.Gateway || msg.Value == nil ||
 		msg.Value.Sign() != 0 || len(msg.SetCodeAuthorizations) != 0 {
 		return false
 	}
-	data, err := e.gateway.Pack("applyPenaltiesToNFTStakes", [][32]byte{call.id})
+	data, err := e.packActiveNFTPenalty(call)
 	return err == nil && bytes.Equal(msg.Data, data)
+}
+
+func (call activeNFTPenaltyCall) sender() common.Address {
+	if call.historical != nil {
+		return masterPenaltySender()
+	}
+	return Sender()
+}
+
+func (e *Executor) packActiveNFTPenalty(call activeNFTPenaltyCall) ([]byte, error) {
+	if history := call.historical; history != nil {
+		return e.gateway.Pack("applyHistoricalPenaltyToNFT", false, call.id, big.NewInt(history.master.InfractionHeight), history.eligible)
+	}
+	return e.gateway.Pack("applyPenaltiesToNFTStakes", [][32]byte{call.id})
 }
 
 // ApplyActiveNFTPenalty realizes one announced penalty on an ordinary active
@@ -61,6 +91,23 @@ func (e *Executor) AuthorizeActiveNFTPenalty(ctx sdk.Context, msg core.Message) 
 // eligible position before committing the enclosing Master announcement.
 func (e *Executor) ApplyActiveNFTPenalty(ctx sdk.Context, row validatortypes.EVMStakeBinding, percentage uint16,
 	nativeSupply func(sdk.Context) sdkmath.Int, project func(sdk.Context, ActiveNFTPenaltyProof) error,
+) error {
+	return e.applyActiveNFTPenalty(ctx, row, percentage, nativeSupply, project, nil)
+}
+
+// ApplyActiveHistoricalNFTPenalty consumes one typed entry. The native
+// provenance projector verifies the eligibility decision and reserve delta.
+func (e *Executor) ApplyActiveHistoricalNFTPenalty(ctx sdk.Context, row validatortypes.EVMStakeBinding, master MasterPenaltyProof, eligible bool,
+	nativeSupply func(sdk.Context) sdkmath.Int, project func(sdk.Context, ActiveNFTPenaltyProof) error,
+) error {
+	if !e.hasHistoricalPenaltyScope(ctx, master, common.BytesToAddress(row.Validator)) {
+		return errors.New("active historical NFT penalty requires the active typed Master reconciliation")
+	}
+	return e.applyActiveNFTPenalty(ctx, row, master.Percentage, nativeSupply, project, &historicalNFTPenalty{master: master, eligible: eligible})
+}
+
+func (e *Executor) applyActiveNFTPenalty(ctx sdk.Context, row validatortypes.EVMStakeBinding, percentage uint16,
+	nativeSupply func(sdk.Context) sdkmath.Int, project func(sdk.Context, ActiveNFTPenaltyProof) error, historical *historicalNFTPenalty,
 ) error {
 	if e == nil || e.evm == nil || ctx.ExecMode() != sdk.ExecModeFinalize || ctx.BlockHeight() <= 0 ||
 		percentage == 0 || percentage > 100 || nativeSupply == nil || project == nil {
@@ -86,15 +133,28 @@ func (e *Executor) ApplyActiveNFTPenalty(ctx sdk.Context, row validatortypes.EVM
 		return errors.New("active NFT penalty cursor overflow")
 	}
 	afterCursor := common.BigToHash(next)
+	announcement := MasterPenaltyProof{Validator: validator, BeforeCursor: beforeCursor, AfterCursor: afterCursor, Percentage: percentage}
 	child, write := ctx.CacheContext()
-	source, err := e.authenticatePenaltySource(child, validator, percentage)
-	if err != nil {
+	var source *nftview.StakeSource
+	var err error
+	eligible := true
+	if historical == nil {
+		source, err = e.authenticatePenaltySource(child, validator, percentage)
+		if err != nil {
+			return err
+		}
+	} else {
+		announcement.InfractionHeight = historical.master.InfractionHeight
+		if announcement != historical.master {
+			return errors.New("active NFT position differs from the typed Master entry")
+		}
+		eligible = historical.eligible
+	}
+	call := activeNFTPenaltyCall{executor: e, height: child.BlockHeight(), id: id, historical: historical}
+	if err := e.requireInert(child, call.sender()); err != nil {
 		return err
 	}
-	if err := e.requireInert(child, Sender()); err != nil {
-		return err
-	}
-	status, err := e.verifyAnnouncedPenalty(child, validator, beforeCursor, afterCursor, percentage)
+	status, err := e.verifyMasterPenaltyAppend(child, announcement)
 	if err != nil {
 		return err
 	}
@@ -102,19 +162,22 @@ func (e *Executor) ApplyActiveNFTPenalty(ctx sdk.Context, row validatortypes.EVM
 	if err != nil {
 		return err
 	}
-	burned := new(big.Int).Mul(row.ReportedReserveAmount.BigInt(), new(big.Int).SetUint64(uint64(percentage)))
-	burned.Quo(burned, big.NewInt(100))
+	burned := new(big.Int)
+	if eligible {
+		burned.Mul(row.ReportedReserveAmount.BigInt(), new(big.Int).SetUint64(uint64(percentage)))
+		burned.Quo(burned, big.NewInt(100))
+	}
 	if burned.BitLen() > 255 {
 		return errors.New("active NFT penalty exceeds signed Gateway event amount")
 	}
 	loss := sdkmath.NewIntFromBigInt(burned)
 	remaining := row.ReportedReserveAmount.Sub(loss)
-	data, err := e.gateway.Pack("applyPenaltiesToNFTStakes", [][32]byte{id})
+	data, err := e.packActiveNFTPenalty(call)
 	if err != nil {
 		return err
 	}
-	authorized := child.WithValue(activeNFTPenaltyKey{}, activeNFTPenaltyCall{e, child.BlockHeight(), id})
-	result, err := e.invokePenaltyWithGas(authorized, Sender(), e.roles.Gateway, data, nftPenaltyEVMGas)
+	authorized := child.WithValue(activeNFTPenaltyKey{}, call)
+	result, err := e.invokePenaltyWithGas(authorized, call.sender(), e.roles.Gateway, data, nftPenaltyEVMGas)
 	if err != nil {
 		return err
 	}
@@ -129,13 +192,17 @@ func (e *Executor) ApplyActiveNFTPenalty(ctx sdk.Context, row validatortypes.EVM
 		return err
 	}
 	receipt := &ethtypes.Receipt{Status: ethtypes.ReceiptStatusSuccessful, Logs: evmtypes.LogsToEthereum(result.Logs)}
-	if err := e.verifyActiveNFTPenaltyLogs(receipt, id, before.position.ReserveAmount, after, percentage, burned); err != nil {
+	if historical != nil && (!eligible || row.ReportedReserveAmount.IsZero()) {
+		if len(receipt.Logs) != 0 {
+			return errors.New("active historical NFT cursor-only settlement emitted unexpected logs")
+		}
+	} else if err := e.verifyActiveNFTPenaltyLogs(receipt, id, before.position.ReserveAmount, after, percentage, burned); err != nil {
 		return err
 	}
 	if err := e.confirmPenaltySource(child, source); err != nil {
 		return err
 	}
-	afterStatus, err := e.verifyAnnouncedPenalty(child, validator, beforeCursor, afterCursor, percentage)
+	afterStatus, err := e.verifyMasterPenaltyAppend(child, announcement)
 	if err != nil {
 		return err
 	}
@@ -143,7 +210,7 @@ func (e *Executor) ApplyActiveNFTPenalty(ctx sdk.Context, row validatortypes.EVM
 		return errors.New("active NFT penalty changed the Master status")
 	}
 	proof := ActiveNFTPenaltyProof{Companion: before.companion, CompanionCursor: before.coinCursor,
-		BeforeCursor: beforeCursor, AfterCursor: afterCursor, RemainingReserve: remaining, Burned: loss}
+		BeforeCursor: beforeCursor, AfterCursor: afterCursor, RemainingReserve: remaining, Burned: loss, Eligible: eligible}
 	if err := project(child, proof); err != nil {
 		return fmt.Errorf("project active NFT penalty: %w", err)
 	}
