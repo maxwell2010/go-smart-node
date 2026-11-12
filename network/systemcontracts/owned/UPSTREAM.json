@@ -1,9 +1,9 @@
 {
-  "patchLabel": "mintcandy-historical-del-nft-penalty-4",
+  "patchLabel": "mintcandy-isolated-nft-conversion",
   "canonicalSource": "sources/DecimalDelegation.sol",
   "canonicalSha256": "4478ab6d8b4a7feb230d70715c72f3be816fdbfd0efe7743e3572cfd4ce010c2",
   "ownedSource": "owned/DecimalDelegation.sol",
-  "ownedSha256": "5dc38fea10bb420daffbe270fbcc5ae662175f21eef631cbf634134cf552d671",
+  "ownedSha256": "2b409b99cdb1a75242e60cf7f1ae55c57e6b1374c141c6e15d2e4f60cde08801",
   "changedFunctions": [
     "DelegationNFTLib._applyPenaltiesToStake",
     "DecimalDelegation._applyPenaltiesToStake",
@@ -37,6 +37,7 @@
     "DelegationNFTLib.delegateIsolatedNFT1155",
     "MintCandyIsolatedDelegation.delegateNFT1155",
     "MintCandyIsolatedDelegation.delegateNFT1155Hold",
+    "MintCandyIsolatedDelegation.delegateNFT1155WithConversion",
     "DecimalDelegationCommon._isValidatorActive",
     "DelegationNFTLib._isValidatorActive",
     "DelegationNFTLib._checkToken",

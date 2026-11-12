@@ -10,6 +10,8 @@ import {MAX_ISOLATED_ORIGIN_UNITS} from "./MintCandyNFTIsolationLimits.sol";
 interface IMintCandyPositionIssuer {
     function maxOriginQuantity() external view returns (uint256);
     function mintFromOrigin(uint256 originId, uint256 quantity, address recipient) external payable returns (uint256 positionId);
+    function mintFromOriginConverted(uint256 originId, uint256 quantity, address recipient,
+        uint256 minimumNativeOutput, uint256 deadline) external returns (uint256 positionId);
 }
 
 /// @notice Uniform fungible origin units; every staked position is isolated.
@@ -146,6 +148,14 @@ contract MintCandyIsolatedDRC1155 is DRC1155 {
     }
 
     function isolate(uint256 tokenId, uint256 quantity, address recipient) external isolatedFinancial returns (uint256 positionId) {
+        return _isolate(tokenId, quantity, recipient, false, 0, 0);
+    }
+    function isolateForDelegation(uint256 tokenId, uint256 quantity, address recipient,
+        uint256 minimumNativeOutput, uint256 deadline) external isolatedFinancial returns (uint256 positionId) {
+        return _isolate(tokenId, quantity, recipient, true, minimumNativeOutput, deadline);
+    }
+    function _isolate(uint256 tokenId, uint256 quantity, address recipient, bool delegation,
+        uint256 minimumNativeOutput, uint256 deadline) private returns (uint256 positionId) {
         UnitReserve storage unit = _isolation().units[tokenId];
         if (!unit.initialized || quantity == 0 || quantity > MAX_ISOLATED_ORIGIN_UNITS) revert IsolationRequired();
         _checkUniform(tokenId, unit);
@@ -155,6 +165,10 @@ contract MintCandyIsolatedDRC1155 is DRC1155 {
         address controller = registry.getContractAddress("delegation");
         if (controller.code.length == 0 || controller != registry.getContractAddress("delegation-nft")) revert IsolationRequired();
         if (recipient == address(0) || (recipient == controller && msg.sender != controller)) revert InvalidIsolationRecipient();
+        if (delegation && (msg.sender != controller || recipient != controller)) revert InvalidIsolationRecipient();
+        bool converting = minimumNativeOutput != 0;
+        if (converting != (deadline != 0) || (converting && (unit.reserve.reserveType != ReserveType.DRC20 ||
+            unit.reserve.token == registry.getContractAddress("wdel")))) revert InvalidReserveType();
         uint256 reserveAmount = unit.reserve.amount * quantity;
         _isolation().isolating = true;
         _burn(msg.sender, tokenId, quantity);
@@ -165,7 +179,10 @@ contract MintCandyIsolatedDRC1155 is DRC1155 {
             positionId = IMintCandyPositionIssuer(vault).mintFromOrigin{value:reserveAmount}(tokenId, quantity, recipient);
         } else {
             if (!IERC20(unit.reserve.token).approve(vault, reserveAmount)) revert ReserveFundingFailed();
-            positionId = IMintCandyPositionIssuer(vault).mintFromOrigin(tokenId, quantity, recipient);
+            if (converting) {
+                positionId = IMintCandyPositionIssuer(vault).mintFromOriginConverted(
+                    tokenId, quantity, recipient, minimumNativeOutput, deadline);
+            } else positionId = IMintCandyPositionIssuer(vault).mintFromOrigin(tokenId, quantity, recipient);
             if (!IERC20(unit.reserve.token).approve(vault, 0)) revert ReserveFundingFailed();
         }
         if (positionId == 0) revert IsolationRequired();
