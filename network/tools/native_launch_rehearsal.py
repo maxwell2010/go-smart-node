@@ -2,6 +2,7 @@
 
 import argparse
 import base64
+from contextlib import nullcontext
 import hashlib
 import ipaddress
 import json
@@ -256,13 +257,19 @@ def rehearse_treasury(nodes, fixture, height, report):
                                          "appHash": app_hash, "state": after}
 
 
-def run_launch(binary, root, genesis, expected, keys, env, owner, report, *, four_validators=False, treasury=None):
+def run_launch(binary, root, genesis, expected, keys, env, owner, report, *, four_validators=False, treasury=None,
+               systemd=None):
     rows = expected["validators"]
     powers = tuple(row["initialPower"] for row in rows)
     options = {"chain_id": expected["chainId"], "evm_chain_id": expected["evmChainId"]}
     validators = [create_replica(binary, root, label, index, genesis, key, env, **options)
                   for index, (label, key) in enumerate(zip((row["name"] for row in rows), keys, strict=True))]
-    follower = create_replica(binary, root, "follower", len(validators), genesis, None, env, **options)
+    follower_binary, follower_root, follower_owner = binary, root, owner
+    if systemd is not None:
+        report["phase"] = "systemd-follower-install"
+        follower_binary, follower_root, follower_owner = systemd.binary, systemd.root, systemd
+        check(not (follower_root / "follower").exists(), "systemd follower installation requires an absent node home")
+    follower = create_replica(follower_binary, follower_root, "follower", len(validators), genesis, None, env, **options)
     nodes = [*validators, follower]
     check(len({node.node_id for node in nodes}) == len(nodes), "duplicate launch P2P identity")
     stopped = validators[-1] if four_validators else None
@@ -271,6 +278,8 @@ def run_launch(binary, root, genesis, expected, keys, env, owner, report, *, fou
     configured[follower.label] = configure_peers(follower, live_validators)
     try:
         run_command(binary, validators[0].home, ["genesis", "validate-genesis"], env)
+        if systemd is not None:
+            run_command(follower_binary, follower.home, ["genesis", "validate-genesis"], env)
     except RuntimeError as error:
         raise RuntimeError("packaged daemon rejected the launch genesis: " + safe_diagnostic(str(error))) from None
     for node in nodes:
@@ -291,7 +300,11 @@ def run_launch(binary, root, genesis, expected, keys, env, owner, report, *, fou
     tip = min(int(node.rpc("abci_info")["response"]["last_block_height"]) for node in live_validators)
     report["validatorHeightBeforeJoin"] = tip
     report["phase"] = "ordinary-peer-p2p-catchup"
-    follower.start(binary, env, owner, "launch-follower")
+    if systemd is not None:
+        report["phase"] = "systemd-follower-start"
+        systemd.prepare(follower.home)
+    follower.start(follower_binary, env, follower_owner, "launch-follower")
+    report["phase"] = "ordinary-peer-p2p-catchup"
     nodes = [*live_validators, follower]
     wait_peer_pair(live_validators[0], follower, 60, report)
     observed_height = wait_replicas(nodes, tip + 5, 150, report)
@@ -323,6 +336,14 @@ def run_launch(binary, root, genesis, expected, keys, env, owner, report, *, fou
     check(first_balance == next(iter(values)), "ordinary peer cannot query the same funded state at block 1")
     report["rpc"] = {"historicalHeight": 1, "verifiedHeight": height, "delAtomic": str(first_balance)}
     report.update(verify_network(nodes, follower, configured, env, stopped=stopped))
+    if systemd is not None:
+        report["phase"] = "systemd-follower-evidence"
+        evidence = systemd.evidence()
+        check(evidence["binarySha256"] == report["binarySha256"], "systemd executable differs from the verified package")
+        genesis_path = follower.home / "config/genesis.json"
+        check(private_bytes(genesis_path, GENESIS_LIMIT) == genesis, "running systemd follower genesis differs from the verified package")
+        report["systemdFollower"] = {**evidence, "freshHome": True, "genesisSha256": report["genesisSha256"],
+                                     "catchingUp": False, "syncedFromHeight": 1, "verifiedHeight": height}
     if treasury is not None:
         rehearse_treasury(nodes, treasury, height, report)
 
@@ -334,9 +355,12 @@ def main(argv=None, signals=None):
     parser.add_argument("--four-validators", action="store_true", help="check quorum and peer catchup after stopping one of four validators")
     parser.add_argument("--treasury-transfer", action="store_true", help="check the signed transfer pair on the four-validator fixture")
     parser.add_argument("--package-genesis", type=Path, help="use genesis extracted from the verified launch package")
+    parser.add_argument("--systemd-follower", action="store_true", help="start the clean installed follower as a systemd service")
     args = parser.parse_args(argv)
     if args.treasury_transfer and not args.four_validators:
         parser.error("--treasury-transfer requires --four-validators")
+    if args.systemd_follower and not args.package_genesis:
+        parser.error("--systemd-follower requires --package-genesis")
     report = {"status": "FAIL", "phase": "fixture-provenance", "initialHeight": 1}
     with Path(args.report).open("x", encoding="utf8") as stream:
         try:
@@ -362,8 +386,15 @@ def main(argv=None, signals=None):
                 check(version["server_name"] == "mcnd" and version["commit"] == args.source_commit, "packaged daemon revision differs")
                 owner = ProcessOwner(signals)
                 try:
-                    run_launch(binary, root, genesis, expected, keys, env, owner, report,
-                               four_validators=args.four_validators, treasury=treasury)
+                    service = nullcontext()
+                    if args.systemd_follower:
+                        from native_launch_systemd import SystemdFollower
+
+                        report["phase"] = "systemd-follower-install"
+                        service = SystemdFollower(binary, args.binary_sha256, signals=signals)
+                    with service as systemd:
+                        run_launch(binary, root, genesis, expected, keys, env, owner, report,
+                                   four_validators=args.four_validators, treasury=treasury, systemd=systemd)
                 finally:
                     owner.close()
             report.update(status="PASS", phase="complete")

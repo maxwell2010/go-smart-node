@@ -22,6 +22,15 @@ on:
         description: Sign and verify a test launch package before starting its daemon and genesis
         default: false
         type: boolean
+      systemd_package_run:
+        description: Run ID containing the signed test package to install and boot under systemd
+        type: string
+      systemd_package_sha256:
+        description: Expected SHA256 of the previously published test archive
+        type: string
+      systemd_package_fingerprint:
+        description: Trusted OpenPGP fingerprint from the signing run
+        type: string
   push:
     branches: ['integration/**', 'release/**']
     paths: ['network/**', '.github/workflows/modern-network-development.yml']
@@ -34,6 +43,9 @@ jobs:
   linux-amd64:
     runs-on: ubuntu-24.04
     timeout-minutes: 40
+    permissions:
+      contents: read
+      actions: read
     env:
       CGO_ENABLED: '1'
       CC: gcc
@@ -52,6 +64,7 @@ jobs:
           go-version: '1.26.11'
           cache-dependency-path: network/go.sum
       - name: Install isolated SBOM schema validator
+        if: ${{ !inputs.systemd_package_run }}
         run: python3 -m pip install --disable-pip-version-check --target "$RUNNER_TEMP/sbom-validator" --requirement scripts/release/requirements-sbom.txt
       - name: Verify sources and operator tooling
         run: |
@@ -60,6 +73,7 @@ jobs:
           python3 network/scripts/verify_owned_sdk.py
           python3 -m unittest discover -s network/tools -p 'test_*.py'
       - name: Build pinned development daemon
+        if: ${{ !inputs.systemd_package_run }}
         run: |
           cd network
           go mod download
@@ -71,6 +85,7 @@ jobs:
           go build -mod=readonly -tags= -p 2 -trimpath -ldflags "-X main.buildCommit=$GITHUB_SHA" -o "$RUNNER_TEMP/mcnd" ./cmd/mcnd
           "$RUNNER_TEMP/mcnd" version
       - name: Check installation and generated retention from the packaged daemon
+        if: ${{ !inputs.systemd_package_run }}
         run: |
           python3 network/tools/package_mcnd.py --binary "$RUNNER_TEMP/mcnd" --source "$GITHUB_WORKSPACE" --revision "$GITHUB_SHA" --source-inputs "$RUNNER_TEMP/mcnd-source-inputs.json" --output "development-artifacts/mcnd-development-linux-amd64.tar.gz"
           install_dir=$(mktemp -d "$RUNNER_TEMP/mcnd-install.XXXXXXXX")
@@ -86,13 +101,27 @@ jobs:
           "$install_dir/mcnd" version
           "$install_dir/mcnd" init config-check --home "$install_dir/home" --chain-id mintcandy_990003-1 --evm.evm-chain-id 990003 > /dev/null 2>&1
           python3 network/tools/configure_history.py --home "$install_dir/home" --apply --role rpc-ibc
+      - name: Download the previously signed test package
+        if: inputs.systemd_package_run
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SYSTEMD_PACKAGE_RUN: ${{ inputs.systemd_package_run }}
+        run: |
+          set -euo pipefail
+          [[ "$SYSTEMD_PACKAGE_RUN" =~ ^[1-9][0-9]*$ ]]
+          mkdir -m 700 -- "$RUNNER_TEMP/mcnd-systemd-download"
+          timeout 150 gh run download "$SYSTEMD_PACKAGE_RUN" --repo "$GITHUB_REPOSITORY" \
+            --pattern 'mcnd-signed-test-launch-*' --dir "$RUNNER_TEMP/mcnd-systemd-download"
       - name: Rehearse fresh launch using the exact packaged daemon
-        if: inputs.launch_rehearsal || inputs.launch_four_validators || inputs.launch_treasury || inputs.launch_signed_package
+        if: inputs.launch_rehearsal || inputs.launch_four_validators || inputs.launch_treasury || inputs.launch_signed_package || inputs.systemd_package_run
         shell: bash
         env:
           LAUNCH_FOUR_VALIDATORS: ${{ inputs.launch_four_validators }}
           LAUNCH_TREASURY: ${{ inputs.launch_treasury }}
           LAUNCH_SIGNED_PACKAGE: ${{ inputs.launch_signed_package }}
+          SYSTEMD_PACKAGE_RUN: ${{ inputs.systemd_package_run }}
+          SYSTEMD_PACKAGE_SHA256: ${{ inputs.systemd_package_sha256 }}
+          SYSTEMD_PACKAGE_FINGERPRINT: ${{ inputs.systemd_package_fingerprint }}
         run: |
           set -euo pipefail
           umask 077
@@ -100,19 +129,13 @@ jobs:
           fixture="$launch_work/fixture"
           evidence="$RUNNER_TEMP/mcnd-launch-evidence"
           mkdir -m 700 -- "$fixture" "$evidence"
-          archive_name=mcnd-development-linux-amd64.tar.gz
-          archive="$GITHUB_WORKSPACE/development-artifacts/$archive_name"
-          (cd development-artifacts && sha256sum --check --strict "$archive_name.sha256")
-          archive_sha=$(sha256sum "$archive" | awk '{print $1}')
-          tar -xOzf "$archive" bin/mcnd > "$launch_work/mcnd"
-          cmp "$RUNNER_TEMP/mcnd" "$launch_work/mcnd"
-          chmod 0755 "$launch_work/mcnd"
-          binary_sha=$(sha256sum "$launch_work/mcnd" | awk '{print $1}')
+          launch_revision="$GITHUB_SHA"
+          launch_binary="$launch_work/mcnd"
           export MCND_NATIVE_CONSENSUS_FIXTURE_DIR="$fixture"
           export MCND_NATIVE_LAUNCH_REHEARSAL=1
           launch_options=()
           allocation_options=()
-          if [[ "$LAUNCH_FOUR_VALIDATORS" == true || "$LAUNCH_TREASURY" == true || "$LAUNCH_SIGNED_PACKAGE" == true ]]; then
+          if [[ "$LAUNCH_FOUR_VALIDATORS" == true || "$LAUNCH_TREASURY" == true || "$LAUNCH_SIGNED_PACKAGE" == true || -n "$SYSTEMD_PACKAGE_RUN" ]]; then
             export MCND_NATIVE_LAUNCH_REHEARSAL=4
             launch_options+=(--four-validators)
             allocation_options+=(--allocation-plan network/docs/ru/public-launch-allocation.draft.json)
@@ -120,6 +143,36 @@ jobs:
           if [[ "$LAUNCH_TREASURY" == true ]]; then
             export MCND_NATIVE_TREASURY_PROCESS=1
             launch_options+=(--treasury-transfer)
+          fi
+          if [[ -n "$SYSTEMD_PACKAGE_RUN" ]]; then
+            [[ "$LAUNCH_SIGNED_PACKAGE" != true ]]
+            [[ "$SYSTEMD_PACKAGE_SHA256" =~ ^[0-9a-f]{64}$ ]]
+            [[ "$SYSTEMD_PACKAGE_FINGERPRINT" =~ ^[A-F0-9]{40}$ ]]
+            shopt -s nullglob
+            archives=("$RUNNER_TEMP/mcnd-systemd-download"/*/mcnd-test-launch-linux-amd64.tar.gz)
+            (( ${#archives[@]} == 1 ))
+            signed_archive=${archives[0]}
+            printf '%s  %s\n' "$SYSTEMD_PACKAGE_SHA256" "$signed_archive" | sha256sum --check --strict
+            tar -xOzf "$signed_archive" release-key.gpg > "$launch_work/trusted-keyring.gpg"
+            verified_package="$launch_work/verified-package"
+            python3 -B network/tools/native_launch_package.py verify \
+              --archive "$signed_archive" --trusted-keyring "$launch_work/trusted-keyring.gpg" \
+              --signer-fingerprint "$SYSTEMD_PACKAGE_FINGERPRINT" --output-dir "$verified_package" > "$evidence/package.json"
+            archive_sha=$(jq -er '.archiveSha256' "$evidence/package.json")
+            [[ "$archive_sha" == "$SYSTEMD_PACKAGE_SHA256" ]]
+            binary_sha=$(jq -er '.binarySha256' "$evidence/package.json")
+            launch_revision=$(jq -er '.sourceCommit' "$evidence/package.json")
+            launch_binary="$verified_package/bin/mcnd"
+            launch_options+=(--package-genesis "$verified_package/genesis.json" --systemd-follower)
+          else
+            archive_name=mcnd-development-linux-amd64.tar.gz
+            archive="$GITHUB_WORKSPACE/development-artifacts/$archive_name"
+            (cd development-artifacts && sha256sum --check --strict "$archive_name.sha256")
+            archive_sha=$(sha256sum "$archive" | awk '{print $1}')
+            tar -xOzf "$archive" bin/mcnd > "$launch_binary"
+            cmp "$RUNNER_TEMP/mcnd" "$launch_binary"
+            chmod 0755 "$launch_binary"
+            binary_sha=$(sha256sum "$launch_binary" | awk '{print $1}')
           fi
           if ! (
               cd network
@@ -132,8 +185,10 @@ jobs:
             sed -nE 's/.*([ /])(native_(consensus|launch|treasury)[[:alnum:]_]*\.go:[0-9]+).*/\2/p' "$launch_work/fixture.log" | sort -u
             exit 1
           fi
-          launch_binary="$launch_work/mcnd"
           launch_genesis="$fixture/public/genesis.json"
+          if [[ -n "$SYSTEMD_PACKAGE_RUN" ]]; then
+            launch_genesis="$verified_package/genesis.json"
+          fi
           if [[ "$LAUNCH_SIGNED_PACKAGE" == true ]]; then
             signer_home=$(mktemp -d "$launch_work/gnupg.XXXXXXXX")
             gpg --homedir "$signer_home" --batch --no-tty --pinentry-mode loopback --passphrase '' \
@@ -166,7 +221,7 @@ jobs:
           sudo -n unshare --net -- bash -euc 'ip link set lo up; exec "$@"' _ \
               env TMPDIR="$launch_work" "$(command -v python3)" -B "$GITHUB_WORKSPACE/network/tools/native_launch_rehearsal.py" \
               --binary "$launch_binary" --binary-sha256 "$binary_sha" --archive-sha256 "$archive_sha" \
-              --source-commit "$GITHUB_SHA" --fixture "$fixture" --home-parent "$launch_work" \
+              --source-commit "$launch_revision" --fixture "$fixture" --home-parent "$launch_work" \
               --report "$evidence/network.json" "${launch_options[@]}" || launch_status=$?
           if [[ -f "$evidence/network.json" ]]; then
             sudo -n chown "$(id -u):$(id -g)" "$evidence/network.json"
@@ -177,7 +232,7 @@ jobs:
           python3 -B network/tools/native_launch_allocation.py --genesis "$evidence/genesis.json" \
             --output "$evidence/allocation.json" "${allocation_options[@]}"
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
-        if: always() && (inputs.launch_rehearsal || inputs.launch_four_validators || inputs.launch_treasury || inputs.launch_signed_package)
+        if: always() && (inputs.launch_rehearsal || inputs.launch_four_validators || inputs.launch_treasury || inputs.launch_signed_package || inputs.systemd_package_run)
         with:
           name: mcnd-launch-${{ github.sha }}-${{ github.run_attempt }}
           path: |
@@ -195,7 +250,7 @@ jobs:
           if-no-files-found: error
           retention-days: 14
       - name: Audit default daemon source and compiled binary
-        if: inputs.security_audit
+        if: inputs.security_audit && !inputs.systemd_package_run
         working-directory: network
         run: |
           audit_dir="$RUNNER_TEMP/mcnd-security"
@@ -222,12 +277,13 @@ jobs:
           done
           exit "$audit_status"
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
-        if: always() && inputs.security_audit
+        if: always() && inputs.security_audit && !inputs.systemd_package_run
         with:
           name: mcnd-security-${{ github.sha }}-${{ github.run_attempt }}
           path: ${{ runner.temp }}/mcnd-security/
           retention-days: 14
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+        if: ${{ !inputs.systemd_package_run }}
         with:
           name: mcnd-development-linux-amd64-${{ github.sha }}
           path: development-artifacts/
