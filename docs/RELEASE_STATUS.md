@@ -171,6 +171,14 @@ The observer synchronized from block 1 and agreed on the AppHash at height 21.
 The rehearsal stopped its service after verification.
 [Systemd CI](https://github.com/maxwell2010/go-smart-node/actions/runs/43237343370) · [Evidence](https://github.com/maxwell2010/go-smart-node/actions/runs/43237343370/artifacts/13953721863)
 
+The restart and snapshot rehearsal on `6f2cfb1` used the same signed test
+archive. After `systemctl restart`, a new systemd invocation loaded the
+same data directory at height 22 and agreed on the AppHash at height 25.
+A separate fresh observer restored the height 40 snapshot using two trust
+RPC processes on the isolated runner. Its first available block was 41.
+It reached a common AppHash and DEL balance at height 44.
+[Restart and snapshot CI](https://github.com/maxwell2010/go-smart-node/actions/runs/43239340819) · [Evidence](https://github.com/maxwell2010/go-smart-node/actions/runs/43239340819/artifacts/13954741374)
+
 ## Separate release tracks
 
 The selected architecture is a fresh network on a maintained modern stack,
