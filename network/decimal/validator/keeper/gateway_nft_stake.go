@@ -27,10 +27,25 @@ type GatewayNFTPosition struct {
 }
 
 func (k *StateKeeper) gatewayNFTProjection(ctx sdk.Context, position GatewayNFTPosition) (types.Delegation, types.EVMStakeBinding, error) {
+	if position.Companion.PenaltyCursor != (common.Hash{}) {
+		_, _, err := position.Companion.nativePair()
+		return types.Delegation{}, types.EVMStakeBinding{}, err
+	}
+	delegation, row, err := k.gatewayNFTState(ctx, position, common.Hash{})
+	if err != nil {
+		return delegation, row, err
+	}
+	if !row.ReportedReserveAmount.IsPositive() {
+		return types.Delegation{}, types.EVMStakeBinding{}, errors.New("invalid Gateway NFT stake or unsupported isolated position")
+	}
+	return delegation, row, nil
+}
+
+func (k *StateKeeper) gatewayNFTState(ctx sdk.Context, position GatewayNFTPosition, cursor common.Hash) (types.Delegation, types.EVMStakeBinding, error) {
 	var delegation types.Delegation
 	var row types.EVMStakeBinding
 	companion, lineage := position.Companion, position.Lineage
-	owner, operator, err := companion.nativePair()
+	owner, operator, err := companion.nativePairIdentity()
 	if err != nil {
 		return delegation, row, err
 	}
@@ -41,7 +56,7 @@ func (k *StateKeeper) gatewayNFTProjection(ctx sdk.Context, position GatewayNFTP
 	var zero common.Hash
 	vault, origin := common.BytesToAddress(lineage.Vault), common.BytesToAddress(lineage.OriginContract)
 	if companion.HoldDeadline != 0 || !bytes.Equal(lineage.ParentPositionID, zero[:]) ||
-		lineage.Reserve.Kind != nfttypes.IsolatedReserveDEL || !reserve.IsPositive() ||
+		lineage.Reserve.Kind != nfttypes.IsolatedReserveDEL ||
 		lineage.ReceiptSubTokenID != 1 || vault == companion.Gateway || vault == companion.WrappedDEL ||
 		origin == companion.Gateway || origin == companion.WrappedDEL ||
 		position.StakeID != crypto.Keccak256Hash([]byte("NFT"), lineage.Vault, lineage.PositionID, companion.Beneficiary[:], companion.Validator[:], zero[:]) {
@@ -66,7 +81,7 @@ func (k *StateKeeper) gatewayNFTProjection(ctx sdk.Context, position GatewayNFTP
 	row = types.EVMStakeBinding{
 		Kind: gatewayNFTBinding, Gateway: companion.Gateway.Bytes(), StakeID: position.StakeID.Bytes(),
 		Validator: companion.Validator.Bytes(), Beneficiary: companion.Beneficiary.Bytes(),
-		TokenContract: lineage.Vault, TokenID: lineage.PositionID, HoldTimestamp: zero.Bytes(), PenaltyCursor: zero.Bytes(),
+		TokenContract: lineage.Vault, TokenID: lineage.PositionID, HoldTimestamp: zero.Bytes(), PenaltyCursor: cursor.Bytes(),
 		RawAmount: sdkmath.OneInt(), RawNftBackedAmount: sdkmath.ZeroInt(), ReportedReserveAmount: reserve,
 		ReserveAsset: &types.EVMReserveAsset{ReserveKind: nfttypes.IsolatedReserveDEL, Token: lineage.Reserve.Token, NativeDenom: identity.BaseDenom},
 		NFTPosition: &types.NFTPositionIdentity{
@@ -78,9 +93,11 @@ func (k *StateKeeper) gatewayNFTProjection(ctx sdk.Context, position GatewayNFTP
 				NativeTokenID: nativeID, NativeSubTokenIDs: units, Standard: 721},
 			OriginQuantity: sdkmath.NewInt(int64(len(lineage.OriginSubTokenIDs))), ReceiptQuantity: sdkmath.OneInt(),
 		},
-		NativeTarget:         &types.NativeStakeTarget{StakeType: types.StakeType_NFT, ID: nativeID, SubTokenIDs: units},
-		CoinCompanionStakeID: companion.StakeID.Bytes(),
-		Active:               true, CreatedHeight: ctx.BlockHeight(), UpdatedHeight: ctx.BlockHeight(),
+		NativeTarget: &types.NativeStakeTarget{StakeType: types.StakeType_NFT, ID: nativeID, SubTokenIDs: units},
+		Active:       true, CreatedHeight: ctx.BlockHeight(), UpdatedHeight: ctx.BlockHeight(),
+	}
+	if reserve.IsPositive() {
+		row.CoinCompanionStakeID = companion.StakeID.Bytes()
 	}
 	return delegation, row, nil
 }
