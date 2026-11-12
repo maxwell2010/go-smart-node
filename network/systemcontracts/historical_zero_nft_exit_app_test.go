@@ -13,6 +13,7 @@ import (
 	"github.com/ethereum/go-ethereum/core"
 	ethtypes "github.com/ethereum/go-ethereum/core/types"
 	nftview "github.com/maxwell2010/go-smart-node/network/decimal/nft/evmview"
+	nftkeeper "github.com/maxwell2010/go-smart-node/network/decimal/nft/keeper"
 	validatorkeeper "github.com/maxwell2010/go-smart-node/network/decimal/validator/keeper"
 	"github.com/maxwell2010/go-smart-node/network/decimal/validator/settlement"
 	validatortypes "github.com/maxwell2010/go-smart-node/network/decimal/validator/types"
@@ -122,6 +123,29 @@ func runHistoricalZeroNFTExit(t *testing.T, f signedDELFixture, reader *nftview.
 	frozen, err := keeper.GetEVMFrozenBinding(ctx(), f.target[:], out.FrozenIndex[:])
 	require.NoError(t, err)
 	completePenalizedNFTExit(t, f, reader, executor, frozen, out, lineage, inclusion, 0)
+	require.True(t, wantSupply.Equal(supply(ctx())))
+	walletLineage, err := nft.GetIsolatedLineage(ctx(), lineage.Vault, positionID[:])
+	require.NoError(t, err)
+	require.Equal(t, make([]byte, common.HashLength), walletLineage.Reserve.Amount)
+	vault := e.load("MintCandyNFTPositionVault")
+	vaultAddress := common.BytesToAddress(lineage.Vault)
+	redeem, err := vault.ABI.Pack("redeemPosition", positionID.Big(), f.user)
+	require.NoError(t, err)
+	response = e.send(e.keys[0], &vaultAddress, new(big.Int), redeem, true)
+	committed, receipt = inclusion(response)
+	message := core.Message{From: f.user, To: &vaultAddress, Value: new(big.Int), Data: redeem}
+	altered := walletLineage
+	altered.Reserve.Amount = common.Hash{31: 1}.Bytes()
+	_, err = executor.VerifySignedNFTPositionRedemption(committed, message, receipt, altered, f.user)
+	require.ErrorContains(t, err, "refund differs from the signed recipient or native DEL reserve")
+	proof, err := executor.VerifySignedNFTPositionRedemption(committed, message, receipt, walletLineage, f.user)
+	require.NoError(t, err)
+	require.True(t, proof.Reserve.IsZero())
+	require.Equal(t, positionID, proof.PositionID)
+	require.Equal(t, f.user, proof.Recipient)
+	require.NoError(t, nft.RetireIsolatedDELReceipt(committed, f.target, proof.Owner, walletLineage, proof.NextPositionID))
+	_, err = nft.GetIsolatedLineage(ctx(), lineage.Vault, positionID[:])
+	require.ErrorIs(t, err, nftkeeper.ErrNotFound)
 	require.True(t, wantSupply.Equal(supply(ctx())))
 	t.Log(historicalZeroNFTExitPassed)
 }

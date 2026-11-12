@@ -22,9 +22,11 @@ import (
 	ethtypes "github.com/ethereum/go-ethereum/core/types"
 	ownedapp "github.com/maxwell2010/go-smart-node/network/app"
 	cointypes "github.com/maxwell2010/go-smart-node/network/decimal/coin/types"
+	nftkeeper "github.com/maxwell2010/go-smart-node/network/decimal/nft/keeper"
 	nfttypes "github.com/maxwell2010/go-smart-node/network/decimal/nft/types"
 	validatortypes "github.com/maxwell2010/go-smart-node/network/decimal/validator/types"
 	"github.com/maxwell2010/go-smart-node/network/identity"
+	contracts "github.com/maxwell2010/go-smart-node/network/systemcontracts"
 	"github.com/stretchr/testify/require"
 )
 
@@ -204,6 +206,23 @@ func runNativeCustomNFTConversion(t *testing.T, dir, phase string) {
 	row, err := keeper.GetEVMFrozenBinding(l.snapshot(), fixture.Gateway.Bytes(), make([]byte, common.HashLength))
 	require.NoError(t, err)
 	require.True(t, row.Active)
+	vaultABI, err := contracts.CompiledABI("MintCandyNFTPositionVault")
+	require.NoError(t, err)
+	recipientKey, err := registryFixtureKey(4, true)
+	require.NoError(t, err)
+	recipient := common.BytesToAddress(recipientKey.PubKey().Address())
+	require.NotEqual(t, fixture.Actor, recipient)
+	redeem := func(target common.Address) *ethtypes.Transaction {
+		t.Helper()
+		data, err := vaultABI.Pack("redeemPosition", positionID.Big(), target)
+		require.NoError(t, err)
+		return l.signedEthereumCall(fixture.NftVault, sdkmath.ZeroInt(), data)
+	}
+	block, failed := l.finalizeSignedEthereum(redeem(recipient))
+	require.NotEmpty(t, failed.VmError, "wallet cannot redeem before the Gateway releases the receipt")
+	l.commit(block)
+	assertState(amount, quantity)
+	assertReceipt(fixture.Gateway)
 	for range 9 {
 		l.commit(l.finalize(nil, nil))
 	}
@@ -212,4 +231,43 @@ func runNativeCustomNFTConversion(t *testing.T, dir, phase string) {
 	require.False(t, row.Active)
 	assertState(amount, quantity)
 	assertReceipt(fixture.Actor)
+
+	balance := func(address common.Address) sdkmath.Int {
+		return app.BankKeeper.GetBalance(l.snapshot(), sdk.AccAddress(address.Bytes()), identity.BaseDenom).Amount
+	}
+	beforeVault, beforeRecipient, beforeWrapper, beforeSupply := balance(fixture.NftVault), balance(recipient), balance(fixture.Wrapped), l.supply()
+	block, failed = l.finalizeSignedEthereum(redeem(fixture.Wrapped))
+	require.Contains(t, failed.VmError, "requires an address without executable code",
+		"a successful EVM refund to a contract must roll back at native admission")
+	l.commit(block)
+	assertState(amount, quantity)
+	assertReceipt(fixture.Actor)
+	require.True(t, beforeWrapper.Equal(balance(fixture.Wrapped)))
+	require.True(t, beforeRecipient.Equal(balance(recipient)))
+
+	block, redeemed := l.finalizeSignedEthereum(redeem(recipient))
+	require.Empty(t, redeemed.VmError)
+	require.LessOrEqual(t, block.TxResults[0].GasUsed, int64(24_000_000))
+	require.LessOrEqual(t, redeemed.MaxUsedGas, uint64(24_000_000))
+	l.commit(block)
+	t.Logf("signed NFT redemption units=%d sdk_gas=%d evm_peak_gas=%d budget=24000000",
+		quantity, block.TxResults[0].GasUsed, redeemed.MaxUsedGas)
+	assertRedeemed := func() {
+		t.Helper()
+		require.True(t, beforeVault.Sub(amount).Equal(balance(fixture.NftVault)))
+		require.True(t, beforeRecipient.Add(amount).Equal(balance(recipient)))
+		require.True(t, beforeSupply.Equal(l.supply()))
+		_, err := app.NativeNFTKeeper.GetIsolatedLineage(l.snapshot(), fixture.NftVault.Bytes(), positionID.Bytes())
+		require.ErrorIs(t, err, nftkeeper.ErrNotFound)
+		_, err = app.NativeNFTKeeper.GetToken(l.snapshot(), fixture.ReceiptToken)
+		require.ErrorIs(t, err, nftkeeper.ErrNotFound)
+		origin, err := app.NativeNFTKeeper.GetToken(l.snapshot(), signedNFTNativeOriginID)
+		require.NoError(t, err)
+		require.Equal(t, quantity, origin.Burnt, "redemption does not revive consumed origin units")
+	}
+	assertRedeemed()
+	block, repeated := l.finalizeSignedEthereum(redeem(recipient))
+	require.NotEmpty(t, repeated.VmError, "a redeemed vault position cannot pay twice")
+	l.commit(block)
+	assertRedeemed()
 }
