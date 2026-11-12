@@ -184,7 +184,7 @@ func checkSignedPagedPenalties(t *testing.T, keys []*ecdsa.PrivateKey, roles map
 		require.Equal(t, big.NewInt(3), after[2])
 		for index, want := range []int64{0, 1, 2} {
 			result := call(1, role, "getDuplicateVotePenaltyHeight", new(big.Int), validator, big.NewInt(int64(index)))
-			require.Equal(t, big.NewInt(want), result[0])
+			require.Zero(t, result[0].(*big.Int).Cmp(big.NewInt(want)))
 		}
 		result := call(1, role, "getPenaltiesRange", new(big.Int), validator, big.NewInt(0), big.NewInt(3))
 		require.Equal(t, []uint16{1, 5, 5}, result[0])
