@@ -267,6 +267,13 @@ func (k *StateKeeper) SetValidator(ctx sdk.Context, v types.Validator) error {
 		if !bytes.Equal(oldKey, newKey) {
 			return errors.New("consensus key is immutable")
 		}
+		if old.Jailed && !v.Jailed {
+			if _, err := k.GetNativeDuplicateVoteExclusion(child, oldKey); err == nil {
+				return ErrNativeConsensusKeyPermanentlyExcluded
+			} else if !errors.Is(err, ErrNotFound) {
+				return err
+			}
+		}
 		previous = &old
 	} else if !errors.Is(e, ErrNotFound) {
 		return e
