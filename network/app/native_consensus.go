@@ -174,6 +174,9 @@ func (app *App) initNativeConsensusModules(ctx sdk.Context, genesis GenesisState
 }
 
 func consensusOperators(ctx sdk.Context, keeper *validatorkeeper.StateKeeper) ([]string, error) {
+	if operators, err := keeper.NativeLiveValidatorOperators(ctx); !errors.Is(err, validatorkeeper.ErrNotFound) {
+		return operators, err
+	}
 	validators, err := keeper.GetValidators(ctx)
 	if err != nil {
 		return nil, err

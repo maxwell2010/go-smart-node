@@ -84,7 +84,7 @@ func TestActiveDELProvenanceCompactsExpiredPrefixAtDepositCap(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, 1, count)
 	require.ErrorContains(t, k.ApplyGatewayDELDelegation(pending, next, deposit), "provenance tranche limit")
-	require.Equal(t, beforeLots, activeDELProvenanceForTest(t, pending, position))
+	require.Equal(t, beforeLots, activeDELProvenanceForTest(t, pending, k, position))
 
 	broken, err := NewStateKeeperWithDomain(failingService{service: k.service, prefix: bindingRevisionKey}, bindingTestChain, 990001)
 	require.NoError(t, err)
@@ -116,7 +116,7 @@ func TestActiveDELProvenanceCompactsExpiredPrefixAtDepositCap(t *testing.T) {
 	frozenLots, _, err := k.GetFrozenDELProvenance(split, frozen)
 	require.NoError(t, err)
 	requireDELProvenance(t, frozenLots, []int64{0}, []int64{1})
-	require.Equal(t, beforeLots, activeDELProvenanceForTest(t, ctx, position))
+	require.Equal(t, beforeLots, activeDELProvenanceForTest(t, ctx, k, position))
 
 	require.NoError(t, k.ApplyGatewayDELDelegation(ctx, next, deposit))
 	lots := activeDELProvenanceForTest(t, ctx, k, next)

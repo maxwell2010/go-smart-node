@@ -376,6 +376,9 @@ func (app *App) initWithdrawalGenesis(ctx sdk.Context, req *abci.RequestInitChai
 		if err := app.NativeValidatorKeeper.InitializeDELProvenance(child, profile.Gateway, profile.WrappedDEL); err != nil {
 			return nil, fmt.Errorf("initialize native stake history: %w", err)
 		}
+		if err := app.NativeValidatorKeeper.InitializeNativeLiveValidatorRoster(child); err != nil {
+			return nil, fmt.Errorf("initialize native validator roster: %w", err)
+		}
 		if err := app.NativeValidatorKeeper.InitializeNativeEvidenceLimits(child, app.GetConsensusParams(child).Evidence); err != nil {
 			return nil, fmt.Errorf("initialize native evidence limits: %w", err)
 		}

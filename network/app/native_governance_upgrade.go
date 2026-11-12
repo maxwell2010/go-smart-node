@@ -85,9 +85,10 @@ type dueNativeUpgrade struct {
 	manifest nativeUpgradeManifest
 }
 
-func (app *App) dueNativeUpgrades(ctx sdk.Context) ([]dueNativeUpgrade, error) {
+func (app *App) dueNativeGovernanceActions(ctx sdk.Context) ([]dueNativeUpgrade, []govv1.Proposal, error) {
 	rng := collections.NewPrefixUntilPairRange[time.Time, uint64](ctx.BlockTime())
-	var due []dueNativeUpgrade
+	var upgrades []dueNativeUpgrade
+	var registrations []govv1.Proposal
 	count := 0
 	err := app.GovKeeper.ActiveProposalsQueue.Walk(ctx, rng, func(key collections.Pair[time.Time, uint64], id uint64) (bool, error) {
 		count++
@@ -102,27 +103,32 @@ func (app *App) dueNativeUpgrades(ctx sdk.Context) ([]dueNativeUpgrade, error) {
 			proposal.VotingEndTime == nil || !proposal.VotingEndTime.Equal(key.K1()) || len(proposal.Messages) != 0 {
 			return true, errors.New("invalid active native governance proposal")
 		}
-		manifest, err := parseNativeUpgradeProposal(proposal.Metadata)
-		if err != nil {
-			return true, err
+		if app.usesNativeUpgradeGovernance() {
+			manifest, err := parseNativeUpgradeProposal(proposal.Metadata)
+			if err != nil {
+				return true, err
+			}
+			if manifest != nil {
+				upgrades = append(upgrades, dueNativeUpgrade{id: id, metadata: proposal.Metadata, manifest: *manifest})
+			}
 		}
-		if manifest != nil {
-			due = append(due, dueNativeUpgrade{id: id, metadata: proposal.Metadata, manifest: *manifest})
+		if app.usesNativeValidatorRegistration() && strings.HasPrefix(proposal.Metadata, nativeValidatorRegistrationNamespace) {
+			registrations = append(registrations, proposal)
 		}
 		return false, nil
 	})
-	return due, err
+	return upgrades, registrations, err
 }
 
 func (app *App) endNativeGovernance(ctx sdk.Context) error {
-	if !app.usesNativeUpgradeGovernance() {
+	if !app.usesNativeUpgradeGovernance() && !app.usesNativeValidatorRegistration() {
 		return app.nativeGovernance.EndBlock(ctx, &app.GovKeeper)
 	}
 	if ctx.ExecMode() != sdk.ExecModeFinalize {
-		return errors.New("native SDK upgrade governance requires FinalizeBlock")
+		return errors.New("native governance actions require FinalizeBlock")
 	}
 	return app.nativeGovernance.Run(ctx, func(scoped sdk.Context) error {
-		due, err := app.dueNativeUpgrades(scoped)
+		due, registrations, err := app.dueNativeGovernanceActions(scoped)
 		if err != nil {
 			return err
 		}
@@ -141,6 +147,11 @@ func (app *App) endNativeGovernance(ctx sdk.Context) error {
 				return errors.New("approved native SDK upgrade differs from its tallied proposal")
 			}
 			if err := app.scheduleNativeUpgrade(scoped, proposal, action.manifest); err != nil {
+				return err
+			}
+		}
+		for _, proposal := range registrations {
+			if err := app.applyNativeValidatorRegistration(scoped, proposal); err != nil {
 				return err
 			}
 		}

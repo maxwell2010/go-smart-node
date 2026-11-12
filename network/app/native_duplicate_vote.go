@@ -33,6 +33,9 @@ func (app *App) verifyNativeDuplicateVoteState(ctx sdk.Context, enabled bool) er
 	if err := keeper.VerifyNativeEvidenceLimits(ctx, app.GetConsensusParams(ctx).Evidence); err != nil {
 		return err
 	}
+	if _, err := keeper.NativeLiveValidatorOperators(ctx); err != nil {
+		return err
+	}
 	return keeper.VerifyNativeEvidenceClockHeight(ctx)
 }
 

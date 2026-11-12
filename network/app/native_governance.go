@@ -104,6 +104,9 @@ func (s nativeGovernanceMsgServer) SubmitProposal(ctx context.Context, msg *govv
 		if err := s.app.validateNativeUpgradeProposal(sdk.UnwrapSDKContext(ctx), msg.Metadata); err != nil {
 			return nil, err
 		}
+		if _, err := s.app.nativeValidatorRegistration(sdk.UnwrapSDKContext(ctx), msg.Metadata, msg.Proposer, msg.Title); err != nil {
+			return nil, err
+		}
 	}
 	return s.MsgServer.SubmitProposal(ctx, msg)
 }

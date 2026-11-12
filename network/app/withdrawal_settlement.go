@@ -402,6 +402,9 @@ func (c *withdrawalController) delStakePosition(result settlement.DELTransition)
 type automaticWithdrawalKey struct{}
 
 func (c *withdrawalController) guardInternalCommit(ctx sdk.Context, msg core.Message, logs []*ethtypes.Log) error {
+	if c.profile.EnableNativeDuplicateVote && c.profile.EnableNativeGovernance && c.executor.AuthorizeNativeValidatorRegistration(ctx, msg) {
+		return nil
+	}
 	if c.profile.EnableNativeDuplicateVote &&
 		(c.executor.AuthorizeMasterHistoricalPenalty(ctx, msg) || c.executor.AuthorizeActiveHistoricalDELPenalty(ctx, msg) ||
 			c.executor.AuthorizeFrozenHistoricalDELPenalty(ctx, msg) || c.executor.AuthorizeActiveHistoricalNFTPenalty(ctx, msg) ||
