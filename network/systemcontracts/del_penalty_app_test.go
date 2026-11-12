@@ -57,10 +57,9 @@ func runSignedOrdinaryDELPenalty(t *testing.T, e isolatedBackendEnv, profile own
 	f.backing(principal)
 	f.activeReserve(principal)
 	governed := uint16(10)
-	gov(master, profile.MasterValidator, "addPenalty", f.validator, governed)
 
 	e.app.EVMKeeper.SetInternalCommitGuard(func(ctx sdk.Context, msg core.Message, _ []*ethtypes.Log) error {
-		if !executor.AuthorizeOrdinaryDELPenalty(ctx, msg) {
+		if !executor.AuthorizeMasterPenalty(ctx, msg) && !executor.AuthorizeOrdinaryDELPenalty(ctx, msg) {
 			return errors.New("test-only internal EVM call lacks exact penalty authorization")
 		}
 		return nil
@@ -72,6 +71,10 @@ func runSignedOrdinaryDELPenalty(t *testing.T, e isolatedBackendEnv, profile own
 		return e.app.BankKeeper.GetSupply(ctx, identity.BaseDenom).Amount
 	}
 	initialSupply := supply(ctx())
+	masterCount := func() int64 {
+		return f.read(master, profile.MasterValidator, "getPenaltyCount", f.validator).(*big.Int).Int64()
+	}
+	require.Zero(t, masterCount())
 	getRow := func() validatortypes.EVMStakeBinding {
 		row, err := keeper.GetEVMStakeBinding(e.ctx(), validatortypes.EVMStakeBindingKind_EVM_STAKE_BINDING_COIN, f.target[:], id[:])
 		require.NoError(t, err)
@@ -89,21 +92,32 @@ func runSignedOrdinaryDELPenalty(t *testing.T, e isolatedBackendEnv, profile own
 			StakeID: id, Amount: before.RawAmount, PenaltyCursor: common.BytesToHash(before.PenaltyCursor),
 		}, proof.After.RawAmount, common.BytesToHash(proof.After.PenaltyCursor))
 	}
+	appendAndRealize := func(project func(sdk.Context, settlement.OrdinaryDELPenaltyProof) error) error {
+		return executor.AppendMasterPenalty(ctx(), f.validator, governed, supply, func(child sdk.Context, proof settlement.MasterPenaltyProof) error {
+			require.Equal(t, f.validator, proof.Validator)
+			require.Equal(t, governed, proof.Percentage)
+			require.Equal(t, common.Hash{}, proof.BeforeCursor)
+			require.Equal(t, common.BigToHash(big.NewInt(1)), proof.AfterCursor)
+			return executor.ApplyOrdinaryDELPenalty(child, before, governed, supply, project)
+		})
+	}
 	injected := errors.New("reject verified penalty projection after writes")
-	err = executor.ApplyOrdinaryDELPenalty(ctx(), before, governed, supply, func(child sdk.Context, proof settlement.OrdinaryDELPenaltyProof) error {
+	err = appendAndRealize(func(child sdk.Context, proof settlement.OrdinaryDELPenaltyProof) error {
 		if err := project(child, proof); err != nil {
 			return err
 		}
 		return injected
 	})
 	require.ErrorIs(t, err, injected)
+	require.Zero(t, masterCount())
 	require.Equal(t, before, getRow())
 	require.True(t, initialSupply.Equal(supply(ctx())))
 	require.Zero(t, f.read(f.gateway, f.target, "getStakePenaltyIndex", id).(*big.Int).Sign())
 	f.backing(principal)
 	f.activeReserve(principal)
 
-	require.NoError(t, executor.ApplyOrdinaryDELPenalty(ctx(), before, governed, supply, project))
+	require.NoError(t, appendAndRealize(project))
+	require.Equal(t, int64(1), masterCount())
 	after := getRow()
 	require.True(t, want.Equal(after.RawAmount))
 	require.Equal(t, common.BigToHash(big.NewInt(1)), common.BytesToHash(after.PenaltyCursor))
@@ -119,5 +133,7 @@ func runSignedOrdinaryDELPenalty(t *testing.T, e isolatedBackendEnv, profile own
 		}))
 	require.True(t, initialSupply.Sub(burned).Equal(supply(ctx())))
 	require.Equal(t, after, getRow())
+	require.ErrorContains(t, appendAndRealize(project), "unpaused candidate or approved validator")
+	require.Equal(t, int64(1), masterCount())
 	t.Log(delPenaltyPassed)
 }

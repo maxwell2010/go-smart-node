@@ -286,7 +286,11 @@ func (e *Executor) requireInert(ctx sdk.Context, addr common.Address) error {
 }
 
 func (e *Executor) invoke(ctx sdk.Context, target common.Address, data []byte, commit bool) (*evmtypes.MsgEthereumTxResponse, core.Message, error) {
-	msg := core.Message{From: Sender(), To: &target, Value: new(big.Int), GasLimit: e.config.EVMGas, GasPrice: new(big.Int), GasFeeCap: new(big.Int), GasTipCap: new(big.Int), Data: data, SkipNonceChecks: true, SkipFromEOACheck: true}
+	return e.invokeFrom(ctx, Sender(), target, data, commit)
+}
+
+func (e *Executor) invokeFrom(ctx sdk.Context, sender, target common.Address, data []byte, commit bool) (*evmtypes.MsgEthereumTxResponse, core.Message, error) {
+	msg := core.Message{From: sender, To: &target, Value: new(big.Int), GasLimit: e.config.EVMGas, GasPrice: new(big.Int), GasFeeCap: new(big.Int), GasTipCap: new(big.Int), Data: data, SkipNonceChecks: true, SkipFromEOACheck: true}
 	result, err := e.evm.ApplyMessage(ctx, statedb.New(ctx, e.evm, statedb.NewEmptyTxConfig()), msg, nil, commit, false, true)
 	if result != nil {
 		ctx.GasMeter().ConsumeGas(min(max(result.MaxUsedGas, result.GasUsed), msg.GasLimit), "Gateway completion EVM work before refunds")

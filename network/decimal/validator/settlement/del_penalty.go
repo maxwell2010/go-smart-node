@@ -80,7 +80,8 @@ func (e *Executor) ApplyOrdinaryDELPenalty(ctx sdk.Context, row validatortypes.E
 	if err := e.requireInert(child, Sender()); err != nil {
 		return err
 	}
-	if err := e.verifyAnnouncedPenalty(child, validator, beforeCursor, afterCursor, percentage); err != nil {
+	status, err := e.verifyAnnouncedPenalty(child, validator, beforeCursor, afterCursor, percentage)
+	if err != nil {
 		return err
 	}
 	before, err := e.ordinaryPenaltyState(child, validator, owner, id, row.RawAmount, beforeCursor, nativeSupply)
@@ -120,8 +121,12 @@ func (e *Executor) ApplyOrdinaryDELPenalty(ctx sdk.Context, row validatortypes.E
 	if afterSource != source {
 		return errors.New("Gateway source changed during ordinary DEL penalty")
 	}
-	if err := e.verifyAnnouncedPenalty(child, validator, beforeCursor, afterCursor, percentage); err != nil {
+	afterStatus, err := e.verifyAnnouncedPenalty(child, validator, beforeCursor, afterCursor, percentage)
+	if err != nil {
 		return err
+	}
+	if afterStatus != status {
+		return errors.New("ordinary DEL penalty changed the Master validator status")
 	}
 	post := proto.Clone(&row).(*validatortypes.EVMStakeBinding)
 	post.RawAmount = remaining
@@ -154,27 +159,27 @@ func (e *Executor) ordinaryPenaltyIdentity(ctx sdk.Context, row validatortypes.E
 	return id, validator, owner, nil
 }
 
-func (e *Executor) verifyAnnouncedPenalty(ctx sdk.Context, validator common.Address, before, after common.Hash, percentage uint16) error {
+func (e *Executor) verifyAnnouncedPenalty(ctx sdk.Context, validator common.Address, before, after common.Hash, percentage uint16) (common.Hash, error) {
 	state, err := e.read(ctx, e.roles.MasterValidator, e.master, "getValidatorState", 3*common.HashLength, validator)
 	if err != nil {
-		return err
+		return common.Hash{}, err
 	}
 	status := common.BytesToHash(state[:common.HashLength])
 	if (status != smallWord(1) && status != smallWord(2)) ||
 		common.BytesToHash(state[common.HashLength:2*common.HashLength]) != smallWord(1) ||
 		common.BytesToHash(state[2*common.HashLength:]) != after {
-		return errors.New("ordinary DEL penalty requires a paused validator and exactly one pending MasterValidator entry")
+		return common.Hash{}, errors.New("DEL penalty requires a paused validator and exactly one pending MasterValidator entry")
 	}
 	page, err := e.read(ctx, e.roles.MasterValidator, e.master, "getPenaltiesRange", 3*common.HashLength, validator, before.Big(), big.NewInt(1))
 	if err != nil {
-		return err
+		return common.Hash{}, err
 	}
 	if common.BytesToHash(page[:common.HashLength]) != smallWord(common.HashLength) ||
 		common.BytesToHash(page[common.HashLength:2*common.HashLength]) != smallWord(1) ||
 		common.BytesToHash(page[2*common.HashLength:]) != common.BigToHash(new(big.Int).SetUint64(uint64(percentage))) {
-		return errors.New("announced MasterValidator penalty differs from the approved percentage")
+		return common.Hash{}, errors.New("announced MasterValidator penalty differs from the approved percentage")
 	}
-	return nil
+	return status, nil
 }
 
 type ordinaryDELPenaltyState struct {
