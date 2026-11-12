@@ -1,0 +1,85 @@
+{
+  "status": "draft_unapproved",
+  "network": {
+    "name": null,
+    "purpose": null,
+    "cosmos_chain_id": null,
+    "evm_chain_id": null,
+    "genesis_time_utc": null,
+    "initial_height": 1
+  },
+  "profile": {
+    "flags": {},
+    "max_validators": null,
+    "unbonding_seconds": null,
+    "gateway_withdrawal_freeze_seconds": null,
+    "evidence_max_age_num_blocks": null,
+    "evidence_max_age_duration_seconds": null,
+    "signed_blocks_window": null,
+    "minimum_signed_fraction": null,
+    "downtime_slash_fraction": null,
+    "downtime_jail_seconds": null
+  },
+  "allocation": {
+    "denom": "del",
+    "decimals": 18,
+    "expected_total_atoms": null,
+    "bank_balances": [{"address": null, "amount_atoms": null, "purpose": null}],
+    "initial_del_delegations": [{"operator_address": null, "beneficiary_address": null, "amount_atoms": null}]
+  },
+  "contracts": {
+    "registry": null,
+    "gateway": null,
+    "library": null,
+    "nft_center": null,
+    "position_vault": null,
+    "master_validator": null,
+    "wrapped_del": null,
+    "token_center": null,
+    "curve_converter": null,
+    "approved_drc20": [],
+    "approved_nft_origins": [],
+    "deployment_evidence": null
+  },
+  "validators": [
+    {
+      "operator_address": null,
+      "evm_operator_address": null,
+      "consensus_pubkey": {"@type": "/cosmos.crypto.ed25519.PubKey", "key": null},
+      "reward_address": null,
+      "moniker": null,
+      "commission_fraction": null,
+      "operator_contact": null
+    }
+  ],
+  "bootstrap": {
+    "seeds": [{"p2p_address": null, "operator": null}],
+    "persistent_peers": [{"p2p_address": null, "operator": null}],
+    "pex": null,
+    "comet_rpc": [{"url": null, "operator": null, "history_from_height": null}],
+    "evm_rpc": [],
+    "grpc": [],
+    "state_sync": {
+      "offered": null,
+      "rpc_servers": [],
+      "snapshot_provider": null,
+      "snapshot_height": null,
+      "trust_height": null,
+      "trust_hash": null,
+      "trust_period": null,
+      "app_hash": null
+    }
+  },
+  "release": {
+    "source_revision": null,
+    "binary_archive_url": null,
+    "binary_archive_sha256": null,
+    "genesis_url": null,
+    "genesis_sha256": null,
+    "signed_manifest_url": null,
+    "detached_signature_url": null,
+    "signature_scheme": null,
+    "signer_public_key_fingerprint": null,
+    "approval_channel": null
+  }
+}
