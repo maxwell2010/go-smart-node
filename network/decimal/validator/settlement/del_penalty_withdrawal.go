@@ -38,18 +38,24 @@ func (e *Executor) verifyPenalizedDELWithdrawalReceipt(ctx sdk.Context, receipt 
 	// room for implicit per-position penalty or burn events.
 	logs := receipt.Logs
 	if len(logs) == 4 {
-		ack := e.gateway.Events["PenaltyAppliedToValidator"]
-		index := new(big.Int).Sub(withdrawal.PenaltyCursor.Big(), big.NewInt(1))
-		data, err := ack.Inputs.NonIndexed().Pack(e.roles.WrappedDEL, uint8(tokenDEL), new(big.Int), index, new(big.Int))
-		if err != nil {
+		if err := e.verifyDELReserveAcknowledgement(logs[0], withdrawal.Validator, withdrawal.PenaltyCursor); err != nil {
 			return nil, err
-		}
-		log := logs[0]
-		if log.Address != e.roles.Gateway || len(log.Topics) != 2 || log.Topics[0] != ack.ID ||
-			log.Topics[1] != common.BytesToHash(withdrawal.Validator[:]) || !bytes.Equal(log.Data, data) {
-			return nil, errors.New("penalized DEL withdrawal has an invalid aggregate penalty acknowledgement")
 		}
 		logs = logs[1:]
 	}
 	return logs, nil
+}
+
+func (e *Executor) verifyDELReserveAcknowledgement(log *ethtypes.Log, validator common.Address, cursor common.Hash) error {
+	ack := e.gateway.Events["PenaltyAppliedToValidator"]
+	index := new(big.Int).Sub(cursor.Big(), big.NewInt(1))
+	data, err := ack.Inputs.NonIndexed().Pack(e.roles.WrappedDEL, uint8(tokenDEL), new(big.Int), index, new(big.Int))
+	if err != nil {
+		return err
+	}
+	if log.Address != e.roles.Gateway || len(log.Topics) != 2 || log.Topics[0] != ack.ID ||
+		log.Topics[1] != common.BytesToHash(validator[:]) || !bytes.Equal(log.Data, data) {
+		return errors.New("invalid aggregate DEL penalty acknowledgement")
+	}
+	return nil
 }
