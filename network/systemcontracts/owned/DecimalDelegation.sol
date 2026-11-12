@@ -4109,7 +4109,7 @@ library DelegationNFTLib {
     function checkpointFrozenDELWithdrawal(IDecimalDelegationCommon.DelegationStorage storage $, uint256 index) public {
         IDecimalDelegationCommon.FrozenStake storage claim = $._frozenStakes[index];
         FrozenDELCheckpoint storage checkpoint = _frozenDELPenaltyStorage().checkpoints[index];
-        if (checkpoint.creationHeight != 0 || block.number == 0 || !_isOrdinaryFrozenDEL($, claim)) {
+        if (checkpoint.creationHeight != 0 || block.number == 0 || !_isFrozenDEL($, claim)) {
             revert InvalidFrozenDELPenalty();
         }
         // _withdraw applied any outstanding active penalties before freezing.
@@ -4126,7 +4126,7 @@ library DelegationNFTLib {
     ) public {
         IDecimalDelegationCommon.FrozenStake storage claim = $._frozenStakes[index];
         FrozenDELCheckpoint storage checkpoint = _frozenDELPenaltyStorage().checkpoints[index];
-        if (!_isOrdinaryFrozenDEL($, claim) || claim.stake.amount != expectedAmount ||
+        if (!_isFrozenDEL($, claim) || claim.stake.amount != expectedAmount ||
             checkpoint.creationHeight == 0 || checkpoint.penaltyCursor != beforeCursor ||
             checkpoint.creationHeight > block.number ||
             infractionHeight == 0 || infractionHeight > block.number ||
@@ -4158,15 +4158,18 @@ library DelegationNFTLib {
         if (afterAmount == 0) emit FrozenDELClaimExtinguished(index, count);
     }
 
-    function _isOrdinaryFrozenDEL(
+    function _isFrozenDEL(
         IDecimalDelegationCommon.DelegationStorage storage $,
         IDecimalDelegationCommon.FrozenStake storage claim
     ) private view returns (bool) {
         IDecimalDelegationCommon.Stake storage stake = claim.stake;
+        bool validHold = stake.holdTimestamp == 0
+            ? stake.holdStartTime == 0
+            : stake.holdStartTime != 0 && stake.holdStartTime < stake.holdTimestamp && stake.holdTimestamp < block.timestamp;
         return claim.freezeType == IDecimalDelegationCommon.FreezeType.Withdraw &&
             claim.freezeStatus == IDecimalDelegationCommon.FreezeStatus.Frozen &&
             stake.tokenType == IDecimalDelegationCommon.TokenType.DEL &&
-            stake.tokenId == 0 && stake.holdTimestamp == 0 && stake.holdStartTime == 0 &&
+            stake.tokenId == 0 && validHold &&
             stake.amount != 0 && stake.token == address(WETH($));
     }
 
@@ -7299,7 +7302,7 @@ contract MintCandyIsolatedDelegation is DecimalDelegation {
     event FrozenDELClaimExtinguished(uint256 indexed index, uint256 indexed penaltyCursor);
 
     function _checkpointFrozenDELWithdrawal(uint256 index, Stake memory stake) internal override {
-        if (stake.tokenType == TokenType.DEL && stake.holdTimestamp == 0) {
+        if (stake.tokenType == TokenType.DEL) {
             DelegationNFTLib.checkpointFrozenDELWithdrawal(_getDelegationStorage(), index);
         }
     }
