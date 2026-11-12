@@ -8,6 +8,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"cosmossdk.io/log"
 	sdkmath "cosmossdk.io/math"
@@ -18,6 +19,7 @@ import (
 	sdk "github.com/cosmos/cosmos-sdk/types"
 	srvflags "github.com/cosmos/evm/server/flags"
 	"github.com/ethereum/go-ethereum/common"
+	ethtypes "github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/crypto"
 	ownedapp "github.com/maxwell2010/go-smart-node/network/app"
 	cointypes "github.com/maxwell2010/go-smart-node/network/decimal/coin/types"
@@ -167,7 +169,13 @@ func checkNativeDRC20Genesis(t *testing.T, dir, phase string) {
 		l.set = cmttypes.NewValidatorSet(validators)
 		l.commit(l.finalize(nil, nil))
 	}
-	require.Equal(t, int64(1), app.LastBlockHeight())
+	if phase == "restart" {
+		require.Equal(t, int64(5), app.LastBlockHeight())
+		sold := sdkmath.NewIntWithDecimal(1, 18)
+		want.Volume, want.Reserve = want.Volume.Sub(sold), want.Reserve.Sub(sold)
+	} else {
+		require.Equal(t, int64(1), app.LastBlockHeight())
+	}
 	require.True(t, coins.Params.BaseVolume.Equal(l.supply()))
 	coin, err := app.NativeCoinKeeper.GetCoinByDRC(l.snapshot(), want.DRC20Contract)
 	require.NoError(t, err)
@@ -183,5 +191,61 @@ func checkNativeDRC20Genesis(t *testing.T, dir, phase string) {
 		altered, _ := l.snapshot().CacheContext()
 		require.NoError(t, app.NativeCoinKeeper.UpdateCoinVR(altered, want.Denom, want.Volume, want.Reserve.AddRaw(1)))
 		require.ErrorContains(t, app.LoadWithdrawalSettlement(altered), "approved DRC20 supply or bank DEL reserve differs")
+	} else {
+		var profile ownedapp.WithdrawalProfile
+		require.NoError(t, json.Unmarshal(state[ownedapp.WithdrawalGenesisKey], &profile))
+		l.checkSignedDRC20Delegation(profile, want)
 	}
+}
+
+func (l nativeHistoricalLifecycle) checkSignedDRC20Delegation(profile ownedapp.WithdrawalProfile, coin cointypes.Coin) {
+	t := l.t
+	t.Helper()
+	coinABI, err := contracts.CompiledABI("DRC20")
+	require.NoError(t, err)
+	converterABI, err := contracts.CompiledABI("MintCandyCurveConverter")
+	require.NoError(t, err)
+	token := common.HexToAddress(coin.DRC20Contract)
+	validator := common.HexToAddress(l.target.EVM)
+	sold := sdkmath.NewIntWithDecimal(1, 18)
+	keeper := l.app.NativeValidatorKeeper
+	const coinKind = validatortypes.EVMStakeBindingKind_EVM_STAKE_BINDING_COIN
+	before, err := keeper.GetEVMStakeBinding(l.snapshot(), coinKind, l.expect.Gateway.Bytes(), l.expect.StakeID.Bytes())
+	require.NoError(t, err)
+	wdel := sdk.AccAddress(l.expect.Wrapped.Bytes())
+	backing := l.app.BankKeeper.GetBalance(l.snapshot(), wdel, identity.BaseDenom).Amount
+	assertState := func(delta sdkmath.Int) {
+		t.Helper()
+		ctx := l.snapshot()
+		updated, err := l.app.NativeCoinKeeper.GetCoinByDRC(ctx, token.Hex())
+		require.NoError(t, err)
+		require.Equal(t, coin.Volume.Sub(delta).String(), updated.Volume.String())
+		require.Equal(t, coin.Reserve.Sub(delta).String(), updated.Reserve.String())
+		require.Equal(t, updated.Reserve.String(), l.app.BankKeeper.GetBalance(ctx, sdk.AccAddress(token.Bytes()), identity.BaseDenom).Amount.String())
+		stake, err := keeper.GetEVMStakeBinding(ctx, coinKind, l.expect.Gateway.Bytes(), l.expect.StakeID.Bytes())
+		require.NoError(t, err)
+		require.Equal(t, before.RawAmount.Add(delta).String(), stake.RawAmount.String())
+		require.Equal(t, backing.Add(delta).String(), l.app.BankKeeper.GetBalance(ctx, wdel, identity.BaseDenom).Amount.String())
+	}
+	approve := func(spender common.Address) *ethtypes.Transaction {
+		data, err := coinABI.Pack("approve", spender, sold.BigInt())
+		require.NoError(t, err)
+		return l.signedEthereumCall(token, sdkmath.ZeroInt(), data)
+	}
+	convert := func(minimum sdkmath.Int) *ethtypes.Transaction {
+		deadline := big.NewInt(l.snapshot().BlockTime().Add(time.Minute).Unix())
+		data, err := converterABI.Pack("convertAndDelegate", validator, token, sold.BigInt(), minimum.BigInt(), deadline)
+		require.NoError(t, err)
+		return l.signedEthereumCall(profile.CurveConverter, sdkmath.ZeroInt(), data)
+	}
+	block, result := l.finalizeSignedEthereum(approve(l.expect.Gateway))
+	require.NotEmpty(t, result.VmError, "unapproved spender must be rejected by the native admission hook")
+	l.commit(block)
+	l.submitSignedEthereum(approve(profile.CurveConverter))
+	block, result = l.finalizeSignedEthereum(convert(sold.MulRaw(2)))
+	require.NotEmpty(t, result.VmError, "minOut above the quote must revert the entire sale")
+	l.commit(block)
+	assertState(sdkmath.ZeroInt())
+	l.submitSignedEthereum(convert(sold))
+	assertState(sold)
 }

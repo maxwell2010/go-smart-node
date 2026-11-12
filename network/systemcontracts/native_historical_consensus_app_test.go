@@ -281,13 +281,19 @@ func (l nativeHistoricalLifecycle) signedGatewayTx(method string, value sdkmath.
 	require.NoError(t, err)
 	data, err := gateway.Pack(method, args...)
 	require.NoError(t, err)
+	return l.signedEthereumCall(l.expect.Gateway, value, data)
+}
+
+func (l nativeHistoricalLifecycle) signedEthereumCall(target common.Address, value sdkmath.Int, data []byte) *ethtypes.Transaction {
+	t := l.t
+	t.Helper()
 	key, err := registryFixtureKey(3, true)
 	require.NoError(t, err)
 	privateKey, err := crypto.ToECDSA(key.Bytes())
 	require.NoError(t, err)
 	require.Equal(t, l.expect.Actor, crypto.PubkeyToAddress(privateKey.PublicKey))
 	signer := ethtypes.NewEIP155Signer(big.NewInt(990001))
-	raw := ethtypes.NewTx(&ethtypes.LegacyTx{Nonce: l.app.EVMKeeper.GetNonce(l.snapshot(), l.expect.Actor), To: &l.expect.Gateway,
+	raw := ethtypes.NewTx(&ethtypes.LegacyTx{Nonce: l.app.EVMKeeper.GetNonce(l.snapshot(), l.expect.Actor), To: &target,
 		Value: value.BigInt(), Gas: 24_000_000, GasPrice: big.NewInt(1_000_000_000_000), Data: data})
 	signed, err := ethtypes.SignTx(raw, signer, privateKey)
 	require.NoError(t, err)
