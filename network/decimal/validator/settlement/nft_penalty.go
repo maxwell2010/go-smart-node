@@ -219,23 +219,35 @@ func (e *Executor) readActiveNFTPenaltyState(ctx sdk.Context, row validatortypes
 }
 
 func verifyActiveNFTPenaltyDeltas(before, after activeNFTPenaltyState, loss sdkmath.Int) error {
-	position := before.position
-	position.ReserveAmount = after.position.ReserveAmount
-	position.DeclaredCurrencyReserve = after.position.DeclaredCurrencyReserve
-	position.HeldCurrencyReserve = after.position.HeldCurrencyReserve
-	if position != after.position || !before.companion.Remaining.Equal(after.companion.Remaining) ||
+	if !before.companion.Remaining.Equal(after.companion.Remaining) ||
 		before.coinCursor != after.coinCursor || before.validatorCursor != after.validatorCursor ||
-		!before.companion.NFTBacked.Sub(after.companion.NFTBacked).Equal(loss) || !before.bankSupply.Sub(after.bankSupply).Equal(loss) {
-		return errors.New("active NFT penalty changed receipt identity, DEL principal, cursor or native supply unexpectedly")
+		!before.companion.NFTBacked.Sub(after.companion.NFTBacked).Equal(loss) {
+		return errors.New("active NFT penalty changed DEL principal or companion backing unexpectedly")
 	}
-	for _, pair := range [][2]common.Hash{{before.position.DeclaredCurrencyReserve, after.position.DeclaredCurrencyReserve},
-		{before.position.HeldCurrencyReserve, after.position.HeldCurrencyReserve}, {before.validatorReserve, after.validatorReserve}} {
+	if new(big.Int).Sub(before.validatorReserve.Big(), after.validatorReserve.Big()).Cmp(loss.BigInt()) != 0 {
+		return errors.New("active NFT penalty did not reduce validator reserve by the exact loss")
+	}
+	return verifyNFTVaultPenaltyDeltas(before.position, after.position, before.payoutState, after.payoutState, before.bankSupply, after.bankSupply, loss)
+}
+
+func verifyNFTVaultPenaltyDeltas(before, after nftview.PositionSnapshot, beforeBalance, afterBalance payoutState,
+	beforeSupply, afterSupply, loss sdkmath.Int,
+) error {
+	position := before
+	position.ReserveAmount = after.ReserveAmount
+	position.DeclaredCurrencyReserve = after.DeclaredCurrencyReserve
+	position.HeldCurrencyReserve = after.HeldCurrencyReserve
+	if position != after || !beforeSupply.Sub(afterSupply).Equal(loss) {
+		return errors.New("NFT penalty changed receipt identity or native supply unexpectedly")
+	}
+	for _, pair := range [][2]common.Hash{{before.ReserveAmount, after.ReserveAmount},
+		{before.DeclaredCurrencyReserve, after.DeclaredCurrencyReserve}, {before.HeldCurrencyReserve, after.HeldCurrencyReserve}} {
 		if new(big.Int).Sub(pair[0].Big(), pair[1].Big()).Cmp(loss.BigInt()) != 0 {
-			return errors.New("active NFT penalty did not reduce Vault custody and validator reserve by the exact loss")
+			return errors.New("NFT penalty did not reduce Vault position and custody by the exact loss")
 		}
 	}
-	for _, pair := range [][2]*big.Int{{before.beneficiary, after.beneficiary}, {before.gateway, after.gateway},
-		{before.wrapped, after.wrapped}, {before.backing, after.backing}, {before.supply, after.supply}} {
+	for _, pair := range [][2]*big.Int{{beforeBalance.beneficiary, afterBalance.beneficiary}, {beforeBalance.gateway, afterBalance.gateway},
+		{beforeBalance.wrapped, afterBalance.wrapped}, {beforeBalance.backing, afterBalance.backing}, {beforeBalance.supply, afterBalance.supply}} {
 		if pair[0].Cmp(pair[1]) != 0 {
 			return errors.New("native Vault penalty changed WDEL or the beneficiary or Gateway bank balance")
 		}
@@ -263,6 +275,21 @@ func (e *Executor) verifyActiveNFTPenaltyLogs(receipt *ethtypes.Receipt, id, pre
 		return nil
 	}
 	logs := receipt.Logs
+	vaultLogs := len(logs) - 3
+	if err := e.verifyNFTPenaltyVaultLogs(logs[:vaultLogs], after.position, percentage, burned); err != nil {
+		return err
+	}
+	logs = logs[vaultLogs:]
+	vaultWord := common.BytesToHash(e.roles.PositionVault[:])
+	percent := common.BigToHash(new(big.Int).SetUint64(uint64(percentage)))
+	if !matchesNFTEvent(logs[0], e.roles.Gateway, []common.Hash{e.gateway.Events["NFTPenaltyApplied"].ID, id},
+		vaultWord, after.position.Asset.TokenID, percent, common.BigToHash(burned)) {
+		return errors.New("isolated NFT penalty event differs from the exact Gateway transition")
+	}
+	return e.checkDELStakeLogs(logs[1:], after.companion.StakeID, after.coin, new(big.Int).Neg(burned), false)
+}
+
+func (e *Executor) verifyNFTPenaltyVaultLogs(logs []*ethtypes.Log, p nftview.PositionSnapshot, percentage uint16, burned *big.Int) error {
 	burnWord := common.BigToHash(burned)
 	vault := e.roles.PositionVault
 	if burned.Sign() > 0 {
@@ -272,15 +299,12 @@ func (e *Executor) verifyActiveNFTPenaltyLogs(receipt *ethtypes.Receipt, id, pre
 		}
 		logs = logs[1:]
 	}
-	p := after.position
 	positionID, remaining := p.Asset.TokenID, p.ReserveAmount
 	percent := common.BigToHash(new(big.Int).SetUint64(uint64(percentage)))
 	quantity := common.BigToHash(new(big.Int).SetUint64(uint64(p.OriginQuantity)))
-	vaultWord := common.BytesToHash(vault[:])
 	if !matchesNFTEvent(logs[0], vault, []common.Hash{e.vault.Events["PositionPenalty"].ID, positionID}, percent, burnWord, remaining) ||
-		!matchesNFTEvent(logs[1], vault, []common.Hash{e.vault.Events["PositionReserveUpdated"].ID, positionID}, smallWord(byte(nfttypes.IsolatedReserveDEL)), common.Hash{}, remaining, quantity) ||
-		!matchesNFTEvent(logs[2], e.roles.Gateway, []common.Hash{e.gateway.Events["NFTPenaltyApplied"].ID, id}, vaultWord, positionID, percent, burnWord) {
-		return errors.New("isolated NFT penalty logs differ from the exact Vault and Gateway transition")
+		!matchesNFTEvent(logs[1], vault, []common.Hash{e.vault.Events["PositionReserveUpdated"].ID, positionID}, smallWord(byte(nfttypes.IsolatedReserveDEL)), common.Hash{}, remaining, quantity) {
+		return errors.New("isolated NFT penalty logs differ from the exact Vault transition")
 	}
-	return e.checkDELStakeLogs(logs[3:], after.companion.StakeID, after.coin, new(big.Int).Neg(burned), false)
+	return nil
 }
