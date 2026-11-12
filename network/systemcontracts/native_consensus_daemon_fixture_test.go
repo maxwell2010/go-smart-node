@@ -348,6 +348,16 @@ func exportNativeConsensusDaemonFixture(t *testing.T, e isolatedBackendEnv, dir 
 			}
 			expectations["unjailNonce"] = nonce
 			expectations["jailSeconds"] = int64(jailRecoveryDuration / time.Second)
+
+			actorNonce := e.app.EVMKeeper.GetNonce(ctx, actor)
+			topUp := ethtypes.NewTx(&ethtypes.LegacyTx{Nonce: actorNonce, To: &profile.Gateway,
+				Gas: gasLimit, GasPrice: price, Data: pack(gateway, "delegateDEL", target), Value: amount(1).QuoRaw(4).BigInt()})
+			signed, err := ethtypes.SignTx(topUp, signer, key)
+			require.NoError(t, err)
+			raw, err := signed.MarshalBinary()
+			require.NoError(t, err)
+			expectations["recoveredTopUp"] = map[string]string{"raw": hexData(raw), "hash": signed.Hash().Hex()}
+			expectations["recoveredTopUpNonce"] = actorNonce
 		}
 		body, err := json.Marshal(expectations)
 		require.NoError(t, err)

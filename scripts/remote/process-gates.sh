@@ -417,7 +417,15 @@ if sys.argv[4]=='1':
     assert reentry['transition']['H+2']['powers']=={'a':3,'b':3,'c':1},report
     assert reentry['cSignedHeight']>=success['height']+2 and report['final']['appHashHeight']==report['final']['height']+1,report
     assert report['final']['app_hash'] and len(report['final']['app_hash'])==64,report
-    print('Signed early unpause rolled back; matured unpause restored C at H+2 and all replicas agreed without another burn.')
+    topup=report['postJailTopUp']
+    assert topup['success'] and topup['height']>report['final']['height'] and topup['effectiveHeight']==topup['height']+2,report
+    assert topup['amountAtomic']=='250000000000000000' and topup['activeReservesAtomic']['c']=='2230000000000000000',report
+    assert topup['jailed']==[] and topup['masterPenaltyCount']==topup['stakePenaltyCursor']==1,report
+    assert topup['powers']=={'a':3,'b':3,'c':2} and topup['signers']==['a','b','c'],report
+    assert topup['effectiveHeight']<=topup['cSignedHeight']<topup['effectiveHeight']+3,report
+    assert topup['bankSupplyAtomic']==report['final']['bankSupplyAtomic'] and topup['appHashHeight']==topup['height']+1,report
+    assert len(topup['app_hash'])==64,report
+    print('Matured unpause restored C at H+2, then a signed DEL top-up raised C to power 2 without another burn.')
 if sys.argv[5]=='1':
     funding,request,payout=(report[name] for name in ('heldFunding','heldWithdrawal','heldPayout'))
     assert funding['success'] and funding['effectiveHeight']==funding['height']+2,report
