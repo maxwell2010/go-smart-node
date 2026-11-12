@@ -54,6 +54,11 @@ func runSignedActiveNFTPenalty(t *testing.T, e isolatedBackendEnv, profile owned
 	if zeroExit {
 		principal, percentage = sdkmath.ZeroInt(), 100
 	}
+	withHeld := mode == frozenNFTWithHeldMode
+	if withHeld {
+		principal = sdkmath.ZeroInt()
+		gov(gateway, profile.Gateway, "setFreezeTime", big.NewInt(benchmarkHoldLots+signedDELFreezeSeconds), new(big.Int))
+	}
 	executor, err := settlement.NewExecutor(e.app.EVMKeeper, reader, settlement.Config{EVMGas: 750_000, MaxLogs: 32, MaxLogBytes: 16384})
 	require.NoError(t, err)
 	position := func(transition settlement.DELTransition, cursor common.Hash) validatorkeeper.GatewayDELStake {
@@ -80,10 +85,14 @@ func runSignedActiveNFTPenalty(t *testing.T, e isolatedBackendEnv, profile owned
 
 	originID := common.BigToHash(new(big.Int).Add(new(big.Int).Lsh(big.NewInt(1), 224), big.NewInt(880)))
 	unitsPerPosition := uint32(1)
-	if mode == frozenNFTMaxUnitsMode || mode == frozenNFTBothEligibleMode {
+	if mode == frozenNFTMaxUnitsMode || mode == frozenNFTBothEligibleMode || withHeld {
 		unitsPerPosition = nfttypes.MaxIsolatedOriginUnits
 	}
-	seedActiveNFTPenaltyOrigin(t, f, profile, origin, vault, originAddress, originID, unitReserve, 2*unitsPerPosition)
+	originQuantity := 2 * unitsPerPosition
+	if withHeld {
+		originQuantity = unitsPerPosition
+	}
+	seedActiveNFTPenaltyOrigin(t, f, profile, origin, vault, originAddress, originID, unitReserve, originQuantity)
 	data, err := origin.ABI.Pack("setApprovalForAll", f.target, true)
 	require.NoError(t, err)
 	e.send(e.keys[0], &originAddress, new(big.Int), data, true)
@@ -111,7 +120,12 @@ func runSignedActiveNFTPenalty(t *testing.T, e isolatedBackendEnv, profile owned
 		commit()
 		return proof
 	}
-	penalized, sibling := delegate(unitsPerPosition), delegate(unitsPerPosition)
+	penalized := delegate(unitsPerPosition)
+	if withHeld {
+		runSignedFrozenNFTAndHeldPenalty(t, f, reader, executor, penalized, inclusion)
+		return
+	}
+	sibling := delegate(unitsPerPosition)
 	if mode == "frozen-nft-penalty" || mode == frozenNFTMaxUnitsMode || mode == frozenNFTBothEligibleMode {
 		runSignedFrozenNFTPenalty(t, f, reader, executor, penalized, sibling, unitReserve, mode == frozenNFTBothEligibleMode, inclusion)
 		return
