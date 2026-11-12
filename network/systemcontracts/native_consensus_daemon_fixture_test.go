@@ -124,7 +124,11 @@ func exportNativeConsensusDaemonFixture(t *testing.T, e isolatedBackendEnv, dir 
 	var custom *nativeCustomCollateralGenesisFixture
 	if os.Getenv(nativeCustomCollateralGenesisPhaseEnv) == "seed" {
 		require.True(t, historical)
-		custom = seedNativeCustomCollateralGenesis(t, e, profile, gov)
+		var fixtureVolume int64
+		if os.Getenv(nativeCustomNFTMaxEnv) == "1" && nft != nil {
+			fixtureVolume = 2*int64(nft.units) + 8
+		}
+		custom = seedNativeCustomCollateralGenesis(t, e, profile, gov, fixtureVolume)
 		if os.Getenv(nativeCustomNFTPhaseEnv) == "seed" {
 			require.NotNil(t, nft)
 			nft.mintCustom(t, e, custom, actor)

@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -27,7 +28,18 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-const nativeCustomNFTPhaseEnv = "MCND_NATIVE_CUSTOM_NFT_PHASE"
+const (
+	nativeCustomNFTPhaseEnv = "MCND_NATIVE_CUSTOM_NFT_PHASE"
+	nativeCustomNFTMaxEnv   = "MCND_NATIVE_CUSTOM_NFT_MAX"
+	convertedNFTGasPrefix   = "signed custom NFT conversion "
+)
+
+func nativeCustomNFTDimensions() (minted, selected uint32) {
+	if os.Getenv(nativeCustomNFTMaxEnv) == "1" {
+		return nfttypes.MaxIsolatedOriginUnits + 1, nfttypes.MaxIsolatedOriginUnits
+	}
+	return 3, 1
+}
 
 func TestOwnedAppNativeCustomNFTConversionAndWithdrawal(t *testing.T) {
 	if phase := os.Getenv(nativeCustomNFTPhaseEnv); phase == "run" || phase == "restart" {
@@ -36,6 +48,15 @@ func TestOwnedAppNativeCustomNFTConversionAndWithdrawal(t *testing.T) {
 	}
 	binary, err := os.Executable()
 	require.NoError(t, err)
+	for _, tc := range []struct{ name, max string }{{"one selected unit", ""}, {"1024 selected units", "1"}} {
+		t.Run(tc.name, func(t *testing.T) {
+			checkNativeCustomNFTPhases(t, binary, tc.max)
+		})
+	}
+}
+
+func checkNativeCustomNFTPhases(t *testing.T, binary, maxFixture string) {
+	t.Helper()
 	dir := filepath.Join(t.TempDir(), "native-custom-nft")
 	require.NoError(t, os.Mkdir(dir, 0700))
 	for _, phase := range []string{"seed", "run", "restart"} {
@@ -46,6 +67,7 @@ func TestOwnedAppNativeCustomNFTConversionAndWithdrawal(t *testing.T) {
 			}
 			child := exec.CommandContext(t.Context(), binary, "-test.v", "-test.timeout=3m", "-test.run="+filter)
 			child.Env = append(os.Environ(), nativeCustomNFTPhaseEnv+"="+phase, nativeConsensusDaemonFixtureEnv+"="+dir,
+				nativeCustomNFTMaxEnv+"="+maxFixture,
 				nativeHistoricalConsensusPhaseEnv+"="+historical, nativeCustomCollateralGenesisPhaseEnv+"="+custom,
 				nativeHistoricalMaxNFTPhaseEnv+"=", nativeConsensusFeeRewardsEnv+"=", nativeConsensusIBCV1Env+"=",
 				nativeConsensusUpgradeGovernanceEnv+"=", nativeConsensusJailRecoveryEnv+"=", nativeConsensusHeldDowntimeEnv+"=",
@@ -53,6 +75,12 @@ func TestOwnedAppNativeCustomNFTConversionAndWithdrawal(t *testing.T) {
 				delLifecycleFixtureEnv+"=", withdrawalGenesisFixtureEnv+"=")
 			output, err := child.CombinedOutput()
 			require.NoError(t, err, "%s", output)
+			if phase == "run" {
+				_, measurement, found := strings.Cut(string(output), convertedNFTGasPrefix)
+				require.True(t, found, "isolated custom NFT transaction did not report its gas")
+				line, _, _ := strings.Cut(measurement, "\n")
+				t.Log(convertedNFTGasPrefix + strings.TrimSpace(line))
+			}
 		}) {
 			return
 		}
@@ -84,7 +112,9 @@ func runNativeCustomNFTConversion(t *testing.T, dir, phase string) {
 	require.NoError(t, app.AppCodec().UnmarshalJSON(state[cointypes.ModuleName], &coins))
 	require.Len(t, coins.Coins, 1)
 	coin := coins.Coins[0]
-	amount := sdkmath.NewIntWithDecimal(2, 18)
+	minted, quantity := nativeCustomNFTDimensions()
+	unitReserve := sdkmath.NewIntWithDecimal(2, 18)
+	amount := unitReserve.MulRaw(int64(quantity))
 	positionID := common.Hash{31: 1}
 	assertState := func(sold sdkmath.Int, burnt uint32) {
 		t.Helper()
@@ -99,16 +129,22 @@ func runNativeCustomNFTConversion(t *testing.T, dir, phase string) {
 		require.True(t, coins.Params.BaseVolume.Equal(l.supply()))
 		origin, err := app.NativeNFTKeeper.GetToken(ctx, signedNFTNativeOriginID)
 		require.NoError(t, err)
-		require.Equal(t, uint32(3), origin.Minted)
+		require.Equal(t, minted, origin.Minted)
 		require.Equal(t, burnt, origin.Burnt)
 		require.Equal(t, coin.Denom, origin.Reserve.Denom)
-		require.True(t, amount.Equal(origin.Reserve.Amount))
+		require.True(t, unitReserve.Equal(origin.Reserve.Amount))
+		sibling, err := app.NativeNFTKeeper.GetSubToken(ctx, signedNFTNativeOriginID, minted)
+		require.NoError(t, err)
+		require.Equal(t, sdk.AccAddress(fixture.Actor.Bytes()).String(), sibling.Owner)
 	}
 	assertReceipt := func(owner common.Address) {
 		t.Helper()
 		lineage, err := app.NativeNFTKeeper.GetIsolatedLineage(l.snapshot(), fixture.NftVault.Bytes(), positionID.Bytes())
 		require.NoError(t, err)
-		require.Equal(t, []uint32{1}, lineage.OriginSubTokenIDs)
+		require.Len(t, lineage.OriginSubTokenIDs, int(quantity))
+		for i, id := range lineage.OriginSubTokenIDs {
+			require.Equal(t, uint32(i+1), id)
+		}
 		require.Equal(t, fixture.ReceiptToken, lineage.ReceiptNativeTokenID)
 		require.Equal(t, nfttypes.IsolatedReserveDEL, lineage.Reserve.Kind)
 		require.Equal(t, common.BigToHash(amount.BigInt()).Bytes(), lineage.Reserve.Amount)
@@ -131,19 +167,26 @@ func runNativeCustomNFTConversion(t *testing.T, dir, phase string) {
 		origin, err := app.NativeNFTKeeper.GetExternalNFTBinding(l.snapshot(), signedNFTNativeOriginID)
 		require.NoError(t, err)
 		validator, originContract := common.HexToAddress(l.target.EVM), common.BytesToAddress(origin.Contract)
-		originID, quantity := common.BytesToHash(origin.TokenID).Big(), big.NewInt(1)
+		originID, units := common.BytesToHash(origin.TokenID).Big(), big.NewInt(int64(quantity))
 		deadline := big.NewInt(l.snapshot().BlockTime().Add(time.Minute).Unix())
 		const method = "delegateNFT1155WithConversion"
 		block, result := l.finalizeSignedEthereum(l.signedGatewayTx(method, sdkmath.ZeroInt(), validator, originContract,
-			originID, quantity, amount.AddRaw(1).BigInt(), deadline))
+			originID, units, amount.AddRaw(1).BigInt(), deadline))
 		require.NotEmpty(t, result.VmError)
 		l.commit(block)
 		assertState(sdkmath.ZeroInt(), 0)
 		vault, err := app.NativeNFTKeeper.GetIsolatedVaultState(l.snapshot(), fixture.NftVault.Bytes())
 		require.NoError(t, err)
 		require.Equal(t, positionID.Bytes(), vault.NextPositionID)
-		l.signedGateway(method, sdkmath.ZeroInt(), validator, originContract, originID, quantity, amount.BigInt(), deadline)
-		assertState(amount, 1)
+		block, result = l.finalizeSignedEthereum(l.signedGatewayTx(method, sdkmath.ZeroInt(), validator, originContract,
+			originID, units, amount.BigInt(), deadline))
+		require.Empty(t, result.VmError)
+		require.LessOrEqual(t, block.TxResults[0].GasUsed, int64(24_000_000))
+		require.LessOrEqual(t, result.MaxUsedGas, uint64(24_000_000))
+		l.commit(block)
+		t.Logf("%sunits=%d sdk_gas=%d evm_peak_gas=%d budget=24000000", convertedNFTGasPrefix, quantity,
+			block.TxResults[0].GasUsed, result.MaxUsedGas)
+		assertState(amount, quantity)
 		assertReceipt(fixture.Gateway)
 		nft, err := app.NativeValidatorKeeper.GetEVMStakeBinding(l.snapshot(), validatortypes.EVMStakeBindingKind_EVM_STAKE_BINDING_NFT,
 			fixture.Gateway.Bytes(), fixture.StakeID.Bytes())
@@ -155,7 +198,7 @@ func runNativeCustomNFTConversion(t *testing.T, dir, phase string) {
 
 	require.Equal(t, "restart", phase)
 	require.Equal(t, int64(5), app.LastBlockHeight())
-	assertState(amount, 1)
+	assertState(amount, quantity)
 	assertReceipt(fixture.Gateway)
 	keeper := app.NativeValidatorKeeper
 	row, err := keeper.GetEVMFrozenBinding(l.snapshot(), fixture.Gateway.Bytes(), make([]byte, common.HashLength))
@@ -167,6 +210,6 @@ func runNativeCustomNFTConversion(t *testing.T, dir, phase string) {
 	row, err = keeper.GetEVMFrozenBinding(l.snapshot(), fixture.Gateway.Bytes(), row.FrozenIndex)
 	require.NoError(t, err)
 	require.False(t, row.Active)
-	assertState(amount, 1)
+	assertState(amount, quantity)
 	assertReceipt(fixture.Actor)
 }

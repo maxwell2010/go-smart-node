@@ -37,7 +37,7 @@ type nativeCustomCollateralGenesisFixture struct {
 }
 
 func seedNativeCustomCollateralGenesis(t *testing.T, e isolatedBackendEnv, profile ownedapp.WithdrawalProfile,
-	gov func(contracts.Artifact, common.Address, string, ...interface{}),
+	gov func(contracts.Artifact, common.Address, string, ...interface{}), fixtureVolume int64,
 ) *nativeCustomCollateralGenesisFixture {
 	t.Helper()
 	registry, proxy, bootstrap := e.load("DecimalContractCenter"), e.load("DecimalContractCenterProxy"), e.load("NewNetworkProxyBootstrap")
@@ -60,9 +60,10 @@ func seedNativeCustomCollateralGenesis(t *testing.T, e isolatedBackendEnv, profi
 
 	creator := crypto.PubkeyToAddress(e.keys[3].PublicKey)
 	unit := func(amount int64) sdkmath.Int { return sdkmath.NewIntWithDecimal(amount, 18) }
+	volume := max(int64(10), fixtureVolume)
 	want := cointypes.Coin{Denom: "genesis20", Title: "Fresh isolated DRC20 collateral asset",
 		Creator: sdk.AccAddress(creator.Bytes()).String(), CRR: 100, Identity: "fixture://approved-collateral/long-identity",
-		Volume: unit(10), Reserve: unit(10), MinVolume: unit(5), LimitVolume: unit(100)}
+		Volume: unit(volume), Reserve: unit(volume), MinVolume: unit(5), LimitVolume: unit(max(int64(100), volume+1))}
 	metadata := struct {
 		InitialMint, MinTotalSupply, MaxTotalSupply *big.Int
 		Creator                                     common.Address

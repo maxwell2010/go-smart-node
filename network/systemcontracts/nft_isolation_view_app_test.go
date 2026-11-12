@@ -138,7 +138,8 @@ func runIsolatedPositionReader(t *testing.T, e isolatedBackendEnv) {
 		}
 		var nft *nativeNFTDowntimeFixture
 		if os.Getenv(nativeCustomNFTPhaseEnv) == "seed" {
-			fixture := newNativeNFTFixture(origin, originAddress, 3)
+			minted, _ := nativeCustomNFTDimensions()
+			fixture := newNativeNFTFixture(origin, originAddress, minted)
 			nft = &fixture
 		} else if maxHistoricalNFT := os.Getenv(nativeHistoricalMaxNFTPhaseEnv) == "seed"; maxHistoricalNFT ||
 			os.Getenv(nativeConsensusNFTDowntimeEnv) == "1" || os.Getenv(nativeConsensusFullUpgradeEnv) == "1" {
