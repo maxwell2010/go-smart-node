@@ -37,6 +37,7 @@ const nativeConsensusFeeRewardsEnv = "MCND_NATIVE_CONSENSUS_FEE_REWARDS"
 const nativeConsensusIBCV1Env = "MCND_NATIVE_CONSENSUS_IBC_V1"
 const nativeConsensusDowntimeEnv = "MCND_NATIVE_CONSENSUS_DEL_DOWNTIME"
 const nativeConsensusJailRecoveryEnv = "MCND_NATIVE_CONSENSUS_DEL_JAIL_RECOVERY"
+const nativeConsensusHeldDowntimeEnv = "MCND_NATIVE_CONSENSUS_HELD_DEL_DOWNTIME"
 
 type nativeConsensusFixtureValidator struct {
 	Name         string `json:"name"`
@@ -71,7 +72,9 @@ func exportNativeConsensusDaemonFixture(t *testing.T, e isolatedBackendEnv, dir 
 	ibcV1 := os.Getenv(nativeConsensusIBCV1Env) == "1"
 	downtime := os.Getenv(nativeConsensusDowntimeEnv) == "1"
 	jailRecovery := os.Getenv(nativeConsensusJailRecoveryEnv) == "1"
+	heldDowntime := os.Getenv(nativeConsensusHeldDowntimeEnv) == "1"
 	require.False(t, jailRecovery && !downtime, "the jail recovery fixture requires the downtime profile")
+	require.False(t, heldDowntime && (!downtime || jailRecovery), "held downtime has its own isolated fixture")
 	initial, after := [3]int64{2, 1, 0}, [3]int64{2, 0, 3}
 	keyScope := "mintcandy native consensus process fixture "
 	if downtime {
@@ -82,6 +85,10 @@ func exportNativeConsensusDaemonFixture(t *testing.T, e isolatedBackendEnv, dir 
 	const jailRecoveryDuration = 30 * time.Second
 	if jailRecovery {
 		keyScope = "mintcandy native ordinary del jail recovery process fixture "
+	}
+	if heldDowntime {
+		initial, after = [3]int64{3, 3, 0}, [3]int64{3, 3, 2}
+		keyScope = "mintcandy native held del downtime process fixture "
 	}
 	commission := sdkmath.LegacyZeroDec()
 	if feeRewards {
@@ -217,6 +224,8 @@ func exportNativeConsensusDaemonFixture(t *testing.T, e isolatedBackendEnv, dir 
 	profile.EnableNativeFeeRewards = feeRewards
 	profile.EnableNativeIBCV1 = ibcV1
 	profile.EnableNativeOrdinaryDELDowntime = downtime
+	profile.EnableDELHold = heldDowntime
+	profile.EnableNativeHeldDELDowntime = heldDowntime
 	genesis[ownedapp.WithdrawalGenesisKey], err = json.Marshal(profile)
 	require.NoError(t, err)
 	require.NoError(t, ownedapp.ReconcileNativeGenesisAllocation(cdc, genesis))
@@ -246,7 +255,12 @@ func exportNativeConsensusDaemonFixture(t *testing.T, e isolatedBackendEnv, dir 
 
 	target := common.HexToAddress(validators[2].EVM)
 	var zero common.Hash
-	stakeID := crypto.Keccak256Hash(target.Bytes(), actor.Bytes(), profile.WrappedDEL.Bytes(), zero.Bytes(), zero.Bytes())
+	holdDeadline := new(big.Int)
+	if heldDowntime {
+		holdDeadline.SetInt64(genesisTime.Add(50 * time.Second).Unix())
+	}
+	holdWord := common.BigToHash(holdDeadline)
+	stakeID := crypto.Keccak256Hash(target.Bytes(), actor.Bytes(), profile.WrappedDEL.Bytes(), zero.Bytes(), holdWord.Bytes())
 	hexData := func(value []byte) string { return "0x" + hex.EncodeToString(value) }
 	for i := range validators {
 		validators[i].ReserveData = hexData(pack(gateway, "getValidatorReserve", common.HexToAddress(validators[i].EVM), profile.WrappedDEL))
@@ -266,6 +280,34 @@ func exportNativeConsensusDaemonFixture(t *testing.T, e isolatedBackendEnv, dir 
 		expectations["master"] = profile.MasterValidator.Hex()
 		expectations["masterStateData"] = masterState
 		expectations["stakePenaltyData"] = hexData(pack(gateway, "getStakePenaltyIndex", stakeID))
+		if heldDowntime {
+			nonce := e.app.EVMKeeper.GetNonce(ctx, actor)
+			price := big.NewInt(1_000_000_000_000)
+			signer := ethtypes.NewEIP155Signer(big.NewInt(990001))
+			principal := amount(2).BigInt()
+			remainder := new(big.Int).Sub(principal, new(big.Int).Div(new(big.Int).Set(principal), big.NewInt(100)))
+			calls := []struct {
+				name  string
+				value *big.Int
+				input []byte
+			}{
+				{"heldDelegate", principal, pack(gateway, "delegateHoldDEL", target, holdDeadline)},
+				{"heldWithdraw", new(big.Int), pack(gateway, "withdrawHold", target, profile.WrappedDEL, remainder, holdDeadline)},
+			}
+			for i, call := range calls {
+				tx := ethtypes.NewTx(&ethtypes.LegacyTx{Nonce: nonce + uint64(i), To: &profile.Gateway,
+					Gas: gasLimit, GasPrice: price, Data: call.input, Value: call.value})
+				signed, err := ethtypes.SignTx(tx, signer, key)
+				require.NoError(t, err)
+				raw, err := signed.MarshalBinary()
+				require.NoError(t, err)
+				expectations[call.name] = map[string]string{"raw": hexData(raw), "hash": signed.Hash().Hex()}
+			}
+			expectations["heldNonce"] = nonce
+			expectations["holdDeadline"] = holdDeadline.Int64()
+			expectations["heldStakeData"] = hexData(pack(gateway, "getHoldStake", target, actor, profile.WrappedDEL, holdDeadline))
+			expectations["heldFrozenData"] = hexData(pack(gateway, "getFrozenStake", new(big.Int)))
+		}
 		if jailRecovery {
 			nonce := e.app.EVMKeeper.GetNonce(ctx, target)
 			price := big.NewInt(1_000_000_000_000)

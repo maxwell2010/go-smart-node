@@ -9,10 +9,10 @@ on:
   workflow_dispatch:
     inputs:
       scope:
-        description: Module tests, contract generation, or isolated daemon and Hermes
+        description: Module tests, contract generation, isolated daemon and Hermes, or held DEL downtime
         default: module
         type: choice
-        options: [module, contracts, process]
+        options: [module, contracts, process, held-downtime]
       remote_profile:
         description: Also validate the reusable remote-worker scripts
         default: 'off'
@@ -176,7 +176,7 @@ jobs:
           if-no-files-found: error
 
   isolated-process-gates:
-    if: github.event_name == 'workflow_dispatch' && inputs.scope == 'process'
+    if: github.event_name == 'workflow_dispatch' && (inputs.scope == 'process' || inputs.scope == 'held-downtime')
     runs-on: ubuntu-24.04
     timeout-minutes: 45
     env:
@@ -208,8 +208,9 @@ jobs:
           NATIVE_IBC_V1: ${{ inputs.native_ibc_v1 }}
           NATIVE_DEL_DOWNTIME: ${{ inputs.native_del_downtime }}
           NATIVE_DEL_JAIL_RECOVERY: ${{ inputs.native_del_jail_recovery }}
+          VALIDATION_SCOPE: ${{ inputs.scope }}
         run: |
-          args=("$RUNNER_TEMP/process-evidence" off off off off off off off)
+          args=("$RUNNER_TEMP/process-evidence" off off off off off off off off)
           if [[ "$DEL_STATE_SYNC" == true ]]; then
             args[1]=withdrawal-genesis
             args[2]=del-state-sync
@@ -232,6 +233,9 @@ jobs:
           fi
           if [[ "$NATIVE_DEL_JAIL_RECOVERY" == true ]]; then
             args[7]=native-del-jail-recovery
+          fi
+          if [[ "$VALIDATION_SCOPE" == held-downtime ]]; then
+            args[8]=native-held-del-downtime
           fi
           bash scripts/remote/process-gates.sh "${args[@]}"
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9

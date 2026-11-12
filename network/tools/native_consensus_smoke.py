@@ -3,7 +3,7 @@
 import argparse
 import base64
 from dataclasses import dataclass
-from datetime import timedelta
+from datetime import datetime, timedelta
 from functools import partial
 import hashlib
 import json
@@ -14,9 +14,9 @@ import tempfile
 import time
 
 from configure_history import validate_fresh_home
-from del_delegation_smoke import DELEGATED, GAS_LIMIT, GAS_PRICE, balance, native_positions, read_words, submit, write_config
+from del_delegation_smoke import DELEGATED, GAS_LIMIT, GAS_PRICE, WITHDRAWAL_REQUESTED, balance, native_positions, read_words, submit, write_config
 from mcnd_process_smoke import ProcessOwner, SignalGuard, private_environment, private_namespace, run_command
-from withdrawal_genesis_smoke import ADDRESS, CHAIN, EVM_CHAIN, MAX_BLOCKS, SHA256, WORD, bech32_payload, block_time, check, comet, ethereum, native, private_bytes, private_write, readiness_diagnostic, safe_diagnostic, wait_height
+from withdrawal_genesis_smoke import ADDRESS, CHAIN, EVM_CHAIN, MAX_BLOCKS, SHA256, WORD, bech32_payload, block_time, check, comet, ethereum, native, private_bytes, private_write, readiness_diagnostic, safe_diagnostic, scan_blocks, wait_height
 
 
 ATOMS = 10**18
@@ -92,7 +92,7 @@ def decode_pubkey(record):
     return value
 
 
-def load_fixture(directory, fee_rewards, downtime, jail_recovery):
+def load_fixture(directory, fee_rewards, downtime, jail_recovery, held_downtime):
     info = directory.lstat()
     check(stat.S_ISDIR(info.st_mode) and stat.S_IMODE(info.st_mode) & 0o077 == 0, 'private fixture directory required')
     expected = json.loads(private_bytes(directory / 'expectations.json', 8192))
@@ -124,6 +124,8 @@ def load_fixture(directory, fee_rewards, downtime, jail_recovery):
         check(re.fullmatch(fr'0x[0-9a-f]{{{8 + words * 64}}}', expected[name]), 'invalid fixture WDEL calldata')
     validators = expected['validators']
     initial, after = (DOWNTIME_INITIAL, DOWNTIME_AFTER) if downtime else (INITIAL, AFTER)
+    if held_downtime:
+        initial, after = DOWNTIME_AFTER, DOWNTIME_INITIAL
     check([row['name'] for row in validators] == ['a', 'b', 'c'] and
           tuple(row['initialPower'] for row in validators) == initial and
           tuple(row['afterStakePower'] for row in validators) == after, 'unexpected fixture initial or changed voting power')
@@ -163,10 +165,23 @@ def load_fixture(directory, fee_rewards, downtime, jail_recovery):
           'fixture genesis native consensus and financial profile differ')
     check(profile.get('enable_native_fee_rewards', False) is fee_rewards, 'fixture genesis fee rewards mode differs')
     check(profile.get('enable_native_ordinary_del_downtime', False) is downtime, 'fixture genesis downtime mode differs')
+    check(profile.get('enable_native_held_del_downtime', False) is held_downtime, 'fixture genesis held downtime mode differs')
     if downtime:
         check(profile['master_validator'].lower() == expected['master'] and
-              not any(profile.get(flag, False) for flag in ('enable_del_hold', 'enable_nft_delegation', 'enable_native_ibc_v1')),
-              'downtime fixture must contain only ordinary DEL')
+              profile.get('enable_del_hold', False) is held_downtime and
+              not any(profile.get(flag, False) for flag in ('enable_nft_delegation', 'enable_native_ibc_v1')),
+              'downtime fixture permits only its declared DEL routes')
+    if held_downtime:
+        check(type(expected['holdDeadline']) is int and expected['holdDeadline'] > 0 and
+              type(expected['heldNonce']) is int and 0 <= expected['heldNonce'] < 2**32 - 1,
+              'invalid held downtime deadline or nonce')
+        check(re.fullmatch(r'0x[0-9a-f]{264}', expected['heldStakeData']) and
+              re.fullmatch(r'0x[0-9a-f]{72}', expected['heldFrozenData']), 'invalid held downtime getter calldata')
+        for route in ('heldDelegate', 'heldWithdraw'):
+            signed = expected[route]
+            check(re.fullmatch(WORD, signed['hash']) and re.fullmatch(r'0x(?:[0-9a-f]{2}){100,512}', signed['raw']),
+                  'invalid signed held downtime fixture transaction')
+        check(expected['heldDelegate']['hash'] != expected['heldWithdraw']['hash'], 'duplicate held downtime transaction')
     if jail_recovery:
         check(expected['jailSeconds'] == 30 and type(expected['unjailNonce']) is int and
               0 <= expected['unjailNonce'] < 2**32 - 1, 'invalid jail recovery duration or nonce')
@@ -294,10 +309,62 @@ def check_updates(replicas, validators, height):
     return {'b': 0, 'c': 3}
 
 
+def check_held_lot(stake, expected, amount):
+    holds = stake.get('holds') or []
+    check(stake['id'] == 'del' and stake['type'] == 'STAKE_TYPE_COIN_HOLD' and
+          stake['stake'] == {'denom': 'del', 'amount': str(amount)} and len(holds) == 1,
+          'native held DEL position differs from the signed bucket')
+    hold = holds[0]
+    check(int(hold['amount']) == amount and int(hold['hold_start_time']) == expected['holdStart'] and
+          int(hold['hold_end_time']) == expected['holdDeadline'], 'native held DEL lot amount or dates differ')
+
+
+def check_held_position(node, expected, height, active, pending):
+    validator = expected['validators'][2]
+    pair = f'/decimal/validator/v1/validators/{validator["operator"]}/delegations/{expected["actorNative"]}'
+    stake = read_words(expected['gateway'], expected['heldStakeData'], height, 8, node.evm)
+    check(stake[3] == active, f'active Gateway held DEL differs on {node.label}')
+    if active:
+        check(stake == [int(validator['evm'], 16), int(expected['actor'], 16), int(expected['wrapped'], 16),
+                        active, 0, 4, expected['holdDeadline'], expected['holdStart']],
+              f'active Gateway hold identity differs on {node.label}')
+        rows = native(pair, height, base=node.rest).get('delegations') or []
+        check(len(rows) == 1 and rows[0]['validator'] == validator['operator'] and rows[0]['delegator'] == expected['actorNative'],
+              f'expected one exact native held DEL row on {node.label}')
+        check_held_lot(rows[0]['stake'], expected, active)
+        try:
+            native(pair + '/undelegation', height, base=node.rest)
+        except OSError as error:
+            check(str(error).startswith('HTTP 404 '), 'expected a missing held DEL queue')
+        else:
+            raise ValueError('active held DEL unexpectedly has a pending claim')
+    elif pending:
+        row = native(pair + '/undelegation', height, base=node.rest)['undelegation']
+        check(row['validator'] == validator['operator'] and row['delegator'] == expected['actorNative'] and len(row['entries']) == 1,
+              f'expected one exact native held DEL queue entry on {node.label}')
+        entry = row['entries'][0]
+        check_held_lot(entry['stake'], expected, pending)
+        frozen = read_held_frozen(node, expected, height, pending, 1)
+        stamp = datetime.fromisoformat(entry['completion_time'].replace('Z', '+00:00'))
+        check(stamp.tzinfo is not None and stamp.timestamp() == frozen, 'native held DEL maturity differs from Gateway')
+        check(not native(pair, height, base=node.rest).get('delegations'), 'pending held DEL remains active in the native ledger')
+    else:
+        native_positions({**expected, 'validatorNative': validator['operator']}, height, 0, 0, None, node.rest)
+
+
+def read_held_frozen(node, expected, height, amount, status):
+    words = read_words(expected['gateway'], expected['heldFrozenData'], height, 11, node.evm)
+    validator = expected['validators'][2]
+    check(words[:10] == [int(validator['evm'], 16), int(expected['actor'], 16), int(expected['wrapped'], 16),
+                        amount, 0, 4, expected['holdDeadline'], expected['holdStart'], status, 1] and words[10] > 0,
+          f'frozen held DEL claim differs on {node.label}')
+    return words[10]
+
+
 def check_ledger(replicas, expected, height, c_reserve, *, wallet=None, collector=None, previous=None, rewards=None,
-                 downtime=False, burned=0):
+                 downtime=False, burned=0, pending_held=0):
     reserves = (3 * ATOMS, 3 * ATOMS, c_reserve) if downtime else (2 * ATOMS, ATOMS, c_reserve)
-    total = sum(reserves)
+    total = sum(reserves) + pending_held
     wallet_value, collector_value = wallet, collector
     reward_values = {} if previous is None else {key: int(value) for key, value in previous['rewardAtomic'].items()}
     if rewards is not None:
@@ -306,7 +373,10 @@ def check_ledger(replicas, expected, height, c_reserve, *, wallet=None, collecto
     for node in replicas:
         for validator, value in zip(expected['validators'], reserves, strict=True):
             try:
-                native_positions({**expected, 'validatorNative': validator['operator']}, height, value, 0, None, node.rest)
+                if validator['name'] == 'c' and 'holdDeadline' in expected:
+                    check_held_position(node, expected, height, value, pending_held)
+                else:
+                    native_positions({**expected, 'validatorNative': validator['operator']}, height, value, 0, None, node.rest)
             except ValueError as error:
                 raise ValueError(f'{node.label}/{validator["name"]} at {height}: {error}') from None
             reserve = read_words(expected['gateway'], validator['reserveData'], height, 2, node.evm)[1]
@@ -375,6 +445,79 @@ def check_downtime_state(replicas, expected, height, jailed, *, penalty_count=No
 
 def downtime_events(result):
     return [event for event in result['finalize_block_events'] or [] if event['type'] == 'decimal_native_downtime_applied']
+
+
+def activate_held_del(replicas, expected, report, first):
+    report['phase'] = 'signed-held-del-delegation'
+    source = replicas[0]
+    validators = expected['validators']
+    before = check_ledger(replicas, expected, first - 1, 0, downtime=True)
+    amount = 2 * ATOMS
+    receipt = submit(source.child, source.log, report, expected, 'heldDelegate', True, expected['heldNonce'], DELEGATED,
+                     {'stake_id': expected['stakeId'], 'amount': str(amount)})
+    height = receipt['height']
+    expected['holdStart'] = int(block_time(height).timestamp())
+    check(expected['holdStart'] < expected['holdDeadline'], 'signed hold was created after its deadline')
+    ready = wait_replicas(replicas, height + 5, 60, report)
+    for node in replicas:
+        updates = node.rpc(f'block_results?height={height}').get('validator_updates') or []
+        check(len(updates) == 1 and int(updates[0].get('power', 0)) == 2 and
+              decode_pubkey(updates[0]['pub_key']) == decode_pubkey(validators[2]['publicKey']),
+              f'held funding must add only C with power 2 on {node.label}')
+    effective_set(replicas, validators, height, DOWNTIME_AFTER)
+    effective_set(replicas, validators, height + 1, DOWNTIME_AFTER)
+    effective_set(replicas, validators, height + 2, DOWNTIME_INITIAL)
+    fee = int(receipt['feeAtomic'])
+    state = check_ledger(replicas, expected, height, amount, downtime=True, previous=before,
+                         wallet=int(before['walletAtomic']) - amount - fee, collector=int(before['feeCollectorAtomic']) + fee)
+    report['heldFunding'] = {**state, **receipt, 'holdStart': expected['holdStart'], 'holdDeadline': expected['holdDeadline'],
+                             'effectiveHeight': height + 2}
+    return ready
+
+
+def withdraw_held_del(replicas, expected, report):
+    source = replicas[0]
+    prior = report['final']
+    report['phase'] = 'wait-for-held-del-maturity'
+    height = prior['height']
+    deadline = time.monotonic() + 95
+    while int(block_time(height).timestamp()) <= expected['holdDeadline']:
+        check(time.monotonic() < deadline, 'committed chain time did not reach the hold deadline')
+        height = wait_replicas(replicas, height + 1, max(0, deadline - time.monotonic()), report)
+
+    report['phase'] = 'signed-withdraw-held-del'
+    amount = 2 * ATOMS - DOWNTIME_BURN
+    frozen_id = '0x' + '0' * 64
+    receipt = submit(source.child, source.log, report, expected, 'heldWithdraw', True, expected['heldNonce'] + 1,
+                     WITHDRAWAL_REQUESTED, {'stake_id': expected['stakeId'], 'frozen_index': frozen_id, 'amount': str(amount)})
+    height = receipt['height']
+    wait_replicas(replicas, height, 40, report)
+    fee = int(receipt['feeAtomic'])
+    requested = check_ledger(replicas, expected, height, 0, downtime=True, pending_held=amount, previous=prior,
+                             wallet=int(prior['walletAtomic']) - fee, collector=int(prior['feeCollectorAtomic']) + fee)
+    due = read_held_frozen(source, expected, height, amount, 1)
+    check(0 < due - int(block_time(height).timestamp()) <= 20, 'unexpected held DEL freeze period')
+    report['heldWithdrawal'] = {**requested, **receipt, 'claimDue': due, 'amountAtomic': str(amount)}
+
+    report['phase'] = 'automatic-held-del-payout'
+    deadline = time.monotonic() + 65
+    completed = []
+    while not completed:
+        check(time.monotonic() < deadline, 'held DEL payout did not mature within its block budget')
+        tip = wait_replicas(replicas, height + 1, max(0, deadline - time.monotonic()), report)
+        completed = scan_blocks(height + 1, tip, expected['gateway'], frozen_id)
+        height = tip
+    check(len(completed) == 1 and int(block_time(completed[0]).timestamp()) >= due,
+          'held DEL payout repeated or executed before maturity')
+    payout_height = completed[0]
+    for node in replicas:
+        check(read_held_frozen(node, expected, payout_height, amount, 0) == due, 'settlement changed held DEL maturity')
+    final = check_ledger(replicas, expected, payout_height, 0, downtime=True, previous=requested,
+                         wallet=int(requested['walletAtomic']) + amount, collector=int(requested['feeCollectorAtomic']))
+    wait_replicas(replicas, payout_height + 3, 50, report)
+    check(not scan_blocks(payout_height + 1, payout_height + 2, expected['gateway'], frozen_id), 'automatic payout repeated')
+    report['heldPayout'] = {**final, 'amountAtomic': str(amount), 'appHashHeight': payout_height + 1,
+                            **committed_header(replicas, payout_height + 1)}
 
 
 def submit_unpause(replicas, expected, report, prior, jail_until, *, success):
@@ -544,6 +687,8 @@ def run_downtime_gate(binary, expected, replicas, env, owner, report, first, *, 
     report['final'] = {**final, **check_downtime_state(replicas, expected, final_height, True)}
     if jail_recovery:
         verify_jail_recovery(replicas, expected, report, jail_until)
+    if 'holdDeadline' in expected:
+        withdraw_held_del(replicas, expected, report)
 
 
 def run_gate(args, binary, root, expected, genesis, keys, env, owner, report):
@@ -578,8 +723,12 @@ def run_gate(args, binary, root, expected, genesis, keys, env, owner, report):
         check(status['node_info']['id'] == node.node_id and status['validator_info']['address'] == validator['consensusAddress'],
               'replica did not start with its distinct configured signing key')
     initial_powers = DOWNTIME_INITIAL if args.downtime else INITIAL
+    if args.held_downtime:
+        initial_powers = DOWNTIME_AFTER
     report['initialPower'] = effective_set(replicas, validators, initial, initial_powers)
     if args.downtime:
+        if args.held_downtime:
+            first = activate_held_del(replicas, expected, report, first)
         run_downtime_gate(binary, expected, replicas, env, owner, report, first, jail_recovery=args.jail_recovery)
         return
     report['initialSigners'] = check_signatures(replicas, validators, initial, INITIAL)
@@ -681,8 +830,9 @@ def main(argv=None, signals=None):
     mode.add_argument('--fee-rewards', action='store_true')
     mode.add_argument('--downtime', action='store_true')
     mode.add_argument('--jail-recovery', action='store_true')
+    mode.add_argument('--held-downtime', action='store_true')
     args = parser.parse_args(argv)
-    args.downtime |= args.jail_recovery
+    args.downtime |= args.jail_recovery or args.held_downtime
     report = {'status': 'FAIL', 'phase': 'fixture-provenance', 'scope': 'three loopback processes with native consensus and a signed DEL stake'}
     with pathlib.Path(args.report).open('x', encoding='utf8') as stream:
         try:
@@ -692,13 +842,15 @@ def main(argv=None, signals=None):
             with open(binary, 'rb') as binary_stream:
                 check(hashlib.file_digest(binary_stream, 'sha256').hexdigest() == args.binary_sha256, 'daemon SHA256 mismatch')
             expected, genesis, keys, initial = load_fixture(pathlib.Path(args.fixture), args.fee_rewards, args.downtime,
-                                                            args.jail_recovery)
+                                                            args.jail_recovery, args.held_downtime)
             report.update(sourceCommit=args.source_commit, binarySha256=args.binary_sha256, initialHeight=initial,
                           genesisSha256=hashlib.sha256(genesis).hexdigest(), chainID=CHAIN, evmChainID=EVM_CHAIN, feeRewards=args.fee_rewards)
             if args.downtime:
                 report['scope'] = 'three loopback processes with an ordinary DEL downtime penalty and follower catch-up'
             if args.jail_recovery:
                 report['scope'] = 'three loopback processes with ordinary DEL downtime and signed validator jail recovery'
+            if args.held_downtime:
+                report['scope'] = 'three loopback processes with a held DEL downtime penalty and automatic payout'
             with tempfile.TemporaryDirectory(prefix='mcnd-native-consensus-', dir=args.home_parent) as directory:
                 root = pathlib.Path(directory)
                 owner = ProcessOwner(signals)
