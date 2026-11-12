@@ -15,7 +15,7 @@ import time
 from configure_history import validate_fresh_home
 from del_delegation_smoke import DELEGATED, GAS_LIMIT, GAS_PRICE, balance, native_positions, read_words, submit, write_config
 from mcnd_process_smoke import ProcessOwner, SignalGuard, private_environment, private_namespace, run_command
-from withdrawal_genesis_smoke import ADDRESS, CHAIN, EVM_CHAIN, MAX_BLOCKS, SHA256, WORD, bech32_payload, check, comet, native, private_bytes, private_write, safe_diagnostic, wait_height
+from withdrawal_genesis_smoke import ADDRESS, CHAIN, EVM_CHAIN, MAX_BLOCKS, SHA256, WORD, bech32_payload, check, comet, native, private_bytes, private_write, readiness_diagnostic, safe_diagnostic, wait_height
 
 
 ATOMS = 10**18
@@ -163,7 +163,7 @@ def load_fixture(directory, fee_rewards, downtime):
 
 
 
-def create_replicas(binary, root, genesis, keys, env):
+def create_replicas(binary, root, genesis, keys, env, *, full_mesh=False):
     replicas = []
     for index, (label, key) in enumerate(zip(('a', 'b', 'c'), keys, strict=True)):
         home = root / label
@@ -180,13 +180,35 @@ def create_replicas(binary, root, genesis, keys, env):
     source = replicas[0]
     for replica in replicas:
         changes = {('p2p', 'pex'): 'false'}
-        if replica is source:
+        if full_mesh:
+            peers = [f'{peer.node_id}@127.0.0.1:{peer.p2p}' for peer in replicas if peer is not replica]
+            changes[('p2p', 'allow_duplicate_ip')] = 'true'
+            changes[('p2p', 'persistent_peers')] = json.dumps(','.join(peers))
+        elif replica is source:
             # The two isolated peers share loopback but have distinct node keys.
             changes[('p2p', 'allow_duplicate_ip')] = 'true'
         else:
             changes[('p2p', 'persistent_peers')] = json.dumps(f'{source.node_id}@127.0.0.1:{source.p2p}')
         write_config(replica.home, 'config.toml', changes)
     return replicas
+
+
+def wait_peer_pair(first, second, seconds, report):
+    deadline = time.monotonic() + seconds
+    while time.monotonic() < deadline:
+        for node in (first, second):
+            if node.child.poll() is not None:
+                raise RuntimeError(f'{node.label} exited before the startup peers connected: ' +
+                                   readiness_diagnostic(node.log, report))
+        try:
+            linked = all(any(row['node_info']['id'] == peer.node_id for row in node.rpc('net_info')['peers'] or [])
+                         for node, peer in ((first, second), (second, first)))
+        except (OSError, json.JSONDecodeError):
+            linked = False
+        if linked:
+            return
+        time.sleep(0.25)
+    raise RuntimeError('startup peers A and C did not connect on loopback')
 
 
 def wait_replicas(replicas, minimum, seconds, report):
@@ -265,7 +287,10 @@ def check_ledger(replicas, expected, height, c_reserve, *, wallet=None, collecto
     bank_supply = None if previous is None else int(previous['bankSupplyAtomic']) - burned
     for node in replicas:
         for validator, value in zip(expected['validators'], reserves, strict=True):
-            native_positions({**expected, 'validatorNative': validator['operator']}, height, value, 0, None, node.rest)
+            try:
+                native_positions({**expected, 'validatorNative': validator['operator']}, height, value, 0, None, node.rest)
+            except ValueError as error:
+                raise ValueError(f'{node.label}/{validator["name"]} at {height}: {error}') from None
             reserve = read_words(expected['gateway'], validator['reserveData'], height, 2, node.evm)[1]
             check(reserve == value, f'validator reserve differs on {node.label}')
         supply = read_words(expected['wrapped'], expected['supplyData'], height, 1, node.evm)[0]
@@ -339,9 +364,11 @@ def run_downtime_gate(binary, expected, replicas, env, owner, report, first):
     a, b, c = replicas
     quorum = (a, b)
     baseline = first - 1
-    before = check_ledger(replicas, expected, baseline, 2 * ATOMS, downtime=True)
-    report['before'] = {**before, **check_downtime_state(replicas, expected, baseline, False)}
+    report['phase'] = 'check-downtime-baseline'
+    baseline_state = check_downtime_state(replicas, expected, baseline, False)
     report['beforeSigners'] = check_signatures(replicas, validators, baseline, DOWNTIME_INITIAL)
+    before = check_ledger(replicas, expected, baseline, 2 * ATOMS, downtime=True)
+    report['before'] = {**before, **baseline_state}
 
     report['phase'] = 'stop-c-and-observe-downtime'
     check(c.child.poll() is None, 'validator C exited before the deliberate stop')
@@ -416,7 +443,7 @@ def run_downtime_gate(binary, expected, replicas, env, owner, report, first):
 
 def run_gate(args, binary, root, expected, genesis, keys, env, owner, report):
     report['phase'] = 'create-replicas'
-    replicas = create_replicas(binary, root, genesis, keys, env)
+    replicas = create_replicas(binary, root, genesis, keys, env, full_mesh=args.downtime)
     source = replicas[0]
     version = json.loads(run_command(binary, source.home, ['version', '--long', '--output', 'json'], env))
     check(version['server_name'] == 'mcnd' and version['commit'] == args.source_commit, 'daemon version differs from checked source')
@@ -428,8 +455,17 @@ def run_gate(args, binary, root, expected, genesis, keys, env, owner, report):
     validators = expected['validators']
 
     report['phase'] = 'initial-native-consensus'
-    for node in replicas:
-        node.start(binary, env, owner, 'initial')
+    if args.downtime:
+        a, b, c = replicas
+        a.start(binary, env, owner, 'initial')
+        c.start(binary, env, owner, 'initial')
+        # A and C together have 5/8 power, so they can establish the peer link
+        # without producing a block before C is connected.
+        wait_peer_pair(a, c, 40, report)
+        b.start(binary, env, owner, 'initial')
+    else:
+        for node in replicas:
+            node.start(binary, env, owner, 'initial')
     initial = report['initialHeight']
     first = wait_replicas(replicas, initial + (4 if args.downtime else 2), 85, report)
     for node, validator in zip(replicas, validators, strict=True):
