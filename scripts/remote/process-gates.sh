@@ -332,7 +332,11 @@ for label,powers in (('H+0',{'a':2,'b':1}),('H+1',{'a':2,'b':1}),('H+2',{'a':2,'
 assert report['transition']['H+2']['signers']==['a','c'],report
 assert report['restart']['powers']=={'a':2,'c':3} and report['restart']['signers']==['a','c'],report
 assert report['restart']['height']>report['restart']['checkpointHeight'],report
-assert report['before']['wrappedAtomic']=='3000000000000000000' and report['final']['wrappedAtomic']=='6000000000000000000',report
+assert report['before']['wrappedAtomic']=='3000000000000000000' and report['funded']['wrappedAtomic']=='6000000000000000000',report
+assert report['topUp']['success'] and report['topUp']['height']>report['transition']['H+2']['height'],report
+assert report['cProposed']['height']>=report['topUp']['height'] and report['final']['wrappedAtomic']=='6250000000000000000',report
+assert int(report['funded']['feeCollectorAtomic'])-int(report['before']['feeCollectorAtomic'])==int(report['delegation']['feeAtomic']),report
+assert int(report['final']['feeCollectorAtomic'])-int(report['funded']['feeCollectorAtomic'])==int(report['topUp']['feeAtomic']),report
 print('Three replicas agree on the signed DEL validator replacement at H+2 and on restart.')
 PY
 fi

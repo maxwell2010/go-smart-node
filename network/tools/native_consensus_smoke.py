@@ -86,17 +86,22 @@ def load_fixture(directory):
     check(stat.S_ISDIR(info.st_mode) and stat.S_IMODE(info.st_mode) & 0o077 == 0, 'private fixture directory required')
     expected = json.loads(private_bytes(directory / 'expectations.json', 8192))
     check(expected['chainId'] == CHAIN and expected['evmChainId'] == EVM_CHAIN, 'fixture signing domain mismatch')
-    for field in ('gateway', 'wrapped', 'actor'):
+    for field in ('gateway', 'wrapped', 'actor', 'feeCollector'):
         check(re.fullmatch(ADDRESS, expected[field]), f'invalid fixture {field}')
         expected[field] = expected[field].lower()
-    for field in ('actor', 'wrapped'):
+    for field in ('actor', 'wrapped', 'feeCollector'):
         check(bech32_payload(expected[field + 'Native']) == expected[field], 'fixture bank and EVM addresses differ')
-    check(len({expected[field] for field in ('gateway', 'wrapped', 'actor')}) == 3, 'duplicate fixture roles')
-    check(expected['gasLimit'] == GAS_LIMIT and expected['gasPrice'] == str(GAS_PRICE) and expected['amount'] == str(3 * ATOMS),
+    check(len({expected[field] for field in ('gateway', 'wrapped', 'actor', 'feeCollector')}) == 4, 'duplicate fixture roles')
+    check(expected['gasLimit'] == GAS_LIMIT and expected['gasPrice'] == str(GAS_PRICE) and
+          (expected['amount'], expected['topUpAmount']) == (str(3 * ATOMS), str(ATOMS // 4)),
           'fixture transaction value or gas differs')
-    check(type(expected['nonce']) is int and 0 <= expected['nonce'] < 2**32, 'invalid fixture nonce')
-    check(re.fullmatch(WORD, expected['stakeId']) and re.fullmatch(WORD, expected['delegate']['hash']) and
-          re.fullmatch(r'0x(?:[0-9a-f]{2}){100,512}', expected['delegate']['raw']), 'invalid signed DEL fixture transaction')
+    check(type(expected['nonce']) is int and 0 <= expected['nonce'] < 2**32 - 1, 'invalid fixture nonce')
+    check(re.fullmatch(WORD, expected['stakeId']), 'invalid fixture stake ID')
+    for route in ('delegate', 'topUp'):
+        signed = expected[route]
+        check(re.fullmatch(WORD, signed['hash']) and re.fullmatch(r'0x(?:[0-9a-f]{2}){100,512}', signed['raw']),
+              'invalid signed DEL fixture transaction')
+    check(expected['delegate']['hash'] != expected['topUp']['hash'], 'duplicate signed fixture transaction')
     for name, words in (('supplyData', 0), ('escrowData', 1)):
         check(re.fullmatch(fr'0x[0-9a-f]{{{8 + words * 64}}}', expected[name]), 'invalid fixture WDEL calldata')
     validators = expected['validators']
@@ -184,7 +189,9 @@ def committed_header(replicas, height):
         fields = {key: header[key] for key in ('validators_hash', 'next_validators_hash', 'app_hash')}
         fields['block_hash'] = response['block_id']['hash']
         check(header['chain_id'] == CHAIN and int(header['height']) == height and
-              all(re.fullmatch(r'[0-9A-Fa-f]{64}', value) for value in fields.values()), 'invalid Comet header identity')
+              all(re.fullmatch(r'[0-9A-Fa-f]{64}', value) for value in fields.values()) and
+              re.fullmatch(r'[0-9A-F]{40}', header['proposer_address']), 'invalid Comet header identity')
+        fields['proposer_address'] = header['proposer_address']
         headers.append(fields)
     check(all(header == headers[0] for header in headers), f'replicas disagree on block or application hash at {height}')
     return headers[0]
@@ -214,10 +221,10 @@ def check_updates(replicas, validators, height):
     return {'b': 0, 'c': 3}
 
 
-def check_ledger(replicas, expected, height, funded, wallet=None):
-    reserves = (2 * ATOMS, ATOMS, 3 * ATOMS if funded else 0)
+def check_ledger(replicas, expected, height, c_reserve, *, wallet=None, collector=None):
+    reserves = (2 * ATOMS, ATOMS, c_reserve)
     total = sum(reserves)
-    wallet_value = wallet
+    wallet_value, collector_value = wallet, collector
     for node in replicas:
         for validator, value in zip(expected['validators'], reserves, strict=True):
             native_positions({**expected, 'validatorNative': validator['operator']}, height, value, 0, None, node.rest)
@@ -231,7 +238,11 @@ def check_ledger(replicas, expected, height, funded, wallet=None):
         if wallet_value is None:
             wallet_value = amount
         check(amount == wallet_value, f'wallet balance differs on {node.label}')
-    return {'height': height, 'walletAtomic': str(wallet_value), 'wrappedAtomic': str(total),
+        amount = balance(expected['feeCollector'], expected['feeCollectorNative'], height, node.evm, node.rest)
+        if collector_value is None:
+            collector_value = amount
+        check(amount == collector_value, f'fee collector balance differs on {node.label}')
+    return {'height': height, 'walletAtomic': str(wallet_value), 'feeCollectorAtomic': str(collector_value), 'wrappedAtomic': str(total),
             'activeReservesAtomic': {row['name']: str(value) for row, value in zip(expected['validators'], reserves, strict=True)}}
 
 
@@ -261,7 +272,7 @@ def run_gate(args, binary, root, expected, genesis, keys, env, owner, report):
     report['initialPower'] = effective_set(replicas, validators, initial, INITIAL)
     report['initialSigners'] = check_signatures(replicas, validators, initial, INITIAL)
     report['initialBlock'] = committed_header(replicas, initial + 1)
-    before = check_ledger(replicas, expected, first, False)
+    before = check_ledger(replicas, expected, first, 0)
     report['before'] = before
 
     report['phase'] = 'signed-del-delegation'
@@ -285,11 +296,43 @@ def run_gate(args, binary, root, expected, genesis, keys, env, owner, report):
           following['next_validators_hash'] == changed['validators_hash'] != following['validators_hash'],
           'ABCI validator updates must first become effective at H+2')
     report['transition'] = transition
-    wallet = int(before['walletAtomic']) - int(expected['amount']) - int(signed['feeAtomic'])
-    report['funded'] = check_ledger(replicas, expected, height + 2, True, wallet)
+    deposit, fee = int(expected['amount']), int(signed['feeAtomic'])
+    wallet = int(before['walletAtomic']) - deposit - fee
+    collector = int(before['feeCollectorAtomic']) + fee
+    report['funded'] = check_ledger(replicas, expected, height + 2, deposit, wallet=wallet, collector=collector)
+
+    report['phase'] = 'post-transition-top-up'
+    top_up = submit(source.child, source.log, report, expected, 'topUp', True, expected['nonce'] + 1, DELEGATED,
+                    {'stake_id': expected['stakeId'], 'amount': expected['topUpAmount']})
+    top_up_height = top_up['height']
+    check(top_up_height > height + 2, 'top-up must occur after the new set became effective')
+    report['topUp'] = top_up
+    wait_replicas(replicas, top_up_height + 4, 65, report)
+    top_up_block = committed_header(replicas, top_up_height)
+    top_up['proposer'] = next((row['name'] for row in validators if row['consensusAddress'] == top_up_block['proposer_address']), None)
+    check(top_up['proposer'] in ('a', 'c'), 'post-transition transaction must be in a block from the new set')
+    for node in replicas:
+        results = node.rpc(f'block_results?height={top_up_height}')
+        check(int(results['height']) == top_up_height and not results.get('validator_updates'),
+              'fractional DEL top-up changed the effective power schedule')
+    for proposer_height in range(top_up_height, top_up_height + 4):
+        header = committed_header(replicas, proposer_height)
+        if header['proposer_address'] == validators[2]['consensusAddress']:
+            report['cProposed'] = {'height': proposer_height, **header}
+            break
+    else:
+        raise ValueError('new native validator C did not propose a committed block')
+    effective_set(replicas, validators, report['cProposed']['height'], AFTER)
+    check_signatures(replicas, validators, report['cProposed']['height'], AFTER)
+
+    top_up_amount, top_up_fee = int(expected['topUpAmount']), int(top_up['feeAtomic'])
+    wallet -= top_up_amount + top_up_fee
+    collector += top_up_fee
+    c_reserve = deposit + top_up_amount
+    report['toppedUp'] = check_ledger(replicas, expected, top_up_height, c_reserve, wallet=wallet, collector=collector)
 
     report['phase'] = 'restart'
-    checkpoint = wait_replicas(replicas, height + 3, 35, report)
+    checkpoint = wait_replicas(replicas, top_up_height + 4, 35, report)
     checkpoint_block = committed_header(replicas, checkpoint)
     for node in reversed(replicas):
         check(node.child.poll() is None, f'replica {node.label} exited before restart')
@@ -303,7 +346,7 @@ def run_gate(args, binary, root, expected, genesis, keys, env, owner, report):
                          'powers': effective_set(replicas, validators, final_height, AFTER),
                          'signers': check_signatures(replicas, validators, final_height, AFTER),
                          **committed_header(replicas, final_height)}
-    report['final'] = check_ledger(replicas, expected, final_height, True, wallet)
+    report['final'] = check_ledger(replicas, expected, final_height, c_reserve, wallet=wallet, collector=collector)
 
 
 def main(argv=None, signals=None):

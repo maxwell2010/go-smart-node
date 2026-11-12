@@ -187,12 +187,19 @@ func exportNativeConsensusDaemonFixture(t *testing.T, e isolatedBackendEnv, dir 
 	nonce := e.app.EVMKeeper.GetNonce(ctx, actor)
 	price := big.NewInt(1_000_000_000_000)
 	signer := ethtypes.NewEIP155Signer(big.NewInt(990001))
-	tx := ethtypes.NewTx(&ethtypes.LegacyTx{Nonce: nonce, To: &profile.Gateway, Value: deposit.BigInt(),
-		Gas: gasLimit, GasPrice: price, Data: pack(gateway, "delegateDEL", target)})
-	signed, err := ethtypes.SignTx(tx, signer, key)
-	require.NoError(t, err)
-	raw, err := signed.MarshalBinary()
-	require.NoError(t, err)
+	input := pack(gateway, "delegateDEL", target)
+	sign := func(nonce uint64, value *big.Int) map[string]string {
+		t.Helper()
+		tx := ethtypes.NewTx(&ethtypes.LegacyTx{Nonce: nonce, To: &profile.Gateway, Value: value,
+			Gas: gasLimit, GasPrice: price, Data: input})
+		signed, err := ethtypes.SignTx(tx, signer, key)
+		require.NoError(t, err)
+		raw, err := signed.MarshalBinary()
+		require.NoError(t, err)
+		return map[string]string{"raw": "0x" + hex.EncodeToString(raw), "hash": signed.Hash().Hex()}
+	}
+	topUp := amount(1).QuoRaw(4)
+	collector := authtypes.NewModuleAddress(authtypes.FeeCollectorName)
 	hexData := func(value []byte) string { return "0x" + hex.EncodeToString(value) }
 	for i := range validators {
 		validators[i].ReserveData = hexData(pack(gateway, "getValidatorReserve", common.HexToAddress(validators[i].EVM), profile.WrappedDEL))
@@ -200,10 +207,11 @@ func exportNativeConsensusDaemonFixture(t *testing.T, e isolatedBackendEnv, dir 
 	expect, err := json.Marshal(map[string]interface{}{
 		"chainId": ctx.ChainID(), "evmChainId": 990001, "gateway": profile.Gateway.Hex(), "wrapped": profile.WrappedDEL.Hex(),
 		"actor": actor.Hex(), "actorNative": beneficiary, "wrappedNative": sdk.AccAddress(profile.WrappedDEL.Bytes()).String(),
-		"amount": deposit.String(), "gasPrice": price.String(), "gasLimit": gasLimit, "nonce": nonce,
+		"amount": deposit.String(), "topUpAmount": topUp.String(), "gasPrice": price.String(), "gasLimit": gasLimit, "nonce": nonce,
+		"feeCollector": common.BytesToAddress(collector).Hex(), "feeCollectorNative": collector.String(),
 		"validators": validators, "stakeId": stakeID.Hex(),
 		"supplyData": hexData(pack(wrapper, "totalSupply")), "escrowData": hexData(pack(wrapper, "balanceOf", profile.Gateway)),
-		"delegate": map[string]string{"raw": hexData(raw), "hash": signed.Hash().Hex()},
+		"delegate": sign(nonce, deposit.BigInt()), "topUp": sign(nonce+1, topUp.BigInt()),
 	})
 	require.NoError(t, err)
 	write("expectations.json", expect)
