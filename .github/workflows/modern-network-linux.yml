@@ -12,7 +12,7 @@ on:
         description: Validation scenario to run on an isolated GitHub runner
         default: module
         type: choice
-        options: [module, contracts, process, held-downtime, native-upgrade-governance, nft-downtime, native-full-profile-upgrade, native-full-ibc-upgrade]
+        options: [module, contracts, process, held-downtime, native-upgrade-governance, nft-downtime, native-full-profile-upgrade, native-full-ibc-upgrade, native-cross-version-ibc-upgrade]
       remote_profile:
         description: Also validate the reusable remote-worker scripts
         default: 'off'
@@ -176,7 +176,7 @@ jobs:
           if-no-files-found: error
 
   isolated-process-gates:
-    if: github.event_name == 'workflow_dispatch' && (inputs.scope == 'process' || inputs.scope == 'held-downtime' || inputs.scope == 'native-upgrade-governance' || inputs.scope == 'nft-downtime' || inputs.scope == 'native-full-profile-upgrade' || inputs.scope == 'native-full-ibc-upgrade')
+    if: github.event_name == 'workflow_dispatch' && (inputs.scope == 'process' || inputs.scope == 'held-downtime' || inputs.scope == 'native-upgrade-governance' || inputs.scope == 'nft-downtime' || inputs.scope == 'native-full-profile-upgrade' || inputs.scope == 'native-full-ibc-upgrade' || inputs.scope == 'native-cross-version-ibc-upgrade')
     runs-on: ubuntu-24.04
     timeout-minutes: 45
     env:
@@ -191,6 +191,7 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
+          fetch-depth: ${{ inputs.scope == 'native-cross-version-ibc-upgrade' && '0' || '1' }}
           persist-credentials: false
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e
         with:
@@ -238,7 +239,7 @@ jobs:
             args[8]=native-held-del-downtime
           elif [[ "$VALIDATION_SCOPE" == native-upgrade-governance ]]; then
             args[9]=native-upgrade-governance
-          elif [[ "$VALIDATION_SCOPE" == native-full-profile-upgrade || "$VALIDATION_SCOPE" == native-full-ibc-upgrade ]]; then
+          elif [[ "$VALIDATION_SCOPE" == native-full-profile-upgrade || "$VALIDATION_SCOPE" == native-full-ibc-upgrade || "$VALIDATION_SCOPE" == native-cross-version-ibc-upgrade ]]; then
             args[9]="$VALIDATION_SCOPE"
           elif [[ "$VALIDATION_SCOPE" == nft-downtime ]]; then
             args[10]=native-nft-downtime

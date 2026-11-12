@@ -24,7 +24,8 @@ native_held_del_downtime="${9:-off}"
 [[ "$native_held_del_downtime" == off || "$native_held_del_downtime" == native-held-del-downtime ]] || { echo 'Unsupported native held DEL downtime option.' >&2; exit 2; }
 native_upgrade_governance="${10:-off}"
 [[ "$native_upgrade_governance" == off || "$native_upgrade_governance" == native-upgrade-governance ||
-   "$native_upgrade_governance" == native-full-profile-upgrade || "$native_upgrade_governance" == native-full-ibc-upgrade ]] || { echo 'Unsupported native upgrade governance option.' >&2; exit 2; }
+   "$native_upgrade_governance" == native-full-profile-upgrade || "$native_upgrade_governance" == native-full-ibc-upgrade ||
+   "$native_upgrade_governance" == native-cross-version-ibc-upgrade ]] || { echo 'Unsupported native upgrade governance option.' >&2; exit 2; }
 native_nft_downtime="${11:-off}"
 [[ "$native_nft_downtime" == off || "$native_nft_downtime" == native-nft-downtime ]] || { echo 'Unsupported native NFT downtime option.' >&2; exit 2; }
 for tool in sudo unshare ip gcc python3 go; do command -v "$tool" >/dev/null; done
@@ -470,14 +471,74 @@ if [[ "$native_upgrade_governance" != off ]]; then
   fixture="$work/native-governance-upgrade-fixture"
   full_profile=0
   pending_ibc=0
+  predecessor_revision="$revision"
+  predecessor_source="$root"
+  predecessor="$work/mcnd"
+  predecessor_sha="$mcnd_sha"
   profile_args=()
+  source_args=()
   if [[ "$native_upgrade_governance" != native-upgrade-governance ]]; then
     full_profile=1
     profile_args=(--full-profile)
   fi
-  if [[ "$native_upgrade_governance" == native-full-ibc-upgrade ]]; then
+  if [[ "$native_upgrade_governance" == native-full-ibc-upgrade || "$native_upgrade_governance" == native-cross-version-ibc-upgrade ]]; then
     pending_ibc=1
     profile_args+=(--pending-ibc --reference-binary "$work/ibcreference" --reference-sha256 "$reference_sha" --hermes-binary "$work/hermes")
+  fi
+  if [[ "$native_upgrade_governance" == native-cross-version-ibc-upgrade ]]; then
+    predecessor_revision=de3851c5d45102398244d21c78f57f129fff712d
+    [[ "$predecessor_revision" != "$revision" ]] || { echo 'Cross-version rehearsal requires two source revisions.' >&2; exit 1; }
+    git -C "$root" cat-file -e "$predecessor_revision^{commit}"
+    predecessor_source="$work/predecessor-source"
+    predecessor="$work/mcnd-predecessor"
+    git clone --quiet --shared --no-checkout -- "$root" "$predecessor_source"
+    git -C "$predecessor_source" checkout --quiet --detach "$predecessor_revision"
+    [[ "$(git -C "$predecessor_source" rev-parse HEAD)" == "$predecessor_revision" ]]
+    (
+      cd "$predecessor_source/network"
+      go mod download
+      go mod verify |& tee "$output/native-governance-upgrade-predecessor-modules.log"
+      git diff --exit-code -- go.mod go.sum
+      "$python" scripts/verify_owned_evm.py
+      "$python" scripts/verify_owned_geth.py
+      "$python" scripts/verify_owned_sdk.py --compiled
+      "$python" scripts/verify_pion_transport.py
+      "$python" "$root/scripts/remote/build-inputs.py" --source "$predecessor_source" --target mcnd \
+        --output "$output/native-governance-upgrade-predecessor-inputs-before.json"
+      "$python" - "$output" "$predecessor_revision" "$revision" <<'PY'
+import json,sys
+from pathlib import Path
+out=Path(sys.argv[1])
+previous=json.loads((out/'native-governance-upgrade-predecessor-inputs-before.json').read_text())
+current=json.loads((out/'mcnd-inputs-before.json').read_text())
+assert previous['sourceRevision']==sys.argv[2] and current['sourceRevision']==sys.argv[3]
+assert previous['buildPolicy']==current['buildPolicy'], 'cross-version toolchain policy differs'
+old,new=previous['files'],current['files']
+changed=sorted(path for path in old.keys()|new.keys() if old.get(path)!=new.get(path))
+assert any(not path.endswith(('/go.mod','/go.sum')) for path in changed), 'cross-version rehearsal requires changed compiled source or embedded inputs'
+(out/'native-governance-upgrade-source-comparison.json').write_text(json.dumps(
+    {'predecessorSourceCommit':sys.argv[2],'replacementSourceCommit':sys.argv[3],'changedBuildInputs':changed},
+    indent=2)+'\n')
+PY
+      go build -mod=readonly -tags= -buildvcs=true -p 2 -trimpath \
+        -ldflags "-X main.buildCommit=$predecessor_revision" -o "$predecessor" ./cmd/mcnd
+      "$python" "$root/scripts/remote/build-inputs.py" --source "$predecessor_source" --target mcnd \
+        --output "$output/native-governance-upgrade-predecessor-inputs-after.json"
+      cmp -- "$output/native-governance-upgrade-predecessor-inputs-before.json" "$output/native-governance-upgrade-predecessor-inputs-after.json"
+      go version -m "$predecessor" > "$output/native-governance-upgrade-predecessor-build.log"
+      "$python" - "$output" "$root" "$predecessor_source" "$predecessor_revision" <<'PY'
+import json,sys
+from pathlib import Path
+out,root,source=map(Path,sys.argv[1:4])
+sys.path.insert(0,str(root/'network/tools'))
+from binary_provenance import verify_binary_build
+verified=verify_binary_build((out/'native-governance-upgrade-predecessor-build.log').read_text(),
+                             source,sys.argv[4],'go1.26.11')
+(out/'native-governance-upgrade-predecessor-metadata-verified.json').write_text(json.dumps(verified,indent=2)+'\n')
+PY
+    )
+    predecessor_sha="$(sha256sum "$predecessor" | awk '{print $1}')"
+    source_args=(--predecessor-source-commit "$predecessor_revision")
   fi
   successor="$work/mcnd-native-sdk-migration-v1"
   go build -mod=readonly -tags=mcnd_native_sdk_migration_v1 -buildvcs=true -p 2 -trimpath \
@@ -485,37 +546,63 @@ if [[ "$native_upgrade_governance" != off ]]; then
   go version -m "$successor" > "$output/native-governance-upgrade-successor-build.log"
   successor_sha="$(sha256sum "$successor" | awk '{print $1}')"
   mkdir -m 700 -- "$fixture"
-  if ! MCND_NATIVE_CONSENSUS_FIXTURE_DIR="$fixture" MCND_NATIVE_CONSENSUS_UPGRADE_GOVERNANCE=1 \
+  if ! (cd "$predecessor_source/network" &&
+      MCND_NATIVE_CONSENSUS_FIXTURE_DIR="$fixture" MCND_NATIVE_CONSENSUS_UPGRADE_GOVERNANCE=1 \
       MCND_NATIVE_CONSENSUS_FULL_PROFILE_UPGRADE="$full_profile" \
       MCND_NATIVE_CONSENSUS_UPGRADE_PENDING_IBC="$pending_ibc" \
       go test -mod=readonly -tags= -trimpath -p 2 -count=1 -timeout 8m -json \
       -run '^TestOwnedAppSignedRegistryBootstrap$/^authenticated_isolated_position_reader$' ./systemcontracts \
-      > "$work/native-governance-upgrade-fixture.log" 2>&1; then
+      > "$work/native-governance-upgrade-fixture.log" 2>&1); then
     private_fixture_diagnostic "$work/native-governance-upgrade-fixture.log"
     exit 1
   fi
-  sudo -n unshare --net -- bash -euc 'ip link set lo up; exec "$@"' _ \
-    env TMPDIR="$work" "$python" -B "$root/network/tools/native_governance_upgrade_smoke.py" \
-    --binary "$work/mcnd" --binary-sha256 "$mcnd_sha" --source-commit "$revision" \
-    --replacement-binary "$successor" --replacement-sha256 "$successor_sha" \
-    --fixture "$fixture" --home-parent "$work" --report "$output/native-governance-upgrade.json" "${profile_args[@]}" \
-    |& tee "$output/native-governance-upgrade.log"
-  preserve_public_reports
-  "$python" - "$output" "$root" "$revision" "$mcnd_sha" "$successor_sha" "$full_profile" "$pending_ibc" <<'PY'
+  run_native_upgrade() {
+    sudo -n unshare --net -- bash -euc 'ip link set lo up; exec "$@"' _ \
+      env TMPDIR="$work" "$python" -B "$root/network/tools/native_governance_upgrade_smoke.py" \
+      --binary "$predecessor" --binary-sha256 "$predecessor_sha" --source-commit "$revision" \
+      --replacement-binary "$successor" --replacement-sha256 "$successor_sha" \
+      --fixture "$fixture" --home-parent "$work" "${profile_args[@]}" "$@"
+  }
+  if [[ "$predecessor_revision" != "$revision" ]]; then
+    if run_native_upgrade --predecessor-source-commit "$revision" --report "$work/invalid-same-source.json" \
+        > "$work/invalid-same-source.log" 2>&1; then
+      echo 'Cross-version runner accepted the same source twice.' >&2
+      exit 1
+    fi
+    "$python" - "$work/invalid-same-source.json" <<'PY'
 import json,sys
 from pathlib import Path
-out,root=map(Path,sys.argv[1:3]); revision,predecessor_sha,successor_sha,full_profile,pending_ibc=sys.argv[3:]
+report=json.loads(Path(sys.argv[1]).read_text())
+assert report['status']=='FAIL' and report['phase']=='fixture-provenance'
+assert report['error']=='cross-version handoff requires the pending IBC profile and distinct full source revisions'
+print('Cross-version runner rejected the same source before opening a private fixture.')
+PY
+  fi
+  run_native_upgrade "${source_args[@]}" --report "$output/native-governance-upgrade.json" |& tee "$output/native-governance-upgrade.log"
+  preserve_public_reports
+  "$python" - "$output" "$root" "$revision" "$predecessor_revision" "$predecessor_sha" "$successor_sha" "$full_profile" "$pending_ibc" <<'PY'
+import json,sys
+from pathlib import Path
+out,root=map(Path,sys.argv[1:3])
+revision,predecessor_revision,predecessor_sha,successor_sha,full_profile,pending_ibc=sys.argv[3:]
 sys.path.insert(0,str(root/'network/tools'))
 from binary_provenance import parse_build_info
-predecessor=parse_build_info((out/'mcnd-build.log').read_text())
+default_build=parse_build_info((out/'mcnd-build.log').read_text())
 successor=parse_build_info((out/'native-governance-upgrade-successor-build.log').read_text())
 assert successor['settings'].pop('-tags') == 'mcnd_native_sdk_migration_v1'
-assert successor==predecessor, 'successor build changed inputs beyond the planned build tag'
+assert successor==default_build, 'successor build differs from its source default beyond the planned build tag'
+cross_version=predecessor_revision!=revision
+if cross_version:
+    predecessor=json.loads((out/'native-governance-upgrade-predecessor-metadata-verified.json').read_text())
+    assert predecessor['settings']['vcs.revision']==predecessor_revision
+    assert predecessor['settings']['vcs.revision']!=successor['settings']['vcs.revision']
 report=json.loads((out/'native-governance-upgrade.json').read_text())
 assert report['status']=='PASS' and 'error' not in report,report
 assert report['sourceCommit']==revision and report['binarySha256']==predecessor_sha,report
 assert report['replacementSha256']==successor_sha and successor_sha!=predecessor_sha,report
-assert report['fullProfile'] is (full_profile == '1') and report['planKind']=='same-source-handler-rehearsal',report
+assert report['predecessorSourceCommit']==predecessor_revision and report['replacementSourceCommit']==revision,report
+assert report['fullProfile'] is (full_profile == '1'),report
+assert report['planKind']==('distinct-source-same-family-handler-rehearsal' if cross_version else 'same-source-handler-rehearsal'),report
 assert report['rejected']['status']=='PROPOSAL_STATUS_REJECTED' and report['passed']['status']=='PROPOSAL_STATUS_PASSED',report
 plan,application,progress=report['schedule'],report['application'],report['progress']
 assert plan['scheduledAt'] < plan['targetHeight'] == application['appliedHeight'] <= progress['height']-3,report

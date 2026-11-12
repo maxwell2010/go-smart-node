@@ -310,9 +310,9 @@ def run_gate(args, binary, replacement, root, expected, genesis, keys, actions, 
     if ibc:
         report['phase'] = 'fund-native-relayer'
         ibc.fund_relayer(binary, replicas, expected, genesis, initial)
-    for executable in (binary, replacement):
+    for executable, revision in ((binary, report['predecessorSourceCommit']), (replacement, report['replacementSourceCommit'])):
         version = json.loads(run_command(executable, source.home, ['version', '--long', '--output', 'json'], env))
-        check(version['server_name'] == 'mcnd' and version['commit'] == args.source_commit, 'daemon version differs from checked source')
+        check(version['server_name'] == 'mcnd' and version['commit'] == revision, 'daemon version differs from its checked source')
     report['phase'] = 'validate-genesis'
     try:
         run_command(binary, source.home, ['genesis', 'validate-genesis'], env)
@@ -452,6 +452,8 @@ def main(argv=None, signals=None):
         parser.add_argument('--' + name, required=True)
     parser.add_argument('--replacement-binary', required=True)
     parser.add_argument('--replacement-sha256', required=True)
+    parser.add_argument('--predecessor-source-commit',
+                        help='Require a distinct predecessor source revision. --source-commit identifies the replacement.')
     parser.add_argument('--full-profile', action='store_true', help='Use the fresh historical, IBC and fee-enabled fixture with a pending DEL claim')
     parser.add_argument('--pending-ibc', action='store_true', help='Carry a real ICS-20 packet across the private native handoff')
     for name in ('reference-binary', 'reference-sha256', 'hermes-binary'):
@@ -465,6 +467,13 @@ def main(argv=None, signals=None):
             check(re.fullmatch(SHA256, args.binary_sha256) and re.fullmatch(SHA256, args.replacement_sha256) and
                   args.binary_sha256 != args.replacement_sha256 and re.fullmatch(r'[0-9a-f]{40}', args.source_commit),
                   'invalid predecessor or successor build provenance')
+            predecessor_commit = args.source_commit
+            plan_kind = 'same-source-handler-rehearsal'
+            if args.predecessor_source_commit is not None:
+                predecessor_commit = args.predecessor_source_commit
+                check(args.pending_ibc and re.fullmatch(r'[0-9a-f]{40}', predecessor_commit) and predecessor_commit != args.source_commit,
+                      'cross-version handoff requires the pending IBC profile and distinct full source revisions')
+                plan_kind = 'distinct-source-same-family-handler-rehearsal'
             binary = str(pathlib.Path(args.binary).resolve(strict=True))
             replacement = str(pathlib.Path(args.replacement_binary).resolve(strict=True))
             for executable, expected_hash in ((binary, args.binary_sha256), (replacement, args.replacement_sha256)):
@@ -474,10 +483,11 @@ def main(argv=None, signals=None):
                   'pending IBC mode requires the full profile and both IBC tools')
             expected, genesis, keys, initial, actions = load_governance_fixture(
                 pathlib.Path(args.fixture), full_profile=args.full_profile, pending_ibc=args.pending_ibc)
-            report.update(sourceCommit=args.source_commit, binarySha256=args.binary_sha256,
+            report.update(sourceCommit=args.source_commit, predecessorSourceCommit=predecessor_commit,
+                          replacementSourceCommit=args.source_commit, binarySha256=args.binary_sha256,
                           replacementSha256=args.replacement_sha256, initialHeight=initial,
                           genesisSha256=hashlib.sha256(genesis).hexdigest(), chainID=CHAIN, evmChainID=EVM_CHAIN,
-                          fullProfile=args.full_profile, planKind='same-source-handler-rehearsal')
+                          fullProfile=args.full_profile, planKind=plan_kind)
             if args.full_profile:
                 report['ibcCoverage'] = 'pending-packet-after-client-update' if args.pending_ibc else 'unbonding-state-only'
             with tempfile.TemporaryDirectory(prefix='mcnd-native-governance-upgrade-', dir=args.home_parent) as directory:
