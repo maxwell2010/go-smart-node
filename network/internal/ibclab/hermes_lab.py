@@ -420,7 +420,8 @@ def prepare_native_owned(lab, mcnd, fixture):
     from native_consensus_smoke import INITIAL, check_signatures, committed_header, create_replicas, effective_set, load_fixture, wait_replicas
     from withdrawal_genesis_smoke import private_bytes, private_write
 
-    expected, genesis, keys, height = load_fixture(fixture, fee_rewards=True, downtime=False)
+    expected, genesis, keys, height = load_fixture(
+        fixture, fee_rewards=True, downtime=False, jail_recovery=False, held_downtime=False, nft_downtime=False)
     original_profile = json.loads(genesis)["app_state"]["withdrawal_settlement"]
     require(original_profile.get("enable_native_ibc_v1") is True, "native Hermes fixture requires opt-in IBC v1")
     root = lab.root / "native-owned"

@@ -18,6 +18,19 @@ daemon_spec.loader.exec_module(daemon)
 
 
 class LabGuards(unittest.TestCase):
+    def test_native_hermes_loads_fee_only_fixture(self):
+        fixture = Path("unused")
+        tools = Path(__file__).parents[2] / "tools"
+        with patch.object(lab.sys, "path", [str(tools), *lab.sys.path]):
+            import native_consensus_smoke
+
+            with patch.object(native_consensus_smoke, "load_fixture", autospec=True,
+                              side_effect=RuntimeError("fixture inspected")) as load:
+                with self.assertRaisesRegex(RuntimeError, "fixture inspected"):
+                    lab.prepare_native_owned(None, None, fixture)
+                load.assert_called_once_with(fixture, fee_rewards=True, downtime=False, jail_recovery=False,
+                                             held_downtime=False, nft_downtime=False)
+
     def test_native_staking_query_decodes_protobuf_once_per_message_layer(self):
         for seconds in (lab.NATIVE_UNBONDING_SECONDS, 21 * 24 * 60 * 60):
             with self.subTest(seconds=seconds):
