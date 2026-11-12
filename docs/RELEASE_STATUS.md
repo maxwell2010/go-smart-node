@@ -36,6 +36,25 @@ in a test helper.
 Published operational data must include the approved genesis and independent
 bootstrap and RPC endpoints for this separate network.
 
+The later `9c0b2e4` candidate adds governed retirement for an empty operator.
+It retains validator history, permits settlement of valid earlier penalties,
+releases the live roster slot and blocks new stake and unjail. Its module
+suite and clean archive audit passed. The packaged scanner reported zero
+symbol advisories in the same 2026-11-11 database snapshot.
+[Retirement and module suite](https://github.com/maxwell2010/go-smart-node/actions/runs/43202494582)
+[Archive and scanner](https://github.com/maxwell2010/go-smart-node/actions/runs/43202494583)
+
+The isolated `824e469` process checks passed state sync with an independent
+witness, partial and repeated DEL payouts, jail recovery, native Hermes
+ICS-20, and a pending-packet client upgrade on its own profile.
+[Process checks](https://github.com/maxwell2010/go-smart-node/actions/runs/43200233345)
+
+On `62d3e09`, the module suite also passed genesis parsing with all profile
+flags in an indented JSON envelope. The packaged Linux amd64 daemon passed
+clean installation and the source and binary symbol scans.
+[Combined module checks](https://github.com/maxwell2010/go-smart-node/actions/runs/43203291269)
+[Archive and scanner](https://github.com/maxwell2010/go-smart-node/actions/runs/43203291717)
+
 ## Separate release tracks
 
 The selected architecture is a fresh network on a maintained modern stack,
@@ -222,25 +241,26 @@ to the common manual and automatic payout path.
 The Linux module and fresh ABCI suites cover a paused validator, a late
 top-up, partial withdrawal, restart and exact burns from eligible principal.
 The owned EVM workload test signed NFT admission and DEL top-ups to exercise
-1024 origin units and 127 DEL tranches. Settlement used 22,817,925 of the
+1024 origin units and 127 DEL tranches. Settlement used 22,820,051 of the
 24,000,000 SDK gas budget and burned 108.7 DEL while retaining two tranches
 funded at and after the infraction height.
-[Historical penalty workload](https://github.com/maxwell2010/go-smart-node/actions/runs/43199989617)
+[Historical penalty workload](https://github.com/maxwell2010/go-smart-node/actions/runs/43202494582)
 
 Modern release blockers remain:
 
-- Complete native Decimal coin, NFT, validator, rewards and fee integration.
-  Formula/schema/storage staging and temporary generic SDK staking do not
-  establish those financial semantics.
-- Supported dependency-family verification and security review of the actual
-  final daemon, including the replacement Geth fork's upstream inheritance.
-- Authenticated system-contract bootstrap for a new genesis, with bank/EVM
-  supply and reserve reconciliation and failure rollback.
-- Repeat the guarded CLI, clean installation, independent Hermes process
-  gates and pending-packet upgrade rehearsal on the final integrated daemon.
-- Validator-set and consensus-parameter transitions, full event reconciliation,
-  bounded auto-unbond work, operator authority and asset policy, independent
-  review and a tested rollback procedure.
+- Finish authenticated DRC20 admission and the signed conversion-to-DEL
+  routes for custom staking and NFT reserves. The converter has isolated
+  signed EVM tests. The current withdrawal profile admits DEL-backed custody
+  and rejects custom allocations at genesis.
+  [Custom collateral design](../network/docs/ru/CUSTOM_COLLATERAL_CONVERSION.md)
+  [Ordinary conversion prototype](https://github.com/maxwell2010/go-smart-node/actions/runs/43202904626)
+- Run the actual release-state migration and rollback rehearsal on the
+  agreed predecessor and successor, including a pending ICS-20 packet and
+  financial claims. Existing same-family rehearsals provide evidence for
+  the specific handlers and profile combinations they exercised.
+- Verify the agreed public genesis, approved contract roles, initial
+  allocations, operator keys, bootstrap and trust data. Publish release
+  checksums and provenance for the exact independently reviewed binary.
 
 ## Legacy reference evidence and limitations
 
