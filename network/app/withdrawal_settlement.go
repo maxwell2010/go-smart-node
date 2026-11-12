@@ -260,6 +260,14 @@ func (c *withdrawalController) PostTxProcessing(ctx sdk.Context, sender common.A
 	if receipt == nil || receipt.Status != ethtypes.ReceiptStatusSuccessful {
 		return nil
 	}
+	if c.isCollateralConversionCall(msg) {
+		if sender != msg.From {
+			return errors.New("DRC20 collateral admission requires the authenticated transaction sender")
+		}
+		return c.projectAndCheckConsensus(ctx, func(child sdk.Context) error {
+			return c.projectCollateralConversion(child, msg, receipt)
+		})
+	}
 	if c.profile.EnableNativeOrdinaryDELDowntime && msg.To != nil && *msg.To == c.profile.MasterValidator {
 		if sender != msg.From {
 			return errors.New("native unjail requires the authenticated transaction sender")
