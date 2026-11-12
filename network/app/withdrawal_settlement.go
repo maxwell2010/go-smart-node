@@ -55,6 +55,7 @@ type WithdrawalProfile struct {
 	EnableNativeIBCV1               bool           `json:"enable_native_ibc_v1,omitempty"`
 	EnableNativeGovernance          bool           `json:"enable_native_governance,omitempty"`
 	EnableNativeOrdinaryDELDowntime bool           `json:"enable_native_ordinary_del_downtime,omitempty"`
+	EnableNativeHeldDELDowntime     bool           `json:"enable_native_held_del_downtime,omitempty"`
 }
 
 type withdrawalController struct {
@@ -336,7 +337,8 @@ type automaticWithdrawalKey struct{}
 func (c *withdrawalController) guardInternalCommit(ctx sdk.Context, msg core.Message, logs []*ethtypes.Log) error {
 	if c.profile.EnableNativeOrdinaryDELDowntime &&
 		(c.executor.AuthorizeMasterPenalty(ctx, msg) || c.executor.AuthorizeOrdinaryDELPenalty(ctx, msg) ||
-			c.executor.AuthorizeFrozenDELPenalty(ctx, msg)) {
+			c.executor.AuthorizeFrozenDELPenalty(ctx, msg) ||
+			(c.profile.EnableNativeHeldDELDowntime && c.executor.AuthorizeHeldDELPenalty(ctx, msg))) {
 		return nil
 	}
 	managed, completion := c.withdrawalActivity(ctx, msg, logs)

@@ -177,10 +177,6 @@ func (e *Executor) applyActiveDELPenalty(ctx sdk.Context, row validatortypes.EVM
 	return nil
 }
 
-func (e *Executor) ordinaryPenaltyIdentity(ctx sdk.Context, row validatortypes.EVMStakeBinding) (common.Hash, common.Address, common.Address, error) {
-	return e.activePenaltyIdentity(ctx, row, false)
-}
-
 func (e *Executor) activePenaltyIdentity(ctx sdk.Context, row validatortypes.EVMStakeBinding, held bool) (common.Hash, common.Address, common.Address, error) {
 	id := common.BytesToHash(row.StakeID)
 	validator, owner := common.BytesToAddress(row.Validator), common.BytesToAddress(row.Beneficiary)

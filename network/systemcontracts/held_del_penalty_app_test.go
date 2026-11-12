@@ -56,7 +56,7 @@ func runSignedHeldDELPenalty(t *testing.T, e isolatedBackendEnv, profile ownedap
 		}, proof.Amount))
 		return proof.StakeID
 	}
-	firstDeadline, secondDeadline := e.ctx().BlockTime().Unix()+100, e.ctx().BlockTime().Unix()+200
+	firstDeadline, secondDeadline := e.ctx().BlockTime().Unix()+12, e.ctx().BlockTime().Unix()+200
 	firstID := deposit(del(3), firstDeadline)
 	require.Equal(t, firstID, deposit(del(2), firstDeadline))
 	secondID := deposit(del(7), secondDeadline)
@@ -150,5 +150,35 @@ func runSignedHeldDELPenalty(t *testing.T, e isolatedBackendEnv, profile ownedap
 	f.activeReserve(expected)
 	f.backing(expected)
 	require.True(t, initialSupply.Sub(del(12).QuoRaw(5)).Equal(supply(ctx())))
+	penalized := binding(e.ctx(), firstID)
+	for e.ctx().BlockTime().Unix() <= firstDeadline {
+		e.advance()
+	}
+	amount := del(2)
+	args := []interface{}{f.validator, f.wrapped, amount.BigInt(), big.NewInt(firstDeadline)}
+	data, err := gateway.ABI.Pack("withdrawHold", args...)
+	require.NoError(t, err)
+	response := f.signed("withdrawHold", sdkmath.ZeroInt(), true, args...)
+	receipt := &ethtypes.Receipt{Status: ethtypes.ReceiptStatusSuccessful, Logs: evmtypes.LogsToEthereum(response.Logs)}
+	msg := core.Message{From: f.user, To: &f.target, Value: new(big.Int), Data: data}
+	inclusion := ctx().WithBlockHeight(e.app.LastBlockHeight()).WithBlockTime(e.ctx().BlockTime().Add(-time.Second))
+	out, err := executor.VerifySignedPenalizedDELWithdrawal(inclusion, msg, receipt, penalized)
+	require.NoError(t, err)
+	require.Equal(t, firstID, out.StakeID)
+	require.Equal(t, firstDeadline, out.HoldDeadline)
+	require.Equal(t, penalized.NativeHoldStartTime, out.HoldStartTime)
+	require.True(t, del(2).Equal(out.Remaining))
+	require.NoError(t, keeper.ApplyPenalizedGatewayDELWithdrawal(inclusion, validatorkeeper.GatewayDELStake{
+		Gateway: f.target, WrappedDEL: f.wrapped, Validator: f.validator, Beneficiary: f.user,
+		StakeID: out.StakeID, Amount: out.Remaining, PenaltyCursor: out.PenaltyCursor,
+		HoldDeadline: out.HoldDeadline, HoldStartTime: out.HoldStartTime,
+	}, out.FrozenIndex, out.Amount, out.Deadline))
+	frozen, err := keeper.GetEVMFrozenBinding(e.ctx(), f.target[:], out.FrozenIndex[:])
+	require.NoError(t, err)
+	require.Equal(t, validatortypes.StakeType_CoinHold, frozen.NativeTarget.StakeType)
+	require.True(t, amount.Equal(frozen.RawAmount))
+	f.activeReserve(expected.Sub(amount))
+	f.backing(expected)
+	require.True(t, initialSupply.Sub(del(12).QuoRaw(5)).Equal(supply(ctx())), "withdrawHold must not burn extra DEL")
 	t.Log(heldDELPenaltyPassed)
 }

@@ -226,12 +226,12 @@ func (k *StateKeeper) ApplyGatewayDELWithdrawal(ctx sdk.Context, next GatewayDEL
 	return k.applyGatewayDELWithdrawal(ctx, next, index, amount, deadline, owner, operator)
 }
 
-// ApplyPenalizedGatewayDELWithdrawal projects a signed ordinary withdrawal
+// ApplyPenalizedGatewayDELWithdrawal projects a signed direct DEL withdrawal
 // after the EVM verifier has proved that both penalty cursors are caught up.
 // The existing position and binding must match the supplied individual cursor.
 func (k *StateKeeper) ApplyPenalizedGatewayDELWithdrawal(ctx sdk.Context, next GatewayDELStake, index common.Hash, amount sdkmath.Int, deadline time.Time) error {
-	if next.PenaltyCursor == (common.Hash{}) || next.HoldDeadline != 0 || !next.nftBackedAmount().IsZero() {
-		return errors.New("expected an ordinary DEL withdrawal from a penalty-adjusted position")
+	if next.PenaltyCursor == (common.Hash{}) || !next.nftBackedAmount().IsZero() {
+		return errors.New("expected a direct DEL withdrawal from a penalty-adjusted position")
 	}
 	owner, operator, err := next.nativePairIdentity()
 	if err != nil {

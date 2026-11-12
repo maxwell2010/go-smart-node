@@ -33,7 +33,7 @@ func (e *Executor) VerifySignedDEL(ctx sdk.Context, msg core.Message, receipt *e
 	return e.verifySignedDEL(ctx, msg, receipt, nil)
 }
 
-// VerifySignedPenalizedDELWithdrawal proves an ordinary withdrawal against
+// VerifySignedPenalizedDELWithdrawal proves a direct DEL withdrawal against
 // an exact active native binding whose penalty has already been realized.
 func (e *Executor) VerifySignedPenalizedDELWithdrawal(ctx sdk.Context, msg core.Message, receipt *ethtypes.Receipt, before validatortypes.EVMStakeBinding) (DELTransition, error) {
 	if e == nil || e.evm == nil {
@@ -45,7 +45,7 @@ func (e *Executor) VerifySignedPenalizedDELWithdrawal(ctx sdk.Context, msg core.
 	if common.BytesToHash(before.PenaltyCursor) == (common.Hash{}) {
 		return DELTransition{}, errors.New("penalized DEL withdrawal requires a nonzero realized native penalty cursor")
 	}
-	if _, _, _, err := e.ordinaryPenaltyIdentity(ctx, before); err != nil {
+	if _, _, _, err := e.activePenaltyIdentity(ctx, before, before.NativeTarget.StakeType == validatortypes.StakeType_CoinHold); err != nil {
 		return DELTransition{}, err
 	}
 	return e.verifySignedDEL(ctx, msg, receipt, &before)
@@ -60,9 +60,6 @@ func (e *Executor) verifySignedDEL(ctx sdk.Context, msg core.Message, receipt *e
 	if err != nil {
 		return out, errors.New("DEL profile admits only direct DEL delegation and withdrawal requests")
 	}
-	if penalized != nil && method.Sig != "withdraw(address,address,uint256)" {
-		return out, errors.New("realized penalty path admits only ordinary direct DEL withdrawal")
-	}
 	deposit := false
 	holdArg := -1
 	switch method.Sig {
@@ -75,6 +72,9 @@ func (e *Executor) verifySignedDEL(ctx sdk.Context, msg core.Message, receipt *e
 		holdArg = 3
 	default:
 		return out, errors.New("DEL profile admits only direct DEL delegation and withdrawal requests")
+	}
+	if penalized != nil && (deposit || (holdArg >= 0) != (penalized.NativeTarget.StakeType == validatortypes.StakeType_CoinHold)) {
+		return out, errors.New("realized penalty path requires a withdrawal matching the active DEL stake type")
 	}
 	args, err := method.Inputs.Unpack(msg.Data[4:])
 	if err != nil {
@@ -144,6 +144,9 @@ func (e *Executor) verifySignedDEL(ctx sdk.Context, msg core.Message, receipt *e
 		start := new(big.Int).SetBytes(post[7*common.HashLength:])
 		if !start.IsInt64() || start.Sign() <= 0 || start.Int64() >= out.HoldDeadline || start.Int64() > ctx.BlockTime().Unix() {
 			return out, errors.New("Gateway returned invalid DEL hold start time")
+		}
+		if penalized != nil && common.BigToHash(start) != common.BytesToHash(penalized.RawHoldStartTime) {
+			return out, errors.New("penalized DEL withdrawal differs from the native hold start time")
 		}
 		out.HoldStartTime = start.Int64()
 		stake[7] = common.BigToHash(start)

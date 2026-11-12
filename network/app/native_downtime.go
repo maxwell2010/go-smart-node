@@ -2,6 +2,7 @@ package app
 
 import (
 	"errors"
+	"math/big"
 	"strconv"
 
 	sdkmath "cosmossdk.io/math"
@@ -20,8 +21,12 @@ import (
 const ordinaryDowntimePositions uint32 = 2
 
 func validateNativeOrdinaryDELDowntimeProfile(profile WithdrawalProfile) error {
-	if profile.EnableNativeOrdinaryDELDowntime && (!profile.EnableNativeConsensus || profile.EnableDELHold || profile.EnableNFTDelegation) {
-		return errors.New("native ordinary DEL downtime requires native consensus with ordinary DEL positions only")
+	if profile.EnableNativeHeldDELDowntime && (!profile.EnableNativeOrdinaryDELDowntime || !profile.EnableDELHold) {
+		return errors.New("native held DEL downtime requires native DEL downtime and DEL hold admission")
+	}
+	if profile.EnableNativeOrdinaryDELDowntime && (!profile.EnableNativeConsensus || profile.EnableNFTDelegation ||
+		(profile.EnableDELHold && !profile.EnableNativeHeldDELDowntime)) {
+		return errors.New("native DEL downtime requires native consensus and supported DEL position types")
 	}
 	return nil
 }
@@ -50,15 +55,18 @@ func (c *withdrawalController) ordinaryDowntimePositions(ctx sdk.Context, valida
 		return nil, nil, errors.New("native ordinary downtime exceeds its per-validator position budget")
 	}
 	coin := validatortypes.EVMStakeBindingKind_EVM_STAKE_BINDING_COIN
+	supported := func(kind validatortypes.StakeType) bool {
+		return kind == validatortypes.StakeType_Coin || (c.profile.EnableNativeHeldDELDowntime && kind == validatortypes.StakeType_CoinHold)
+	}
 	for _, row := range active {
 		if row.Kind != coin || common.BytesToAddress(row.Gateway) != c.profile.Gateway ||
 			common.BytesToAddress(row.TokenContract) != c.profile.WrappedDEL ||
-			row.NativeTarget.StakeType != validatortypes.StakeType_Coin || !row.RawNftBackedAmount.IsZero() {
+			!supported(row.NativeTarget.StakeType) || !row.RawNftBackedAmount.IsZero() {
 			return nil, nil, errors.New("native ordinary downtime encountered an unsupported active position")
 		}
 	}
 	for _, row := range frozen {
-		if row.SourceKind != coin || row.FreezeType != 1 || row.NativeTarget.StakeType != validatortypes.StakeType_Coin ||
+		if row.SourceKind != coin || row.FreezeType != 1 || !supported(row.NativeTarget.StakeType) ||
 			common.BytesToAddress(row.Gateway) != c.profile.Gateway {
 			return nil, nil, errors.New("native ordinary downtime encountered an unsupported pending claim")
 		}
@@ -140,11 +148,22 @@ func (app *App) executeOrdinaryDELDowntime(ctx sdk.Context, candidate validatork
 			if common.BytesToHash(row.PenaltyCursor) != master.BeforeCursor {
 				return errors.New("ordinary DEL stake differs from the prior Master penalty cursor")
 			}
-			err := c.executor.ApplyOrdinaryDELPenalty(project, row, percent, supply, func(next sdk.Context, proof settlement.OrdinaryDELPenaltyProof) error {
+			applyPenalty := c.executor.ApplyOrdinaryDELPenalty
+			held := row.NativeTarget.StakeType == validatortypes.StakeType_CoinHold
+			if held {
+				applyPenalty = c.executor.ApplyHeldDELPenalty
+			}
+			err := applyPenalty(project, row, percent, supply, func(next sdk.Context, proof settlement.ActiveDELPenaltyProof) error {
 				before := validatorkeeper.GatewayDELStake{
 					Gateway: c.profile.Gateway, WrappedDEL: c.profile.WrappedDEL, Validator: common.BytesToAddress(row.Validator),
 					Beneficiary: common.BytesToAddress(row.Beneficiary), StakeID: common.BytesToHash(row.StakeID),
 					Amount: row.RawAmount, PenaltyCursor: master.BeforeCursor,
+				}
+				if held {
+					// The EVM proof has already checked both words fit Unix seconds.
+					before.HoldDeadline = common.BytesToHash(proof.Before.HoldTimestamp).Big().Int64()
+					before.HoldStartTime = proof.Before.NativeHoldStartTime
+					return c.keeper.ApplyGatewayDELHoldPenalty(next, before, proof.After.RawAmount, master.AfterCursor)
 				}
 				return c.keeper.ApplyGatewayDELPenalty(next, before, proof.After.RawAmount, master.AfterCursor)
 			})
@@ -163,6 +182,12 @@ func (app *App) executeOrdinaryDELDowntime(ctx sdk.Context, candidate validatork
 			err := c.executor.ApplyFrozenDELPenalty(project, row, candidate.InfractionHeight, percent, supply, func(next sdk.Context, proof settlement.FrozenDELPenaltyProof) error {
 				if proof.BeforeCursor != master.BeforeCursor || proof.AfterCursor != master.AfterCursor {
 					return errors.New("frozen DEL claim differs from the Master penalty cursor")
+				}
+				if row.NativeTarget.StakeType == validatortypes.StakeType_CoinHold {
+					hold := validatorkeeper.GatewayFrozenDELHold{
+						WrappedDEL: c.profile.WrappedDEL, HoldDeadline: proof.HoldDeadline, HoldStartTime: proof.HoldStartTime,
+					}
+					return c.keeper.ApplyGatewayFrozenDELHoldPenalty(next, row, hold, candidate.InfractionHeight, proof.BeforeCursor, proof.AfterCursor, proof.Remaining)
 				}
 				return c.keeper.ApplyGatewayFrozenDELPenalty(next, row, candidate.InfractionHeight, proof.BeforeCursor, proof.AfterCursor, proof.Remaining)
 			})
@@ -192,7 +217,11 @@ func (app *App) executeOrdinaryDELDowntime(ctx sdk.Context, candidate validatork
 
 func (c *withdrawalController) projectPenalizedDELWithdrawal(ctx sdk.Context, msg core.Message, receipt *ethtypes.Receipt) (bool, error) {
 	method, err := c.abi.MethodById(msg.Data[:4])
-	if err != nil || method.Sig != "withdraw(address,address,uint256)" {
+	if err != nil {
+		return false, nil
+	}
+	held := method.Sig == "withdrawHold(address,address,uint256,uint256)"
+	if method.Sig != "withdraw(address,address,uint256)" && !(held && c.profile.EnableNativeHeldDELDowntime) {
 		return false, nil
 	}
 	args, err := method.Inputs.Unpack(msg.Data[4:])
@@ -203,8 +232,15 @@ func (c *withdrawalController) projectPenalizedDELWithdrawal(ctx sdk.Context, ms
 	if token != c.profile.WrappedDEL {
 		return false, nil
 	}
-	var zero [2 * common.HashLength]byte
-	id := crypto.Keccak256Hash(operator[:], msg.From[:], token[:], zero[:])
+	var tokenID, hold common.Hash
+	if held {
+		deadline := args[3].(*big.Int)
+		if !deadline.IsInt64() || deadline.Sign() <= 0 {
+			return true, errors.New("invalid penalized DEL withdrawal hold deadline")
+		}
+		hold = common.BigToHash(deadline)
+	}
+	id := crypto.Keccak256Hash(operator[:], msg.From[:], token[:], tokenID[:], hold[:])
 	before, err := c.keeper.GetEVMStakeBinding(ctx, validatortypes.EVMStakeBindingKind_EVM_STAKE_BINDING_COIN, c.profile.Gateway[:], id[:])
 	if errors.Is(err, validatorkeeper.ErrNotFound) || (err == nil && common.BytesToHash(before.PenaltyCursor) == (common.Hash{})) {
 		return false, nil
