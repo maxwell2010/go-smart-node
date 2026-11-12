@@ -339,12 +339,43 @@ func (c *withdrawalController) projectSignedDEL(ctx sdk.Context, msg core.Messag
 	}
 	position := c.delStakePosition(result)
 	if result.Deadline.IsZero() {
-		if position.PenaltyCursor != (common.Hash{}) {
-			return c.keeper.ApplyRecoveredGatewayDELDelegation(ctx, position, result.Amount)
-		}
-		return c.keeper.ApplyGatewayDELDelegation(ctx, position, result.Amount)
+		return c.projectGatewayDELDeposit(ctx, position, result.Amount)
 	}
 	return c.keeper.ApplyGatewayDELWithdrawal(ctx, position, result.FrozenIndex, result.Amount, result.Deadline)
+}
+
+// The signed stake route calls this inside projectAndCheckConsensus's cache.
+func (c *withdrawalController) projectGatewayDELDeposit(ctx sdk.Context, position validatorkeeper.GatewayDELStake, amount sdkmath.Int) error {
+	apply := c.keeper.ApplyGatewayDELDelegation
+	if position.PenaltyCursor != (common.Hash{}) {
+		apply = c.keeper.ApplyRecoveredGatewayDELDelegation
+	}
+	if !c.profile.EnableNativeHeldDELDowntime || position.HoldDeadline == 0 {
+		return apply(ctx, position, amount)
+	}
+	child, write := ctx.CacheContext()
+	if err := apply(child, position, amount); err != nil {
+		return err
+	}
+	lots, err := c.ordinaryDowntimeHoldLots(child, position.Validator[:])
+	if err != nil {
+		return err
+	}
+	// Keep one slot for a partial withdrawal that splits an active lot.
+	// Compare the prestate only at the ceiling so a same-lot top-up can
+	// still use a timestamp already represented in the native ledger.
+	const depositLimit = nativeDowntimeHoldLots - 1
+	if lots > depositLimit {
+		before, err := c.ordinaryDowntimeHoldLots(ctx, position.Validator[:])
+		if err != nil {
+			return err
+		}
+		if lots > before {
+			return fmt.Errorf("native held DEL deposit exceeds its per-validator limit of %d hold lots", depositLimit)
+		}
+	}
+	write()
+	return nil
 }
 
 func (c *withdrawalController) delStakePosition(result settlement.DELTransition) validatorkeeper.GatewayDELStake {

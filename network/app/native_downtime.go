@@ -3,10 +3,12 @@ package app
 import (
 	"errors"
 	"math/big"
+	"slices"
 	"strconv"
 
 	sdkmath "cosmossdk.io/math"
 	storetypes "cosmossdk.io/store/types"
+	"github.com/cosmos/cosmos-sdk/codec/address"
 	sdk "github.com/cosmos/cosmos-sdk/types"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core"
@@ -18,7 +20,10 @@ import (
 	"github.com/maxwell2010/go-smart-node/network/identity"
 )
 
-const ordinaryDowntimePositions uint32 = 2
+const (
+	ordinaryDowntimePositions uint32 = 2
+	nativeDowntimeHoldLots           = 128
+)
 
 func validateNativeOrdinaryDELDowntimeProfile(profile WithdrawalProfile) error {
 	if profile.EnableNativeHeldDELDowntime && (!profile.EnableNativeOrdinaryDELDowntime || !profile.EnableDELHold) {
@@ -88,6 +93,60 @@ func (c *withdrawalController) ordinaryDowntimePositions(ctx sdk.Context, valida
 		}
 	}
 	return active, frozen, nil
+}
+
+func (c *withdrawalController) ordinaryDowntimeHoldLots(ctx sdk.Context, validator []byte) (int, error) {
+	active, frozen, err := c.ordinaryDowntimePositions(ctx, validator)
+	if err != nil {
+		return 0, err
+	}
+	var beneficiaries []common.Address
+	collect := func(target *validatortypes.NativeStakeTarget, beneficiary []byte) {
+		if target.StakeType == validatortypes.StakeType_CoinHold {
+			owner := common.BytesToAddress(beneficiary)
+			if !slices.Contains(beneficiaries, owner) {
+				beneficiaries = append(beneficiaries, owner)
+			}
+		}
+	}
+	for _, row := range active {
+		collect(row.NativeTarget, row.Beneficiary)
+	}
+	for _, row := range frozen {
+		collect(row.NativeTarget, row.Beneficiary)
+	}
+	if len(beneficiaries) == 0 {
+		return 0, nil
+	}
+	operator, err := c.keeper.ValidatorAddressCodec().BytesToString(validator)
+	if err != nil {
+		return 0, err
+	}
+	codec := address.NewBech32Codec(identity.Bech32PrefixAccAddr)
+	lots := 0
+	// Native hold buckets for one owner/operator pair share a single active
+	// delegation. Count it and the pair's pending entries just once.
+	for _, beneficiary := range beneficiaries {
+		owner, err := codec.BytesToString(beneficiary[:])
+		if err != nil {
+			return 0, err
+		}
+		held, err := c.keeper.GetDelegation(ctx, owner, operator, validatortypes.StakeType_CoinHold, identity.BaseDenom)
+		if err != nil && !errors.Is(err, validatorkeeper.ErrNotFound) {
+			return 0, err
+		}
+		lots += len(held.Stake.Holds)
+		pending, err := c.keeper.GetUndelegation(ctx, owner, operator)
+		if err != nil && !errors.Is(err, validatorkeeper.ErrNotFound) {
+			return 0, err
+		}
+		for _, entry := range pending.Entries {
+			if entry.Stake.Type == validatortypes.StakeType_CoinHold {
+				lots += len(entry.Stake.Holds)
+			}
+		}
+	}
+	return lots, nil
 }
 
 func (c *withdrawalController) validateOrdinaryDowntimeAdmission(ctx sdk.Context) error {
