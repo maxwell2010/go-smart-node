@@ -60,7 +60,7 @@ func verifyRecoveredNFTDeposit(t *testing.T, f signedDELFixture, executor *settl
 	ack.Data[len(ack.Data)-1] = 1
 	bad.Logs[8] = &ack
 	_, err = executor.VerifySignedNFTIsolationWithDowntime(ctx.WithGasMeter(storetypes.NewGasMeter(24_000_000)), msg, &bad)
-	require.ErrorContains(t, err, "aggregate DEL penalty acknowledgement")
+	require.ErrorContains(t, err, "aggregate penalty acknowledgement")
 
 	proof, err := executor.VerifySignedNFTIsolationWithDowntime(ctx, msg, receipt)
 	require.NoError(t, err)

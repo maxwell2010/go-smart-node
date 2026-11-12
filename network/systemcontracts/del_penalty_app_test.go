@@ -237,7 +237,7 @@ func verifyRecoveredDELDeposits(t *testing.T, f signedDELFixture, executor *sett
 			ack.Data[len(ack.Data)-1] = 1
 			bad.Logs[0] = &ack
 			_, err := executor.VerifySignedDELDepositWithDowntime(included.WithGasMeter(storetypes.NewGasMeter(24_000_000)), msg, &bad)
-			require.ErrorContains(t, err, "aggregate DEL penalty acknowledgement")
+			require.ErrorContains(t, err, "aggregate penalty acknowledgement")
 		} else {
 			require.Len(t, receipt.Logs, 3)
 		}
