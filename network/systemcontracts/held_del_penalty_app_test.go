@@ -3,6 +3,7 @@ package systemcontracts_test
 import (
 	"errors"
 	"math/big"
+	"strings"
 	"testing"
 	"time"
 
@@ -23,14 +24,35 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-const heldDELPenaltyPassed = "active held DEL penalty preserves each bucket and lot and burns the exact real reserve"
+const (
+	heldDELPenaltyPassed = "active held DEL penalty preserves each bucket and lot and burns the exact real reserve"
+	heldPenaltyMode      = "held-penalty"
+	heldLotBudgetMode    = "held-penalty-lot-budget"
+	mixedLotBudgetMode   = "mixed-penalty-lot-budget"
+	benchmarkHoldLots    = 128
+)
 
 func TestOwnedAppSignedHeldDELPenalty(t *testing.T) {
-	testSignedDELFixture(t, "held-penalty", heldDELPenaltyPassed)
+	testSignedDELFixture(t, heldPenaltyMode, heldDELPenaltyPassed)
+	for _, mode := range []string{heldLotBudgetMode, mixedLotBudgetMode} {
+		t.Run(mode, func(t *testing.T) {
+			testSignedHoldLotBudget(t, mode, heldDELPenaltyPassed)
+		})
+	}
+}
+
+func testSignedHoldLotBudget(t *testing.T, mode, passed string) {
+	t.Helper()
+	output := testSignedDELFixture(t, mode, passed)
+	const prefix = "DEL hold penalty gas lots="
+	_, measurement, found := strings.Cut(output, prefix)
+	require.True(t, found, "isolated fixture did not report hold lot gas")
+	line, _, _ := strings.Cut(measurement, "\n")
+	t.Log(prefix + strings.TrimSpace(line))
 }
 
 func runSignedHeldDELPenalty(t *testing.T, e isolatedBackendEnv, profile ownedapp.WithdrawalProfile, gateway, master, wrapper contracts.Artifact,
-	reader *nftview.Reader, gov func(contracts.Artifact, common.Address, string, ...interface{}),
+	reader *nftview.Reader, gov func(contracts.Artifact, common.Address, string, ...interface{}), mode string,
 ) {
 	t.Helper()
 	f := prepareSignedDELFixture(t, e, profile, gateway, master, wrapper, gov)
@@ -41,9 +63,15 @@ func runSignedHeldDELPenalty(t *testing.T, e isolatedBackendEnv, profile ownedap
 	del := func(n int64) sdkmath.Int { return sdkmath.NewIntWithDecimal(n, 18) }
 	deposit := func(value sdkmath.Int, deadline int64) common.Hash {
 		t.Helper()
-		data, err := gateway.ABI.Pack("delegateHoldDEL", f.validator, big.NewInt(deadline))
+		method := "delegateDEL"
+		args := []interface{}{f.validator}
+		if deadline != 0 {
+			method = "delegateHoldDEL"
+			args = append(args, big.NewInt(deadline))
+		}
+		data, err := gateway.ABI.Pack(method, args...)
 		require.NoError(t, err)
-		result := f.signed("delegateHoldDEL", value, true, f.validator, big.NewInt(deadline))
+		result := f.signed(method, value, true, args...)
 		msg := core.Message{From: f.user, To: &f.target, Value: value.BigInt(), Data: data}
 		receipt := &ethtypes.Receipt{Status: ethtypes.ReceiptStatusSuccessful, Logs: evmtypes.LogsToEthereum(result.Logs)}
 		inclusion := e.ctx().WithBlockHeight(e.app.LastBlockHeight()).WithBlockTime(e.ctx().BlockTime().Add(-time.Second))
@@ -56,9 +84,29 @@ func runSignedHeldDELPenalty(t *testing.T, e isolatedBackendEnv, profile ownedap
 		}, proof.Amount))
 		return proof.StakeID
 	}
-	firstDeadline, secondDeadline := e.ctx().BlockTime().Unix()+12, e.ctx().BlockTime().Unix()+200
+	mixed := mode == mixedLotBudgetMode
+	lotCount, extraLots := 3, 0
+	if mode != heldPenaltyMode {
+		lotCount = benchmarkHoldLots
+		extraLots = lotCount - 3
+		if mixed {
+			extraLots++
+		}
+	}
+	firstDeadline := e.ctx().BlockTime().Unix() + int64(extraLots) + 12
+	secondDeadline := firstDeadline + 200
+	if mixed {
+		secondDeadline = 0
+	}
 	firstID := deposit(del(3), firstDeadline)
 	require.Equal(t, firstID, deposit(del(2), firstDeadline))
+	// Five atoms incur an exact one-atom loss at 20% and keep each lot alive.
+	extraAmount := sdkmath.NewInt(5)
+	for range extraLots {
+		require.Equal(t, firstID, deposit(extraAmount, firstDeadline))
+	}
+	firstAmount := del(5).Add(extraAmount.MulRaw(int64(extraLots)))
+	total := firstAmount.Add(del(7))
 	secondID := deposit(del(7), secondDeadline)
 	require.NotEqual(t, firstID, secondID)
 	binding := func(ctx sdk.Context, id common.Hash) validatortypes.EVMStakeBinding {
@@ -73,21 +121,22 @@ func runSignedHeldDELPenalty(t *testing.T, e isolatedBackendEnv, profile ownedap
 	}
 	first, second := binding(e.ctx(), firstID), binding(e.ctx(), secondID)
 	beforeLots := held(e.ctx())
-	require.Len(t, beforeLots.Holds, 3)
-	f.activeReserve(del(12))
-	f.backing(del(12))
+	require.Len(t, beforeLots.Holds, lotCount)
+	f.activeReserve(total)
+	f.backing(total)
 
 	e.app.EVMKeeper.SetInternalCommitGuard(func(ctx sdk.Context, msg core.Message, _ []*ethtypes.Log) error {
 		if executor.AuthorizeMasterPenalty(ctx, msg) {
 			return nil
 		}
-		if executor.AuthorizeOrdinaryDELPenalty(ctx, msg) || !executor.AuthorizeHeldDELPenalty(ctx, msg) {
-			return errors.New("test-only internal call lacks exact held penalty authorization")
+		if executor.AuthorizeHeldDELPenalty(ctx, msg) || (mixed && executor.AuthorizeOrdinaryDELPenalty(ctx, msg)) {
+			return nil
 		}
-		return nil
+		return errors.New("test-only internal call lacks exact DEL penalty authorization")
 	})
+	const attemptGas = uint64(24_000_000)
 	ctx := func() sdk.Context {
-		return e.ctx().WithExecMode(sdk.ExecModeFinalize).WithGasMeter(storetypes.NewGasMeter(24_000_000))
+		return e.ctx().WithExecMode(sdk.ExecModeFinalize).WithGasMeter(storetypes.NewGasMeter(attemptGas))
 	}
 	supply := func(ctx sdk.Context) sdkmath.Int {
 		return e.app.BankKeeper.GetSupply(ctx, identity.BaseDenom).Amount
@@ -96,7 +145,8 @@ func runSignedHeldDELPenalty(t *testing.T, e isolatedBackendEnv, profile ownedap
 	const percentage = uint16(20)
 	injected := errors.New("reject held penalty projection after writes")
 	reconcile := func(reject bool) error {
-		return executor.AppendMasterPenalty(ctx(), f.validator, percentage, supply, func(child sdk.Context, announcement settlement.MasterPenaltyProof) error {
+		execution := ctx()
+		err := executor.AppendMasterPenalty(execution, f.validator, percentage, supply, func(child sdk.Context, announcement settlement.MasterPenaltyProof) error {
 			wrong := first
 			wrong.NativeHoldStartTime++
 			err := executor.ApplyHeldDELPenalty(child, wrong, percentage, supply, func(sdk.Context, settlement.ActiveDELPenaltyProof) error {
@@ -104,13 +154,17 @@ func runSignedHeldDELPenalty(t *testing.T, e isolatedBackendEnv, profile ownedap
 			})
 			require.ErrorContains(t, err, "exact valid hold start and deadline")
 			for _, row := range []validatortypes.EVMStakeBinding{first, second} {
-				err := executor.ApplyHeldDELPenalty(child, row, percentage, supply, func(projectCtx sdk.Context, proof settlement.ActiveDELPenaltyProof) error {
+				execute, project := executor.ApplyHeldDELPenalty, keeper.ApplyGatewayDELHoldPenalty
+				if row.NativeTarget.StakeType == validatortypes.StakeType_Coin {
+					execute, project = executor.ApplyOrdinaryDELPenalty, keeper.ApplyGatewayDELPenalty
+				}
+				err := execute(child, row, percentage, supply, func(projectCtx sdk.Context, proof settlement.ActiveDELPenaltyProof) error {
 					require.Equal(t, row, proof.Before)
 					require.Equal(t, row.HoldTimestamp, proof.After.HoldTimestamp)
 					require.Equal(t, row.RawHoldStartTime, proof.After.RawHoldStartTime)
 					require.Equal(t, announcement.AfterCursor, common.BytesToHash(proof.After.PenaltyCursor))
 					require.True(t, row.RawAmount.QuoRaw(5).Equal(proof.Burned))
-					require.NoError(t, keeper.ApplyGatewayDELHoldPenalty(projectCtx, validatorkeeper.GatewayDELStake{
+					require.NoError(t, project(projectCtx, validatorkeeper.GatewayDELStake{
 						Gateway: f.target, WrappedDEL: f.wrapped, Validator: f.validator, Beneficiary: f.user,
 						StakeID: common.BytesToHash(row.StakeID), Amount: row.RawAmount, PenaltyCursor: common.BytesToHash(row.PenaltyCursor),
 						HoldDeadline: common.BytesToHash(row.HoldTimestamp).Big().Int64(), HoldStartTime: row.NativeHoldStartTime,
@@ -129,13 +183,17 @@ func runSignedHeldDELPenalty(t *testing.T, e isolatedBackendEnv, profile ownedap
 			}
 			return nil
 		})
+		if err == nil {
+			t.Logf("DEL hold penalty gas lots=%d sdk_gas=%d budget=%d mixed=%t", lotCount, execution.GasMeter().GasConsumed(), attemptGas, mixed)
+		}
+		return err
 	}
 	require.ErrorIs(t, reconcile(true), injected)
 	require.Equal(t, first, binding(e.ctx(), firstID))
 	require.Equal(t, second, binding(e.ctx(), secondID))
 	require.Equal(t, beforeLots, held(e.ctx()))
 	require.True(t, initialSupply.Equal(supply(ctx())))
-	f.backing(del(12))
+	f.backing(total)
 
 	require.NoError(t, reconcile(false))
 	afterLots := held(e.ctx())
@@ -146,10 +204,10 @@ func runSignedHeldDELPenalty(t *testing.T, e isolatedBackendEnv, profile ownedap
 		require.Equal(t, before.HoldEndTime, after.HoldEndTime)
 		require.True(t, before.Amount.MulRaw(4).QuoRaw(5).Equal(after.Amount))
 	}
-	expected := del(12).MulRaw(4).QuoRaw(5)
+	expected := total.MulRaw(4).QuoRaw(5)
 	f.activeReserve(expected)
 	f.backing(expected)
-	require.True(t, initialSupply.Sub(del(12).QuoRaw(5)).Equal(supply(ctx())))
+	require.True(t, initialSupply.Sub(total.QuoRaw(5)).Equal(supply(ctx())))
 	penalized := binding(e.ctx(), firstID)
 	for e.ctx().BlockTime().Unix() <= firstDeadline {
 		e.advance()
@@ -167,7 +225,7 @@ func runSignedHeldDELPenalty(t *testing.T, e isolatedBackendEnv, profile ownedap
 	require.Equal(t, firstID, out.StakeID)
 	require.Equal(t, firstDeadline, out.HoldDeadline)
 	require.Equal(t, penalized.NativeHoldStartTime, out.HoldStartTime)
-	require.True(t, del(2).Equal(out.Remaining))
+	require.True(t, firstAmount.MulRaw(4).QuoRaw(5).Sub(amount).Equal(out.Remaining))
 	require.NoError(t, keeper.ApplyPenalizedGatewayDELWithdrawal(inclusion, validatorkeeper.GatewayDELStake{
 		Gateway: f.target, WrappedDEL: f.wrapped, Validator: f.validator, Beneficiary: f.user,
 		StakeID: out.StakeID, Amount: out.Remaining, PenaltyCursor: out.PenaltyCursor,
@@ -181,6 +239,6 @@ func runSignedHeldDELPenalty(t *testing.T, e isolatedBackendEnv, profile ownedap
 	require.NoError(t, err)
 	require.True(t, expected.Sub(amount).Equal(active))
 	f.backing(expected)
-	require.True(t, initialSupply.Sub(del(12).QuoRaw(5)).Equal(supply(ctx())), "withdrawHold must not burn extra DEL")
+	require.True(t, initialSupply.Sub(total.QuoRaw(5)).Equal(supply(ctx())), "withdrawHold must not burn extra DEL")
 	t.Log(heldDELPenaltyPassed)
 }
