@@ -35,6 +35,20 @@ scans reported zero symbol advisories with that run's database snapshot.
 The [isolated process run](https://github.com/maxwell2010/go-smart-node/actions/runs/43042136814)
 also passed on the same updated dependency pins.
 
+The refreshed source and Linux amd64 binary scans for
+`496ee4ba52953e348ab82c8c2c01affb304c4177` completed with zero symbol
+advisories in the scanner database dated 2026-11-11. This evidence covers
+that exact daemon build and database snapshot.
+[GitHub CI security audit](https://github.com/maxwell2010/go-smart-node/actions/runs/43176718744)
+
+The Linux development archive on `e8e5dcf` includes a schema-validated
+CycloneDX 1.5 SBOM bound to the source revision and binary hash. It records
+the Go dependencies and toolchain, including the manifest and compiled
+source hashes for the owned SDK, EVM and geth replacements. Both scanner
+captures passed on that build.
+[Archive and security audit](https://github.com/maxwell2010/go-smart-node/actions/runs/43177540530)
+
+
 Official Hermes and an independent SDK53 counterparty passed six phases in
 separate default-build OS processes: handshake, native DEL send, voucher return,
 both-node disk restart with the exact pending packet commitment, decoded error
