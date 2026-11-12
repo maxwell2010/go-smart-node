@@ -29,6 +29,10 @@ type ActiveNFTPenaltyProof struct {
 	RemainingReserve, Burned  sdkmath.Int
 }
 
+// The extra Gateway library and Vault frames need to forward gas to the
+// native burn. The enclosing operation charges actual pre-refund work.
+const nftPenaltyEVMGas = 2_000_000
+
 type activeNFTPenaltyKey struct{}
 type activeNFTPenaltyCall struct {
 	executor *Executor
@@ -110,9 +114,7 @@ func (e *Executor) ApplyActiveNFTPenalty(ctx sdk.Context, row validatortypes.EVM
 		return err
 	}
 	authorized := child.WithValue(activeNFTPenaltyKey{}, activeNFTPenaltyCall{e, child.BlockHeight(), id})
-	// The extra Gateway library and Vault frames need to forward gas to the
-	// native burn. Charge actual pre-refund work to the unchanged block budget.
-	result, err := e.invokePenaltyWithGas(authorized, Sender(), e.roles.Gateway, data, 2_000_000)
+	result, err := e.invokePenaltyWithGas(authorized, Sender(), e.roles.Gateway, data, nftPenaltyEVMGas)
 	if err != nil {
 		return err
 	}

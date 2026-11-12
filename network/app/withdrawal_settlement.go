@@ -57,6 +57,7 @@ type WithdrawalProfile struct {
 	EnableNativeUpgradeGovernance   bool           `json:"enable_native_upgrade_governance,omitempty"`
 	EnableNativeOrdinaryDELDowntime bool           `json:"enable_native_ordinary_del_downtime,omitempty"`
 	EnableNativeHeldDELDowntime     bool           `json:"enable_native_held_del_downtime,omitempty"`
+	EnableNativeNFTDowntime         bool           `json:"enable_native_nft_downtime,omitempty"`
 }
 
 type withdrawalController struct {
@@ -352,7 +353,8 @@ func (c *withdrawalController) guardInternalCommit(ctx sdk.Context, msg core.Mes
 	if c.profile.EnableNativeOrdinaryDELDowntime &&
 		(c.executor.AuthorizeMasterPenalty(ctx, msg) || c.executor.AuthorizeOrdinaryDELPenalty(ctx, msg) ||
 			c.executor.AuthorizeFrozenDELPenalty(ctx, msg) ||
-			(c.profile.EnableNativeHeldDELDowntime && c.executor.AuthorizeHeldDELPenalty(ctx, msg))) {
+			(c.profile.EnableNativeHeldDELDowntime && c.executor.AuthorizeHeldDELPenalty(ctx, msg)) ||
+			(c.profile.EnableNativeNFTDowntime && c.executor.AuthorizeActiveNFTPenalty(ctx, msg))) {
 		return nil
 	}
 	managed, completion := c.withdrawalActivity(ctx, msg, logs)

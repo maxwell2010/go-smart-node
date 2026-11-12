@@ -102,7 +102,7 @@ func (e *Executor) ApplyFrozenNFTPenalty(ctx sdk.Context, row validatortypes.EVM
 		return err
 	}
 	authorized := child.WithValue(frozenDELPenaltyKey{}, frozenDELPenaltyCall{executor: e, height: child.BlockHeight(), data: bytes.Clone(data)})
-	result, err := e.invokePenalty(authorized, sender, e.roles.Gateway, data)
+	result, err := e.invokePenaltyWithGas(authorized, sender, e.roles.Gateway, data, nftPenaltyEVMGas)
 	if err != nil {
 		return err
 	}

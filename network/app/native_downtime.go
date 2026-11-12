@@ -24,7 +24,11 @@ func validateNativeOrdinaryDELDowntimeProfile(profile WithdrawalProfile) error {
 	if profile.EnableNativeHeldDELDowntime && (!profile.EnableNativeOrdinaryDELDowntime || !profile.EnableDELHold) {
 		return errors.New("native held DEL downtime requires native DEL downtime and DEL hold admission")
 	}
-	if profile.EnableNativeOrdinaryDELDowntime && (!profile.EnableNativeConsensus || profile.EnableNFTDelegation ||
+	if profile.EnableNativeNFTDowntime && (!profile.EnableNativeOrdinaryDELDowntime || !profile.EnableNFTDelegation) {
+		return errors.New("native NFT downtime requires native DEL downtime and isolated NFT admission")
+	}
+	if profile.EnableNativeOrdinaryDELDowntime && (!profile.EnableNativeConsensus ||
+		(profile.EnableNFTDelegation && !profile.EnableNativeNFTDowntime) ||
 		(profile.EnableDELHold && !profile.EnableNativeHeldDELDowntime)) {
 		return errors.New("native DEL downtime requires native consensus and supported DEL position types")
 	}
@@ -55,20 +59,32 @@ func (c *withdrawalController) ordinaryDowntimePositions(ctx sdk.Context, valida
 		return nil, nil, errors.New("native ordinary downtime exceeds its per-validator position budget")
 	}
 	coin := validatortypes.EVMStakeBindingKind_EVM_STAKE_BINDING_COIN
+	nft := validatortypes.EVMStakeBindingKind_EVM_STAKE_BINDING_NFT
 	supported := func(kind validatortypes.StakeType) bool {
 		return kind == validatortypes.StakeType_Coin || (c.profile.EnableNativeHeldDELDowntime && kind == validatortypes.StakeType_CoinHold)
 	}
 	for _, row := range active {
-		if row.Kind != coin || common.BytesToAddress(row.Gateway) != c.profile.Gateway ||
-			common.BytesToAddress(row.TokenContract) != c.profile.WrappedDEL ||
-			!supported(row.NativeTarget.StakeType) || !row.RawNftBackedAmount.IsZero() {
-			return nil, nil, errors.New("native ordinary downtime encountered an unsupported active position")
+		if common.BytesToAddress(row.Gateway) != c.profile.Gateway {
+			return nil, nil, errors.New("native downtime encountered a position outside the approved Gateway")
+		}
+		if c.profile.EnableNativeNFTDowntime && row.Kind == nft && row.NativeTarget.StakeType == validatortypes.StakeType_NFT &&
+			common.BytesToAddress(row.TokenContract) == c.profile.PositionVault {
+			continue
+		}
+		if row.Kind != coin || common.BytesToAddress(row.TokenContract) != c.profile.WrappedDEL ||
+			!supported(row.NativeTarget.StakeType) || (!c.profile.EnableNativeNFTDowntime && !row.RawNftBackedAmount.IsZero()) {
+			return nil, nil, errors.New("native downtime encountered an unsupported active position")
 		}
 	}
 	for _, row := range frozen {
-		if row.SourceKind != coin || row.FreezeType != 1 || !supported(row.NativeTarget.StakeType) ||
-			common.BytesToAddress(row.Gateway) != c.profile.Gateway {
-			return nil, nil, errors.New("native ordinary downtime encountered an unsupported pending claim")
+		if common.BytesToAddress(row.Gateway) != c.profile.Gateway || row.FreezeType != 1 {
+			return nil, nil, errors.New("native downtime encountered a claim outside the approved Gateway withdrawal route")
+		}
+		if c.profile.EnableNativeNFTDowntime && row.SourceKind == nft && row.NativeTarget.StakeType == validatortypes.StakeType_NFT {
+			continue
+		}
+		if row.SourceKind != coin || !supported(row.NativeTarget.StakeType) {
+			return nil, nil, errors.New("native downtime encountered an unsupported pending claim")
 		}
 	}
 	return active, frozen, nil
@@ -144,9 +160,31 @@ func (app *App) executeOrdinaryDELDowntime(ctx sdk.Context, candidate validatork
 	}
 	beforeSupply := supply(child)
 	err = c.executor.AppendMasterPenalty(child, common.BytesToAddress(validator), percent, supply, func(project sdk.Context, master settlement.MasterPenaltyProof) error {
+		// Resolve NFT backing first. It can reduce or remove a logical coin
+		// companion before direct DEL is reconciled at the same Master cursor.
 		for _, row := range active {
+			if row.Kind == validatortypes.EVMStakeBindingKind_EVM_STAKE_BINDING_NFT {
+				if err := c.applyActiveNFTDowntime(project, row, master, percent, supply); err != nil {
+					return err
+				}
+			}
+		}
+		for _, row := range active {
+			if row.Kind != validatortypes.EVMStakeBindingKind_EVM_STAKE_BINDING_COIN {
+				continue
+			}
+			if !row.RawNftBackedAmount.IsZero() {
+				current, err := c.keeper.GetEVMStakeBinding(project, row.Kind, row.Gateway, row.StakeID)
+				if errors.Is(err, validatorkeeper.ErrNotFound) && row.RawAmount.Equal(row.RawNftBackedAmount) {
+					continue
+				}
+				if err != nil {
+					return err
+				}
+				row = current
+			}
 			if common.BytesToHash(row.PenaltyCursor) != master.BeforeCursor {
-				return errors.New("ordinary DEL stake differs from the prior Master penalty cursor")
+				return errors.New("DEL stake differs from the prior Master penalty cursor")
 			}
 			applyPenalty := c.executor.ApplyOrdinaryDELPenalty
 			held := row.NativeTarget.StakeType == validatortypes.StakeType_CoinHold
@@ -157,15 +195,17 @@ func (app *App) executeOrdinaryDELDowntime(ctx sdk.Context, candidate validatork
 				before := validatorkeeper.GatewayDELStake{
 					Gateway: c.profile.Gateway, WrappedDEL: c.profile.WrappedDEL, Validator: common.BytesToAddress(row.Validator),
 					Beneficiary: common.BytesToAddress(row.Beneficiary), StakeID: common.BytesToHash(row.StakeID),
-					Amount: row.RawAmount, PenaltyCursor: master.BeforeCursor,
+					Amount: row.RawAmount.Sub(row.RawNftBackedAmount), NFTBacked: row.RawNftBackedAmount,
+					PenaltyCursor: master.BeforeCursor,
 				}
+				remaining := proof.After.RawAmount.Sub(row.RawNftBackedAmount)
 				if held {
 					// The EVM proof has already checked both words fit Unix seconds.
 					before.HoldDeadline = common.BytesToHash(proof.Before.HoldTimestamp).Big().Int64()
 					before.HoldStartTime = proof.Before.NativeHoldStartTime
-					return c.keeper.ApplyGatewayDELHoldPenalty(next, before, proof.After.RawAmount, master.AfterCursor)
+					return c.keeper.ApplyGatewayDELHoldPenalty(next, before, remaining, master.AfterCursor)
 				}
-				return c.keeper.ApplyGatewayDELPenalty(next, before, proof.After.RawAmount, master.AfterCursor)
+				return c.keeper.ApplyGatewayDELPenalty(next, before, remaining, master.AfterCursor)
 			})
 			if err != nil {
 				return err
@@ -177,6 +217,12 @@ func (app *App) executeOrdinaryDELDowntime(ctx sdk.Context, candidate validatork
 				return errors.New("invalid frozen DEL penalty deadline")
 			}
 			if deadline.Int64() <= project.BlockTime().Unix() {
+				continue
+			}
+			if row.SourceKind == validatortypes.EVMStakeBindingKind_EVM_STAKE_BINDING_NFT {
+				if err := c.applyFrozenNFTDowntime(project, row, master, candidate.InfractionHeight, percent, supply); err != nil {
+					return err
+				}
 				continue
 			}
 			err := c.executor.ApplyFrozenDELPenalty(project, row, candidate.InfractionHeight, percent, supply, func(next sdk.Context, proof settlement.FrozenDELPenaltyProof) error {
@@ -194,6 +240,9 @@ func (app *App) executeOrdinaryDELDowntime(ctx sdk.Context, candidate validatork
 			if err != nil {
 				return err
 			}
+		}
+		if err := c.keeper.RequireActiveStakePenaltyCatchup(project, validator, master.AfterCursor[:]); err != nil {
+			return err
 		}
 		if err := c.keeper.ApplyNativeDowntimeOutcome(project, candidate); err != nil {
 			return err
