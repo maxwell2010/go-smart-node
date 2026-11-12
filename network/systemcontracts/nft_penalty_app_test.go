@@ -80,7 +80,7 @@ func runSignedActiveNFTPenalty(t *testing.T, e isolatedBackendEnv, profile owned
 
 	originID := common.BigToHash(new(big.Int).Add(new(big.Int).Lsh(big.NewInt(1), 224), big.NewInt(880)))
 	unitsPerPosition := uint32(1)
-	if mode == "frozen-nft-penalty-max-units" {
+	if mode == frozenNFTMaxUnitsMode || mode == frozenNFTBothEligibleMode {
 		unitsPerPosition = nfttypes.MaxIsolatedOriginUnits
 	}
 	seedActiveNFTPenaltyOrigin(t, f, profile, origin, vault, originAddress, originID, unitReserve, 2*unitsPerPosition)
@@ -112,8 +112,8 @@ func runSignedActiveNFTPenalty(t *testing.T, e isolatedBackendEnv, profile owned
 		return proof
 	}
 	penalized, sibling := delegate(unitsPerPosition), delegate(unitsPerPosition)
-	if mode == "frozen-nft-penalty" || mode == "frozen-nft-penalty-max-units" {
-		runSignedFrozenNFTPenalty(t, f, reader, executor, penalized, sibling, unitReserve, inclusion)
+	if mode == "frozen-nft-penalty" || mode == frozenNFTMaxUnitsMode || mode == frozenNFTBothEligibleMode {
+		runSignedFrozenNFTPenalty(t, f, reader, executor, penalized, sibling, unitReserve, mode == frozenNFTBothEligibleMode, inclusion)
 		return
 	}
 	getRow := func(kind validatortypes.EVMStakeBindingKind, id common.Hash) validatortypes.EVMStakeBinding {
