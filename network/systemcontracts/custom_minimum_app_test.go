@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"math/big"
 	"testing"
+	"time"
 
 	storetypes "cosmossdk.io/store/types"
 	"github.com/cosmos/cosmos-sdk/codec/address"
@@ -17,6 +18,7 @@ import (
 	"github.com/ethereum/go-ethereum/core"
 	"github.com/ethereum/go-ethereum/crypto"
 	nftview "github.com/maxwell2010/go-smart-node/network/decimal/nft/evmview"
+	"github.com/maxwell2010/go-smart-node/network/decimal/validator/settlement"
 	"github.com/maxwell2010/go-smart-node/network/identity"
 	contracts "github.com/maxwell2010/go-smart-node/network/systemcontracts"
 	"github.com/stretchr/testify/require"
@@ -86,23 +88,40 @@ func runRegisteredCustomMinimum(t *testing.T, e customMinimumEnv) {
 		values := query(vault, e.vault, "getPosition", id)
 		return *abi.ConvertType(values[0], new(isolatedPosition)).(*isolatedPosition)
 	}
+	type coinMeta struct {
+		InitialMint, MinTotalSupply, MaxTotalSupply *big.Int
+		Creator                                     common.Address
+		Crr                                         uint8
+		Identity, Symbol, Name                      string
+	}
+	mintCurrency := func(symbol string, crr uint8) common.Address {
+		commission := integer(center, centerAddress, "getCommissionSymbol", symbol)
+		metadata := coinMeta{amount(10), amount(5), amount(100), owner, crr, "isolated-minimum-control", symbol, "Isolated minimum reserve coin"}
+		e.call(0, center, centerAddress, new(big.Int).Add(amount(10), commission), true, "createToken", metadata)
+		currency := query(center, centerAddress, "tokens", symbol)[0].(common.Address)
+		require.NotEqual(t, common.Address{}, currency)
+		return currency
+	}
+	registerValidator := func(label string) common.Address {
+		validator := common.BytesToAddress(crypto.Keccak256([]byte("minimum-validator:" + label))[12:])
+		operator, err := address.NewBech32Codec(identity.Bech32PrefixValAddr).BytesToString(validator.Bytes())
+		require.NoError(t, err)
+		meta, err := json.Marshal(map[string]interface{}{"operator_address": operator, "reward_address": validator.Hex(), "consensus_pubkey": base64.StdEncoding.EncodeToString(bytes.Repeat([]byte{0xB9}, 32)), "description": map[string]string{"moniker": "minimum-control"}, "commission": "10"})
+		require.NoError(t, err)
+		type validatorMeta struct {
+			Validator common.Address
+			Meta      string
+		}
+		e.gov(master, e.master, "addValidators", []validatorMeta{{validator, string(meta)}})
+		return validator
+	}
 	for _, scenario := range []struct {
 		name, symbol string
 		reserve      int64
 		success      bool
 	}{{"cross minimum rejects atomically", "minblockx", 6, false}, {"exact minimum succeeds with repricing", "minpassxx", 5, true}} {
 		t.Run(scenario.name, func(t *testing.T) {
-			type coinMeta struct {
-				InitialMint, MinTotalSupply, MaxTotalSupply *big.Int
-				Creator                                     common.Address
-				Crr                                         uint8
-				Identity, Symbol, Name                      string
-			}
-			metadata := coinMeta{amount(10), amount(5), amount(100), owner, 100, "isolated-minimum-control", scenario.symbol, "Isolated minimum reserve coin"}
-			commission := integer(center, centerAddress, "getCommissionSymbol", scenario.symbol)
-			e.call(0, center, centerAddress, new(big.Int).Add(amount(10), commission), true, "createToken", metadata)
-			currency := query(center, centerAddress, "tokens", scenario.symbol)[0].(common.Address)
-			require.NotEqual(t, common.Address{}, currency)
+			currency := mintCurrency(scenario.symbol, 100)
 			expectedProxy, err := contracts.PauseAwareProxyRuntime(centerAddress, centerAddress, 0)
 			require.NoError(t, err)
 			require.Equal(t, expectedProxy, b.app.EVMKeeper.GetCode(b.ctx(), b.app.EVMKeeper.GetCodeHash(b.ctx(), currency)))
@@ -112,16 +131,7 @@ func runRegisteredCustomMinimum(t *testing.T, e customMinimumEnv) {
 			require.Equal(t, amount(10), bank(currency))
 			require.Equal(t, amount(10), integer(token, currency, "reserve"))
 			require.Equal(t, amount(1), integer(token, currency, "getCurrentPrice"))
-			validator := common.BytesToAddress(crypto.Keccak256([]byte("minimum-validator:" + scenario.symbol))[12:])
-			operator, err := address.NewBech32Codec(identity.Bech32PrefixValAddr).BytesToString(validator.Bytes())
-			require.NoError(t, err)
-			meta, err := json.Marshal(map[string]interface{}{"operator_address": operator, "reward_address": validator.Hex(), "consensus_pubkey": base64.StdEncoding.EncodeToString(bytes.Repeat([]byte{0xB9}, 32)), "description": map[string]string{"moniker": "minimum-control"}, "commission": "10"})
-			require.NoError(t, err)
-			type validatorMeta struct {
-				Validator common.Address
-				Meta      string
-			}
-			e.gov(master, e.master, "addValidators", []validatorMeta{{validator, string(meta)}})
+			validator := registerValidator(scenario.symbol)
 			originID := big.NewInt(600 + scenario.reserve)
 			locked := amount(scenario.reserve)
 			e.call(0, token, currency, new(big.Int), true, "approve", e.origin, locked)
@@ -190,4 +200,100 @@ func runRegisteredCustomMinimum(t *testing.T, e customMinimumEnv) {
 			}
 		})
 	}
+	t.Run("signed custom NFT conversion isolates exact DEL backing", func(t *testing.T) {
+		converter := b.load("MintCandyCurveConverter")
+		code, err := converter.Deployment(e.registry)
+		require.NoError(t, err)
+		converterAddress := crypto.CreateAddress(owner, b.app.EVMKeeper.GetNonce(b.ctx(), owner))
+		b.send(b.keys[0], nil, new(big.Int), code, true)
+		e.gov(registry, e.registry, "setContractAddress", "curve-converter", converterAddress)
+		expected, err := contracts.ExpectedRuntime("MintCandyCurveConverter", nil, map[string]common.Hash{
+			"MintCandyCurveConverter.sol:MintCandyCurveConverter.REGISTRY": common.BytesToHash(e.registry[:]),
+		})
+		require.NoError(t, err)
+		require.Equal(t, expected, b.app.EVMKeeper.GetCode(b.ctx(), b.app.EVMKeeper.GetCodeHash(b.ctx(), converterAddress)))
+		currency := mintCurrency("nftconvcx", 50)
+		validator, siblingValidator := registerValidator("converted-a"), registerValidator("converted-b")
+		originID, input := big.NewInt(720), amount(2)
+		e.call(0, token, currency, new(big.Int), true, "approve", e.origin, amount(6))
+		e.call(0, origin, e.origin, new(big.Int), true, "mint", owner, originID, big.NewInt(3), "ipfs://converted-nft", amount(6), currency)
+		quote := func() *big.Int {
+			return integer(token, currency, exactABIMethod(t, token.ABI, "calculateSellOutput(uint256)"), input)
+		}
+		deadline := func() *big.Int { return big.NewInt(b.ctx().BlockTime().Unix() + 300) }
+		const method = "delegateNFT1155WithConversion"
+		type snapshot struct {
+			Cursor, Units, DeclaredCustom, OriginCustody, CoinSupply, CoinReserve, VaultNative, VaultCustom, ConverterCustom *big.Int
+		}
+		read := func() snapshot {
+			return snapshot{
+				integer(vault, e.vault, "nextPositionId"), integer(origin, e.origin, "balanceOf", owner, originID),
+				integer(origin, e.origin, "declaredReserve", uint8(2), currency), integer(token, currency, "balanceOf", e.origin),
+				integer(token, currency, "totalSupply"), bank(currency), bank(e.vault),
+				integer(token, currency, "balanceOf", e.vault), integer(token, currency, "balanceOf", converterAddress),
+			}
+		}
+		before, firstOutput := read(), quote()
+		require.Positive(t, firstOutput.Sign())
+		require.NotZero(t, firstOutput.Cmp(input), "the custom reserve is sold at its actual curve, not 1:1")
+		for _, failure := range []struct {
+			quantity, minimum, expiry *big.Int
+			errorName                 string
+		}{
+			{big.NewInt(1), new(big.Int).Add(firstOutput, big.NewInt(1)), deadline(), "ConversionLiquidityUnavailable"},
+			{big.NewInt(3), big.NewInt(1), deadline(), "ConversionLiquidityUnavailable"},
+			{big.NewInt(1), big.NewInt(1), big.NewInt(1), "ConversionDeadlineExpired"},
+		} {
+			result := e.call(0, gateway, e.gateway, new(big.Int), false, method, validator, e.origin, originID, failure.quantity, failure.minimum, failure.expiry)
+			signature := converter.ABI.Errors[failure.errorName].ID
+			require.NotEqual(t, common.Hash{}, signature)
+			require.Equal(t, signature.Bytes()[:4], result.Ret)
+			require.Empty(t, result.Logs)
+			require.Equal(t, before, read())
+		}
+
+		executor, err := settlement.NewExecutor(b.app.EVMKeeper, e.reader, settlement.Config{EVMGas: 750000, MaxLogs: 32, MaxLogBytes: 16384})
+		require.NoError(t, err)
+		deposit := func(target common.Address, output *big.Int) settlement.NFTConvertedIsolation {
+			args := []interface{}{target, e.origin, originID, big.NewInt(1), output, deadline()}
+			data, err := gateway.ABI.Pack(method, args...)
+			require.NoError(t, err)
+			response := e.call(0, gateway, e.gateway, new(big.Int), true, method, args...)
+			height := b.app.LastBlockHeight()
+			ctx := b.ctx().WithBlockHeight(height).WithBlockTime(b.ctx().BlockTime().Add(-time.Second)).
+				WithGasMeter(storetypes.NewGasMeter(24_000_000))
+			receipt := signedNFTReceipt(response)
+			receipt.BlockNumber = big.NewInt(height)
+			msg := core.Message{From: owner, To: &e.gateway, Value: new(big.Int), Data: data}
+			proof, err := executor.VerifySignedNFTIsolationWithConversion(ctx, msg, receipt, converterAddress, centerAddress, true)
+			require.NoError(t, err)
+			require.Equal(t, currency, proof.InputToken)
+			require.Equal(t, input, proof.InputAmount.BigInt())
+			require.Equal(t, output, proof.NativeOutput.BigInt())
+			require.Equal(t, output, proof.Companion.NFTBacked.BigInt())
+			return proof
+		}
+		first := deposit(validator, firstOutput)
+		firstID := first.Position.Asset.TokenID.Big()
+		firstPosition := position(firstID)
+		secondOutput := quote()
+		second := deposit(siblingValidator, secondOutput)
+		require.NotEqual(t, first.Position.Asset.TokenID, second.Position.Asset.TokenID)
+		require.Equal(t, firstPosition, position(firstID))
+		require.Equal(t, firstOutput, firstPosition.Reserve.Amount)
+		require.Equal(t, uint8(1), firstPosition.Reserve.ReserveType)
+		require.Equal(t, secondOutput, position(second.Position.Asset.TokenID.Big()).Reserve.Amount)
+		after := read()
+		require.Equal(t, big.NewInt(1), after.Units)
+		require.Equal(t, amount(2), after.DeclaredCustom)
+		require.Equal(t, after.DeclaredCustom, after.OriginCustody)
+		require.Equal(t, amount(6), after.CoinSupply)
+		totalOutput := new(big.Int).Add(firstOutput, secondOutput)
+		require.Equal(t, new(big.Int).Sub(before.CoinReserve, totalOutput), after.CoinReserve)
+		require.Equal(t, new(big.Int).Add(before.VaultNative, totalOutput), after.VaultNative)
+		require.Equal(t, before.VaultCustom, after.VaultCustom)
+		require.Equal(t, before.ConverterCustom, after.ConverterCustom)
+		require.Zero(t, integer(token, currency, "allowance", e.origin, e.vault).Sign())
+		require.Zero(t, integer(token, currency, "allowance", e.vault, converterAddress).Sign())
+	})
 }
