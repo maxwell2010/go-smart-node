@@ -9,6 +9,9 @@ contract NewNetworkMasterValidator is DecimalMasterValidator {
     error InvalidPenaltyReadRange();
 
     error InvalidDuplicateVotePenalty();
+    error HistoricalPenaltyRequiresSettlement();
+
+    uint16 private constant DUPLICATE_VOTE_PERCENTAGE = 5;
 
     event ValidatorDuplicateVotePenalty(
         address indexed validator, uint256 indexed penaltyIndex, uint256 indexed infractionHeight, uint16 percentage
@@ -17,6 +20,7 @@ contract NewNetworkMasterValidator is DecimalMasterValidator {
     struct DuplicateVoteStorage {
         mapping(address => mapping(uint256 => uint256)) heightByIndex;
         mapping(address => mapping(uint256 => bool)) recordedHeight;
+        mapping(address => uint256) firstIndexPlusOne;
     }
 
     bytes32 private constant DUPLICATE_VOTE_STORAGE = keccak256("mintcandy.master-validator.duplicate-vote.v1");
@@ -64,7 +68,7 @@ contract NewNetworkMasterValidator is DecimalMasterValidator {
         Validator storage state = _getValidatorStorage()._validators[validator];
         DuplicateVoteStorage storage evidence = _duplicateVoteStorage();
         if ((state.status != ValidatorStatus.Candidate && state.status != ValidatorStatus.Approved) ||
-            percentage == 0 || percentage > 100 || infractionHeight == 0 || infractionHeight >= block.number ||
+            percentage != DUPLICATE_VOTE_PERCENTAGE || infractionHeight == 0 || infractionHeight >= block.number ||
             state.penaltyPercantages.length != expectedCount || evidence.recordedHeight[validator][infractionHeight]) {
             revert InvalidDuplicateVotePenalty();
         }
@@ -72,12 +76,16 @@ contract NewNetworkMasterValidator is DecimalMasterValidator {
         state.penaltyPercantages.push(percentage);
         evidence.heightByIndex[validator][expectedCount] = infractionHeight;
         evidence.recordedHeight[validator][infractionHeight] = true;
+        if (evidence.firstIndexPlusOne[validator] == 0) evidence.firstIndexPlusOne[validator] = expectedCount + 1;
         emit ValidatorDuplicateVotePenalty(validator, expectedCount, infractionHeight, percentage);
     }
 
-    /// @notice Zero identifies a legacy percentage entry at a known index.
-    function getDuplicateVotePenaltyHeight(address validator, uint256 penaltyIndex) external view returns (uint256) {
-        return _duplicateVoteStorage().heightByIndex[validator][penaltyIndex];
+    /// @notice A pair of zeroes identifies a regular percentage entry at a known index.
+    function getDuplicateVotePenalty(address validator, uint256 penaltyIndex) external view returns (uint256 height, uint16 percentage) {
+        uint16[] storage penalties = _getValidatorStorage()._validators[validator].penaltyPercantages;
+        if (penaltyIndex >= penalties.length) revert InvalidPenaltyReadRange();
+        height = _duplicateVoteStorage().heightByIndex[validator][penaltyIndex];
+        if (height != 0) percentage = penalties[penaltyIndex];
     }
 
     function getPenaltiesRange(
@@ -90,7 +98,13 @@ contract NewNetworkMasterValidator is DecimalMasterValidator {
         uint256 remaining = penalties.length - start;
         uint256 count = limit < remaining ? limit : remaining;
         result = new uint16[](count);
+        DuplicateVoteStorage storage evidence = _duplicateVoteStorage();
+        uint256 firstIndex = evidence.firstIndexPlusOne[validator];
+        // A consumer of untyped percentages must never charge the current
+        // balance for a historical infraction. Typed settlement has its own reader.
+        bool checkHistory = firstIndex != 0 && start + count >= firstIndex;
         for (uint256 i; i < count; ++i) {
+            if (checkHistory && evidence.heightByIndex[validator][start + i] != 0) revert HistoricalPenaltyRequiresSettlement();
             result[i] = penalties[start + i];
         }
     }

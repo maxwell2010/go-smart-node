@@ -127,9 +127,9 @@ func checkSignedPagedPenalties(t *testing.T, keys []*ecdsa.PrivateKey, roles map
 		validator := addValidator(0xa3)
 		const role = "master-validator"
 		master, target := artifacts[role], roles[role]
-		rejectAppend := func(user int, cursor, height int64) {
+		rejectAppend := func(user int, cursor, height int64, percentage uint16) {
 			t.Helper()
-			input, err := master.ABI.Pack("appendDuplicateVotePenalty", validator, big.NewInt(cursor), big.NewInt(height), uint16(5))
+			input, err := master.ABI.Pack("appendDuplicateVotePenalty", validator, big.NewInt(cursor), big.NewInt(height), percentage)
 			require.NoError(t, err)
 			send(keys[user], &target, new(big.Int), input, false)
 		}
@@ -162,9 +162,10 @@ func checkSignedPagedPenalties(t *testing.T, keys []*ecdsa.PrivateKey, roles map
 		beforeSupply := new(big.Int).Set(nativeSupply())
 		before := state()
 		require.False(t, before[1].(bool))
-		rejectAppend(0, 0, 1)
-		rejectAppend(1, 1, 1)
-		rejectAppend(1, 0, 0)
+		rejectAppend(0, 0, 1, 5)
+		rejectAppend(1, 1, 1, 5)
+		rejectAppend(1, 0, 0, 5)
+		rejectAppend(1, 0, 1, 1)
 		require.Equal(t, before, state())
 
 		call(1, role, "addPenalty", new(big.Int), validator, uint16(1))
@@ -173,7 +174,7 @@ func checkSignedPagedPenalties(t *testing.T, keys []*ecdsa.PrivateKey, roles map
 		require.Equal(t, before[0], paused[0])
 		require.True(t, paused[1].(bool))
 		require.Equal(t, big.NewInt(2), paused[2])
-		rejectAppend(1, 2, 1)
+		rejectAppend(1, 2, 1, 5)
 		require.Equal(t, paused, state())
 
 		call(1, role, "unpauseValidator", new(big.Int), validator)
@@ -182,12 +183,25 @@ func checkSignedPagedPenalties(t *testing.T, keys []*ecdsa.PrivateKey, roles map
 		require.Equal(t, before[0], after[0])
 		require.True(t, after[1].(bool))
 		require.Equal(t, big.NewInt(3), after[2])
-		for index, want := range []int64{0, 1, 2} {
-			result := call(1, role, "getDuplicateVotePenaltyHeight", new(big.Int), validator, big.NewInt(int64(index)))
-			require.Zero(t, result[0].(*big.Int).Cmp(big.NewInt(want)))
+		for index, height := range []int64{0, 1, 2} {
+			result := call(1, role, "getDuplicateVotePenalty", new(big.Int), validator, big.NewInt(int64(index)))
+			require.Zero(t, result[0].(*big.Int).Cmp(big.NewInt(height)))
+			if height == 0 {
+				require.Zero(t, result[1].(uint16))
+			} else {
+				require.Equal(t, uint16(5), result[1])
+			}
 		}
-		result := call(1, role, "getPenaltiesRange", new(big.Int), validator, big.NewInt(0), big.NewInt(3))
-		require.Equal(t, []uint16{1, 5, 5}, result[0])
+		result := call(1, role, "getPenaltiesRange", new(big.Int), validator, big.NewInt(0), big.NewInt(1))
+		require.Equal(t, []uint16{1}, result[0])
+		input, err := master.ABI.Pack("getPenaltiesRange", validator, big.NewInt(0), big.NewInt(3))
+		require.NoError(t, err)
+		failure := send(keys[1], &target, new(big.Int), input, false)
+		require.Equal(t, master.ABI.Errors["HistoricalPenaltyRequiresSettlement"].ID.Bytes()[:4], failure.Ret)
+		call(1, role, "unpauseValidator", new(big.Int), validator)
+		call(1, role, "addPenalty", new(big.Int), validator, uint16(2))
+		result = call(1, role, "getPenaltiesRange", new(big.Int), validator, big.NewInt(3), big.NewInt(1))
+		require.Equal(t, []uint16{2}, result[0])
 		require.Equal(t, beforeSupply, nativeSupply())
 	})
 	firstPair := func(validator common.Address) {
