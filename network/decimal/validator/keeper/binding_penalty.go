@@ -49,7 +49,7 @@ func (k *StateKeeper) extremeActivePenaltyCursor(ctx sdk.Context, validator []by
 		}
 	}()
 	if !it.Valid() {
-		return nil, false, it.Error()
+		return nil, false, nil
 	}
 	key, sourceKey := bytes.Clone(it.Key()), bytes.Clone(it.Value())
 	if err = it.Error(); err != nil {

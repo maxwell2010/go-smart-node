@@ -122,9 +122,6 @@ func (k *StateKeeper) validatorBindingPage(ctx sdk.Context, prefix, after []byte
 		rows = append(rows, row)
 		cursor = key
 	}
-	if err := it.Error(); err != nil {
-		return nil, nil, err
-	}
 	if !it.Valid() {
 		cursor = nil
 	}
