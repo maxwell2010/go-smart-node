@@ -50,6 +50,10 @@ func seedNativeCustomCollateralGenesis(t *testing.T, e isolatedBackendEnv, profi
 	bootstrapData, err := bootstrap.ABI.Pack("bootstrapConfigured", e.govOwner, centerImpl, centerInit, [][]byte{tokenLogic})
 	require.NoError(t, err)
 	centerAddress := e.deploy(proxy, e.setup, bootstrapData)
+	converter.Runtime, err = contracts.ExpectedRuntime("MintCandyCurveConverter", nil, map[string]common.Hash{
+		"MintCandyCurveConverter.sol:MintCandyCurveConverter.REGISTRY": common.BytesToHash(profile.Registry.Bytes()),
+	})
+	require.NoError(t, err)
 	converterAddress := e.deploy(converter, profile.Registry)
 	gov(registry, profile.Registry, "setContractAddress", "token-center", centerAddress)
 	gov(registry, profile.Registry, "setContractAddress", "curve-converter", converterAddress)
