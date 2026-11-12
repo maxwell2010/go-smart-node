@@ -26,21 +26,6 @@ type GatewayNFTPosition struct {
 	Lineage   nfttypes.IsolatedPositionLineage
 }
 
-func (k *StateKeeper) gatewayNFTProjection(ctx sdk.Context, position GatewayNFTPosition) (types.Delegation, types.EVMStakeBinding, error) {
-	if position.Companion.PenaltyCursor != (common.Hash{}) {
-		_, _, err := position.Companion.nativePair()
-		return types.Delegation{}, types.EVMStakeBinding{}, err
-	}
-	delegation, row, err := k.gatewayNFTState(ctx, position, common.Hash{})
-	if err != nil {
-		return delegation, row, err
-	}
-	if !row.ReportedReserveAmount.IsPositive() {
-		return types.Delegation{}, types.EVMStakeBinding{}, errors.New("invalid Gateway NFT stake or unsupported isolated position")
-	}
-	return delegation, row, nil
-}
-
 func (k *StateKeeper) gatewayNFTState(ctx sdk.Context, position GatewayNFTPosition, cursor common.Hash) (types.Delegation, types.EVMStakeBinding, error) {
 	var delegation types.Delegation
 	var row types.EVMStakeBinding
@@ -121,11 +106,19 @@ func gatewayNFTCompanionMutation(ctx sdk.Context, companion GatewayDELStake, pre
 // the owner's direct DEL stake. The caller admits the NFT lineage in the same
 // outer transaction cache.
 func (k *StateKeeper) ApplyGatewayNFTDelegation(ctx sdk.Context, position GatewayNFTPosition) error {
-	delegation, row, err := k.gatewayNFTProjection(ctx, position)
+	companion := position.Companion
+	delegation, row, err := k.gatewayNFTState(ctx, position, companion.PenaltyCursor)
 	if err != nil {
 		return err
 	}
-	companion := position.Companion
+	if !row.ReportedReserveAmount.IsPositive() {
+		return errors.New("Gateway NFT delegation requires a positive reserve")
+	}
+	if companion.PenaltyCursor != (common.Hash{}) {
+		if err := k.requireRecoveredGatewayValidator(ctx, delegation.Validator); err != nil {
+			return err
+		}
+	}
 	backed := companion.nftBackedAmount()
 	if backed.LT(row.ReportedReserveAmount) {
 		return errors.New("Gateway NFT deposit exceeds the companion backing")

@@ -190,14 +190,21 @@ func (k *StateKeeper) ApplyRecoveredGatewayDELDelegation(ctx sdk.Context, next G
 	if err != nil {
 		return err
 	}
+	if err := k.requireRecoveredGatewayValidator(ctx, operator); err != nil {
+		return err
+	}
+	return k.applyGatewayDELDelegation(ctx, next, deposited, owner, operator)
+}
+
+func (k *StateKeeper) requireRecoveredGatewayValidator(ctx sdk.Context, operator string) error {
 	validator, err := k.GetValidator(ctx, operator)
 	if err != nil {
 		return err
 	}
 	if validator.Jailed || !validator.Online {
-		return errors.New("recovered DEL delegation requires an online unjailed native validator")
+		return errors.New("recovered Gateway delegation requires an online unjailed native validator")
 	}
-	return k.applyGatewayDELDelegation(ctx, next, deposited, owner, operator)
+	return nil
 }
 
 func (k *StateKeeper) applyGatewayDELDelegation(ctx sdk.Context, next GatewayDELStake, deposited sdkmath.Int, owner, operator string) error {

@@ -39,7 +39,11 @@ func (c *withdrawalController) isNFTStakeCall(msg core.Message) bool {
 func (c *withdrawalController) projectSignedNFT(ctx sdk.Context, msg core.Message, receipt *ethtypes.Receipt) error {
 	child, commit := ctx.CacheContext()
 	if bytes.Equal(msg.Data[:4], c.abi.Methods["delegateNFT1155"].ID) {
-		proof, err := c.executor.VerifySignedNFTIsolation(child, msg, receipt)
+		verify := c.executor.VerifySignedNFTIsolation
+		if c.profile.EnableNativeNFTDowntime {
+			verify = c.executor.VerifySignedNFTIsolationWithDowntime
+		}
+		proof, err := verify(child, msg, receipt)
 		if err != nil {
 			return fmt.Errorf("verify signed NFT isolation: %w", err)
 		}

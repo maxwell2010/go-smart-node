@@ -117,7 +117,7 @@ func (e *Executor) verifySignedDEL(ctx sdk.Context, msg core.Message, receipt *e
 	out.Amount = sdkmath.NewIntFromBigInt(amount)
 	out.StakeID = crypto.Keccak256Hash(out.Validator.Bytes(), out.Beneficiary.Bytes(), e.roles.WrappedDEL.Bytes(), tokenID[:], holdWord[:])
 	var logs []*ethtypes.Log
-	var depositReceipt downtimeDELDepositReceipt
+	var depositReceipt downtimeDepositReceipt
 	if downtimeDeposit {
 		depositReceipt, err = e.verifyDowntimeDELDepositReceipt(ctx, receipt, out)
 		if err != nil {
@@ -188,8 +188,7 @@ func (e *Executor) verifySignedDEL(ctx sdk.Context, msg core.Message, receipt *e
 		return out, errors.New("Gateway position is smaller than the DEL deposit")
 	}
 	isNew := deposit && gross.Cmp(amount) == 0
-	if downtimeDeposit && (depositReceipt.emptyStakeAcknowledged && !isNew ||
-		!isNew && depositReceipt.reserveCursor != depositReceipt.cursor) {
+	if downtimeDeposit && !depositReceipt.validatesPosition(isNew) {
 		return out, errors.New("DEL deposit did not prove the exact caught-up active position")
 	}
 	if isNew && holdArg >= 0 && out.HoldStartTime != ctx.BlockTime().Unix() {
