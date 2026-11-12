@@ -204,15 +204,9 @@ func (e *Executor) activePenaltyIdentity(ctx sdk.Context, row validatortypes.EVM
 }
 
 func (e *Executor) verifyAnnouncedPenalty(ctx sdk.Context, validator common.Address, before, after common.Hash, percentage uint16) (common.Hash, error) {
-	state, err := e.read(ctx, e.roles.MasterValidator, e.master, "getValidatorState", 3*common.HashLength, validator)
+	status, err := e.verifyMasterPenaltyState(ctx, validator, after)
 	if err != nil {
 		return common.Hash{}, err
-	}
-	status := common.BytesToHash(state[:common.HashLength])
-	if (status != smallWord(1) && status != smallWord(2)) ||
-		common.BytesToHash(state[common.HashLength:2*common.HashLength]) != smallWord(1) ||
-		common.BytesToHash(state[2*common.HashLength:]) != after {
-		return common.Hash{}, errors.New("DEL penalty requires a paused validator and exactly one pending MasterValidator entry")
 	}
 	page, err := e.read(ctx, e.roles.MasterValidator, e.master, "getPenaltiesRange", 3*common.HashLength, validator, before.Big(), big.NewInt(1))
 	if err != nil {
