@@ -88,6 +88,18 @@ contract NewNetworkMasterValidator is DecimalMasterValidator {
         if (height != 0) percentage = penalties[penaltyIndex];
     }
 
+    /// @notice Verifies the precise pending entry consumed by historical settlement.
+    function requirePendingDuplicateVotePenalty(address validator, uint256 cursor, uint256 infractionHeight) external view returns (uint256 count) {
+        Validator storage state = _getValidatorStorage()._validators[validator];
+        count = state.penaltyPercantages.length;
+        if ((state.status != ValidatorStatus.Candidate && state.status != ValidatorStatus.Approved) || !state.paused ||
+            count <= cursor || count - cursor != 1 || infractionHeight == 0 ||
+            _duplicateVoteStorage().heightByIndex[validator][cursor] != infractionHeight ||
+            state.penaltyPercantages[cursor] != DUPLICATE_VOTE_PERCENTAGE) {
+            revert InvalidDuplicateVotePenalty();
+        }
+    }
+
     function getPenaltiesRange(
         address validator,
         uint256 start,

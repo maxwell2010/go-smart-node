@@ -1,9 +1,9 @@
 {
-  "patchLabel": "mintcandy-historical-del-penalty-2",
+  "patchLabel": "mintcandy-historical-del-penalty-3",
   "canonicalSource": "sources/DecimalDelegation.sol",
   "canonicalSha256": "4478ab6d8b4a7feb230d70715c72f3be816fdbfd0efe7743e3572cfd4ce010c2",
   "ownedSource": "owned/DecimalDelegation.sol",
-  "ownedSha256": "8adad145747159b9ca7305ba9b238ef7a3ee78ed527babb42940e9b55bdf2924",
+  "ownedSha256": "7717bd687f45bb4cfb80cf4b59e3cb33a376ba8296f9f9ee15e85fa04349b55c",
   "changedFunctions": [
     "DelegationNFTLib._applyPenaltiesToStake",
     "DecimalDelegation._applyPenaltiesToStake",
@@ -56,7 +56,6 @@
     "DelegationNFTLib.completeWithdrawal",
     "DecimalDelegation._completeWithdraw",
     "DelegationNFTLib._realizeCoinStakePenalty",
-    "DelegationNFTLib._requireHistoricalPenalty",
     "DelegationNFTLib.applyHistoricalPenaltyToDELStake",
     "MintCandyIsolatedDelegation.applyHistoricalPenaltyToDELStake",
     "DelegationNFTLib._realizeFrozenDELPenalty",

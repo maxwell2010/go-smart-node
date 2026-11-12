@@ -2750,7 +2750,7 @@ interface IPagedDecimalMasterValidator {
     function getValidatorState(address validator) external view returns (uint8 status, bool paused, uint256 penaltyCount);
     function getPenaltyCount(address validator) external view returns (uint256);
     function getPenaltiesRange(address validator, uint256 start, uint256 limit) external view returns (uint16[] memory);
-    function getDuplicateVotePenalty(address validator, uint256 penaltyIndex) external view returns (uint256 height, uint16 percentage);
+    function requirePendingDuplicateVotePenalty(address validator, uint256 cursor, uint256 infractionHeight) external view returns (uint256);
 }
 
 interface IDecimalDelegationCommon {
@@ -4180,7 +4180,8 @@ library DelegationNFTLib {
             eligibleAmount > claim.stake.amount || (checkpoint.creationHeight < infractionHeight && eligibleAmount != 0)) {
             revert InvalidHistoricalPenalty();
         }
-        uint256 count = _requireHistoricalPenalty($, claim.stake.validator, checkpoint.penaltyCursor, infractionHeight);
+        uint256 count = IPagedDecimalMasterValidator(address(_masterValidator($))).requirePendingDuplicateVotePenalty(
+            claim.stake.validator, checkpoint.penaltyCursor, infractionHeight);
         checkpoint.penaltyCursor = count;
         _realizeFrozenDELPenalty($, claim, index, count, infractionHeight, eligibleAmount / 20, eligibleAmount != 0);
     }
@@ -4695,24 +4696,9 @@ library DelegationNFTLib {
             revert InvalidHistoricalPenalty();
         }
         uint256 cursor = getStakePenaltyIndex($, stakeId);
-        uint256 count = _requireHistoricalPenalty($, stake.validator, cursor, infractionHeight);
+        uint256 count = IPagedDecimalMasterValidator(address(_masterValidator($))).requirePendingDuplicateVotePenalty(
+            stake.validator, cursor, infractionHeight);
         _realizeCoinStakePenalty($, stake, stakeId, count, eligibleAmount / 20);
-    }
-
-    function _requireHistoricalPenalty(
-        IDecimalDelegationCommon.DelegationStorage storage $,
-        address validator,
-        uint256 cursor,
-        uint256 infractionHeight
-    ) private view returns (uint256 count) {
-        IPagedDecimalMasterValidator master = IPagedDecimalMasterValidator(address(_masterValidator($)));
-        (uint8 status, bool paused, uint256 actualCount) = master.getValidatorState(validator);
-        if ((status != 1 && status != 2) || !paused || actualCount <= cursor || actualCount - cursor != 1) {
-            revert InvalidHistoricalPenalty();
-        }
-        (uint256 recordedHeight, uint16 percentage) = master.getDuplicateVotePenalty(validator, cursor);
-        if (recordedHeight == 0 || recordedHeight != infractionHeight || percentage != 5) revert InvalidHistoricalPenalty();
-        return actualCount;
     }
 
     function _applyPenaltiesToStake(
