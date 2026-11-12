@@ -20,7 +20,7 @@ import (
 func (k *StateKeeper) ApplyGatewayFrozenNFTPenalty(ctx sdk.Context, nft *nftkeeper.StateKeeper, before types.EVMFrozenBinding,
 	infractionHeight int64, oldCursor, newCursor common.Hash, remaining sdkmath.Int,
 ) error {
-	return k.applyGatewayFrozenNFTPenalty(ctx, nft, before, infractionHeight, oldCursor, newCursor, remaining, nil)
+	return k.applyGatewayFrozenNFTPenalty(ctx, nft, before, infractionHeight, oldCursor, newCursor, remaining, frozenPenaltyRegular, false)
 }
 
 // ApplyGatewayFrozenHistoricalNFTPenalty projects the exact historical loss
@@ -29,11 +29,20 @@ func (k *StateKeeper) ApplyGatewayFrozenNFTPenalty(ctx sdk.Context, nft *nftkeep
 func (k *StateKeeper) ApplyGatewayFrozenHistoricalNFTPenalty(ctx sdk.Context, nft *nftkeeper.StateKeeper, before types.EVMFrozenBinding,
 	infractionHeight int64, oldCursor, newCursor common.Hash, remaining sdkmath.Int, eligible bool,
 ) error {
-	return k.applyGatewayFrozenNFTPenalty(ctx, nft, before, infractionHeight, oldCursor, newCursor, remaining, &eligible)
+	return k.applyGatewayFrozenNFTPenalty(ctx, nft, before, infractionHeight, oldCursor, newCursor, remaining, frozenPenaltyHistorical, eligible)
+}
+
+// ApplyGatewayCustodiedNFTCheckpoint acknowledges one verified ordinary
+// penalty on a mature claim created before the infraction. Its NFT and
+// reserve stay in custody until the claim can be withdrawn.
+func (k *StateKeeper) ApplyGatewayCustodiedNFTCheckpoint(ctx sdk.Context, nft *nftkeeper.StateKeeper, before types.EVMFrozenBinding,
+	infractionHeight int64, oldCursor, newCursor common.Hash,
+) error {
+	return k.applyGatewayFrozenNFTPenalty(ctx, nft, before, infractionHeight, oldCursor, newCursor, before.ReportedReserveAmount, frozenPenaltyCustodiedCheckpoint, false)
 }
 
 func (k *StateKeeper) applyGatewayFrozenNFTPenalty(ctx sdk.Context, nft *nftkeeper.StateKeeper, before types.EVMFrozenBinding,
-	infractionHeight int64, oldCursor, newCursor common.Hash, remaining sdkmath.Int, historicalEligibility *bool,
+	infractionHeight int64, oldCursor, newCursor common.Hash, remaining sdkmath.Int, mode frozenPenaltyMode, eligible bool,
 ) error {
 	if err := before.Validate(); err != nil {
 		return err
@@ -80,17 +89,22 @@ func (k *StateKeeper) applyGatewayFrozenNFTPenalty(ctx sdk.Context, nft *nftkeep
 	entry := &pending.Entries[i]
 	exactQueueEntry := entry.CreationHeight == before.CreatedHeight && len(entry.Stake.Holds) == 0 &&
 		entry.Stake.Stake.Denom == identity.BaseDenom && entry.Stake.Stake.Amount.Equal(before.ReportedReserveAmount)
-	if historicalEligibility == nil && (!exactQueueEntry || !entry.CompletionTime.After(ctx.BlockTime())) {
+	if mode == frozenPenaltyRegular && (!exactQueueEntry || !entry.CompletionTime.After(ctx.BlockTime())) {
 		return errors.New("frozen NFT penalty requires the exact unmatured NFT queue entry and reserve")
 	}
 	if !exactQueueEntry {
 		return errors.New("frozen NFT historical penalty requires the exact NFT queue entry and reserve")
 	}
+	if mode == frozenPenaltyCustodiedCheckpoint {
+		if err := checkMatureCustodiedCheckpoint(entry, infractionHeight, ctx.BlockTime()); err != nil {
+			return err
+		}
+	}
 	loss := before.ReportedReserveAmount.Sub(remaining)
 	if entry.CreationHeight < infractionHeight && !loss.IsZero() {
 		return errors.New("frozen NFT claim predates the infraction")
 	}
-	if historicalEligibility != nil {
+	if mode != frozenPenaltyRegular {
 		if err := k.checkBindingDomain(child); err != nil {
 			return err
 		}
@@ -105,7 +119,7 @@ func (k *StateKeeper) applyGatewayFrozenNFTPenalty(ctx sdk.Context, nft *nftkeep
 		if err != nil {
 			return err
 		}
-		if plan.Eligible != *historicalEligibility || !plan.Remaining.Equal(remaining) {
+		if plan.Eligible != eligible || !plan.Remaining.Equal(remaining) {
 			return errors.New("frozen NFT penalty differs from the historical exposure")
 		}
 	}
