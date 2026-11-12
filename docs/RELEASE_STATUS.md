@@ -112,6 +112,22 @@ Replaying height 56 produced the same AppHash as the primary upgrade.
 Both candidates use the same SDK and IBC dependency family.
 [Cross-version IBC and restore](https://github.com/maxwell2010/go-smart-node/actions/runs/43217877949)
 
+The isolated launch rehearsal on `aafd22b` validated the fresh genesis and
+started three validators with voting power 4/4/2 from the exact packaged
+Linux amd64 daemon. All three signed blocks. An ordinary peer with a new
+home joined when the validators reached height 8 and synchronized from
+block 1 over P2P. All four agreed on AppHash at height 12 and returned the
+same DEL balance through EVM JSON-RPC and Cosmos REST. The public rehearsal
+artifact binds the genesis SHA256 to the allocation and network reports.
+The bank allocation totals 49,787.680854 DEL, including 10 DEL backing the
+initial stake in WDEL and 10 DEL backing the test DRC20. The fixture has
+deterministic CI identities and loopback endpoints for the private runner.
+The public launch still requires approved allocations, operator identities,
+and independently operated bootstrap and RPC endpoints.
+[Linux module and cold genesis checks](https://github.com/maxwell2010/go-smart-node/actions/runs/43221565437)
+[Packaged launch](https://github.com/maxwell2010/go-smart-node/actions/runs/43221986446)
+[Launch evidence](https://github.com/maxwell2010/go-smart-node/actions/runs/43221986446/artifacts/13946004522)
+
 ## Separate release tracks
 
 The selected architecture is a fresh network on a maintained modern stack,
