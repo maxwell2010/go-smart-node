@@ -26,6 +26,20 @@ type GatewayNFTPenalty struct {
 // commits the projection in the same outer cache. This method does not burn
 // funds, change effective Comet power or touch queued withdrawals.
 func (k *StateKeeper) ApplyGatewayNFTPenalty(ctx sdk.Context, nft *nftkeeper.StateKeeper, penalty GatewayNFTPenalty) error {
+	return k.applyGatewayNFTPenalty(ctx, nft, penalty, 0, nil)
+}
+
+// ApplyGatewayActiveHistoricalNFTPenalty projects the exact historical loss
+// from one active isolated NFT in the same cache as its verified EVM debit.
+func (k *StateKeeper) ApplyGatewayActiveHistoricalNFTPenalty(ctx sdk.Context, nft *nftkeeper.StateKeeper, penalty GatewayNFTPenalty,
+	infractionHeight int64, eligible bool,
+) error {
+	return k.applyGatewayNFTPenalty(ctx, nft, penalty, infractionHeight, &eligible)
+}
+
+func (k *StateKeeper) applyGatewayNFTPenalty(ctx sdk.Context, nft *nftkeeper.StateKeeper, penalty GatewayNFTPenalty,
+	infractionHeight int64, historicalEligibility *bool,
+) error {
 	if nft == nil || ctx.BlockHeight() <= 0 || penalty.RemainingReserve.IsNil() || penalty.RemainingReserve.IsNegative() {
 		return errors.New("invalid active isolated NFT penalty projection")
 	}
@@ -71,6 +85,15 @@ func (k *StateKeeper) ApplyGatewayNFTPenalty(ctx sdk.Context, nft *nftkeeper.Sta
 	}
 	if !previous.Stake.Equal(delegation.Stake) {
 		return errors.New("isolated NFT penalty differs from the active native delegation")
+	}
+	if historicalEligibility != nil {
+		plan, err := k.planActiveNFTHistoricalPenalty(child, active, infractionHeight)
+		if err != nil {
+			return err
+		}
+		if plan.Eligible != *historicalEligibility || !plan.Remaining.Equal(penalty.RemainingReserve) {
+			return errors.New("active NFT penalty differs from the historical exposure")
+		}
 	}
 	reserve, err := k.GetActiveDELReserve(child, operator)
 	if err != nil {

@@ -20,6 +20,21 @@ import (
 func (k *StateKeeper) ApplyGatewayFrozenNFTPenalty(ctx sdk.Context, nft *nftkeeper.StateKeeper, before types.EVMFrozenBinding,
 	infractionHeight int64, oldCursor, newCursor common.Hash, remaining sdkmath.Int,
 ) error {
+	return k.applyGatewayFrozenNFTPenalty(ctx, nft, before, infractionHeight, oldCursor, newCursor, remaining, nil)
+}
+
+// ApplyGatewayFrozenHistoricalNFTPenalty projects the exact historical loss
+// on a still-custodied NFT. Nominal maturity only controls withdrawal, so a
+// mature claim that still has its native queue entry remains eligible.
+func (k *StateKeeper) ApplyGatewayFrozenHistoricalNFTPenalty(ctx sdk.Context, nft *nftkeeper.StateKeeper, before types.EVMFrozenBinding,
+	infractionHeight int64, oldCursor, newCursor common.Hash, remaining sdkmath.Int, eligible bool,
+) error {
+	return k.applyGatewayFrozenNFTPenalty(ctx, nft, before, infractionHeight, oldCursor, newCursor, remaining, &eligible)
+}
+
+func (k *StateKeeper) applyGatewayFrozenNFTPenalty(ctx sdk.Context, nft *nftkeeper.StateKeeper, before types.EVMFrozenBinding,
+	infractionHeight int64, oldCursor, newCursor common.Hash, remaining sdkmath.Int, historicalEligibility *bool,
+) error {
 	if err := before.Validate(); err != nil {
 		return err
 	}
@@ -63,13 +78,36 @@ func (k *StateKeeper) ApplyGatewayFrozenNFTPenalty(ctx sdk.Context, nft *nftkeep
 		return err
 	}
 	entry := &pending.Entries[i]
-	if entry.CreationHeight != before.CreatedHeight || !entry.CompletionTime.After(ctx.BlockTime()) || len(entry.Stake.Holds) != 0 ||
-		entry.Stake.Stake.Denom != identity.BaseDenom || !entry.Stake.Stake.Amount.Equal(before.ReportedReserveAmount) {
+	exactQueueEntry := entry.CreationHeight == before.CreatedHeight && len(entry.Stake.Holds) == 0 &&
+		entry.Stake.Stake.Denom == identity.BaseDenom && entry.Stake.Stake.Amount.Equal(before.ReportedReserveAmount)
+	if historicalEligibility == nil && (!exactQueueEntry || !entry.CompletionTime.After(ctx.BlockTime())) {
 		return errors.New("frozen NFT penalty requires the exact unmatured NFT queue entry and reserve")
+	}
+	if !exactQueueEntry {
+		return errors.New("frozen NFT historical penalty requires the exact NFT queue entry and reserve")
 	}
 	loss := before.ReportedReserveAmount.Sub(remaining)
 	if entry.CreationHeight < infractionHeight && !loss.IsZero() {
 		return errors.New("frozen NFT claim predates the infraction")
+	}
+	if historicalEligibility != nil {
+		if err := k.checkBindingDomain(child); err != nil {
+			return err
+		}
+		if err := k.requireNFTHistoricalProvenance(child); err != nil {
+			return err
+		}
+		provenance, err := k.readGatewayFrozenNFTProvenance(child, before)
+		if err != nil {
+			return err
+		}
+		plan, err := planFrozenNFTHistoricalPenalty(before, provenance.stakeEntryHeight, infractionHeight)
+		if err != nil {
+			return err
+		}
+		if plan.Eligible != *historicalEligibility || !plan.Remaining.Equal(remaining) {
+			return errors.New("frozen NFT penalty differs from the historical exposure")
+		}
 	}
 	// The binding already contains the exact archived unit and reserve
 	// identity. Derive the expected lineage from it so the NFT keeper reads

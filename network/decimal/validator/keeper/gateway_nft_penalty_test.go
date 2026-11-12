@@ -20,6 +20,11 @@ import (
 
 func gatewayNFTPenaltyFixture(t *testing.T) (sdk.Context, store.KVStoreService, *StateKeeper, *nftkeeper.StateKeeper, GatewayNFTPosition, GatewayNFTPosition) {
 	t.Helper()
+	return gatewayNFTPenaltyFixtureWithReserves(t, 5, 7, 10)
+}
+
+func gatewayNFTPenaltyFixtureWithReserves(t *testing.T, firstReserve, secondReserve, secondEntryHeight int64) (sdk.Context, store.KVStoreService, *StateKeeper, *nftkeeper.StateKeeper, GatewayNFTPosition, GatewayNFTPosition) {
+	t.Helper()
 	nftKey, validatorKey := storetypes.NewKVStoreKey("nft-penalty"), storetypes.NewKVStoreKey("validator-penalty")
 	ctx := testutil.DefaultContextWithKeys(map[string]*storetypes.KVStoreKey{"nft": nftKey, "validator": validatorKey}, nil, nil).
 		WithChainID(bindingTestChain).WithBlockHeight(10).WithBlockTime(time.Unix(2000, 0).UTC())
@@ -31,11 +36,12 @@ func gatewayNFTPenaltyFixture(t *testing.T) (sdk.Context, store.KVStoreService, 
 	require.NoError(t, k.InitGenesis(ctx, bindingGenesisState(t, false)))
 	companion := gatewayDELFixture()
 	require.NoError(t, k.ApplyGatewayDELDelegation(ctx, companion, companion.Amount))
-	companion.NFTBacked = sdkmath.NewInt(5)
-	first := gatewayNFTFixture(t, companion, 1, 5, []uint32{1})
-	companion.NFTBacked = sdkmath.NewInt(12)
-	second := gatewayNFTFixture(t, companion, 2, 7, []uint32{2})
+	companion.NFTBacked = sdkmath.NewInt(firstReserve)
+	first := gatewayNFTFixture(t, companion, 1, firstReserve, []uint32{1})
 	require.NoError(t, k.ApplyGatewayNFTDelegation(ctx, first))
+	ctx = ctx.WithBlockTime(ctx.BlockTime().Add(time.Duration(secondEntryHeight-ctx.BlockHeight()) * time.Second)).WithBlockHeight(secondEntryHeight)
+	companion.NFTBacked = companion.NFTBacked.AddRaw(secondReserve)
+	second := gatewayNFTFixture(t, companion, 2, secondReserve, []uint32{2})
 	require.NoError(t, k.ApplyGatewayNFTDelegation(ctx, second))
 
 	creator := addr(t, identity.Bech32PrefixAccAddr, 9)
@@ -44,7 +50,7 @@ func gatewayNFTPenaltyFixture(t *testing.T) (sdk.Context, store.KVStoreService, 
 	nextPosition := common.BytesToHash([]byte{3})
 	nextPosition[5] = 1
 	originToken := &nfttypes.Token{Creator: creator, Denom: "origins", ID: origin.OriginNativeTokenID, URI: "ipfs://origin",
-		Reserve: sdk.NewInt64Coin(identity.BaseDenom, 7), Minted: 2, Burnt: 2}
+		Reserve: sdk.NewInt64Coin(identity.BaseDenom, secondReserve), Minted: 2, Burnt: 2}
 	receipts := nfttypes.Collection{Creator: creator, Denom: "positions", Supply: 2, TypeNft: nfttypes.NftType_NFT721,
 		AddressDRC: common.BytesToAddress(origin.Vault).Hex()}
 	g := nfttypes.DefaultGenesisState()

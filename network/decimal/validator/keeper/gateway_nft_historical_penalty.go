@@ -24,27 +24,16 @@ type NFTHistoricalPenaltyPlan struct {
 // PlanActiveNFTHistoricalPenalty uses the immutable entry height of an
 // ordinary isolated receipt in a network initialized with fresh provenance.
 func (k *StateKeeper) PlanActiveNFTHistoricalPenalty(ctx sdk.Context, expected types.EVMStakeBinding, infractionHeight int64) (NFTHistoricalPenaltyPlan, error) {
-	if infractionHeight <= 0 || infractionHeight > ctx.BlockHeight() {
-		return NFTHistoricalPenaltyPlan{}, errors.New("invalid NFT infraction height")
-	}
 	if err := k.checkBindingDomain(ctx); err != nil {
 		return NFTHistoricalPenaltyPlan{}, err
-	}
-	enabled, err := k.NativeStakeProvenanceEnabled(ctx)
-	if err != nil {
-		return NFTHistoricalPenaltyPlan{}, err
-	}
-	if !enabled {
-		return NFTHistoricalPenaltyPlan{}, ErrNotFound
 	}
 	preimage, err := recordFromStake(&expected)
 	if err != nil {
 		return NFTHistoricalPenaltyPlan{}, err
 	}
-	if !expected.Active || expected.Kind != gatewayNFTBinding || expected.CreatedHeight <= 0 || expected.UpdatedHeight > ctx.BlockHeight() ||
-		common.BytesToHash(expected.HoldTimestamp) != (common.Hash{}) || expected.NativeTarget.StakeType != types.StakeType_NFT ||
-		!ordinaryGatewayNFTPosition(expected.NFTPosition, expected.ReserveAsset, expected.Beneficiary, expected.Validator, expected.StakeID) {
-		return NFTHistoricalPenaltyPlan{}, errors.New("NFT historical penalty requires an ordinary active Gateway receipt")
+	plan, err := k.planActiveNFTHistoricalPenalty(ctx, expected, infractionHeight)
+	if err != nil {
+		return NFTHistoricalPenaltyPlan{}, err
 	}
 	current, err := k.readBindingRow(ctx, preimage.key)
 	if err != nil {
@@ -73,6 +62,24 @@ func (k *StateKeeper) PlanActiveNFTHistoricalPenalty(ctx sdk.Context, expected t
 	if !delegation.Stake.Equal(stake) {
 		return NFTHistoricalPenaltyPlan{}, errors.New("native delegation differs from the active NFT historical penalty reserve or receipt")
 	}
+	return plan, nil
+}
+
+// The caller validates the binding and reconciles the exact native row and
+// delegation. Keeping those reads outside the common calculation also lets
+// the mutation path reuse the prestate it already checked.
+func (k *StateKeeper) planActiveNFTHistoricalPenalty(ctx sdk.Context, expected types.EVMStakeBinding, infractionHeight int64) (NFTHistoricalPenaltyPlan, error) {
+	if infractionHeight <= 0 || infractionHeight > ctx.BlockHeight() {
+		return NFTHistoricalPenaltyPlan{}, errors.New("invalid NFT infraction height")
+	}
+	if err := k.requireNFTHistoricalProvenance(ctx); err != nil {
+		return NFTHistoricalPenaltyPlan{}, err
+	}
+	if !expected.Active || expected.Kind != gatewayNFTBinding || expected.CreatedHeight <= 0 || expected.UpdatedHeight > ctx.BlockHeight() ||
+		common.BytesToHash(expected.HoldTimestamp) != (common.Hash{}) || expected.NativeTarget.StakeType != types.StakeType_NFT ||
+		!ordinaryGatewayNFTPosition(expected.NFTPosition, expected.ReserveAsset, expected.Beneficiary, expected.Validator, expected.StakeID) {
+		return NFTHistoricalPenaltyPlan{}, errors.New("NFT historical penalty requires an ordinary active Gateway receipt")
+	}
 	return planNFTHistoricalPenalty(expected.ReportedReserveAmount, expected.CreatedHeight < infractionHeight), nil
 }
 
@@ -87,11 +94,26 @@ func (k *StateKeeper) PlanFrozenNFTHistoricalPenalty(ctx sdk.Context, expected t
 	if err != nil {
 		return NFTHistoricalPenaltyPlan{}, err
 	}
+	return planFrozenNFTHistoricalPenalty(expected, entryHeight, infractionHeight)
+}
+
+func planFrozenNFTHistoricalPenalty(expected types.EVMFrozenBinding, entryHeight, infractionHeight int64) (NFTHistoricalPenaltyPlan, error) {
 	if !ordinaryGatewayNFTPosition(expected.NFTPosition, expected.ReserveAsset, expected.Beneficiary, expected.SourceValidator, expected.SourceStakeID) {
 		return NFTHistoricalPenaltyPlan{}, errors.New("NFT historical penalty requires an ordinary frozen Gateway receipt")
 	}
 	eligible := entryHeight < infractionHeight && infractionHeight <= expected.CreatedHeight
 	return planNFTHistoricalPenalty(expected.ReportedReserveAmount, eligible), nil
+}
+
+func (k *StateKeeper) requireNFTHistoricalProvenance(ctx sdk.Context) error {
+	enabled, err := k.NativeStakeProvenanceEnabled(ctx)
+	if err != nil {
+		return err
+	}
+	if !enabled {
+		return ErrNotFound
+	}
+	return nil
 }
 
 func ordinaryGatewayNFTPosition(position *types.NFTPositionIdentity, asset *types.EVMReserveAsset, beneficiary, validator, stakeID []byte) bool {
