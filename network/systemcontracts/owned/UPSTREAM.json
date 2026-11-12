@@ -1,9 +1,9 @@
 {
-  "patchLabel": "mintcandy-frozen-held-del-penalty-5",
+  "patchLabel": "mintcandy-frozen-nft-penalty-6",
   "canonicalSource": "sources/DecimalDelegation.sol",
   "canonicalSha256": "4478ab6d8b4a7feb230d70715c72f3be816fdbfd0efe7743e3572cfd4ce010c2",
   "ownedSource": "owned/DecimalDelegation.sol",
-  "ownedSha256": "d37a66de7b3c9b7f10ac24139c7ad6f015fea375de1b203db5e823c649175d19",
+  "ownedSha256": "f531d6ae757e60ad7ce0098d7ad6c8c52d63932576f6561a68d5982c29622005",
   "changedFunctions": [
     "DelegationNFTLib._applyPenaltiesToStake",
     "DecimalDelegation._applyPenaltiesToStake",
@@ -48,6 +48,8 @@
     "DelegationNFTLib.checkpointFrozenDELWithdrawal",
     "DelegationNFTLib.applyFrozenDELPenalty",
     "DelegationNFTLib._isFrozenDEL",
+    "DelegationNFTLib._frozenNFTReserve",
+    "DelegationNFTLib.withdrawNFT",
     "MintCandyIsolatedDelegation._checkpointFrozenDELWithdrawal",
     "MintCandyIsolatedDelegation.getFrozenDELCheckpoint",
     "MintCandyIsolatedDelegation.applyFrozenDELPenalty",
