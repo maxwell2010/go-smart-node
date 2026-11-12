@@ -235,6 +235,9 @@ func (k *StateKeeper) applyGatewayDELDelegation(ctx sdk.Context, next GatewayDEL
 			return err
 		}
 	}
+	if err := k.recordDELProvenanceDeposit(child, next, previous, &delegation, deposited); err != nil {
+		return err
+	}
 	if err := k.ApplyDelegationBatch(child, []DelegationChange{{Expected: previous, Next: &delegation}}); err != nil {
 		return err
 	}
@@ -330,6 +333,9 @@ func (k *StateKeeper) applyGatewayDELWithdrawal(ctx sdk.Context, next GatewayDEL
 	}
 	plan, err := k.PrepareBindingPlan(child, []BindingMutation{mutation, {Frozen: &frozen}})
 	if err != nil {
+		return err
+	}
+	if err := k.recordDELProvenanceWithdrawal(child, next, frozen, stake, change); err != nil {
 		return err
 	}
 	if err := k.ApplyDelegationBatch(child, []DelegationChange{change}); err != nil {

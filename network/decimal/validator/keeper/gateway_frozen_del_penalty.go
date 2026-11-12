@@ -111,6 +111,12 @@ func (k *StateKeeper) applyGatewayFrozenDELPenalty(ctx sdk.Context, before types
 	if entry.CreationHeight < infractionHeight && !loss.IsZero() {
 		return errors.New("frozen DEL claim predates the infraction")
 	}
+	previousHolds := entry.Stake.Holds
+	var nextHolds []*types.StakeHold
+	var holdDeadline int64
+	if hold != nil {
+		holdDeadline = hold.HoldDeadline
+	}
 	after := before
 	after.RawAmount, after.UpdatedHeight = remaining, ctx.BlockHeight()
 	if remaining.IsZero() {
@@ -130,6 +136,12 @@ func (k *StateKeeper) applyGatewayFrozenDELPenalty(ctx sdk.Context, before types
 		if err != nil {
 			return err
 		}
+	}
+	if remaining.IsPositive() {
+		nextHolds = entry.Stake.Holds
+	}
+	if err := k.recordFrozenDELProvenancePenalty(child, before, loss, holdDeadline, previousHolds, nextHolds); err != nil {
+		return err
 	}
 	pair, err := encodeWithdrawalPair(pending)
 	if err != nil {

@@ -57,6 +57,9 @@ func (k *StateKeeper) ApplyGatewayDELHoldReset(ctx sdk.Context, held, ordinary G
 	if err != nil {
 		return err
 	}
+	if err := k.recordDELProvenanceHoldReset(child, held, ordinary, moved, previousHeld, previousPlain); err != nil {
+		return err
+	}
 	if err := k.ApplyDelegationBatch(child, []DelegationChange{{Expected: previousHeld, Next: nextHeld}, {Expected: previousPlain, Next: &nextPlain}}); err != nil {
 		return err
 	}

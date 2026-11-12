@@ -83,6 +83,9 @@ func (k *StateKeeper) applyGatewayDELPenalty(ctx sdk.Context, before GatewayDELS
 	if err != nil {
 		return err
 	}
+	if err := k.recordActiveDELProvenancePenalty(child, before, change, loss); err != nil {
+		return err
+	}
 	if loss.IsPositive() {
 		if err := k.ApplyDelegationBatch(child, []DelegationChange{change}); err != nil {
 			return err
