@@ -68,13 +68,24 @@ func PositionHash(position nativetypes.Delegation) ([32]byte, error) {
 	}
 	return sha256.Sum256(data), nil
 }
-func stateHash(ctx sdk.Context, g *nativetypes.GenesisState) ([32]byte, []byte, error) {
+
+type votingStateReader struct {
+	read   func(sdk.Context) (*nativetypes.GenesisState, error)
+	domain string
+}
+
+const (
+	exportVotingDomain    = "native-governance-tally-v1"
+	activeDELVotingDomain = "native-governance-active-del-v1"
+)
+
+func stateHash(ctx sdk.Context, domain string, g *nativetypes.GenesisState) ([32]byte, []byte, error) {
 	data, e := proto.Marshal(g)
 	if e != nil {
 		return [32]byte{}, nil, e
 	}
 	hash := sha256.New()
-	hash.Write([]byte("native-governance-tally-v1"))
+	hash.Write([]byte(domain))
 	var height [8]byte
 	binary.BigEndian.PutUint64(height[:], uint64(ctx.BlockHeight()))
 	hash.Write(height[:])
@@ -103,7 +114,7 @@ type votingDelegation struct {
 // Adapter is a frozen tally-time snapshot, not a proposal-creation snapshot.
 // Every SDK read verifies that its chain/height/native records still match.
 type Adapter struct {
-	native         *nativekeeper.StateKeeper
+	state          votingStateReader
 	chainID        string
 	height         int64
 	digest         [32]byte
@@ -117,7 +128,14 @@ type Adapter struct {
 }
 
 func Build(ctx sdk.Context, native *nativekeeper.StateKeeper, source WeightSource, powerScale sdkmath.Int) (*Adapter, error) {
-	if native == nil || source == nil {
+	if native == nil {
+		return nil, errors.New("native keeper and authoritative ownership source are required")
+	}
+	return build(ctx, votingStateReader{read: native.ExportGenesis, domain: exportVotingDomain}, source, powerScale)
+}
+
+func build(ctx sdk.Context, state votingStateReader, source WeightSource, powerScale sdkmath.Int) (*Adapter, error) {
+	if state.read == nil || source == nil {
 		return nil, errors.New("native keeper and authoritative ownership source are required")
 	}
 	value := reflect.ValueOf(source)
@@ -133,14 +151,14 @@ func Build(ctx sdk.Context, native *nativekeeper.StateKeeper, source WeightSourc
 	if ctx.BlockHeight() <= 0 || ctx.ChainID() == "" {
 		return nil, errors.New("tally context requires chain identity and positive height")
 	}
-	g, e := native.ExportGenesis(ctx)
+	g, e := state.read(ctx)
 	if e != nil {
 		return nil, e
 	}
 	if g.Params.BaseDenom != identity.BaseDenom {
 		return nil, errors.New("native governance requires del denomination")
 	}
-	digest, data, e := stateHash(ctx, g)
+	digest, data, e := stateHash(ctx, state.domain, g)
 	if e != nil {
 		return nil, e
 	}
@@ -158,11 +176,11 @@ func Build(ctx sdk.Context, native *nativekeeper.StateKeeper, source WeightSourc
 	if e != nil {
 		return nil, e
 	}
-	after, e := native.ExportGenesis(child)
+	after, e := state.read(child)
 	if e != nil {
 		return nil, e
 	}
-	afterHash, _, e := stateHash(child, after)
+	afterHash, _, e := stateHash(child, state.domain, after)
 	if e != nil {
 		return nil, e
 	}
@@ -240,7 +258,7 @@ func Build(ctx sdk.Context, native *nativekeeper.StateKeeper, source WeightSourc
 		}
 		expected[v.Validator] = v.Ownership
 	}
-	a := &Adapter{native: native, chainID: ctx.ChainID(), height: ctx.BlockHeight(), digest: digest, delegations: map[string][]votingDelegation{}, total: sdkmath.ZeroInt(), valuationID: weights.ValuationID, dependency: dependency, dependencyHash: dependencyHash, request: request}
+	a := &Adapter{state: state, chainID: ctx.ChainID(), height: ctx.BlockHeight(), digest: digest, delegations: map[string][]votingDelegation{}, total: sdkmath.ZeroInt(), valuationID: weights.ValuationID, dependency: dependency, dependencyHash: dependencyHash, request: request}
 	for _, v := range g.Validators {
 		power := v.ConsensusPower()
 		if power == 0 {
@@ -295,18 +313,18 @@ func Build(ctx sdk.Context, native *nativekeeper.StateKeeper, source WeightSourc
 }
 
 func (a *Adapter) guard(ctx context.Context) error {
-	if a == nil || a.native == nil {
+	if a == nil || a.state.read == nil {
 		return errors.New("native voting snapshot is not initialized")
 	}
 	s := sdk.UnwrapSDKContext(ctx)
 	if s.BlockHeight() != a.height || s.ChainID() != a.chainID {
 		return errors.New("native voting snapshot used outside its tally context")
 	}
-	g, e := a.native.ExportGenesis(s)
+	g, e := a.state.read(s)
 	if e != nil {
 		return e
 	}
-	digest, _, e := stateHash(s, g)
+	digest, _, e := stateHash(s, a.state.domain, g)
 	if e != nil {
 		return e
 	}

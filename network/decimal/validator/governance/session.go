@@ -19,7 +19,7 @@ import (
 // Sessions is immutable reader configuration. Weight snapshots live only in a
 // scoped SDK context, never on this long-lived object or in a global cache.
 type Sessions struct {
-	native *nativekeeper.StateKeeper
+	state  votingStateReader
 	source WeightSource
 	scale  sdkmath.Int
 	branch func(sdk.Context) any
@@ -38,7 +38,24 @@ type session struct {
 }
 
 func NewSessions(native *nativekeeper.StateKeeper, source WeightSource, scale sdkmath.Int, branch func(sdk.Context) any) (*Sessions, error) {
-	if native == nil || source == nil {
+	if native == nil {
+		return nil, errors.New("native keeper and ownership source are required")
+	}
+	return newSessions(votingStateReader{read: native.ExportGenesis, domain: exportVotingDomain}, source, scale, branch)
+}
+
+// NewActiveDELSessions uses the authenticated active ownership projection for
+// the DEL-only native network. The full export stays available to staged
+// consumers and custom ownership sources through NewSessions.
+func NewActiveDELSessions(native *nativekeeper.StateKeeper, scale sdkmath.Int, branch func(sdk.Context) any) (*Sessions, error) {
+	if native == nil {
+		return nil, errors.New("native keeper is required for active DEL voting")
+	}
+	return newSessions(votingStateReader{read: native.ReadActiveDELVotingState, domain: activeDELVotingDomain}, BaseReserveSource{}, scale, branch)
+}
+
+func newSessions(state votingStateReader, source WeightSource, scale sdkmath.Int, branch func(sdk.Context) any) (*Sessions, error) {
+	if state.read == nil || source == nil {
 		return nil, errors.New("native keeper and ownership source are required")
 	}
 	if branch == nil {
@@ -54,7 +71,7 @@ func NewSessions(native *nativekeeper.StateKeeper, source WeightSource, scale sd
 	if scale.IsNil() || !scale.IsPositive() {
 		return nil, errors.New("voting scale must be initialized and positive")
 	}
-	return &Sessions{native: native, source: source, scale: sdkmath.NewIntFromBigInt(scale.BigInt()), branch: branch}, nil
+	return &Sessions{state: state, source: source, scale: sdkmath.NewIntFromBigInt(scale.BigInt()), branch: branch}, nil
 }
 
 // Run scopes a sequence of canonical SDK tallies and commits its child SDK
@@ -69,7 +86,7 @@ func (r *Sessions) ReadOnly(ctx sdk.Context, fn func(sdk.Context) error) error {
 	return r.run(ctx, fn, false)
 }
 func (r *Sessions) run(ctx sdk.Context, fn func(sdk.Context) error, commit bool) error {
-	if r == nil || r.native == nil || fn == nil {
+	if r == nil || r.state.read == nil || fn == nil {
 		return errors.New("native voting session is not configured")
 	}
 	if ctx.BlockHeight() <= 0 || ctx.ChainID() == "" || ctx.MultiStore() == nil {
@@ -224,7 +241,7 @@ func (r *Sessions) IterateBondedValidatorsByPower(ctx context.Context, fn func(i
 	if fn == nil {
 		return h.finish(nil, false, errors.New("validator voting callback is missing"))
 	}
-	a, e := Build(s, r.native, r.source, r.scale)
+	a, e := build(s, r.state, r.source, r.scale)
 	if e == nil {
 		e = a.iterateValidators(fn)
 	}

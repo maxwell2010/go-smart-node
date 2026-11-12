@@ -31,7 +31,7 @@ func (app *App) usesNativeGovernance() bool {
 }
 
 func (app *App) newNativeGovernanceSessions() (*nativegov.Sessions, error) {
-	return nativegov.NewSessions(app.NativeValidatorKeeper, nativegov.BaseReserveSource{},
+	return nativegov.NewActiveDELSessions(app.NativeValidatorKeeper,
 		sdkmath.NewInt(nativekeeper.NativeDELAtomsPerPower), func(ctx sdk.Context) any {
 			return ctx.MultiStore().GetKVStore(app.keys[validatortypes.StoreKey])
 		})

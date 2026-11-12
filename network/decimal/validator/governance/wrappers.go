@@ -27,7 +27,7 @@ type scopedQueryServer struct {
 // QueryServer forwards canonical queries and scopes TallyResult in an always
 // discarded SDK cache, because canonical live tally removes its vote records.
 func (r *Sessions) QueryServer(keeper *govkeeper.Keeper) (v1.QueryServer, error) {
-	if r == nil || r.native == nil || keeper == nil {
+	if r == nil || r.state.read == nil || keeper == nil {
 		return nil, errors.New("governance reader and keeper are required")
 	}
 	return scopedQueryServer{QueryServer: govkeeper.NewQueryServer(keeper), sessions: r}, nil
