@@ -7,6 +7,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"testing"
 	"time"
 
 	clienttx "github.com/cosmos/cosmos-sdk/client/tx"
