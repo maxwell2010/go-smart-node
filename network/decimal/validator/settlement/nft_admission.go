@@ -39,6 +39,16 @@ type NFTWithdrawal struct {
 
 // VerifySignedNFTIsolation admits only the direct no-hold Gateway route.
 func (e *Executor) VerifySignedNFTIsolation(ctx sdk.Context, msg core.Message, receipt *ethtypes.Receipt) (NFTIsolation, error) {
+	return e.verifySignedNFTIsolation(ctx, msg, receipt, false)
+}
+
+// VerifySignedNFTIsolationWithDowntime proves the NFT and companion begin at
+// the current unpaused Master cursor without realizing earlier losses.
+func (e *Executor) VerifySignedNFTIsolationWithDowntime(ctx sdk.Context, msg core.Message, receipt *ethtypes.Receipt) (NFTIsolation, error) {
+	return e.verifySignedNFTIsolation(ctx, msg, receipt, true)
+}
+
+func (e *Executor) verifySignedNFTIsolation(ctx sdk.Context, msg core.Message, receipt *ethtypes.Receipt, downtimeDeposit bool) (NFTIsolation, error) {
 	var proof NFTIsolation
 	method := e.gateway.Methods["delegateNFT1155"]
 	if msg.To == nil || *msg.To != e.roles.Gateway || msg.Value == nil || msg.Value.Sign() != 0 ||
@@ -59,7 +69,16 @@ func (e *Executor) VerifySignedNFTIsolation(ctx sdk.Context, msg core.Message, r
 		!quantity.IsUint64() || quantity.Uint64() > uint64(nfttypes.MaxIsolatedOriginUnits) {
 		return proof, errors.New("invalid signed NFT isolation identity or quantity")
 	}
-	if err := e.verifyDELStakeReceipt(ctx, receipt, validator, msg.From, 11); err != nil {
+	var cursor common.Hash
+	if downtimeDeposit {
+		if err := e.verifyDELReceiptEnvelope(ctx, receipt, msg.From, 11, 13); err != nil {
+			return proof, err
+		}
+		cursor, err = e.readUnpausedDepositCursor(ctx, validator)
+		if err != nil {
+			return proof, err
+		}
+	} else if err := e.verifyDELStakeReceipt(ctx, receipt, validator, msg.From, 11); err != nil {
 		return proof, err
 	}
 	collection, known, err := e.auth.AuthenticateCollection(ctx, origin, receipts.EntryPointSignedEthereum)
@@ -109,22 +128,37 @@ func (e *Executor) VerifySignedNFTIsolation(ctx sdk.Context, msg core.Message, r
 		!matchesNFTEvent(logs[7], origin, []common.Hash{e.origin.Events["OriginIsolated"].ID, originIDWord, positionID, gatewayWord}, gatewayWord, quantityWord, position.ReserveAmount) {
 		return proof, errors.New("NFT isolation receipt does not reconcile origin burn and vault mint")
 	}
-	companion, post, err := e.readNFTCompanion(ctx, validator, msg.From)
+	companion, post, coinCursor, err := e.readNFTCompanionState(ctx, validator, msg.From)
 	if err != nil {
 		return proof, err
+	}
+	if coinCursor != cursor {
+		return proof, errors.New("NFT isolation companion cursor differs from the exact Master count")
 	}
 	if companion.NFTBacked.BigInt().Cmp(reserve) < 0 {
 		return proof, errors.New("Gateway did not include the new NFT reserve in the companion position")
 	}
+	companion.PenaltyCursor = coinCursor
 	isNew := common.BytesToHash(post[3*common.HashLength:4*common.HashLength]) == position.ReserveAmount
-	if err := e.checkDELStakeLogs(logs[8:10], companion.StakeID, post, reserve, isNew); err != nil {
+	tail := logs[8:]
+	if downtimeDeposit {
+		ack, err := e.verifyDepositPenaltyAcknowledgements(ctx, tail, validator, companion.StakeID, cursor)
+		if err != nil {
+			return proof, err
+		}
+		if !ack.validatesPosition(isNew) {
+			return proof, errors.New("NFT isolation did not prove the exact caught-up companion position")
+		}
+		tail = ack.logs
+	}
+	if err := e.checkDELStakeLogs(tail[:2], companion.StakeID, post, reserve, isNew); err != nil {
 		return proof, err
 	}
-	stakeID, err := e.verifyNFTStake(ctx, position, validator, msg.From, true)
+	stakeID, err := e.verifyNFTStakeAtCursor(ctx, position, validator, msg.From, true, cursor)
 	if err != nil {
 		return proof, err
 	}
-	if !matchesNFTEvent(logs[10], e.roles.Gateway, []common.Hash{e.gateway.Events["NFTDelegated"].ID, stakeID, companion.StakeID, validatorWord},
+	if !matchesNFTEvent(tail[2], e.roles.Gateway, []common.Hash{e.gateway.Events["NFTDelegated"].ID, stakeID, companion.StakeID, validatorWord},
 		vaultWord, positionID, smallWord(1), ownerWord, position.ReserveAmount, wdelWord) {
 		return proof, errors.New("Gateway NFTDelegated event differs from the funded vault position")
 	}
@@ -281,17 +315,6 @@ func (e *Executor) isolationOriginPoststate(ctx sdk.Context, origin common.Addre
 	return uint32(supply.Uint64()), pool, nil
 }
 
-func (e *Executor) readNFTCompanion(ctx sdk.Context, validator, beneficiary common.Address) (DELTransition, []byte, error) {
-	position, post, cursor, err := e.readNFTCompanionState(ctx, validator, beneficiary)
-	if err != nil {
-		return DELTransition{}, nil, err
-	}
-	if cursor != (common.Hash{}) {
-		return DELTransition{}, nil, errors.New("DEL position has an unsupported penalty cursor")
-	}
-	return position, post, nil
-}
-
 func (e *Executor) readNFTCompanionState(ctx sdk.Context, validator, beneficiary common.Address) (DELTransition, []byte, common.Hash, error) {
 	var zero common.Hash
 	coinID := crypto.Keccak256Hash(validator[:], beneficiary[:], e.roles.WrappedDEL[:], zero[:], zero[:])
@@ -314,10 +337,6 @@ func (e *Executor) readNFTCompanionState(ctx sdk.Context, validator, beneficiary
 	}
 	return DELTransition{Validator: validator, Beneficiary: beneficiary, StakeID: coinID,
 		Remaining: sdkmath.NewIntFromBigInt(direct), NFTBacked: sdkmath.NewIntFromBigInt(backed)}, post, common.BytesToHash(cursor), nil
-}
-
-func (e *Executor) verifyNFTStake(ctx sdk.Context, position evmview.PositionSnapshot, validator, beneficiary common.Address, active bool) (common.Hash, error) {
-	return e.verifyNFTStakeAtCursor(ctx, position, validator, beneficiary, active, common.Hash{})
 }
 
 func (e *Executor) verifyNFTStakeAtCursor(ctx sdk.Context, position evmview.PositionSnapshot, validator, beneficiary common.Address, active bool, expectedCursor common.Hash) (common.Hash, error) {

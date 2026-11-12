@@ -5,6 +5,7 @@ import (
 	"os"
 	"testing"
 
+	sdkmath "cosmossdk.io/math"
 	storetypes "cosmossdk.io/store/types"
 	sdk "github.com/cosmos/cosmos-sdk/types"
 	"github.com/cosmos/evm/x/vm/statedb"
@@ -18,6 +19,7 @@ import (
 	nftkeeper "github.com/maxwell2010/go-smart-node/network/decimal/nft/keeper"
 	"github.com/maxwell2010/go-smart-node/network/decimal/nft/receipts"
 	nfttypes "github.com/maxwell2010/go-smart-node/network/decimal/nft/types"
+	"github.com/maxwell2010/go-smart-node/network/decimal/validator/settlement"
 	contracts "github.com/maxwell2010/go-smart-node/network/systemcontracts"
 	"github.com/stretchr/testify/require"
 )
@@ -306,14 +308,24 @@ func runIsolatedPositionReader(t *testing.T, e isolatedBackendEnv) {
 	call(0, vault, vaultAddress, new(big.Int), true, "redeemPosition", newPosition, owner)
 	t.Logf("actual isolated StakeSource authentication SDKgas=%d; native capture/pipeline costs separate", cost)
 	if mode := os.Getenv(delLifecycleFixtureEnv); mode == "1" || mode == "hold" || mode == "reset" ||
-		mode == "penalty" || mode == "recovered-deposits" || mode == "held-penalty" || mode == "frozen-penalty-partial" || mode == "frozen-penalty-full" ||
+		mode == "penalty" || mode == "recovered-deposits" || mode == "recovered-nft-deposit" || mode == "held-penalty" || mode == "frozen-penalty-partial" || mode == "frozen-penalty-full" ||
 		mode == "frozen-held-penalty" || mode == "frozen-held-penalty-full" ||
 		mode == "nft-penalty" || mode == "nft-penalty-zero-exit" || mode == "frozen-nft-penalty" || mode == "frozen-nft-penalty-max-units" {
 		profile := ownedapp.WithdrawalProfile{Registry: registryAddress, Gateway: gatewayAddress, Library: libraryAddress, NFTCenter: factoryAddress,
 			PositionVault: vaultAddress, MasterValidator: masterAddress, WrappedDEL: wrapped, SettlementOnly: true, EnableDELDelegation: true,
 			EnableDELHold: mode == "hold" || mode == "reset", EnableDELHoldReset: mode == "reset"}
-		if mode == "penalty" || mode == "recovered-deposits" {
-			runSignedOrdinaryDELPenalty(t, e, profile, gateway, master, wrapper, sourceReader, govSetup, mode == "recovered-deposits")
+		switch mode {
+		case "penalty":
+			runSignedOrdinaryDELPenalty(t, e, profile, gateway, master, wrapper, sourceReader, govSetup, nil)
+			return
+		case "recovered-deposits":
+			runSignedOrdinaryDELPenalty(t, e, profile, gateway, master, wrapper, sourceReader, govSetup, verifyRecoveredDELDeposits)
+			return
+		case "recovered-nft-deposit":
+			runSignedOrdinaryDELPenalty(t, e, profile, gateway, master, wrapper, sourceReader, govSetup,
+				func(t *testing.T, f signedDELFixture, executor *settlement.Executor, existing, supply sdkmath.Int) {
+					verifyRecoveredNFTDeposit(t, f, executor, profile, origin, vault, originAddress, existing, supply)
+				})
 			return
 		}
 		if mode == "held-penalty" {

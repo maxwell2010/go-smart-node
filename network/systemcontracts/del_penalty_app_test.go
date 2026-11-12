@@ -37,7 +37,7 @@ func TestOwnedAppSignedRecoveredDELDeposits(t *testing.T) {
 
 func runSignedOrdinaryDELPenalty(t *testing.T, e isolatedBackendEnv, profile ownedapp.WithdrawalProfile, gateway, master, wrapper contracts.Artifact,
 	reader *nftview.Reader, gov func(contracts.Artifact, common.Address, string, ...interface{}),
-	recoveredDeposits bool,
+	recover func(*testing.T, signedDELFixture, *settlement.Executor, sdkmath.Int, sdkmath.Int),
 ) {
 	t.Helper()
 	f := prepareSignedDELFixture(t, e, profile, gateway, master, wrapper, gov)
@@ -70,7 +70,7 @@ func runSignedOrdinaryDELPenalty(t *testing.T, e isolatedBackendEnv, profile own
 
 	e.app.EVMKeeper.SetInternalCommitGuard(func(ctx sdk.Context, msg core.Message, _ []*ethtypes.Log) error {
 		if !executor.AuthorizeMasterPenalty(ctx, msg) && !executor.AuthorizeOrdinaryDELPenalty(ctx, msg) {
-			if recoveredDeposits && msg.From == e.govOwner && msg.To != nil && *msg.To == profile.MasterValidator &&
+			if recover != nil && msg.From == e.govOwner && msg.To != nil && *msg.To == profile.MasterValidator &&
 				msg.Value != nil && msg.Value.Sign() == 0 && bytes.Equal(msg.Data, unpause) {
 				return nil
 			}
@@ -149,10 +149,10 @@ func runSignedOrdinaryDELPenalty(t *testing.T, e isolatedBackendEnv, profile own
 	require.Equal(t, after, getRow())
 	require.ErrorContains(t, appendAndRealize(project), "unpaused candidate or approved validator")
 	require.Equal(t, int64(1), masterCount())
-	if recoveredDeposits {
+	if recover != nil {
 		f.signed("delegateDEL", sdkmath.NewIntWithDecimal(1, 18), false, f.validator)
 		gov(master, profile.MasterValidator, "unpauseValidator", f.validator)
-		verifyRecoveredDELDeposits(t, f, executor, want, initialSupply.Sub(burned))
+		recover(t, f, executor, want, initialSupply.Sub(burned))
 		return
 	}
 
