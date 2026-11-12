@@ -184,7 +184,11 @@ func (r *customCollateralRegistry) authenticateCoin(ctx sdk.Context, token commo
 	}
 	// ERC20Storage._totalSupply is the third word, after the two mappings.
 	metadata.Volume = sdkmath.NewIntFromBigInt(r.evm.GetState(ctx, token, customSlotOffset(customERC20Slot, 2)).Big())
-	metadata.Reserve = r.bank.GetBalance(ctx, sdk.AccAddress(token.Bytes()), identity.BaseDenom).Amount
+	var err error
+	metadata.Reserve, err = r.spendableReserve(ctx, token)
+	if err != nil {
+		return cointypes.Coin{}, err
+	}
 	if err := metadata.Validate(); err != nil {
 		return cointypes.Coin{}, err
 	}
@@ -192,6 +196,18 @@ func (r *customCollateralRegistry) authenticateCoin(ctx sdk.Context, token commo
 		return cointypes.Coin{}, errors.New("DRC20 live bank DEL reserve is below the approved curve floor")
 	}
 	return metadata, nil
+}
+
+func (r *customCollateralRegistry) spendableReserve(ctx sdk.Context, token common.Address) (sdkmath.Int, error) {
+	account := sdk.AccAddress(token.Bytes())
+	total := r.bank.GetBalance(ctx, account, identity.BaseDenom).Amount
+	// EVM StateDB uses the spendable bank balance for address.balance.
+	// SpendableCoin subtracts LockedCoins from GetBalance. Check the
+	// difference directly so invalid locks cannot panic during subtraction.
+	if !r.bank.LockedCoins(ctx, account).AmountOf(identity.BaseDenom).IsZero() {
+		return sdkmath.Int{}, errors.New("approved DRC20 DEL reserve must be fully spendable")
+	}
+	return total, nil
 }
 
 // Coin returns verified live values. The caller checks the exact delta

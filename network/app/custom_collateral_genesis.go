@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"math/big"
+	"time"
 
 	"github.com/cosmos/cosmos-sdk/codec/address"
 	sdk "github.com/cosmos/cosmos-sdk/types"
@@ -110,7 +111,9 @@ func (r *customCollateralRegistry) verifyManifest(ctx sdk.Context, manifest []by
 		if !bytes.Equal(entry, actual[:]) {
 			return fmt.Errorf("approved DRC20 metadata differs for %s", coin.Denom)
 		}
-		live, err := r.authenticateCoin(ctx, token, coin)
+		// Cold attestation must be valid with the same inputs at InitChain
+		// and on state restore, where no consensus block time is available.
+		live, err := r.authenticateCoin(ctx.WithBlockTime(time.Time{}), token, coin)
 		if err != nil {
 			return err
 		}
