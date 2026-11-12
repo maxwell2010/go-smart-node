@@ -415,18 +415,11 @@ def prepare_owned(lab, mcnd, upgrade=False):
     return {**ports, "home": home, "address": address, "mnemonic": mnemonic_file, "process": child, "start": start}
 
 
-def prepare_native_owned(lab, mcnd, fixture):
-    sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "tools"))
-    from native_consensus_smoke import INITIAL, check_signatures, committed_header, create_replicas, effective_set, load_fixture, wait_replicas
+def fund_native_relayer(lab, mcnd, replicas, expected, genesis, height):
     from withdrawal_genesis_smoke import private_bytes, private_write
 
-    expected, genesis, keys, height = load_fixture(
-        fixture, fee_rewards=True, downtime=False, jail_recovery=False, held_downtime=False, nft_downtime=False)
     original_profile = json.loads(genesis)["app_state"]["withdrawal_settlement"]
     require(original_profile.get("enable_native_ibc_v1") is True, "native Hermes fixture requires opt-in IBC v1")
-    root = lab.root / "native-owned"
-    root.mkdir(mode=0o700)
-    replicas = create_replicas(mcnd, root, genesis, keys, lab.env)
     source = replicas[0]
     address, mnemonic_file = prepare_owned_relayer(lab, mcnd, source.home)
     require(address not in {expected["actorNative"], *(row["rewardNative"] for row in expected["validators"])},
@@ -443,6 +436,19 @@ def prepare_native_owned(lab, mcnd, fixture):
         patch_toml(replica.home / "config/app.toml", {("", "minimum-gas-prices"): "1000000000del"})
     command([mcnd, "genesis", "validate", "--home", source.home, "--chain-id", A_ID,
              "--evm.evm-chain-id", EVM_ID], lab.env)
+    return {"rpc": source.p2p + 1, "grpc": source.grpc, "address": address, "mnemonic": mnemonic_file}, funded_genesis
+
+
+def prepare_native_owned(lab, mcnd, fixture):
+    sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "tools"))
+    from native_consensus_smoke import INITIAL, check_signatures, committed_header, create_replicas, effective_set, load_fixture, wait_replicas
+
+    expected, genesis, keys, height = load_fixture(
+        fixture, fee_rewards=True, downtime=False, jail_recovery=False, held_downtime=False, nft_downtime=False)
+    root = lab.root / "native-owned"
+    root.mkdir(mode=0o700)
+    replicas = create_replicas(mcnd, root, genesis, keys, lab.env)
+    owned, funded_genesis = fund_native_relayer(lab, mcnd, replicas, expected, genesis, height)
 
     def start_all(label):
         for replica in replicas:
@@ -473,7 +479,7 @@ def prepare_native_owned(lab, mcnd, fixture):
 
     start_all("ibc-initial")
     snapshot = verify_replicas(height + 1)
-    rpc_port = source.p2p + 1
+    rpc_port, address = owned["rpc"], owned["address"]
     require(amount(rpc_port, address, "del") == 10**24, "unexpected isolated native relayer account funding")
     require(escrow(rpc_port, "del") == 0, "new native escrow must be zero")
     for replica in replicas:
@@ -482,9 +488,8 @@ def prepare_native_owned(lab, mcnd, fixture):
                                  "unbonding_seconds": NATIVE_UNBONDING_SECONDS, "consensus": snapshot,
                                  "genesis_sha256": hashlib.sha256(funded_genesis).hexdigest()}
     print("Three native consensus daemons with matching app hashes: PASS", flush=True)
-    return {"rpc": rpc_port, "grpc": source.grpc, "address": address, "mnemonic": mnemonic_file,
-            "restart": restart_all, "verify_replicas": verify_replicas, "verify_pending": verify_pending,
-            "verify_checkpoint": verify_checkpoint}
+    return {**owned, "restart": restart_all, "verify_replicas": verify_replicas,
+            "verify_pending": verify_pending, "verify_checkpoint": verify_checkpoint}
 
 
 def receipts(chain):
@@ -539,10 +544,10 @@ def phase_after(lab, label, a, b, before, native_a_delta=0, native_b_delta=0):
     print(label + ": PASS", flush=True)
 
 
-def connect_transfer(lab, mcnd, reference, hermes, upgrade=False, native_fixture=None):
+def connect_transfer(lab, mcnd, reference, hermes, upgrade=False, native_fixture=None, *, owned=None):
     # Start the native group's fixed ports first so dynamically allocated
     # reference ports cannot reuse any of them.
-    a = prepare_native_owned(lab, mcnd, native_fixture) if native_fixture else None
+    a = prepare_native_owned(lab, mcnd, native_fixture) if native_fixture else owned
     b, config = reference_probe(lab, reference, hermes)
     if a is None:
         a = prepare_owned(lab, mcnd, upgrade=upgrade)

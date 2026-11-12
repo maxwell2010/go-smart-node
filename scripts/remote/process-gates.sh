@@ -23,7 +23,8 @@ native_del_jail_recovery="${8:-off}"
 native_held_del_downtime="${9:-off}"
 [[ "$native_held_del_downtime" == off || "$native_held_del_downtime" == native-held-del-downtime ]] || { echo 'Unsupported native held DEL downtime option.' >&2; exit 2; }
 native_upgrade_governance="${10:-off}"
-[[ "$native_upgrade_governance" == off || "$native_upgrade_governance" == native-upgrade-governance || "$native_upgrade_governance" == native-full-profile-upgrade ]] || { echo 'Unsupported native upgrade governance option.' >&2; exit 2; }
+[[ "$native_upgrade_governance" == off || "$native_upgrade_governance" == native-upgrade-governance ||
+   "$native_upgrade_governance" == native-full-profile-upgrade || "$native_upgrade_governance" == native-full-ibc-upgrade ]] || { echo 'Unsupported native upgrade governance option.' >&2; exit 2; }
 native_nft_downtime="${11:-off}"
 [[ "$native_nft_downtime" == off || "$native_nft_downtime" == native-nft-downtime ]] || { echo 'Unsupported native NFT downtime option.' >&2; exit 2; }
 for tool in sudo unshare ip gcc python3 go; do command -v "$tool" >/dev/null; done
@@ -468,10 +469,15 @@ fi
 if [[ "$native_upgrade_governance" != off ]]; then
   fixture="$work/native-governance-upgrade-fixture"
   full_profile=0
+  pending_ibc=0
   profile_args=()
-  if [[ "$native_upgrade_governance" == native-full-profile-upgrade ]]; then
+  if [[ "$native_upgrade_governance" != native-upgrade-governance ]]; then
     full_profile=1
     profile_args=(--full-profile)
+  fi
+  if [[ "$native_upgrade_governance" == native-full-ibc-upgrade ]]; then
+    pending_ibc=1
+    profile_args+=(--pending-ibc --reference-binary "$work/ibcreference" --reference-sha256 "$reference_sha" --hermes-binary "$work/hermes")
   fi
   successor="$work/mcnd-native-sdk-migration-v1"
   go build -mod=readonly -tags=mcnd_native_sdk_migration_v1 -buildvcs=true -p 2 -trimpath \
@@ -481,6 +487,7 @@ if [[ "$native_upgrade_governance" != off ]]; then
   mkdir -m 700 -- "$fixture"
   if ! MCND_NATIVE_CONSENSUS_FIXTURE_DIR="$fixture" MCND_NATIVE_CONSENSUS_UPGRADE_GOVERNANCE=1 \
       MCND_NATIVE_CONSENSUS_FULL_PROFILE_UPGRADE="$full_profile" \
+      MCND_NATIVE_CONSENSUS_UPGRADE_PENDING_IBC="$pending_ibc" \
       go test -mod=readonly -tags= -trimpath -p 2 -count=1 -timeout 8m -json \
       -run '^TestOwnedAppSignedRegistryBootstrap$/^authenticated_isolated_position_reader$' ./systemcontracts \
       > "$work/native-governance-upgrade-fixture.log" 2>&1; then
@@ -494,10 +501,10 @@ if [[ "$native_upgrade_governance" != off ]]; then
     --fixture "$fixture" --home-parent "$work" --report "$output/native-governance-upgrade.json" "${profile_args[@]}" \
     |& tee "$output/native-governance-upgrade.log"
   preserve_public_reports
-  "$python" - "$output" "$root" "$revision" "$mcnd_sha" "$successor_sha" "$full_profile" <<'PY'
+  "$python" - "$output" "$root" "$revision" "$mcnd_sha" "$successor_sha" "$full_profile" "$pending_ibc" <<'PY'
 import json,sys
 from pathlib import Path
-out,root=map(Path,sys.argv[1:3]); revision,predecessor_sha,successor_sha,full_profile=sys.argv[3:]
+out,root=map(Path,sys.argv[1:3]); revision,predecessor_sha,successor_sha,full_profile,pending_ibc=sys.argv[3:]
 sys.path.insert(0,str(root/'network/tools'))
 from binary_provenance import parse_build_info
 predecessor=parse_build_info((out/'mcnd-build.log').read_text())
@@ -515,7 +522,7 @@ assert plan['scheduledAt'] < plan['targetHeight'] == application['appliedHeight'
 assert report['predecessor']['committedHeight']+1==plan['targetHeight']==report['predecessor']['boundaryHeight'],report
 assert application['sameBinary'] is False and application['processRestarted'] is True,report
 if full_profile == '1':
-    assert report['ibcCoverage']=='unbonding-state-only',report
+    assert report['ibcCoverage']==('pending-packet-after-client-update' if pending_ibc=='1' else 'unbonding-state-only'),report
     claim=report['withdrawal']
     before,after=claim['before'],claim['after']
     assert claim['unbondingSeconds']==28*24*60*60,report
@@ -526,6 +533,14 @@ if full_profile == '1':
                         'nativeSupplyAtomic':before['nativeSupplyAtomic']}.items():
         assert before[field]==after[field]==value,report
     assert progress['powers']=={'a':1,'b':1} and progress['signers']==['a','b'],report
+if pending_ibc == '1':
+    packet=report['ibcPacket']
+    assert len(packet['packets'])==1 and packet['escrowAtomic']=='1000000000000000000',report
+    assert packet['clientHeightBefore']<plan['targetHeight']<packet['clientHeightAfter'],report
+    phases=report['phases']
+    assert set(phases)=={'client_connection_channel_handshake','pending_packet_across_native_upgrade',
+                         'post_native_upgrade_voucher_return'},report
+    assert all(phase['status']=='PASS' and (phase['owned_fees'] or phase['counterparty_fees']) for phase in phases.values()),report
 print('Native governance tally, exact predecessor halt, successor migration and continued three-node consensus passed.')
 PY
 fi
