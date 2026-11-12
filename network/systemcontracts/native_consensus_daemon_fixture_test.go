@@ -101,7 +101,7 @@ func exportNativeConsensusDaemonFixture(t *testing.T, e isolatedBackendEnv, dir 
 	if historical {
 		require.False(t, feeRewards || ibcV1 || upgradeGovernance || jailRecovery || heldDowntime || nft != nil)
 		initial, after = [3]int64{4, 4, 2}, [3]int64{4, 4, 0}
-		keyScope = "mintcandy native historical ABCI fixture "
+		keyScope = nativeHistoricalConsensusKeyScope
 	}
 	commission := sdkmath.LegacyZeroDec()
 	if feeRewards {
@@ -250,6 +250,10 @@ func exportNativeConsensusDaemonFixture(t *testing.T, e isolatedBackendEnv, dir 
 	profile.EnableNativeIBCV1 = ibcV1
 	profile.EnableNativeOrdinaryDELDowntime = downtime
 	profile.EnableNativeDuplicateVote = historical
+	if historical {
+		profile.EnableNativeGovernance = true
+		configureNativeRegistrationGovernance(t, e, genesis)
+	}
 	profile.EnableDELHold = heldDowntime
 	profile.EnableNativeHeldDELDowntime = heldDowntime
 	var governanceFixture []byte
