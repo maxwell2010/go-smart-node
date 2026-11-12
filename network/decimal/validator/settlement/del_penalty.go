@@ -233,14 +233,20 @@ func (e *Executor) ordinaryPenaltyState(ctx sdk.Context, validator, owner common
 }
 
 func verifyOrdinaryPenaltyDeltas(before, after ordinaryDELPenaltyState, burned *big.Int) error {
-	if before.beneficiary.Cmp(after.beneficiary) != 0 || before.gateway.Cmp(after.gateway) != 0 ||
-		before.reserveCursor != after.reserveCursor {
-		return errors.New("ordinary DEL penalty changed an unrelated balance or reserve cursor")
+	if before.reserveCursor != after.reserveCursor || new(big.Int).Sub(before.reserve, after.reserve).Cmp(burned) != 0 {
+		return errors.New("ordinary DEL penalty reserve amount or cursor changed unexpectedly")
 	}
-	for _, pair := range [][2]*big.Int{{before.reserve, after.reserve}, {before.supply, after.supply},
-		{before.wrapped, after.wrapped}, {before.backing, after.backing}, {before.bankSupply, after.bankSupply}} {
+	return verifyDELBurnDeltas(before.payoutState, after.payoutState, before.bankSupply, after.bankSupply, burned)
+}
+
+func verifyDELBurnDeltas(before, after payoutState, bankBefore, bankAfter, burned *big.Int) error {
+	if before.beneficiary.Cmp(after.beneficiary) != 0 || before.gateway.Cmp(after.gateway) != 0 {
+		return errors.New("DEL penalty changed the beneficiary or Gateway native balance")
+	}
+	for _, pair := range [][2]*big.Int{{before.supply, after.supply}, {before.wrapped, after.wrapped},
+		{before.backing, after.backing}, {bankBefore, bankAfter}} {
 		if new(big.Int).Sub(pair[0], pair[1]).Cmp(burned) != 0 {
-			return errors.New("actual reserve, WDEL and native supply deltas differ from the realized DEL penalty")
+			return errors.New("actual WDEL and native supply deltas differ from the realized DEL penalty")
 		}
 	}
 	return nil
@@ -260,14 +266,8 @@ func (e *Executor) verifyOrdinaryPenaltyLogs(receipt *ethtypes.Receipt, id, curs
 	}
 	logs := receipt.Logs
 	if burned.Sign() > 0 {
-		amount := common.BigToHash(burned)
-		transfer, native := logs[0], logs[1]
-		if transfer.Address != e.roles.WrappedDEL || len(transfer.Topics) != 3 || transfer.Topics[0] != e.wrapper.Events["Transfer"].ID ||
-			transfer.Topics[1] != common.BytesToHash(e.roles.Gateway[:]) || transfer.Topics[2] != (common.Hash{}) || !bytes.Equal(transfer.Data, amount[:]) ||
-			native.Address != common.HexToAddress(nativeburn.AddressString) || len(native.Topics) != 2 ||
-			native.Topics[0] != crypto.Keccak256Hash([]byte("NativeBurn(address,uint256)")) ||
-			native.Topics[1] != common.BytesToHash(e.roles.WrappedDEL[:]) || !bytes.Equal(native.Data, amount[:]) {
-			return errors.New("ordinary DEL penalty must burn matching WDEL and native backing")
+		if err := e.verifyDELBurnLogs(logs[:2], burned); err != nil {
+			return err
 		}
 		logs = logs[2:]
 	}
@@ -278,6 +278,19 @@ func (e *Executor) verifyOrdinaryPenaltyLogs(receipt *ethtypes.Receipt, id, curs
 	if penalty.Address != e.roles.Gateway || len(penalty.Topics) != 2 ||
 		penalty.Topics[0] != e.gateway.Events["PenaltyAppliedToStake"].ID || penalty.Topics[1] != id || !bytes.Equal(penalty.Data, cursor[:]) {
 		return errors.New("Gateway did not emit the exact realized penalty cursor")
+	}
+	return nil
+}
+
+func (e *Executor) verifyDELBurnLogs(logs []*ethtypes.Log, burned *big.Int) error {
+	amount := common.BigToHash(burned)
+	transfer, native := logs[0], logs[1]
+	if transfer.Address != e.roles.WrappedDEL || len(transfer.Topics) != 3 || transfer.Topics[0] != e.wrapper.Events["Transfer"].ID ||
+		transfer.Topics[1] != common.BytesToHash(e.roles.Gateway[:]) || transfer.Topics[2] != (common.Hash{}) || !bytes.Equal(transfer.Data, amount[:]) ||
+		native.Address != common.HexToAddress(nativeburn.AddressString) || len(native.Topics) != 2 ||
+		native.Topics[0] != crypto.Keccak256Hash([]byte("NativeBurn(address,uint256)")) ||
+		native.Topics[1] != common.BytesToHash(e.roles.WrappedDEL[:]) || !bytes.Equal(native.Data, amount[:]) {
+		return errors.New("DEL penalty must burn matching WDEL and native backing")
 	}
 	return nil
 }
