@@ -42,7 +42,7 @@ func TestOwnedAppSignedZeroReserveNFTExit(t *testing.T) {
 func runSignedActiveNFTPenalty(t *testing.T, e isolatedBackendEnv, profile ownedapp.WithdrawalProfile,
 	gateway, master, wrapper, origin, vault contracts.Artifact, originAddress common.Address,
 	reader *nftview.Reader, gov func(contracts.Artifact, common.Address, string, ...interface{}),
-	zeroExit bool,
+	mode string,
 ) {
 	t.Helper()
 	f := prepareSignedDELFixture(t, e, profile, gateway, master, wrapper, gov)
@@ -50,6 +50,7 @@ func runSignedActiveNFTPenalty(t *testing.T, e isolatedBackendEnv, profile owned
 	nft, validators := e.app.NativeNFTKeeper, e.app.NativeValidatorKeeper
 	principal, unitReserve := sdkmath.NewIntWithDecimal(3, 18), sdkmath.NewIntWithDecimal(2, 18)
 	percentage := uint16(25)
+	zeroExit := mode == "nft-penalty-zero-exit"
 	if zeroExit {
 		principal, percentage = sdkmath.ZeroInt(), 100
 	}
@@ -107,6 +108,10 @@ func runSignedActiveNFTPenalty(t *testing.T, e isolatedBackendEnv, profile owned
 		return proof
 	}
 	penalized, sibling := delegate(), delegate()
+	if mode == "frozen-nft-penalty" {
+		runSignedFrozenNFTPenalty(t, f, reader, executor, penalized, sibling, unitReserve, inclusion)
+		return
+	}
 	getRow := func(kind validatortypes.EVMStakeBindingKind, id common.Hash) validatortypes.EVMStakeBinding {
 		t.Helper()
 		row, err := validators.GetEVMStakeBinding(e.ctx(), kind, f.target[:], id[:])
@@ -250,7 +255,7 @@ func runSignedActiveNFTPenalty(t *testing.T, e isolatedBackendEnv, profile owned
 		require.Equal(t, []uint32{lineage.ReceiptSubTokenID}, frozen.NativeTarget.SubTokenIDs)
 		require.Equal(t, out.PenaltyCursor, common.BytesToHash(getCoin().PenaltyCursor))
 		require.Equal(t, siblingBefore, getNFT(sibling.StakeID))
-		completePenalizedNFTExit(t, f, reader, executor, frozen, out, lineage, inclusion)
+		completePenalizedNFTExit(t, f, reader, executor, frozen, out, lineage, inclusion, 0)
 		require.True(t, initialSupply.Sub(loss).Equal(supply(ctx())))
 		f.backing(sdkmath.ZeroInt())
 		t.Log(nftPenaltyZeroExitPassed)
@@ -260,7 +265,7 @@ func runSignedActiveNFTPenalty(t *testing.T, e isolatedBackendEnv, profile owned
 
 func completePenalizedNFTExit(t *testing.T, f signedDELFixture, reader *nftview.Reader, executor *settlement.Executor,
 	frozen validatortypes.EVMFrozenBinding, out settlement.NFTWithdrawal, lineage nfttypes.IsolatedPositionLineage,
-	inclusion func(*evmtypes.MsgEthereumTxResponse) (sdk.Context, *ethtypes.Receipt),
+	inclusion func(*evmtypes.MsgEthereumTxResponse) (sdk.Context, *ethtypes.Receipt), pending int,
 ) {
 	t.Helper()
 	e := f.env
@@ -295,8 +300,14 @@ func completePenalizedNFTExit(t *testing.T, f signedDELFixture, reader *nftview.
 	p, err := reader.Position(e.ctx(), out.Position.Asset.TokenID)
 	require.NoError(t, err)
 	require.Equal(t, f.user, p.Owner)
-	require.Equal(t, common.Hash{}, p.ReserveAmount)
-	require.Empty(t, f.native().Undelegations)
+	require.Equal(t, common.BigToHash(frozen.ReportedReserveAmount.BigInt()), p.ReserveAmount)
+	if pending == 0 {
+		require.Empty(t, f.native().Undelegations)
+	} else {
+		pair, err := validators.GetUndelegation(e.ctx(), f.beneficiary, f.operator)
+		require.NoError(t, err)
+		require.Len(t, pair.Entries, pending)
+	}
 	f.signed("complete", sdkmath.ZeroInt(), false, args)
 }
 
