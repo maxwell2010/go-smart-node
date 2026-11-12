@@ -291,7 +291,11 @@ func (e *Executor) invoke(ctx sdk.Context, target common.Address, data []byte, c
 }
 
 func (e *Executor) invokeFrom(ctx sdk.Context, sender, target common.Address, data []byte, commit bool) (*evmtypes.MsgEthereumTxResponse, core.Message, error) {
-	msg := core.Message{From: sender, To: &target, Value: new(big.Int), GasLimit: e.config.EVMGas, GasPrice: new(big.Int), GasFeeCap: new(big.Int), GasTipCap: new(big.Int), Data: data, SkipNonceChecks: true, SkipFromEOACheck: true}
+	return e.invokeFromWithGas(ctx, sender, target, data, commit, e.config.EVMGas)
+}
+
+func (e *Executor) invokeFromWithGas(ctx sdk.Context, sender, target common.Address, data []byte, commit bool, gasLimit uint64) (*evmtypes.MsgEthereumTxResponse, core.Message, error) {
+	msg := core.Message{From: sender, To: &target, Value: new(big.Int), GasLimit: gasLimit, GasPrice: new(big.Int), GasFeeCap: new(big.Int), GasTipCap: new(big.Int), Data: data, SkipNonceChecks: true, SkipFromEOACheck: true}
 	result, err := e.evm.ApplyMessage(ctx, statedb.New(ctx, e.evm, statedb.NewEmptyTxConfig()), msg, nil, commit, false, true)
 	if result != nil {
 		ctx.GasMeter().ConsumeGas(min(max(result.MaxUsedGas, result.GasUsed), msg.GasLimit), "Gateway completion EVM work before refunds")
@@ -321,7 +325,11 @@ func (e *Executor) invokeFrom(ctx sdk.Context, sender, target common.Address, da
 // initializes its forwarded EVM gas budget. Prior authentication and getter
 // work belongs to the enclosing operation, so meter each execution separately
 // and debit the full measured work to that enclosing budget.
-func (e *Executor) invokePenalty(ctx sdk.Context, sender, target common.Address, data []byte) (result *evmtypes.MsgEthereumTxResponse, err error) {
+func (e *Executor) invokePenalty(ctx sdk.Context, sender, target common.Address, data []byte) (*evmtypes.MsgEthereumTxResponse, error) {
+	return e.invokePenaltyWithGas(ctx, sender, target, data, e.config.EVMGas)
+}
+
+func (e *Executor) invokePenaltyWithGas(ctx sdk.Context, sender, target common.Address, data []byte, gasLimit uint64) (result *evmtypes.MsgEthereumTxResponse, err error) {
 	meter := storetypes.NewGasMeter(ctx.GasMeter().GasRemaining())
 	defer func() {
 		if recovered := recover(); recovered != nil {
@@ -332,7 +340,7 @@ func (e *Executor) invokePenalty(ctx sdk.Context, sender, target common.Address,
 		}
 		ctx.GasMeter().ConsumeGas(meter.GasConsumedToLimit(), "metered penalty execution")
 	}()
-	result, _, err = e.invokeFrom(ctx.WithGasMeter(meter), sender, target, data, true)
+	result, _, err = e.invokeFromWithGas(ctx.WithGasMeter(meter), sender, target, data, true, min(gasLimit, meter.Limit()))
 	return result, err
 }
 

@@ -110,7 +110,9 @@ func (e *Executor) ApplyActiveNFTPenalty(ctx sdk.Context, row validatortypes.EVM
 		return err
 	}
 	authorized := child.WithValue(activeNFTPenaltyKey{}, activeNFTPenaltyCall{e, child.BlockHeight(), id})
-	result, err := e.invokePenalty(authorized, Sender(), e.roles.Gateway, data)
+	// The extra Gateway library and Vault frames need to forward gas to the
+	// native burn. Charge actual pre-refund work to the unchanged block budget.
+	result, err := e.invokePenaltyWithGas(authorized, Sender(), e.roles.Gateway, data, 2_000_000)
 	if err != nil {
 		return err
 	}
