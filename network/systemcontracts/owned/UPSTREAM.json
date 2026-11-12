@@ -1,9 +1,9 @@
 {
-  "patchLabel": "mintcandy-exact-token-address-binding-3",
+  "patchLabel": "mintcandy-frozen-ordinary-del-penalty-4",
   "canonicalSource": "sources/DecimalDelegation.sol",
   "canonicalSha256": "4478ab6d8b4a7feb230d70715c72f3be816fdbfd0efe7743e3572cfd4ce010c2",
   "ownedSource": "owned/DecimalDelegation.sol",
-  "ownedSha256": "560c2b87374d7ad96faff533e490d2f54313072455817010af72638ca2515c26",
+  "ownedSha256": "6d1cecc140c5c2643f3589f26f3221cc9552744c34194e585dc8380e5c1b08d7",
   "changedFunctions": [
     "DelegationNFTLib._applyPenaltiesToStake",
     "DecimalDelegation._applyPenaltiesToStake",
@@ -40,7 +40,17 @@
     "DecimalDelegationCommon._isValidatorActive",
     "DelegationNFTLib._isValidatorActive",
     "DelegationNFTLib._checkToken",
-    "DecimalDelegation._checkToken"
+    "DecimalDelegation._checkToken",
+    "DecimalDelegationCommon._withdraw",
+    "DecimalDelegationCommon._checkpointFrozenDELWithdrawal",
+    "DelegationNFTLib._frozenDELPenaltyStorage",
+    "DelegationNFTLib.getFrozenDELCheckpoint",
+    "DelegationNFTLib.checkpointFrozenDELWithdrawal",
+    "DelegationNFTLib.applyFrozenDELPenalty",
+    "DelegationNFTLib._isOrdinaryFrozenDEL",
+    "MintCandyIsolatedDelegation._checkpointFrozenDELWithdrawal",
+    "MintCandyIsolatedDelegation.getFrozenDELCheckpoint",
+    "MintCandyIsolatedDelegation.applyFrozenDELPenalty"
   ],
-  "financialScope": "Preserve per-position claim rounding; burn exact realized direct loss and debit recorded validator reserve once; NFT contract burns its own reserve loss once; global penalty application only acknowledges target index. ERC1155 preserves quantity-return API; companion/reserve mirrors debit exact observed approved NFT pool loss, without reinterpreting quantity as reserve wei. Explicit coin applications consume at most32 append entries per position, at most16 position IDs. NFT applications share at most16 append entries for the whole call, at most16 IDs; mutations require completed catchup. New and zero positions use current append count; no timestamp deduplication. The separate MintCandyIsolatedDelegation fresh-network profile replaces ERC1155 deposit delegation with authenticated incoming isolation and an ERC721 vault receipt stake. Origin quantity and receipt quantity remain separate; the explicit registry vault role is a distinct supported receipt family. Legacy MintCandyDelegation remains a separately named shared-model regression reference, not the fresh financial profile. Both owned Gateway activity checks use the approved fixed-size MasterValidator state header instead of isActive copying penalty history; membership/pause semantics stay status!=Deleted and !paused. Both owned token admission checks resolve the authoritative current TokenCenter tokens(symbol) entry to the exact token address; an unrelated token with a registered symbol is rejected. The existing exact-registry WDEL exception and all valid DEL/WDEL/custom routes remain unchanged."
+  "financialScope": "Preserve per-position claim rounding; burn exact realized direct loss and debit recorded validator reserve once; NFT contract burns its own reserve loss once; global penalty application only acknowledges target index. ERC1155 preserves quantity-return API; companion/reserve mirrors debit exact observed approved NFT pool loss, without reinterpreting quantity as reserve wei. Explicit coin applications consume at most32 append entries per position, at most16 position IDs. NFT applications share at most16 append entries for the whole call, at most16 IDs; mutations require completed catchup. New and zero positions use current append count; no timestamp deduplication. The separate MintCandyIsolatedDelegation fresh-network profile replaces ERC1155 deposit delegation with authenticated incoming isolation and an ERC721 vault receipt stake. Origin quantity and receipt quantity remain separate; the explicit registry vault role is a distinct supported receipt family. Legacy MintCandyDelegation remains a separately named shared-model regression reference, not the fresh financial profile. Both owned Gateway activity checks use the approved fixed-size MasterValidator state header instead of isActive copying penalty history; membership/pause semantics stay status!=Deleted and !paused. Both owned token admission checks resolve the authoritative current TokenCenter tokens(symbol) entry to the exact token address; an unrelated token with a registered symbol is rejected. The existing exact-registry WDEL exception and all valid DEL/WDEL/custom routes remain unchanged. The isolated Gateway records ordinary frozen DEL creation height and realized cursor in an ERC-7201 sidecar without changing its frozen getter layout. An owner-authorized update consumes exactly one Master penalty for a paused live validator while the claim remains immature. Claims created before the infraction advance without loss. Other eligible claims burn exactly their realized WDEL and native backing, without debiting active reserve. Full loss retains an immutable index and a completed zero claim. Existing claims without a checkpoint retain their completion path and cannot be penalized through this entrypoint."
 }

@@ -3498,8 +3498,11 @@ abstract contract DecimalDelegationCommon is
         frozenStakes.push(frozenStake);
 
         uint256 stakeIndex = frozenStakes.length - 1;
+        _checkpointFrozenDELWithdrawal(stakeIndex, frozenStake.stake);
         emit WithdrawRequest(stakeId, stakeIndex, frozenStake);
     }
+
+    function _checkpointFrozenDELWithdrawal(uint256, Stake memory) internal virtual {}
 
     function _withdrawFor(
         address validator,
@@ -4070,6 +4073,102 @@ interface IMintCandyIsolationVault {
 }
 
 library DelegationNFTLib {
+    error InvalidFrozenDELPenalty();
+
+    event FrozenDELPenaltyApplied(
+        uint256 indexed index, uint256 indexed penaltyCursor, uint256 infractionHeight,
+        uint256 amountBefore, uint256 amountAfter, bool eligible
+    );
+    event FrozenDELClaimExtinguished(uint256 indexed index, uint256 indexed penaltyCursor);
+
+    struct FrozenDELCheckpoint {
+        uint256 creationHeight;
+        uint256 penaltyCursor;
+    }
+
+    /// @custom:storage-location erc7201:mintcandy.gateway.frozen-del-penalty.v1
+    struct FrozenDELPenaltyStorage {
+        mapping(uint256 index => FrozenDELCheckpoint) checkpoints;
+    }
+
+    bytes32 private constant FROZEN_DEL_PENALTY_STORAGE =
+        0x95000512b10e8ab66ab38fda478ef91599c9a3d7fbb87d0537231a521d996d00;
+
+    function _frozenDELPenaltyStorage() private pure returns (FrozenDELPenaltyStorage storage $) {
+        assembly {
+            $.slot := FROZEN_DEL_PENALTY_STORAGE
+        }
+    }
+
+    function getFrozenDELCheckpoint(uint256 index) public view returns (uint256 creationHeight, uint256 penaltyCursor) {
+        FrozenDELCheckpoint storage checkpoint = _frozenDELPenaltyStorage().checkpoints[index];
+        return (checkpoint.creationHeight, checkpoint.penaltyCursor);
+    }
+
+    function checkpointFrozenDELWithdrawal(IDecimalDelegationCommon.DelegationStorage storage $, uint256 index) public {
+        IDecimalDelegationCommon.FrozenStake storage claim = $._frozenStakes[index];
+        FrozenDELCheckpoint storage checkpoint = _frozenDELPenaltyStorage().checkpoints[index];
+        if (checkpoint.creationHeight != 0 || block.number == 0 || !_isOrdinaryFrozenDEL($, claim)) {
+            revert InvalidFrozenDELPenalty();
+        }
+        // _withdraw applied any outstanding active penalties before freezing.
+        checkpoint.creationHeight = block.number;
+        checkpoint.penaltyCursor = $._stakePenaltyIndex[_getStakeId(claim.stake)];
+    }
+
+    function applyFrozenDELPenalty(
+        IDecimalDelegationCommon.DelegationStorage storage $,
+        uint256 index,
+        uint256 infractionHeight,
+        uint256 expectedAmount,
+        uint256 beforeCursor
+    ) public {
+        IDecimalDelegationCommon.FrozenStake storage claim = $._frozenStakes[index];
+        FrozenDELCheckpoint storage checkpoint = _frozenDELPenaltyStorage().checkpoints[index];
+        if (!_isOrdinaryFrozenDEL($, claim) || claim.stake.amount != expectedAmount ||
+            checkpoint.creationHeight == 0 || checkpoint.penaltyCursor != beforeCursor ||
+            checkpoint.creationHeight > block.number ||
+            infractionHeight == 0 || infractionHeight > block.number ||
+            block.timestamp >= claim.unfreezeTimestamp) {
+            revert InvalidFrozenDELPenalty();
+        }
+        IPagedDecimalMasterValidator master = IPagedDecimalMasterValidator(address(_masterValidator($)));
+        (uint8 status, bool paused, uint256 count) = master.getValidatorState(claim.stake.validator);
+        if ((status != 1 && status != 2) || !paused || count <= beforeCursor || count - beforeCursor != 1) {
+            revert InvalidFrozenDELPenalty();
+        }
+        uint16[] memory percentages = master.getPenaltiesRange(claim.stake.validator, beforeCursor, 1);
+        if (percentages.length != 1 || percentages[0] == 0 || percentages[0] > 100) {
+            revert InvalidFrozenDELPenalty();
+        }
+        bool eligible = checkpoint.creationHeight >= infractionHeight;
+        uint256 loss = eligible ? _getAmountToPenalty(expectedAmount, percentages[0]) : 0;
+        uint256 afterAmount = expectedAmount - loss;
+        checkpoint.penaltyCursor = count;
+        if (loss != 0) {
+            claim.stake.amount = afterAmount;
+            if (afterAmount == 0) {
+                claim.freezeStatus = IDecimalDelegationCommon.FreezeStatus.Completed;
+            }
+            // This claim already left the active reserve when frozen.
+            _burnToken($, claim.stake.token, loss);
+        }
+        emit FrozenDELPenaltyApplied(index, count, infractionHeight, expectedAmount, afterAmount, eligible);
+        if (afterAmount == 0) emit FrozenDELClaimExtinguished(index, count);
+    }
+
+    function _isOrdinaryFrozenDEL(
+        IDecimalDelegationCommon.DelegationStorage storage $,
+        IDecimalDelegationCommon.FrozenStake storage claim
+    ) private view returns (bool) {
+        IDecimalDelegationCommon.Stake storage stake = claim.stake;
+        return claim.freezeType == IDecimalDelegationCommon.FreezeType.Withdraw &&
+            claim.freezeStatus == IDecimalDelegationCommon.FreezeStatus.Frozen &&
+            stake.tokenType == IDecimalDelegationCommon.TokenType.DEL &&
+            stake.tokenId == 0 && stake.holdTimestamp == 0 && stake.holdStartTime == 0 &&
+            stake.amount != 0 && stake.token == address(WETH($));
+    }
+
     /* ========== EVENTS (redeclared, identical signatures) ========== */
 
     event StakeUpdated(
@@ -7198,6 +7297,29 @@ contract DecimalDelegation is
 /// @notice Fresh-network Unified Gateway: ERC1155 delegation creates an isolated ERC721 position.
 /// @dev Historical shared-pool artifact remains separately named MintCandyDelegation.
 contract MintCandyIsolatedDelegation is DecimalDelegation {
+    error InvalidFrozenDELPenalty();
+
+    event FrozenDELPenaltyApplied(
+        uint256 indexed index, uint256 indexed penaltyCursor, uint256 infractionHeight,
+        uint256 amountBefore, uint256 amountAfter, bool eligible
+    );
+    event FrozenDELClaimExtinguished(uint256 indexed index, uint256 indexed penaltyCursor);
+
+    function _checkpointFrozenDELWithdrawal(uint256 index, Stake memory stake) internal override {
+        if (stake.tokenType == TokenType.DEL && stake.holdTimestamp == 0) {
+            DelegationNFTLib.checkpointFrozenDELWithdrawal(_getDelegationStorage(), index);
+        }
+    }
+
+    function getFrozenDELCheckpoint(uint256 index) external view returns (uint256, uint256) {
+        return DelegationNFTLib.getFrozenDELCheckpoint(index);
+    }
+
+    function applyFrozenDELPenalty(uint256 index, uint256 infractionHeight, uint256 expectedAmount, uint256 beforeCursor)
+        external onlyOwner whenNotPaused nonReentrant {
+        DelegationNFTLib.applyFrozenDELPenalty(_getDelegationStorage(), index, infractionHeight, expectedAmount, beforeCursor);
+    }
+
     function delegateNFT1155(address validator, address originContract, uint256 tokenId, uint256 quantity)
         public override whenNotPaused {
         DelegationNFTLib.delegateIsolatedNFT1155(_getDelegationStorage(), msg.sender,
