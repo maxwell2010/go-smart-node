@@ -13,6 +13,7 @@ import (
 	"github.com/ethereum/go-ethereum/core"
 	ethtypes "github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/crypto"
+	"github.com/maxwell2010/go-smart-node/network/decimal/nft/evmview"
 	validatortypes "github.com/maxwell2010/go-smart-node/network/decimal/validator/types"
 	"github.com/maxwell2010/go-smart-node/network/identity"
 	"github.com/maxwell2010/go-smart-node/network/nativeburn"
@@ -29,33 +30,60 @@ type OrdinaryDELPenaltyProof = ActiveDELPenaltyProof
 
 type activeDELPenaltyKey struct{}
 type activeDELPenaltyCall struct {
-	executor *Executor
-	height   int64
-	id       common.Hash
-	held     bool
+	executor   *Executor
+	height     int64
+	id         common.Hash
+	held       bool
+	historical *historicalActiveDELPenalty
+}
+
+type historicalActiveDELPenalty struct {
+	master   MasterPenaltyProof
+	eligible sdkmath.Int
 }
 
 // AuthorizeOrdinaryDELPenalty is for the internal EVM commit guard only. A
 // signed call or a different executor cannot obtain this cache capability.
 func (e *Executor) AuthorizeOrdinaryDELPenalty(ctx sdk.Context, msg core.Message) bool {
-	return e.authorizeActiveDELPenalty(ctx, msg, false)
+	return e.authorizeActiveDELPenalty(ctx, msg, false, false)
 }
 
 // AuthorizeHeldDELPenalty scopes the internal capability to the held route.
 func (e *Executor) AuthorizeHeldDELPenalty(ctx sdk.Context, msg core.Message) bool {
-	return e.authorizeActiveDELPenalty(ctx, msg, true)
+	return e.authorizeActiveDELPenalty(ctx, msg, true, false)
 }
 
-func (e *Executor) authorizeActiveDELPenalty(ctx sdk.Context, msg core.Message, held bool) bool {
+// AuthorizeActiveHistoricalDELPenalty scopes the historical active route to
+// one authenticated position and eligible amount in the same execution cache.
+func (e *Executor) AuthorizeActiveHistoricalDELPenalty(ctx sdk.Context, msg core.Message) bool {
+	return e.authorizeActiveDELPenalty(ctx, msg, false, true)
+}
+
+func (e *Executor) authorizeActiveDELPenalty(ctx sdk.Context, msg core.Message, held, historical bool) bool {
 	call, ok := ctx.Value(activeDELPenaltyKey{}).(activeDELPenaltyCall)
-	if !ok || e == nil || call.executor != e || call.height != ctx.BlockHeight() || call.held != held ||
-		ctx.ExecMode() != sdk.ExecModeFinalize || msg.From != Sender() ||
+	if !ok || e == nil || call.executor != e || call.height != ctx.BlockHeight() ||
+		(call.historical != nil) != historical || (!historical && call.held != held) ||
+		ctx.ExecMode() != sdk.ExecModeFinalize || msg.From != call.sender() ||
 		msg.To == nil || *msg.To != e.roles.Gateway || msg.Value == nil ||
 		msg.Value.Sign() != 0 || len(msg.SetCodeAuthorizations) != 0 {
 		return false
 	}
-	data, err := e.gateway.Pack("applyPenaltiesToStakes", [][32]byte{call.id})
+	data, err := e.packActiveDELPenalty(call)
 	return err == nil && bytes.Equal(msg.Data, data)
+}
+
+func (c activeDELPenaltyCall) sender() common.Address {
+	if c.historical != nil {
+		return masterPenaltySender()
+	}
+	return Sender()
+}
+
+func (e *Executor) packActiveDELPenalty(call activeDELPenaltyCall) ([]byte, error) {
+	if history := call.historical; history != nil {
+		return e.gateway.Pack("applyHistoricalPenaltyToDELStake", call.id, big.NewInt(history.master.InfractionHeight), history.eligible.BigInt())
+	}
+	return e.gateway.Pack("applyPenaltiesToStakes", [][32]byte{call.id})
 }
 
 // ApplyOrdinaryDELPenalty realizes one already announced MasterValidator
@@ -66,7 +94,7 @@ func (e *Executor) authorizeActiveDELPenalty(ctx sdk.Context, msg core.Message, 
 func (e *Executor) ApplyOrdinaryDELPenalty(ctx sdk.Context, row validatortypes.EVMStakeBinding, percentage uint16,
 	nativeSupply func(sdk.Context) sdkmath.Int, project func(sdk.Context, OrdinaryDELPenaltyProof) error,
 ) error {
-	return e.applyActiveDELPenalty(ctx, row, percentage, nativeSupply, project, false)
+	return e.applyActiveDELPenalty(ctx, row, percentage, nativeSupply, project, false, nil)
 }
 
 // ApplyHeldDELPenalty realizes one announced penalty in the exact active
@@ -75,11 +103,28 @@ func (e *Executor) ApplyOrdinaryDELPenalty(ctx sdk.Context, row validatortypes.E
 func (e *Executor) ApplyHeldDELPenalty(ctx sdk.Context, row validatortypes.EVMStakeBinding, percentage uint16,
 	nativeSupply func(sdk.Context) sdkmath.Int, project func(sdk.Context, ActiveDELPenaltyProof) error,
 ) error {
-	return e.applyActiveDELPenalty(ctx, row, percentage, nativeSupply, project, true)
+	return e.applyActiveDELPenalty(ctx, row, percentage, nativeSupply, project, true, nil)
+}
+
+// ApplyActiveHistoricalDELPenalty debits exactly the eligible direct principal
+// confirmed by the native provenance planner in the typed Master callback.
+func (e *Executor) ApplyActiveHistoricalDELPenalty(ctx sdk.Context, row validatortypes.EVMStakeBinding, master MasterPenaltyProof,
+	eligible sdkmath.Int, nativeSupply func(sdk.Context) sdkmath.Int, project func(sdk.Context, ActiveDELPenaltyProof) error,
+) error {
+	scope, _ := ctx.Value(penaltySourceKey{}).(*penaltySourceScope)
+	if e == nil || scope == nil || !scope.active || scope.executor != e || scope.height != ctx.BlockHeight() ||
+		master.InfractionHeight <= 0 || master.InfractionHeight != scope.infractionHeight || master.Percentage != scope.percentage ||
+		master.Validator != scope.validator || master.Validator != common.BytesToAddress(row.Validator) ||
+		eligible.IsNil() || eligible.IsNegative() {
+		return errors.New("active historical DEL penalty requires the active typed Master reconciliation")
+	}
+	held := common.BytesToHash(row.HoldTimestamp) != (common.Hash{})
+	return e.applyActiveDELPenalty(ctx, row, master.Percentage, nativeSupply, project, held,
+		&historicalActiveDELPenalty{master: master, eligible: eligible})
 }
 
 func (e *Executor) applyActiveDELPenalty(ctx sdk.Context, row validatortypes.EVMStakeBinding, percentage uint16,
-	nativeSupply func(sdk.Context) sdkmath.Int, project func(sdk.Context, ActiveDELPenaltyProof) error, held bool,
+	nativeSupply func(sdk.Context) sdkmath.Int, project func(sdk.Context, ActiveDELPenaltyProof) error, held bool, historical *historicalActiveDELPenalty,
 ) error {
 	if e == nil || e.evm == nil || nativeSupply == nil || project == nil ||
 		ctx.ExecMode() != sdk.ExecModeFinalize || ctx.BlockHeight() <= 0 || percentage == 0 || percentage > 100 {
@@ -98,15 +143,27 @@ func (e *Executor) applyActiveDELPenalty(ctx sdk.Context, row validatortypes.EVM
 		return errors.New("active DEL penalty cursor overflow")
 	}
 	afterCursor := common.BigToHash(next)
+	announcement := MasterPenaltyProof{Validator: validator, BeforeCursor: beforeCursor, AfterCursor: afterCursor, Percentage: percentage}
+	direct := row.RawAmount.Sub(row.RawNftBackedAmount)
 	child, write := ctx.CacheContext()
-	source, err := e.authenticatePenaltySource(child, validator, percentage)
-	if err != nil {
+	var source *evmview.StakeSource
+	if historical == nil {
+		source, err = e.authenticatePenaltySource(child, validator, percentage)
+		if err != nil {
+			return err
+		}
+	} else {
+		announcement.InfractionHeight = historical.master.InfractionHeight
+		if announcement != historical.master || historical.eligible.GT(direct) {
+			return errors.New("active DEL position differs from the typed Master entry or eligible principal")
+		}
+		direct = historical.eligible
+	}
+	call := activeDELPenaltyCall{executor: e, height: child.BlockHeight(), id: id, held: held, historical: historical}
+	if err := e.requireInert(child, call.sender()); err != nil {
 		return err
 	}
-	if err := e.requireInert(child, Sender()); err != nil {
-		return err
-	}
-	status, err := e.verifyAnnouncedPenalty(child, validator, beforeCursor, afterCursor, percentage)
+	status, err := e.verifyMasterPenaltyAppend(child, announcement)
 	if err != nil {
 		return err
 	}
@@ -114,16 +171,15 @@ func (e *Executor) applyActiveDELPenalty(ctx sdk.Context, row validatortypes.EVM
 	if err != nil {
 		return err
 	}
-	direct := row.RawAmount.Sub(row.RawNftBackedAmount)
 	burned := new(big.Int).Mul(direct.BigInt(), new(big.Int).SetUint64(uint64(percentage)))
 	burned.Quo(burned, big.NewInt(100))
 	remaining := row.RawAmount.Sub(sdkmath.NewIntFromBigInt(burned))
-	data, err := e.gateway.Pack("applyPenaltiesToStakes", [][32]byte{id})
+	data, err := e.packActiveDELPenalty(call)
 	if err != nil {
 		return err
 	}
-	authorized := child.WithValue(activeDELPenaltyKey{}, activeDELPenaltyCall{executor: e, height: child.BlockHeight(), id: id, held: held})
-	result, err := e.invokePenalty(authorized, Sender(), e.roles.Gateway, data)
+	authorized := child.WithValue(activeDELPenaltyKey{}, call)
+	result, err := e.invokePenalty(authorized, call.sender(), e.roles.Gateway, data)
 	if err != nil {
 		return err
 	}
@@ -144,7 +200,7 @@ func (e *Executor) applyActiveDELPenalty(ctx sdk.Context, row validatortypes.EVM
 	if err := e.confirmPenaltySource(child, source); err != nil {
 		return err
 	}
-	afterStatus, err := e.verifyAnnouncedPenalty(child, validator, beforeCursor, afterCursor, percentage)
+	afterStatus, err := e.verifyMasterPenaltyAppend(child, announcement)
 	if err != nil {
 		return err
 	}

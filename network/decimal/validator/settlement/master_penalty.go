@@ -38,12 +38,12 @@ type masterPenaltyCall struct {
 type penaltySourceKey struct{}
 
 type penaltySourceScope struct {
-	executor   *Executor
-	height     int64
-	validator  common.Address
-	percentage uint16
-	historical bool
-	active     bool
+	executor         *Executor
+	height           int64
+	validator        common.Address
+	percentage       uint16
+	infractionHeight int64
+	active           bool
 }
 
 // Each realization still verifies its exact Master entry, receipt and
@@ -51,7 +51,7 @@ type penaltySourceScope struct {
 // ends of the same outer cache instead of repeating that read per position.
 func (e *Executor) authenticatePenaltySource(ctx sdk.Context, validator common.Address, percentage uint16) (*evmview.StakeSource, error) {
 	if scope, ok := ctx.Value(penaltySourceKey{}).(*penaltySourceScope); ok {
-		if !scope.active || scope.historical || scope.executor != e || scope.height != ctx.BlockHeight() ||
+		if !scope.active || scope.infractionHeight != 0 || scope.executor != e || scope.height != ctx.BlockHeight() ||
 			scope.validator != validator || scope.percentage != percentage {
 			return nil, errors.New("position penalty differs from the active Master reconciliation scope")
 		}
@@ -206,7 +206,7 @@ func (e *Executor) appendMasterPenalty(ctx sdk.Context, proof MasterPenaltyProof
 		!before.bankSupply.Equal(after.bankSupply) {
 		return errors.New("Master penalty announcement changed native DEL or WDEL")
 	}
-	scope := &penaltySourceScope{executor: e, height: child.BlockHeight(), validator: validator, percentage: percentage, historical: historical, active: true}
+	scope := &penaltySourceScope{executor: e, height: child.BlockHeight(), validator: validator, percentage: percentage, infractionHeight: proof.InfractionHeight, active: true}
 	defer func() { scope.active = false }()
 	if err := reconcile(child.WithValue(penaltySourceKey{}, scope), proof); err != nil {
 		return fmt.Errorf("reconcile announced Master penalty: %w", err)
