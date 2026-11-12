@@ -166,6 +166,30 @@ predecessor committed through 63, the successor applied the approved plan at
 binaries use the same source and the plan is dedicated to this rehearsal.
 [Two-binary governance rehearsal](https://github.com/maxwell2010/go-smart-node/actions/runs/43172176025)
 
+### Approved basis for duplicate-vote penalties
+
+The selected penalty is 5% of slashable DEL exposure at the infraction.
+Subsequent deposits do not fund this penalty. The planned ledger boundary
+for infraction height H is the committed state immediately before H. Keep
+the deposit heights when ordinary DEL and held DEL split into withdrawal
+claims, and keep the original staking height and receipt lineage when an
+isolated NFT becomes a claim. Both the native projection and EVM settlement
+need to advance the corresponding penalty cursor when the eligible loss is
+zero.
+
+The withdrawal timer must be supplemented by the evidence window and any
+accepted pending liability. CometBFT v0.38.26's nominal evidence expiry
+requires both age thresholds to be exceeded, using the preceding committed
+height and time. The application needs a deterministic cutoff using the
+same clock for admission, payout, compaction and replay. These rules apply
+to the common manual and automatic payout path.
+[CometBFT evidence age check](https://github.com/cometbft/cometbft/blob/v0.38.26/evidence/verify.go#L280-L289)
+
+The stable process gate must cover a validator already paused for downtime,
+a late top-up, a partial withdrawal, a restart with pending liability and
+an exact burn without reallocating loss to later backing. The new-network
+release remains a development candidate while this path is being built.
+
 Modern release blockers remain:
 
 - Complete native Decimal coin, NFT, validator, rewards and fee integration.
