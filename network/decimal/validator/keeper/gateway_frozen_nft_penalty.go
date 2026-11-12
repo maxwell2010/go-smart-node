@@ -71,16 +71,16 @@ func (k *StateKeeper) ApplyGatewayFrozenNFTPenalty(ctx sdk.Context, nft *nftkeep
 	if entry.CreationHeight < infractionHeight && !loss.IsZero() {
 		return errors.New("frozen NFT claim predates the infraction")
 	}
-	lineage, err := nft.GetIsolatedLineage(child, p.Vault, p.PositionID)
-	if err != nil {
-		return err
-	}
-	if !bytes.Equal(lineage.ParentPositionID, p.ParentPositionID) || !bytes.Equal(lineage.OriginContract, p.Origin.Contract) ||
-		!bytes.Equal(lineage.OriginTokenID, p.Origin.TokenID) || lineage.OriginNativeTokenID != p.Origin.NativeTokenID ||
-		!types.SameNativeUnitIDs(lineage.OriginSubTokenIDs, p.Origin.NativeSubTokenIDs) ||
-		lineage.ReceiptNativeTokenID != p.Custody.NativeTokenID || lineage.ReceiptSubTokenID != p.Custody.NativeSubTokenIDs[0] ||
-		lineage.Reserve.Kind != nfttypes.IsolatedReserveDEL || common.BytesToHash(lineage.Reserve.Amount) != common.BigToHash(before.ReportedReserveAmount.BigInt()) {
-		return errors.New("frozen NFT penalty lineage differs from the native claim")
+	// The binding already contains the exact archived unit and reserve
+	// identity. Derive the expected lineage from it so the NFT keeper reads
+	// and validates those units once, even for a 1024-unit receipt.
+	lineage := nfttypes.IsolatedPositionLineage{
+		Vault: p.Vault, PositionID: p.PositionID, ParentPositionID: p.ParentPositionID,
+		OriginContract: p.Origin.Contract, OriginTokenID: p.Origin.TokenID,
+		OriginNativeTokenID: p.Origin.NativeTokenID, OriginSubTokenIDs: p.Origin.NativeSubTokenIDs,
+		ReceiptNativeTokenID: p.Custody.NativeTokenID, ReceiptSubTokenID: p.Custody.NativeSubTokenIDs[0],
+		Reserve: nfttypes.IsolatedReserveSnapshot{Kind: before.ReserveAsset.ReserveKind, Token: before.ReserveAsset.Token,
+			Amount: common.BigToHash(before.ReportedReserveAmount.BigInt()).Bytes()},
 	}
 	if err := nft.ApplyGatewayIsolatedDELPenalty(child, common.BytesToAddress(before.Gateway), lineage, remaining); err != nil {
 		return err

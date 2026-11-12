@@ -50,7 +50,8 @@ func (e *Executor) ApplyFrozenNFTPenalty(ctx sdk.Context, row validatortypes.EVM
 		return errors.New("penalty requires an unmatured ordinary isolated NFT claim backed by native DEL")
 	}
 	child, commit := ctx.CacheContext()
-	source, err := e.auth.AuthenticateStakeProfile(child)
+	validator := common.BytesToAddress(row.SourceValidator)
+	source, err := e.authenticatePenaltySource(child, validator, percentage)
 	if err != nil {
 		return err
 	}
@@ -79,14 +80,17 @@ func (e *Executor) ApplyFrozenNFTPenalty(ctx sdk.Context, row validatortypes.EVM
 	if next.BitLen() > 256 {
 		return errors.New("frozen NFT penalty cursor overflow")
 	}
-	validator := common.BytesToAddress(row.SourceValidator)
 	proof := FrozenNFTPenaltyProof{Index: index, BeforeCursor: checkpoint.cursor, AfterCursor: common.BigToHash(next),
 		InfractionHeight: infractionHeight, Eligible: row.CreatedHeight >= infractionHeight}
 	status, err := e.verifyAnnouncedPenalty(child, validator, checkpoint.cursor, proof.AfterCursor, percentage)
 	if err != nil {
 		return err
 	}
-	before, err := e.readFrozenNFTPenaltyState(child, row, beneficiary, row.ReportedReserveAmount, nativeSupply)
+	position, err := e.readFrozenNFTPenaltyPosition(child, row)
+	if err != nil {
+		return err
+	}
+	before, err := e.readFrozenNFTPenaltyState(child, row, beneficiary, position, nativeSupply)
 	if err != nil {
 		return err
 	}
@@ -123,7 +127,11 @@ func (e *Executor) ApplyFrozenNFTPenalty(ctx sdk.Context, row validatortypes.EVM
 	if recorded.creationHeight != checkpoint.creationHeight || recorded.cursor != proof.AfterCursor {
 		return errors.New("frozen NFT penalty did not advance the exact checkpoint once")
 	}
-	after, err := e.readFrozenNFTPenaltyState(child, row, beneficiary, proof.RemainingReserve, nativeSupply)
+	postPosition, err := e.readFrozenNFTPenaltyPostPosition(child, before.position, proof.RemainingReserve)
+	if err != nil {
+		return err
+	}
+	after, err := e.readFrozenNFTPenaltyState(child, row, beneficiary, postPosition, nativeSupply)
 	if err != nil {
 		return err
 	}
@@ -138,16 +146,15 @@ func (e *Executor) ApplyFrozenNFTPenalty(ctx sdk.Context, row validatortypes.EVM
 	if err := e.verifyFrozenNFTPenaltyLogs(receipt, row.ReportedReserveAmount, after.position, percentage, proof); err != nil {
 		return err
 	}
-	afterSource, err := e.auth.AuthenticateStakeProfile(child)
-	if err != nil {
+	if err := e.confirmPenaltySource(child, source); err != nil {
 		return err
 	}
 	afterStatus, err := e.verifyAnnouncedPenalty(child, validator, checkpoint.cursor, proof.AfterCursor, percentage)
 	if err != nil {
 		return err
 	}
-	if afterSource != source || afterStatus != status {
-		return errors.New("authenticated source or Master status changed during frozen NFT penalty")
+	if afterStatus != status {
+		return errors.New("Master status changed during frozen NFT penalty")
 	}
 	if err := project(child, proof); err != nil {
 		return fmt.Errorf("project frozen NFT penalty: %w", err)
@@ -163,15 +170,12 @@ type frozenNFTPenaltyState struct {
 	bankSupply sdkmath.Int
 }
 
-func (e *Executor) readFrozenNFTPenaltyState(ctx sdk.Context, row validatortypes.EVMFrozenBinding, beneficiary common.Address,
-	amount sdkmath.Int, nativeSupply func(sdk.Context) sdkmath.Int,
-) (frozenNFTPenaltyState, error) {
-	var out frozenNFTPenaltyState
+func (e *Executor) readFrozenNFTPenaltyPosition(ctx sdk.Context, row validatortypes.EVMFrozenBinding) (nftview.PositionSnapshot, error) {
 	p := row.NFTPosition
 	positionID := common.BytesToHash(p.PositionID)
 	position, err := e.auth.Position(ctx, positionID)
 	if err != nil {
-		return out, err
+		return nftview.PositionSnapshot{}, err
 	}
 	if position.Status != evmview.PositionActive || position.Owner != e.roles.Gateway ||
 		position.Asset.Contract != e.roles.PositionVault || position.Asset.TokenID != positionID ||
@@ -179,9 +183,55 @@ func (e *Executor) readFrozenNFTPenaltyState(ctx sdk.Context, row validatortypes
 		p.Origin.Standard != 1155 || position.Origin.Contract != common.BytesToAddress(p.Origin.Contract) ||
 		position.Origin.TokenID != common.BytesToHash(p.Origin.TokenID) || position.OriginQuantity != uint32(len(p.Origin.NativeSubTokenIDs)) ||
 		position.ReserveKind != nfttypes.IsolatedReserveDEL || position.ReserveToken != (common.Address{}) ||
-		position.ReserveAmount != common.BigToHash(amount.BigInt()) {
-		return out, errors.New("frozen NFT penalty differs from exact live Vault custody and DEL reserve")
+		position.ReserveAmount != common.BigToHash(row.ReportedReserveAmount.BigInt()) {
+		return nftview.PositionSnapshot{}, errors.New("frozen NFT penalty differs from exact live Vault custody and DEL reserve")
 	}
+	return position, nil
+}
+
+// The before-read authenticated the full origin profile. The same pinned
+// Vault implements this exact twelve-word read after the reserve-only call.
+// Rechecking all returned words and collateral avoids repeating the factory
+// and origin proxy discovery just to read the changed balance.
+func (e *Executor) readFrozenNFTPenaltyPostPosition(ctx sdk.Context, before nftview.PositionSnapshot, remaining sdkmath.Int) (nftview.PositionSnapshot, error) {
+	var out nftview.PositionSnapshot
+	vault := e.roles.PositionVault
+	position, err := e.read(ctx, vault, e.vault, "getPosition", 12*common.HashLength, before.Asset.TokenID.Big())
+	if err != nil {
+		return out, err
+	}
+	amount := common.BigToHash(remaining.BigInt())
+	quantity := common.BigToHash(new(big.Int).SetUint64(uint64(before.OriginQuantity)))
+	if !matchesNFTWords(position, common.BytesToHash(before.Origin.Contract[:]), before.Origin.TokenID, smallWord(1), quantity,
+		common.Hash{}, amount, smallWord(byte(nfttypes.IsolatedReserveDEL)), before.ParentPositionID,
+		common.BytesToHash(before.Owner[:]), smallWord(byte(before.Status)), boolWord(before.Refundable), boolWord(before.Burnable)) {
+		return out, errors.New("frozen NFT penalty changed the exact Vault receipt or reserve")
+	}
+	next, err := e.read(ctx, vault, e.vault, "nextPositionId", common.HashLength)
+	if err != nil {
+		return out, err
+	}
+	if common.BytesToHash(next) != before.NextPositionID {
+		return out, errors.New("frozen NFT penalty changed the Vault position cursor")
+	}
+	declared, err := e.read(ctx, vault, e.vault, "declaredReserve", common.HashLength, uint8(nfttypes.IsolatedReserveDEL), common.Address{})
+	if err != nil {
+		return out, err
+	}
+	held := e.evm.GetBalance(ctx, vault)
+	declaredWord := common.BytesToHash(declared)
+	if held == nil || declaredWord.Big().Cmp(remaining.BigInt()) < 0 || held.ToBig().Cmp(declaredWord.Big()) < 0 {
+		return out, errors.New("frozen NFT penalty left insufficient Vault collateral")
+	}
+	out = before
+	out.ReserveAmount, out.DeclaredCurrencyReserve, out.HeldCurrencyReserve = amount, declaredWord, common.BigToHash(held.ToBig())
+	return out, nil
+}
+
+func (e *Executor) readFrozenNFTPenaltyState(ctx sdk.Context, row validatortypes.EVMFrozenBinding, beneficiary common.Address,
+	position nftview.PositionSnapshot, nativeSupply func(sdk.Context) sdkmath.Int,
+) (frozenNFTPenaltyState, error) {
+	var out frozenNFTPenaltyState
 	activeReserve, err := e.read(ctx, e.roles.Gateway, e.gateway, "getValidatorReserve", 2*common.HashLength,
 		common.BytesToAddress(row.SourceValidator), e.roles.WrappedDEL)
 	if err != nil {
