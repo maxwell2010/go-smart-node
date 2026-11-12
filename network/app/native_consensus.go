@@ -208,6 +208,11 @@ func (c *withdrawalController) projectAndCheckConsensus(ctx sdk.Context, project
 			return fmt.Errorf("stake change exceeds native fee reward admission: %w", err)
 		}
 	}
+	if c.profile.EnableNativeOrdinaryDELDowntime {
+		if err := c.validateOrdinaryDowntimeAdmission(child); err != nil {
+			return fmt.Errorf("stake change exceeds the ordinary DEL downtime profile: %w", err)
+		}
+	}
 	write()
 	return nil
 }

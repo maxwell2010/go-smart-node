@@ -62,6 +62,9 @@ func parseWithdrawalGenesisProfile(raw json.RawMessage) (*WithdrawalProfile, err
 	if profile.EnableNativeGovernance && !profile.EnableNativeConsensus {
 		return nil, errors.New("native governance genesis requires native consensus")
 	}
+	if err := validateNativeOrdinaryDELDowntimeProfile(profile); err != nil {
+		return nil, err
+	}
 	seen := make(map[common.Address]bool)
 	for _, addr := range []common.Address{profile.Registry, profile.Gateway, profile.Library, profile.NFTCenter,
 		profile.PositionVault, profile.MasterValidator, profile.WrappedDEL} {
@@ -281,6 +284,11 @@ func (app *App) initWithdrawalGenesis(ctx sdk.Context, req *abci.RequestInitChai
 	}
 	if profile.EnableNativeFeeRewards {
 		if err := app.validateNativeFeeRewardGenesis(child, controller); err != nil {
+			return nil, err
+		}
+	}
+	if profile.EnableNativeOrdinaryDELDowntime {
+		if err := controller.validateOrdinaryDowntimeAdmission(child); err != nil {
 			return nil, err
 		}
 	}

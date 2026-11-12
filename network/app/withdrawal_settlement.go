@@ -38,22 +38,23 @@ const (
 // WithdrawalProfile pins the system addresses for the isolated-position profile.
 // It is read from consensus state, never from node-local operator settings.
 type WithdrawalProfile struct {
-	Registry               common.Address `json:"registry"`
-	Gateway                common.Address `json:"gateway"`
-	Library                common.Address `json:"library"`
-	NFTCenter              common.Address `json:"nft_center"`
-	PositionVault          common.Address `json:"position_vault"`
-	MasterValidator        common.Address `json:"master_validator"`
-	WrappedDEL             common.Address `json:"wrapped_del"`
-	SettlementOnly         bool           `json:"settlement_only,omitempty"`
-	EnableDELDelegation    bool           `json:"enable_del_delegation,omitempty"`
-	EnableDELHold          bool           `json:"enable_del_hold,omitempty"`
-	EnableDELHoldReset     bool           `json:"enable_del_hold_reset,omitempty"`
-	EnableNFTDelegation    bool           `json:"enable_nft_delegation,omitempty"`
-	EnableNativeConsensus  bool           `json:"enable_native_consensus,omitempty"`
-	EnableNativeFeeRewards bool           `json:"enable_native_fee_rewards,omitempty"`
-	EnableNativeIBCV1      bool           `json:"enable_native_ibc_v1,omitempty"`
-	EnableNativeGovernance bool           `json:"enable_native_governance,omitempty"`
+	Registry                        common.Address `json:"registry"`
+	Gateway                         common.Address `json:"gateway"`
+	Library                         common.Address `json:"library"`
+	NFTCenter                       common.Address `json:"nft_center"`
+	PositionVault                   common.Address `json:"position_vault"`
+	MasterValidator                 common.Address `json:"master_validator"`
+	WrappedDEL                      common.Address `json:"wrapped_del"`
+	SettlementOnly                  bool           `json:"settlement_only,omitempty"`
+	EnableDELDelegation             bool           `json:"enable_del_delegation,omitempty"`
+	EnableDELHold                   bool           `json:"enable_del_hold,omitempty"`
+	EnableDELHoldReset              bool           `json:"enable_del_hold_reset,omitempty"`
+	EnableNFTDelegation             bool           `json:"enable_nft_delegation,omitempty"`
+	EnableNativeConsensus           bool           `json:"enable_native_consensus,omitempty"`
+	EnableNativeFeeRewards          bool           `json:"enable_native_fee_rewards,omitempty"`
+	EnableNativeIBCV1               bool           `json:"enable_native_ibc_v1,omitempty"`
+	EnableNativeGovernance          bool           `json:"enable_native_governance,omitempty"`
+	EnableNativeOrdinaryDELDowntime bool           `json:"enable_native_ordinary_del_downtime,omitempty"`
 }
 
 type withdrawalController struct {
@@ -107,6 +108,9 @@ func (app *App) LoadWithdrawalSettlement(ctx sdk.Context) error {
 }
 
 func (app *App) newWithdrawalController(profile WithdrawalProfile) (*withdrawalController, error) {
+	if err := validateNativeOrdinaryDELDowntimeProfile(profile); err != nil {
+		return nil, err
+	}
 	if profile.EnableNativeIBCV1 && !profile.EnableNativeConsensus {
 		return nil, errors.New("native IBC v1 requires native consensus")
 	}
@@ -288,6 +292,11 @@ func (c *withdrawalController) PostTxProcessing(ctx sdk.Context, sender common.A
 }
 
 func (c *withdrawalController) projectSignedDEL(ctx sdk.Context, msg core.Message, receipt *ethtypes.Receipt) error {
+	if c.profile.EnableNativeOrdinaryDELDowntime {
+		if handled, err := c.projectPenalizedDELWithdrawal(ctx, msg, receipt); handled || err != nil {
+			return err
+		}
+	}
 	if bytes.Equal(msg.Data[:4], c.abi.Methods["resetHolds"].ID) {
 		held, ordinary, err := c.executor.VerifySignedDELHoldReset(ctx, msg, receipt)
 		if err != nil {
@@ -317,6 +326,11 @@ func (c *withdrawalController) delStakePosition(result settlement.DELTransition)
 type automaticWithdrawalKey struct{}
 
 func (c *withdrawalController) guardInternalCommit(ctx sdk.Context, msg core.Message, logs []*ethtypes.Log) error {
+	if c.profile.EnableNativeOrdinaryDELDowntime &&
+		(c.executor.AuthorizeMasterPenalty(ctx, msg) || c.executor.AuthorizeOrdinaryDELPenalty(ctx, msg) ||
+			c.executor.AuthorizeFrozenDELPenalty(ctx, msg)) {
+		return nil
+	}
 	managed, completion := c.withdrawalActivity(ctx, msg, logs)
 	if !completion {
 		if c.profile.EnableNativeConsensus {

@@ -43,6 +43,11 @@ func (app *App) beginNativeConsensus(ctx sdk.Context) (sdk.BeginBlock, error) {
 			return sdk.BeginBlock{}, fmt.Errorf("distribute native fees for height %d: %w", commit.Height, err)
 		}
 	}
+	if app.withdrawals.profile.EnableNativeOrdinaryDELDowntime && commit.Height > 0 {
+		if err := app.applyOrdinaryDELDowntime(child); err != nil {
+			return sdk.BeginBlock{}, err
+		}
+	}
 	manager := app.nativeConsensusBlockManager()
 	result, err := manager.BeginBlock(child)
 	if err != nil {
