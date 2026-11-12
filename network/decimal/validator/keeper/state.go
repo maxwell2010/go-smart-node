@@ -267,6 +267,13 @@ func (k *StateKeeper) SetValidator(ctx sdk.Context, v types.Validator) error {
 	old, e := k.GetValidator(child, v.OperatorAddress)
 	var previous *types.Validator
 	if e == nil {
+		retired, err := k.IsNativeValidatorRetired(child, v.OperatorAddress)
+		if err != nil {
+			return err
+		}
+		if retired && v.Online {
+			return ErrNativeValidatorRetired
+		}
 		oldKey, _ := old.GetConsAddr()
 		newKey, _ := v.GetConsAddr()
 		if !bytes.Equal(oldKey, newKey) {

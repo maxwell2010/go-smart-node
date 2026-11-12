@@ -38,7 +38,7 @@ func (app *App) nativeValidatorRegistration(ctx sdk.Context, metadata, proposer,
 	return validateNativeValidatorRegistrationProposal(metadata, app.chainID, app.evmChainID, operator, ctx.BlockHeight())
 }
 
-func (app *App) applyNativeValidatorRegistration(ctx sdk.Context, expected govv1.Proposal) error {
+func (app *App) applyNativeValidatorAction(ctx sdk.Context, expected govv1.Proposal) error {
 	proposal, err := app.GovKeeper.Proposals.Get(ctx, expected.Id)
 	if err != nil {
 		return err
@@ -48,14 +48,18 @@ func (app *App) applyNativeValidatorRegistration(ctx sdk.Context, expected govv1
 	}
 	if proposal.Id != expected.Id || proposal.Metadata != expected.Metadata || proposal.Proposer != expected.Proposer ||
 		proposal.Title != expected.Title || len(proposal.Messages) != 0 || proposal.FinalTallyResult == nil {
-		return errors.New("approved native validator registration differs from its tallied proposal")
+		return errors.New("approved native validator action differs from its tallied proposal")
 	}
-	if err := app.registerNativeValidator(ctx, proposal); err != nil {
+	action, failureEvent := app.registerNativeValidator, "decimal_native_validator_registration_failed"
+	if strings.HasPrefix(proposal.Metadata, nativeValidatorRetirementNamespace) {
+		action, failureEvent = app.retireNativeValidator, "decimal_native_validator_retirement_failed"
+	}
+	if err := action(ctx, proposal); err != nil {
 		proposal.Status, proposal.FailedReason = govv1.StatusFailed, err.Error()
 		if err := app.GovKeeper.SetProposal(ctx, proposal); err != nil {
 			return err
 		}
-		ctx.EventManager().EmitEvent(sdk.NewEvent("decimal_native_validator_registration_failed",
+		ctx.EventManager().EmitEvent(sdk.NewEvent(failureEvent,
 			sdk.NewAttribute("proposal_id", strconv.FormatUint(proposal.Id, 10)), sdk.NewAttribute("reason", proposal.FailedReason)))
 	}
 	return nil

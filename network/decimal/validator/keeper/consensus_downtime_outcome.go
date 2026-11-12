@@ -123,6 +123,9 @@ func (k *StateKeeper) ApplyNativeDowntimeOutcome(ctx sdk.Context, candidate Nati
 // positions have caught up. The historical infraction marker is retained.
 func (k *StateKeeper) ReleaseNativeDowntimeJail(ctx sdk.Context, operator string) error {
 	child, write := ctx.CacheContext()
+	if err := k.requireNativeValidatorNotRetired(child, operator); err != nil {
+		return err
+	}
 	validator, err := k.GetValidator(child, operator)
 	if err != nil {
 		return err

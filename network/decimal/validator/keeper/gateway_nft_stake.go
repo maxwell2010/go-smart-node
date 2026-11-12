@@ -111,6 +111,9 @@ func (k *StateKeeper) ApplyGatewayNFTDelegation(ctx sdk.Context, position Gatewa
 	if err != nil {
 		return err
 	}
+	if err := k.requireNativeValidatorNotRetired(ctx, delegation.Validator); err != nil {
+		return err
+	}
 	if !row.ReportedReserveAmount.IsPositive() {
 		return errors.New("Gateway NFT delegation requires a positive reserve")
 	}

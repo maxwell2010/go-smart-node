@@ -208,6 +208,9 @@ func (k *StateKeeper) requireRecoveredGatewayValidator(ctx sdk.Context, operator
 }
 
 func (k *StateKeeper) applyGatewayDELDelegation(ctx sdk.Context, next GatewayDELStake, deposited sdkmath.Int, owner, operator string) error {
+	if err := k.requireNativeValidatorNotRetired(ctx, operator); err != nil {
+		return err
+	}
 	if deposited.IsNil() || !deposited.IsPositive() || next.Amount.LT(deposited) {
 		return errors.New("Gateway DEL position cannot account for the deposit")
 	}

@@ -271,6 +271,10 @@ func (l nativeHistoricalLifecycle) commit(result *abci.ResponseFinalizeBlock) {
 }
 
 func (l nativeHistoricalLifecycle) signedGateway(method string, value sdkmath.Int, args ...interface{}) *abci.ResponseFinalizeBlock {
+	return l.submitSignedEthereum(l.signedGatewayTx(method, value, args...))
+}
+
+func (l nativeHistoricalLifecycle) signedGatewayTx(method string, value sdkmath.Int, args ...interface{}) *ethtypes.Transaction {
 	t := l.t
 	t.Helper()
 	gateway, err := contracts.CompiledABI("MintCandyIsolatedDelegation")
@@ -287,10 +291,18 @@ func (l nativeHistoricalLifecycle) signedGateway(method string, value sdkmath.In
 		Value: value.BigInt(), Gas: 24_000_000, GasPrice: big.NewInt(1_000_000_000_000), Data: data})
 	signed, err := ethtypes.SignTx(raw, signer, privateKey)
 	require.NoError(t, err)
-	return l.submitSignedEthereum(signed)
+	return signed
 }
 
 func (l nativeHistoricalLifecycle) submitSignedEthereum(signed *ethtypes.Transaction) *abci.ResponseFinalizeBlock {
+	l.t.Helper()
+	block, response := l.finalizeSignedEthereum(signed)
+	require.Empty(l.t, response.VmError)
+	l.commit(block)
+	return block
+}
+
+func (l nativeHistoricalLifecycle) finalizeSignedEthereum(signed *ethtypes.Transaction) (*abci.ResponseFinalizeBlock, evmtypes.MsgEthereumTxResponse) {
 	t := l.t
 	t.Helper()
 	msg := &evmtypes.MsgEthereumTx{}
@@ -307,9 +319,7 @@ func (l nativeHistoricalLifecycle) submitSignedEthereum(signed *ethtypes.Transac
 	require.Len(t, messages.MsgResponses, 1)
 	var response evmtypes.MsgEthereumTxResponse
 	require.NoError(t, response.Unmarshal(messages.MsgResponses[0].Value))
-	require.Empty(t, response.VmError)
-	l.commit(block)
-	return block
+	return block, response
 }
 
 func (l nativeHistoricalLifecycle) finalizePenalty() *abci.ResponseFinalizeBlock {
