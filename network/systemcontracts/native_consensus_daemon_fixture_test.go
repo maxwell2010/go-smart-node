@@ -99,7 +99,10 @@ func exportNativeConsensusDaemonFixture(t *testing.T, e isolatedBackendEnv, dir 
 		keyScope = "mintcandy native NFT downtime process fixture "
 	}
 	if historical {
-		require.False(t, feeRewards || ibcV1 || upgradeGovernance || jailRecovery || heldDowntime || nft != nil)
+		require.False(t, feeRewards || ibcV1 || upgradeGovernance || jailRecovery || heldDowntime)
+		if nft != nil {
+			require.Equal(t, "seed", os.Getenv(nativeHistoricalMaxNFTPhaseEnv))
+		}
 		initial, after = [3]int64{4, 4, 2}, [3]int64{4, 4, 0}
 		keyScope = nativeHistoricalConsensusKeyScope
 	}
@@ -331,6 +334,9 @@ func exportNativeConsensusDaemonFixture(t *testing.T, e isolatedBackendEnv, dir 
 		expectations["stakePenaltyData"] = hexData(pack(gateway, "getStakePenaltyIndex", stakeID))
 		if nft != nil {
 			nft.expectations(t, e, profile, gateway, vault, target, actor, key, expectations)
+			if historical {
+				expectations["delStakeId"] = stakeID.Hex()
+			}
 		}
 		if heldDowntime {
 			nonce := e.app.EVMKeeper.GetNonce(ctx, actor)

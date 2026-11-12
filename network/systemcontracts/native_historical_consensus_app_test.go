@@ -287,8 +287,14 @@ func (l nativeHistoricalLifecycle) signedGateway(method string, value sdkmath.In
 		Value: value.BigInt(), Gas: 24_000_000, GasPrice: big.NewInt(1_000_000_000_000), Data: data})
 	signed, err := ethtypes.SignTx(raw, signer, privateKey)
 	require.NoError(t, err)
+	l.submitSignedEthereum(signed)
+}
+
+func (l nativeHistoricalLifecycle) submitSignedEthereum(signed *ethtypes.Transaction) {
+	t := l.t
+	t.Helper()
 	msg := &evmtypes.MsgEthereumTx{}
-	require.NoError(t, msg.FromSignedEthereumTx(signed, signer))
+	require.NoError(t, msg.FromSignedEthereumTx(signed, ethtypes.NewEIP155Signer(big.NewInt(990001))))
 	tx, err := msg.BuildTx(l.app.TxConfig().NewTxBuilder(), identity.BaseDenom)
 	require.NoError(t, err)
 	encoded, err := l.app.TxConfig().TxEncoder()(tx)

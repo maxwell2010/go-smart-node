@@ -23,18 +23,19 @@ type nativeNFTDowntimeFixture struct {
 	origin  contracts.Artifact
 	address common.Address
 	tokenID common.Hash
+	units   uint32
 }
 
 const nativeConsensusNFTDowntimeEnv = "MCND_NATIVE_CONSENSUS_NFT_DOWNTIME"
 
-func mintNativeNFTDowntimeFixture(t *testing.T, e isolatedBackendEnv, origin contracts.Artifact, address, beneficiary common.Address) nativeNFTDowntimeFixture {
+func mintNativeNFTDowntimeFixture(t *testing.T, e isolatedBackendEnv, origin contracts.Artifact, address, beneficiary common.Address, units uint32) nativeNFTDowntimeFixture {
 	t.Helper()
 	tokenID := common.BigToHash(new(big.Int).Add(new(big.Int).Lsh(big.NewInt(1), 224), big.NewInt(401)))
-	input, err := origin.ABI.Pack("mintByDEL", beneficiary, tokenID.Big(), big.NewInt(1), "ipfs://native-nft-downtime")
+	input, err := origin.ABI.Pack("mintByDEL", beneficiary, tokenID.Big(), big.NewInt(int64(units)), "ipfs://native-nft-downtime")
 	require.NoError(t, err)
 	e.nextGasLimit(24_000_000)
-	e.send(e.keys[0], &address, sdkmath.NewIntWithDecimal(2, 18).BigInt(), input, true)
-	return nativeNFTDowntimeFixture{origin: origin, address: address, tokenID: tokenID}
+	e.send(e.keys[0], &address, sdkmath.NewIntWithDecimal(2*int64(units), 18).BigInt(), input, true)
+	return nativeNFTDowntimeFixture{origin: origin, address: address, tokenID: tokenID, units: units}
 }
 
 func (f nativeNFTDowntimeFixture) addGenesis(t *testing.T, e isolatedBackendEnv, profile ownedapp.WithdrawalProfile, genesis map[string]json.RawMessage, beneficiary string) {
@@ -48,16 +49,20 @@ func (f nativeNFTDowntimeFixture) addGenesis(t *testing.T, e isolatedBackendEnv,
 	domain, ok := e.app.NativeValidatorKeeper.ConfiguredEVMSourceDomain()
 	require.True(t, ok)
 	creator := sdk.AccAddress(e.govOwner.Bytes()).String()
+	units := make(nfttypes.SubTokens, f.units)
+	for i := range units {
+		units[i] = &nfttypes.SubToken{ID: uint32(i + 1), Owner: beneficiary}
+	}
 	nft.Collections = []nfttypes.Collection{
 		{Creator: beneficiary, Denom: signedNFTNativeOriginDenom, Supply: 1, TypeNft: nfttypes.NftType_NFT1155,
 			AddressDRC: f.address.Hex(), Tokens: nfttypes.Tokens{{Creator: beneficiary, Denom: signedNFTNativeOriginDenom,
 				ID: signedNFTNativeOriginID, URI: "ipfs://native-nft-downtime", Reserve: sdk.NewCoin(identity.BaseDenom, sdkmath.NewIntWithDecimal(2, 18)),
-				Minted: 1, SubTokens: nfttypes.SubTokens{{ID: 1, Owner: beneficiary}}}}},
+				Minted: f.units, SubTokens: units}}},
 		{Creator: creator, Denom: signedNFTNativeVaultDenom, TypeNft: nfttypes.NftType_NFT721, AddressDRC: profile.PositionVault.Hex()},
 	}
 	nft.ExternalBindings = []nfttypes.ExternalNFTBinding{{ChainID: domain.ChainID, EVMChainID: domain.EVMChainID,
 		Contract: f.address.Bytes(), TokenID: f.tokenID.Bytes(), NativeTokenID: signedNFTNativeOriginID,
-		NFTType: nfttypes.NftType_NFT1155, NextSubTokenID: 2}}
+		NFTType: nfttypes.NftType_NFT1155, NextSubTokenID: uint64(f.units) + 1}}
 	nft.IsolatedVaults = []nfttypes.IsolatedVaultState{{ChainID: domain.ChainID, EVMChainID: domain.EVMChainID, Vault: profile.PositionVault.Bytes(),
 		NextPositionID: common.BigToHash(big.NewInt(1)).Bytes(), ReceiptCreator: creator, ReceiptDenom: signedNFTNativeVaultDenom}}
 	require.NoError(t, nft.Validate())
@@ -104,7 +109,7 @@ func (f nativeNFTDowntimeFixture) expectations(t *testing.T, e isolatedBackendEn
 		input  []byte
 	}{
 		{"nftApprove", f.address, pack(f.origin, "setApprovalForAll", profile.Gateway, true)},
-		{"nftDelegate", profile.Gateway, pack(gateway, "delegateNFT1155", target, f.address, f.tokenID.Big(), one)},
+		{"nftDelegate", profile.Gateway, pack(gateway, "delegateNFT1155", target, f.address, f.tokenID.Big(), big.NewInt(int64(f.units)))},
 	}
 	for i, call := range calls {
 		tx := ethtypes.NewTx(&ethtypes.LegacyTx{Nonce: nonce + uint64(i), To: &call.target,

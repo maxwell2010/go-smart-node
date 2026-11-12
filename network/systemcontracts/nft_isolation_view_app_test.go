@@ -137,8 +137,12 @@ func runIsolatedPositionReader(t *testing.T, e isolatedBackendEnv) {
 			SettlementOnly: true, EnableDELDelegation: true,
 		}
 		var nft *nativeNFTDowntimeFixture
-		if os.Getenv(nativeConsensusNFTDowntimeEnv) == "1" {
-			origin := mintNativeNFTDowntimeFixture(t, e, origin, originAddress, crypto.PubkeyToAddress(e.keys[3].PublicKey))
+		if maxHistoricalNFT := os.Getenv(nativeHistoricalMaxNFTPhaseEnv) == "seed"; maxHistoricalNFT || os.Getenv(nativeConsensusNFTDowntimeEnv) == "1" {
+			units := uint32(1)
+			if maxHistoricalNFT {
+				units = nfttypes.MaxIsolatedOriginUnits
+			}
+			origin := mintNativeNFTDowntimeFixture(t, e, origin, originAddress, crypto.PubkeyToAddress(e.keys[3].PublicKey), units)
 			nft = &origin
 		}
 		exportNativeConsensusDaemonFixture(t, e, dir, profile, gateway, master, wrapper, vault, nft, govSetup)
