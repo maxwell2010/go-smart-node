@@ -212,6 +212,24 @@ non-voting identities. AppHash matched the original run at heights 32
 and 47. The module migration is enabled in the CI successor build.
 [Coordinated systemd CI](https://github.com/maxwell2010/go-smart-node/actions/runs/43446310577) · [Evidence](https://github.com/maxwell2010/go-smart-node/actions/runs/43446310577/artifacts/14048472406)
 
+The `native-systemd-four-validator-recovery` scope on `0a77558` repeated the
+governed migration with four voting systemd validators. Both signed packages
+used the same test genesis. The four validators migrated `coin` from 1 to 2
+at height 32 and produced a commit with four verified Ed25519 signatures at
+height 33. After restoring all four height-31 backups, the replicas replayed
+the migration with zero voting power. AppHash matched the primary run at
+heights 32 and 47, and the pending 0.25 DEL withdrawal survived.
+
+The restored replicas independently reached the same AppHash at height 62
+before enabling signing. They reused their original keys and byte-for-byte
+latest signing states, each retained at height 62. The signed block and
+commit at that height were preserved. All four signed the new canonical
+block at height 63 and agreed on its resulting AppHash. The gate runs on a
+GitHub-hosted worker in a loopback-only namespace with disposable keys.
+All four replicas reached height 62 over P2P in this run, so startup replay
+of a missing final block was outside this run's coverage.
+[Four-validator recovery CI](https://github.com/maxwell2010/go-smart-node/actions/runs/43452128668) · [Evidence](https://github.com/maxwell2010/go-smart-node/actions/runs/43452128668/artifacts/14053602020)
+
 ## Separate release tracks
 
 The selected architecture is a fresh network on a maintained modern stack,
