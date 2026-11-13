@@ -335,24 +335,34 @@ def check_coin_module_migration(replicas, genesis, height, version):
 
 
 def restore_validator_checkpoint(fleet, replicas, replacement, root, genesis, expected, action, env, owner, report):
+    from native_launch_systemd import copy_offline_home
+
     target = action['planHeight']
     final = report['progress']['height']
-    report['phase'] = 'witness-retains-canonical-signed-blocks'
-    witness = create_replica(replacement, root, 'rollback-witness', len(replicas), genesis, None, env)
-    write_config(witness.home, 'config.toml', {
-        ('p2p', 'pex'): 'false', ('p2p', 'allow_duplicate_ip'): 'true',
-        ('p2p', 'persistent_peers'): json.dumps(','.join(f'{node.node_id}@127.0.0.1:{node.p2p}' for node in replicas)),
-    })
-    witness.start(replacement, env, owner, 'retain-canonical-blocks')
-    wait_replicas([*replicas, witness], final + 3, 100, report)
-    primary_final = committed_header([*replicas, witness], final + 1)
-    check(int(witness.rpc('status')['validator_info']['voting_power']) == 0,
-          'rollback witness must be a non-voting observer')
-
-    report['phase'] = 'stop-all-signers-and-restore-closed-homes'
+    report['phase'] = 'stop-all-signers-and-retain-canonical-signed-blocks'
+    # A block-sync peer needs the following header to validate each block.
+    # Leave enough history above the shared verification height.
+    wait_replicas(replicas, final + 3, 40, report)
+    primary_final = committed_header(replicas, final + 1)
+    report['coinMigration']['verifiedHeight'] = final
+    report['coinMigration']['verifiedAppHash'] = primary_final['app_hash']
     for node in reversed(replicas):
         fleet.stop(node.child)
     check(all(node.child.poll() is not None for node in replicas), 'a primary signer is still running')
+
+    witness = create_replica(replacement, root, 'rollback-witness', len(replicas), genesis, None, env)
+    write_config(witness.home, 'config.toml', {('p2p', 'pex'): 'false', ('p2p', 'allow_duplicate_ip'): 'true'})
+    # Copy only the closed application and Comet stores. The new witness keeps
+    # its own identities and never opens a validator's WAL or signing state.
+    for database in ('application.db', 'blockstore.db', 'state.db'):
+        copy_offline_home(replicas[0].home / 'data' / database, witness.home / 'data' / database)
+    witness.start(replacement, env, owner, 'retain-canonical-blocks')
+    wait_replicas([witness], final + 3, 60, report)
+    check(committed_header([witness], final + 1) == primary_final and
+          int(witness.rpc('status')['validator_info']['voting_power']) == 0,
+          'rollback witness must retain the canonical history without voting')
+
+    report['phase'] = 'restore-closed-validator-homes'
     restored_hashes = fleet.restore()
     check(restored_hashes == report['systemd']['backupHomeSha256'], 'restored homes differ from closed backups')
     for node in replicas:

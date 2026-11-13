@@ -671,6 +671,7 @@ if systemd_migration:
     assert rollback['restoredHomeSha256']==systemd['backupHomeSha256'] and len(rollback['restoredHomeSha256'])==3,report
     assert rollback['restoredAppHash']==application['block']['app_hash'],report
     assert rollback['migrationAppHash']==migration['appHash'] and rollback['sameCanonicalHistory'] is True,report
+    assert rollback['verifiedHeight']==migration['verifiedHeight'] and rollback['appHash']==migration['verifiedAppHash'],report
     assert rollback['votingPower']==rollback['witnessVotingPower']==0 and rollback['catchingUp'] is False,report
     for phase,expected_sha in [('predecessor',predecessor_sha),('successor',successor_sha)]:
         package=json.loads((out/f'native-governance-{phase}-package.json').read_text())

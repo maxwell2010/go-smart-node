@@ -317,9 +317,11 @@ class SystemdFollower:
 
 def validator_identity(home):
     key = json.loads(private_bytes(home / "config/priv_validator_key.json", 8192))
-    pub_key = key["pub_key"]
+    pub_key, priv_key = key["pub_key"], key["priv_key"]
     public = base64.b64decode(pub_key["value"], validate=True)
-    if pub_key["type"] != "tendermint/PubKeyEd25519" or len(public) != 32:
+    private = base64.b64decode(priv_key["value"], validate=True)
+    if (pub_key["type"] != "tendermint/PubKeyEd25519" or priv_key["type"] != "tendermint/PrivKeyEd25519" or
+        len(public) != 32 or len(private) != 64 or private[32:] != public):
         raise RuntimeError("expected an Ed25519 fixture signing key")
     address = hashlib.sha256(public).hexdigest()[:40].upper()
     if key["address"] != address:
@@ -370,6 +372,8 @@ class SystemdValidatorFleet:
     def spawn(self, args, log, env):
         home = Path(args[args.index("--home") + 1])
         service = self.services[home]
+        if service.submitted:
+            raise RuntimeError("validator service is already submitted")
         identity = validator_identity(home)
         if self.restored:
             state = json.loads(private_bytes(home / "data/priv_validator_state.json", 8192))
