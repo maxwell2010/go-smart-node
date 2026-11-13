@@ -138,6 +138,7 @@ with (out/'manifest.json').open('w') as stream:
         provenanceVerified=True,
         scope='Default production builds; both source inventories checked before/after; Go VCS metadata checked'),stream,indent=2)
 PY
+if [[ "$native_upgrade_governance" != native-systemd-module-upgrade ]]; then
 curl --fail --location --proto '=https' --tlsv1.2 --retry 3 \
   'https://github.com/informalsystems/hermes/releases/download/v1.13.3/hermes-v1.13.3-x86_64-unknown-linux-gnu.tar.gz' --output "$work/hermes.tar.gz"
 printf '%s  %s\n' 3582136824ac1984c8884b310c63940a1489f091fa45faca38ed80e5dfe7d51b "$work/hermes.tar.gz" | sha256sum --check
@@ -170,6 +171,7 @@ assert set(hermes['phases'])==required,hermes['phases']
 assert all(phase['status']=='PASS' for phase in hermes['phases'].values()),hermes['phases']
 print('Default daemon lifecycle and all six genuine Hermes phases passed.')
 PY
+fi
 
 if [[ "$ibc_client_upgrade" == ibc-client-upgrade ]]; then
   overlay_handler="$root/network/internal/ibclab/rehearsal_handler.go.tmpl"

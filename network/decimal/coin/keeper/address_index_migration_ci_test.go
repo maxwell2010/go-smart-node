@@ -10,6 +10,10 @@ import (
 
 func TestAddressIndexMigrationPreservesCoinState(t *testing.T) {
 	ctx, service, keeper, coin := fixture(t)
+	params, err := keeper.GetParams(ctx)
+	require.NoError(t, err)
+	params.BaseVolume = coin.Reserve
+	require.NoError(t, keeper.SetParams(ctx, params))
 	require.NoError(t, keeper.SetCoin(ctx, coin))
 	state := service.OpenKVStore(ctx)
 	legacy := addressKey(coin.DRC20Contract)

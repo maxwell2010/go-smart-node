@@ -15,7 +15,7 @@ from urllib.parse import urlencode
 from del_delegation_smoke import GAS_LIMIT, GAS_PRICE, balance, native_positions, read_frozen, read_words, write_config
 from mcnd_process_smoke import ProcessOwner, SignalGuard, private_environment, private_namespace, run_command
 from native_consensus_smoke import ATOMS, INITIAL, check_signatures, committed_header, create_replica, create_replicas, effective_set, load_fixture, wait_replicas
-from withdrawal_genesis_smoke import CHAIN, EVM_CHAIN, MAX_BLOCKS, SHA256, WORD, check, ethereum, native, private_bytes, private_write, readiness_diagnostic, request, safe_diagnostic
+from withdrawal_genesis_smoke import CHAIN, EVM_CHAIN, MAX_BLOCKS, SHA256, WORD, check, ethereum, log_records, native, private_bytes, private_write, readiness_diagnostic, request, safe_diagnostic
 
 
 PLAN = 'mintcandy-native-sdk-migrations-v1'
@@ -378,6 +378,11 @@ def restore_validator_checkpoint(fleet, replicas, replacement, root, genesis, ex
     for node in replicas:
         node.start(fleet.binary_for(node.home), env, fleet, 'restore-replay')
     wait_replicas([*replicas, witness], final + 1, 125, report)
+    restored_app_hash = report['predecessor']['boundary']['app_hash']
+    for node in replicas:
+        (handshake,) = log_records(node.log, 'ABCI Handshake App Info')
+        check((int(handshake['height']), handshake['hash'].upper()) == (target - 1, restored_app_hash.upper()),
+              'restored service did not load the exact pre-upgrade application checkpoint')
     deadline = time.monotonic() + 25
     while True:
         statuses = [node.rpc('status') for node in replicas]
@@ -399,9 +404,10 @@ def restore_validator_checkpoint(fleet, replicas, replacement, root, genesis, ex
         check(applied_height(node, target) == target and current_plan(node, target) is None,
               'restored service did not reapply the exact approved migration')
     report['rollback'] = {'restoredHomeSha256': restored_hashes, 'restoredHeight': target - 1,
-                          'restoredAppHash': report['predecessor']['boundary']['app_hash'],
+                          'restoredAppHash': restored_app_hash,
                           'replayedHeight': target, 'migrationAppHash': migration_app_hash,
-                          'verifiedHeight': final, 'appHash': final_header['app_hash'], 'catchingUp': False,
+                          'verifiedHeight': final, 'appHash': final_header['app_hash'],
+                          'primaryAppHashAtVerifiedHeight': primary_final['app_hash'], 'catchingUp': False,
                           'sameCanonicalHistory': True, 'votingPower': 0, 'witnessVotingPower': 0,
                           'coinBefore': check_coin_module_migration(replicas, genesis, target - 1, 1),
                           'coinAfter': check_coin_module_migration(replicas, genesis, target, 2),
@@ -541,6 +547,7 @@ def run_gate(args, binary, replacement, root, expected, genesis, keys, actions, 
                           **committed_header(replicas, final)}
     if fleet:
         report['systemd']['successors'] = fleet.evidence()
+        report['progress']['stateAppHash'] = committed_header(replicas, final + 1)['app_hash']
         report['coinMigration'].update(after=check_coin_module_migration(replicas, genesis, target, 2),
                                        appHash=committed_header(replicas, target + 1)['app_hash'])
         check(report['coinMigration']['before']['coinRecordSha256'] == report['coinMigration']['after']['coinRecordSha256'],
