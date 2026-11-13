@@ -169,8 +169,9 @@ def check_proposal(replicas, proposal_id, height, manifest, accepted, voting_wei
         proposal = query_proposal(node, proposal_id, height)
         check(int(proposal['id']) == proposal_id and proposal['status'] == status and
               proposal['metadata'] == manifest and not proposal.get('messages'), 'unexpected native proposal identity or outcome')
-        tally = proposal['final_tally_result']
-        check({key: str(tally.get(key, '0')) for key in expected} == expected, 'final tally differs from the complete native DEL ownership')
+        tally = {key: str(proposal['final_tally_result'].get(key, '0')) for key in expected}
+        check(all(re.fullmatch(r'[0-9]{1,30}', count) for count in tally.values()), 'final native tally contains an invalid count')
+        check(tally == expected, f'final tally on {node.label} differs from native voting weight: expected {expected}, got {tally}')
     return {'id': proposal_id, 'status': status, 'queryHeight': height, 'tally': expected}
 
 
@@ -341,7 +342,9 @@ def canonical_commit(replicas, height):
     signed = commits[0]['signed_header']
     check(all(entry['canonical'] is True and entry['signed_header'] == signed for entry in commits) and
           int(signed['commit']['height']) == height and int(signed['header']['height']) == height and
-          signed['header']['chain_id'] == CHAIN, 'replicas disagree on a canonical signed commit')
+          signed['header']['chain_id'] == CHAIN and
+          signed['commit']['block_id']['hash'] == committed_header(replicas, height)['block_hash'],
+          'replicas disagree on a canonical signed commit')
     return signed['commit']
 
 
@@ -407,13 +410,20 @@ def resume_validator_signing(fleet, replicas, witness, expected, env, owner, rep
 
     report['phase'] = 'replay-last-signed-block-without-validator-keys'
     participants = [*replicas, witness]
-    wait_replicas(participants, boundary - 1, 100, report)
-    anchor = committed_header([witness], boundary)['app_hash']
-    for node in replicas:
-        check(checked_abci_state(node) == (boundary - 1, anchor),
-              'restored follower did not reach the common application state before the last signed block')
+    wait_replicas(participants, boundary - 2, 100, report)
     witness_state = checked_abci_state(witness)
     check(witness_state[0] == boundary, 'canonical witness did not persist the final signed height')
+    # Block sync can hand off two heights behind the frozen witness. Consensus
+    # gossip can also deliver the final signed block before we close a replica.
+    canonical_prefix = {
+        boundary - 2: committed_header([witness], boundary - 1)['app_hash'],
+        boundary - 1: committed_header([witness], boundary)['app_hash'],
+        boundary: witness_state[1],
+    }
+    for node in replicas:
+        height, app_hash = checked_abci_state(node)
+        check(canonical_prefix.get(height) == app_hash,
+              'restored follower did not reach the canonical application state near the last signed block')
     signed_boundary = witness.rpc(f'commit?height={boundary}')['signed_header']
     check(int(signed_boundary['commit']['height']) == boundary and signed_boundary['header']['chain_id'] == CHAIN and
           signed_boundary['commit']['block_id']['hash'] == report['signingBoundary']['block_hash'],
@@ -442,12 +452,15 @@ def resume_validator_signing(fleet, replicas, witness, expected, env, owner, rep
         node.start(fleet.binary_for(node.home), env, fleet, 'replay-last-signed-block')
     wait_replicas(replicas, boundary, 70, report)
     replayed = {}
+    handshake_heights = {}
     for node in replicas:
         check(checked_abci_state(node) == witness_state and int(node.rpc('status')['validator_info']['voting_power']) == 0,
               'restored service did not replay and verify the last signed block while non-voting')
         (handshake,) = log_records(node.log, 'ABCI Handshake App Info')
-        check((int(handshake['height']), handshake['hash'].upper()) == (boundary - 1, anchor),
+        handshake_height = int(handshake['height'])
+        check(canonical_prefix.get(handshake_height) == handshake['hash'].upper(),
               'last signed block replay did not open the previously verified restored application')
+        handshake_heights[node.label] = handshake_height
         replayed[node.home] = witness_state[0]
     for node in reversed(replicas):
         fleet.stop(node.child)
@@ -455,6 +468,7 @@ def resume_validator_signing(fleet, replicas, witness, expected, env, owner, rep
     check(retained == watermarks, 'restored signer high-watermarks differ from the closed primary fleet')
     report['signingResumption'] = {'watermarks': watermarks, 'verifiedBeforeSigningHeight': boundary,
                                    'verifiedBeforeSigningAppHash': witness_state[1],
+                                   'nonVotingHandshakeHeights': handshake_heights,
                                    'retainedOriginalState': True}
     report['phase'] = 'resume-original-validators-after-verified-replay'
     for node in replicas:
@@ -629,7 +643,7 @@ def run_gate(args, binary, replacement, root, expected, genesis, keys, actions, 
         check(vote_tx['height'] > proposal_tx['height'], 'vote must be committed after its proposal')
         tally_height = wait_tally(source, proposal_id, vote_tx['height'], report)
         wait_replicas(replicas, tally_height, 40, report)
-        weight = str(10 * ATOMS) if args.resume_signing else VOTING_WEIGHT
+        weight = str(sum(initial_powers) * ATOMS) if args.resume_signing else VOTING_WEIGHT
         report[label] = {**check_proposal(replicas, proposal_id, tally_height, action['metadata'], accepted, weight),
                          'proposalTx': proposal_tx, 'voteTx': vote_tx}
         if not accepted:

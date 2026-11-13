@@ -697,6 +697,10 @@ if systemd_migration:
         replayed=resumed['verifiedBeforeSigningHeight']
         commit=resumed['commit']
         assert set(watermarks)==set(powers) and len({row['consensusAddress'] for row in watermarks.values()})==4,report
+        for stage in ('initialCommit','successorCommit'):
+            assert report[stage]['signers']==list(powers) and report[stage]['verifiedEd25519Signatures']==4,report
+        prefix=resumed['nonVotingHandshakeHeights']
+        assert set(prefix)==set(powers) and all(replayed-2<=height<=replayed for height in prefix.values()),report
         assert rollback['verifiedHeight'] < replayed < resumed['verifiedHeight']==commit['height'],report
         assert all(row['height']<=replayed and row['stateSha256'] for row in watermarks.values()),report
         assert resumed['retainedOriginalState'] is True and resumed['sameSignedHistory'] is True,report
