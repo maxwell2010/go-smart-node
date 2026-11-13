@@ -188,6 +188,18 @@ caught up to a common AppHash at height 26. Both binaries use the same Go
 application code and database schema.
 [Upgrade and rollback CI](https://github.com/maxwell2010/go-smart-node/actions/runs/43243377624) · [Evidence](https://github.com/maxwell2010/go-smart-node/actions/runs/43243377624/artifacts/13957190361)
 
+The systemd rehearsal on `877b501` enabled IAVL Fast Storage in a new
+signed build. The offline backup held application height 22 and used IAVL
+storage version `1.0.0`. After the update, an offline inspection of the
+`bank` store found version `1.1.0` and 25 FastNode records. The observer
+agreed with the validators on AppHash at height 25. Restoring the backup
+recovered the original binary and the height 22 AppHash. The observer
+caught up and agreed on AppHash at height 26. A final inspection of the
+stopped database at height 27 confirmed version `1.0.0` and zero FastNode
+records in `bank`. The rehearsal exercised the local IAVL storage format
+with the existing application and consensus rules.
+[IAVL migration and rollback CI](https://github.com/maxwell2010/go-smart-node/actions/runs/43246566894) · [Evidence](https://github.com/maxwell2010/go-smart-node/actions/runs/43246566894/artifacts/13958681719)
+
 ## Separate release tracks
 
 The selected architecture is a fresh network on a maintained modern stack,
