@@ -405,25 +405,67 @@ def checked_abci_state(node):
     return int(info['last_block_height']), digest
 
 
-def resume_validator_signing(fleet, replicas, witness, expected, env, owner, report, watermarks, boundary, probe):
+def check_block_absent(node, boundary):
+    status = node.rpc('status')
+    check(status['node_info']['network'] == CHAIN and int(status['validator_info']['voting_power']) == 0,
+          'expected a non-voting node on the isolated chain')
+    tip = int(node.rpc('block')['block']['header']['height'])
+    check(int(status['sync_info']['latest_block_height']) <= tip < boundary,
+          'local blockstore already has the final signed block')
+    # JSON-RPC POST preserves the structured application error in an HTTP 200
+    # response. The URI handler turns the same error into HTTP 500.
+    query = {'jsonrpc': '2.0', 'id': 1, 'method': 'block', 'params': [str(boundary)]}
+    result, _ = request(f'http://127.0.0.1:{node.p2p + 1}', query)
+    error = result.get('error', {})
+    message = re.fullmatch(f'height {boundary} must be less than or equal to the current blockchain height ([0-9]+)',
+                           str(error.get('data', '')))
+    check(result.get('id') == 1 and 'result' not in result and error.get('code') == -32603 and
+          message and tip <= int(message[1]) < boundary, 'Comet RPC did not reject the missing final block as out of range')
+    return int(message[1])
+
+
+def start_bounded_witness(replacement, root, source, index, genesis, env, owner, boundary, report):
     from native_launch_systemd import copy_offline_home
 
+    bounded = create_replica(replacement, root, 'bounded-rollback-witness', index, genesis, None, env)
+    write_config(bounded.home, 'config.toml', {
+        ('p2p', 'pex'): 'false', ('p2p', 'allow_duplicate_ip'): 'true',
+    })
+    for database in ('application.db', 'blockstore.db', 'state.db'):
+        copy_offline_home(source.home / 'data' / database, bounded.home / 'data' / database)
+    run_command(replacement, bounded.home, ['rollback', '--hard', '--chain-id', CHAIN,
+                                             '--evm.evm-chain-id', str(EVM_CHAIN)], env)
+    bounded.start(replacement, env, owner, 'serve-prefix-without-final-block')
+    wait_replicas([bounded], boundary - 1, 60, report)
+    check(check_block_absent(bounded, boundary) == boundary - 1 and
+          checked_abci_state(bounded) == (boundary - 1, report['signingBoundary']['app_hash']),
+          'bounded witness must retain the canonical prefix without the final signed block')
+    return bounded
+
+
+def resume_validator_signing(fleet, replicas, witness, expected, env, owner, report, watermarks, boundary, probe,
+                             *, bounded=None):
+    from native_launch_systemd import copy_offline_home, home_digest, home_records
+
     report['phase'] = 'replay-last-signed-block-without-validator-keys'
-    participants = [*replicas, witness]
-    wait_replicas(participants, boundary - 2, 100, report)
+    wait_replicas(replicas, boundary - (3 if bounded else 2), 100, report)
     witness_state = checked_abci_state(witness)
     check(witness_state[0] == boundary, 'canonical witness did not persist the final signed height')
     # Block sync can hand off two heights behind the frozen witness. Consensus
     # gossip can also deliver the final signed block before we close a replica.
-    canonical_prefix = {
-        boundary - 2: committed_header([witness], boundary - 1)['app_hash'],
-        boundary - 1: committed_header([witness], boundary)['app_hash'],
-        boundary: witness_state[1],
-    }
+    first = boundary - (3 if bounded else 2)
+    canonical_prefix = {height: committed_header([witness], height + 1)['app_hash']
+                        for height in range(first, boundary)}
+    if not bounded:
+        canonical_prefix[boundary] = witness_state[1]
+    canonical_hashes = {**canonical_prefix, boundary: witness_state[1]}
+    absence = {}
     for node in replicas:
         height, app_hash = checked_abci_state(node)
         check(canonical_prefix.get(height) == app_hash,
               'restored follower did not reach the canonical application state near the last signed block')
+        if bounded:
+            absence[node.label] = check_block_absent(node, boundary)
     signed_boundary = witness.rpc(f'commit?height={boundary}')['signed_header']
     check(int(signed_boundary['commit']['height']) == boundary and signed_boundary['header']['chain_id'] == CHAIN and
           signed_boundary['commit']['block_id']['hash'] == report['signingBoundary']['block_hash'],
@@ -442,17 +484,33 @@ def resume_validator_signing(fleet, replicas, witness, expected, env, owner, rep
     # Each restored application.db remains in place and executes the final block
     # through Comet's startup replay before its original key may be reinstalled.
     report['phase'] = 'install-closed-canonical-comet-stores'
+    if bounded:
+        owner.stop(bounded.child)
+        check(bounded.child.returncode == 0, 'bounded witness did not close its databases')
     owner.stop(witness.child)
     check(witness.child.returncode == 0, 'canonical witness did not close its databases')
+    application_before = {}
     for node in replicas:
+        if bounded:
+            application_db = node.home / 'data' / 'application.db'
+            application_before[node.label] = home_digest(home_records(application_db))
+            write_config(node.home, 'config.toml', {
+                ('p2p', 'persistent_peers'): '""', ('p2p', 'seeds'): '""',
+            })
         for database in ('blockstore.db', 'state.db'):
             current = node.home / 'data' / database
             current.rename(node.home / f'before-last-block-{database}')
             copy_offline_home(witness.home / 'data' / database, current)
+        if bounded:
+            app_db_at_startup = home_digest(home_records(application_db))
+            check(app_db_at_startup == application_before[node.label],
+                  'installing Comet stores modified the restored application database')
+            application_before[node.label] = (application_before[node.label], app_db_at_startup)
         node.start(fleet.binary_for(node.home), env, fleet, 'replay-last-signed-block')
     wait_replicas(replicas, boundary, 70, report)
     replayed = {}
     handshake_heights = {}
+    replay_proof = {}
     for node in replicas:
         check(checked_abci_state(node) == witness_state and int(node.rpc('status')['validator_info']['voting_power']) == 0,
               'restored service did not replay and verify the last signed block while non-voting')
@@ -462,6 +520,31 @@ def resume_validator_signing(fleet, replicas, witness, expected, env, owner, rep
               'last signed block replay did not open the previously verified restored application')
         handshake_heights[node.label] = handshake_height
         replayed[node.home] = witness_state[0]
+        if bounded:
+            (startup,) = log_records(node.log, 'ABCI Replay Blocks')
+            executed = log_records(node.log, 'executed block')
+            expected_heights = list(range(handshake_height + 1, boundary + 1))
+            peers = int(node.rpc('net_info')['n_peers'])
+            check((int(startup['appHeight']), int(startup['storeHeight']), int(startup['stateHeight'])) ==
+                  (handshake_height, boundary, boundary) and expected_heights and
+                  [int(row['height']) for row in executed] == expected_heights and
+                  all(row['app_hash'].upper() == canonical_hashes[height]
+                      for row, height in zip(executed, expected_heights, strict=True)) and peers == 0 and
+                  committed_header([node], boundary) == report['signingBoundary'],
+                  'startup did not execute the missing final block without P2P')
+            before, at_startup = application_before[node.label]
+            replay_proof[node.label] = {
+                'blockstoreHeightBefore': absence[node.label], 'missingBlockHeight': boundary,
+                'applicationHeightBefore': handshake_height, 'applicationAppHashBefore': handshake['hash'].upper(),
+                'applicationDbSha256Before': before, 'applicationDbSha256AtStartup': at_startup,
+                'executedHeights': expected_heights, 'committedHeight': witness_state[0],
+                'appHash': witness_state[1], 'peersAtStartup': peers,
+            }
+    if bounded:
+        report['forcedStartupReplay'] = {
+            'height': boundary, 'blockHash': report['signingBoundary']['block_hash'], 'appHash': witness_state[1],
+            'boundedWitnessHeight': boundary - 1, 'replicas': replay_proof,
+        }
     for node in reversed(replicas):
         fleet.stop(node.child)
     retained = fleet.reactivate_signers(replayed)
@@ -493,7 +576,7 @@ def resume_validator_signing(fleet, replicas, witness, expected, env, owner, rep
 
 
 def restore_validator_checkpoint(fleet, replicas, replacement, root, genesis, expected, action, env, owner, report,
-                                 *, signing_boundary=None, commit_probe=None):
+                                 *, signing_boundary=None, commit_probe=None, force_startup_replay=False):
     from native_launch_systemd import copy_offline_home
 
     target = action['planHeight']
@@ -516,6 +599,11 @@ def restore_validator_checkpoint(fleet, replicas, replacement, root, genesis, ex
         check(max(row['height'] for row in watermarks.values()) == signing_boundary,
               'primary validators have an unexpected signing high-watermark')
 
+    bounded = None
+    if force_startup_replay:
+        report['phase'] = 'prepare-witness-without-final-signed-block'
+        bounded = start_bounded_witness(replacement, root, replicas[0], len(replicas) + 1, genesis,
+                                        env, owner, signing_boundary, report)
     witness = create_replica(replacement, root, 'rollback-witness', len(replicas), genesis, None, env)
     write_config(witness.home, 'config.toml', {('p2p', 'pex'): 'false', ('p2p', 'allow_duplicate_ip'): 'true'})
     # Copy only the closed application and Comet stores. The new witness keeps
@@ -531,13 +619,14 @@ def restore_validator_checkpoint(fleet, replicas, replacement, root, genesis, ex
     report['phase'] = 'restore-closed-validator-homes'
     restored_hashes = fleet.restore()
     check(restored_hashes == report['systemd']['backupHomeSha256'], 'restored homes differ from closed backups')
+    replay_peer = bounded or witness
     for node in replicas:
         # Replay on restored copies without the original signing identities.
         keys = create_replica(replacement, root, f'nonvoting-{node.label}', node.index, genesis, None, env)
         for relative in ('config/priv_validator_key.json', 'data/priv_validator_state.json'):
             private_write(node.home / relative, private_bytes(keys.home / relative, 8192))
         write_config(node.home, 'config.toml', {
-            ('p2p', 'persistent_peers'): json.dumps(f'{witness.node_id}@127.0.0.1:{witness.p2p}'),
+            ('p2p', 'persistent_peers'): json.dumps(f'{replay_peer.node_id}@127.0.0.1:{replay_peer.p2p}'),
         })
     fleet.replace_binaries(replacement, report['replacementSha256'])
     report['phase'] = 'replay-governed-migration-from-restored-homes'
@@ -584,7 +673,7 @@ def restore_validator_checkpoint(fleet, replicas, replacement, root, genesis, ex
           'restored module records differ before or after replaying the migration')
     if signing_boundary is not None:
         resume_validator_signing(fleet, replicas, witness, expected, env, owner, report, watermarks,
-                                 signing_boundary, commit_probe)
+                                 signing_boundary, commit_probe, bounded=bounded)
 
 
 def run_gate(args, binary, replacement, root, expected, genesis, keys, actions, env, owner, report, ibc=None, fleet=None):
@@ -739,7 +828,8 @@ def run_gate(args, binary, replacement, root, expected, genesis, keys, actions, 
         check(report['coinMigration']['before']['coinRecordSha256'] == report['coinMigration']['after']['coinRecordSha256'],
               'DRC20 address index migration changed the indexed coin record')
         restore_validator_checkpoint(fleet, replicas, replacement, root, genesis, expected, action, env, owner, report,
-                                     signing_boundary=signing_boundary, commit_probe=args.commit_probe)
+                                     signing_boundary=signing_boundary, commit_probe=args.commit_probe,
+                                     force_startup_replay=args.force_startup_replay)
     if ibc:
         applied_app_hash = committed_header(replicas, target + 1)['app_hash']
         report['phase'] = 'hermes-post-upgrade-acknowledgement-and-return'
@@ -777,6 +867,7 @@ def main(argv=None, signals=None):
     parser.add_argument('--pending-ibc', action='store_true', help='Carry a real ICS-20 packet across the private native handoff')
     parser.add_argument('--systemd-migration', action='store_true', help='Run and restore the coordinated module migration in systemd')
     parser.add_argument('--resume-signing', action='store_true', help='Resume the four original signers after verifying the restored state')
+    parser.add_argument('--force-startup-replay', action='store_true', help='Require a missing block to execute at startup on all four restored nodes')
     parser.add_argument('--commit-probe', type=pathlib.Path, help='Canonical Comet Ed25519 commit verifier')
     for name in ('reference-binary', 'reference-sha256', 'hermes-binary'):
         parser.add_argument('--' + name)
@@ -785,6 +876,8 @@ def main(argv=None, signals=None):
         parser.error('--systemd-migration requires --full-profile without --pending-ibc')
     if args.resume_signing != bool(args.commit_probe) or (args.resume_signing and not args.systemd_migration):
         parser.error('--resume-signing and --commit-probe require --systemd-migration and each other')
+    if args.force_startup_replay and not args.resume_signing:
+        parser.error('--force-startup-replay requires --resume-signing')
     report = {'status': 'FAIL', 'phase': 'fixture-provenance',
               'scope': 'three loopback replicas across a native governance SDK binary upgrade'}
     if args.resume_signing:

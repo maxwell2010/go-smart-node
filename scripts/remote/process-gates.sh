@@ -26,12 +26,14 @@ native_upgrade_governance="${10:-off}"
 [[ "$native_upgrade_governance" == off || "$native_upgrade_governance" == native-upgrade-governance ||
    "$native_upgrade_governance" == native-full-profile-upgrade || "$native_upgrade_governance" == native-full-ibc-upgrade ||
    "$native_upgrade_governance" == native-cross-version-ibc-upgrade || "$native_upgrade_governance" == native-systemd-module-upgrade ||
-   "$native_upgrade_governance" == native-systemd-four-validator-recovery ]] || { echo 'Unsupported native upgrade governance option.' >&2; exit 2; }
+   "$native_upgrade_governance" == native-systemd-four-validator-recovery || "$native_upgrade_governance" == native-systemd-startup-replay ]] || { echo 'Unsupported native upgrade governance option.' >&2; exit 2; }
 coin_index_migration=0
 resume_signing=0
+startup_replay=0
 case "$native_upgrade_governance" in
   native-systemd-module-upgrade) coin_index_migration=1 ;;
   native-systemd-four-validator-recovery) coin_index_migration=1; resume_signing=1 ;;
+  native-systemd-startup-replay) coin_index_migration=1; resume_signing=1; startup_replay=1 ;;
 esac
 native_nft_downtime="${11:-off}"
 [[ "$native_nft_downtime" == off || "$native_nft_downtime" == native-nft-downtime ]] || { echo 'Unsupported native NFT downtime option.' >&2; exit 2; }
@@ -564,6 +566,9 @@ PY
     go build -mod=readonly -p 2 -trimpath -o "$commit_probe" ./tools/comet_commit_probe
     profile_args+=(--resume-signing --commit-probe "$commit_probe")
   fi
+  if [[ "$startup_replay" == 1 ]]; then
+    profile_args+=(--force-startup-replay)
+  fi
   go build -mod=readonly -tags="$successor_tags" -buildvcs=true -p 2 -trimpath \
     -ldflags "-X main.buildCommit=$revision" -o "$successor" ./cmd/mcnd
   go version -m "$successor" > "$output/native-governance-upgrade-successor-build.log"
@@ -634,11 +639,11 @@ PY
   fi
   run_native_upgrade "${source_args[@]}" --report "$output/native-governance-upgrade.json" |& tee "$output/native-governance-upgrade.log"
   preserve_public_reports
-  "$python" - "$output" "$root" "$revision" "$predecessor_revision" "$predecessor_sha" "$successor_sha" "$full_profile" "$pending_ibc" "$successor_tags" "$resume_signing" <<'PY'
+  "$python" - "$output" "$root" "$revision" "$predecessor_revision" "$predecessor_sha" "$successor_sha" "$full_profile" "$pending_ibc" "$successor_tags" "$resume_signing" "$startup_replay" <<'PY'
 import json,sys
 from pathlib import Path
 out,root=map(Path,sys.argv[1:3])
-revision,predecessor_revision,predecessor_sha,successor_sha,full_profile,pending_ibc,successor_tags,resume_signing=sys.argv[3:]
+revision,predecessor_revision,predecessor_sha,successor_sha,full_profile,pending_ibc,successor_tags,resume_signing,startup_replay=sys.argv[3:]
 four_signers=resume_signing=='1'
 sys.path.insert(0,str(root/'network/tools'))
 from binary_provenance import parse_build_info
@@ -700,7 +705,22 @@ if systemd_migration:
         for stage in ('initialCommit','successorCommit'):
             assert report[stage]['signers']==list(powers) and report[stage]['verifiedEd25519Signatures']==4,report
         prefix=resumed['nonVotingHandshakeHeights']
-        assert set(prefix)==set(powers) and all(replayed-2<=height<=replayed for height in prefix.values()),report
+        assert set(prefix)==set(powers),report
+        if startup_replay=='1':
+            replay=report['forcedStartupReplay']
+            assert replay['height']==replayed and replay['boundedWitnessHeight']==replayed-1,report
+            assert replay['blockHash']==report['signingBoundary']['block_hash'],report
+            assert replay['appHash']==resumed['verifiedBeforeSigningAppHash'],report
+            assert set(replay['replicas'])==set(powers),report
+            for label,replica in replay['replicas'].items():
+                assert replica['missingBlockHeight']==replayed and replica['blockstoreHeightBefore']<replayed,report
+                assert replayed-3<=prefix[label]==replica['applicationHeightBefore']<replayed,report
+                assert replica['executedHeights']==list(range(prefix[label]+1,replayed+1)),report
+                assert replica['applicationDbSha256Before']==replica['applicationDbSha256AtStartup'],report
+                assert replica['committedHeight']==replayed and replica['appHash']==replay['appHash'],report
+                assert replica['peersAtStartup']==0,report
+        else:
+            assert all(replayed-2<=height<=replayed for height in prefix.values()),report
         assert rollback['verifiedHeight'] < replayed < resumed['verifiedHeight']==commit['height'],report
         assert all(row['height']<=replayed and row['stateSha256'] for row in watermarks.values()),report
         assert resumed['retainedOriginalState'] is True and resumed['sameSignedHistory'] is True,report

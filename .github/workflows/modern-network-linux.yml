@@ -12,7 +12,7 @@ on:
         description: Validation scenario to run on an isolated GitHub runner
         default: module
         type: choice
-        options: [module, contracts, process, held-downtime, native-upgrade-governance, nft-downtime, native-full-profile-upgrade, native-full-ibc-upgrade, native-cross-version-ibc-upgrade, native-systemd-module-upgrade, native-systemd-four-validator-recovery]
+        options: [module, contracts, process, held-downtime, native-upgrade-governance, nft-downtime, native-full-profile-upgrade, native-full-ibc-upgrade, native-cross-version-ibc-upgrade, native-systemd-module-upgrade, native-systemd-four-validator-recovery, native-systemd-startup-replay]
       remote_profile:
         description: Also validate the reusable remote-worker scripts
         default: 'off'
@@ -176,7 +176,7 @@ jobs:
           if-no-files-found: error
 
   isolated-process-gates:
-    if: github.event_name == 'workflow_dispatch' && (inputs.scope == 'process' || inputs.scope == 'held-downtime' || inputs.scope == 'native-upgrade-governance' || inputs.scope == 'nft-downtime' || inputs.scope == 'native-full-profile-upgrade' || inputs.scope == 'native-full-ibc-upgrade' || inputs.scope == 'native-cross-version-ibc-upgrade' || inputs.scope == 'native-systemd-module-upgrade' || inputs.scope == 'native-systemd-four-validator-recovery')
+    if: github.event_name == 'workflow_dispatch' && (inputs.scope == 'process' || inputs.scope == 'held-downtime' || inputs.scope == 'native-upgrade-governance' || inputs.scope == 'nft-downtime' || inputs.scope == 'native-full-profile-upgrade' || inputs.scope == 'native-full-ibc-upgrade' || inputs.scope == 'native-cross-version-ibc-upgrade' || inputs.scope == 'native-systemd-module-upgrade' || inputs.scope == 'native-systemd-four-validator-recovery' || inputs.scope == 'native-systemd-startup-replay')
     runs-on: ubuntu-24.04
     timeout-minutes: 45
     env:
@@ -239,7 +239,7 @@ jobs:
             args[8]=native-held-del-downtime
           elif [[ "$VALIDATION_SCOPE" == native-upgrade-governance ]]; then
             args[9]=native-upgrade-governance
-          elif [[ "$VALIDATION_SCOPE" == native-full-profile-upgrade || "$VALIDATION_SCOPE" == native-full-ibc-upgrade || "$VALIDATION_SCOPE" == native-cross-version-ibc-upgrade || "$VALIDATION_SCOPE" == native-systemd-module-upgrade || "$VALIDATION_SCOPE" == native-systemd-four-validator-recovery ]]; then
+          elif [[ "$VALIDATION_SCOPE" == native-full-profile-upgrade || "$VALIDATION_SCOPE" == native-full-ibc-upgrade || "$VALIDATION_SCOPE" == native-cross-version-ibc-upgrade || "$VALIDATION_SCOPE" == native-systemd-module-upgrade || "$VALIDATION_SCOPE" == native-systemd-four-validator-recovery || "$VALIDATION_SCOPE" == native-systemd-startup-replay ]]; then
             args[9]="$VALIDATION_SCOPE"
           elif [[ "$VALIDATION_SCOPE" == nft-downtime ]]; then
             args[10]=native-nft-downtime
