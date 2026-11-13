@@ -25,7 +25,7 @@ native_held_del_downtime="${9:-off}"
 native_upgrade_governance="${10:-off}"
 [[ "$native_upgrade_governance" == off || "$native_upgrade_governance" == native-upgrade-governance ||
    "$native_upgrade_governance" == native-full-profile-upgrade || "$native_upgrade_governance" == native-full-ibc-upgrade ||
-   "$native_upgrade_governance" == native-cross-version-ibc-upgrade ]] || { echo 'Unsupported native upgrade governance option.' >&2; exit 2; }
+   "$native_upgrade_governance" == native-cross-version-ibc-upgrade || "$native_upgrade_governance" == native-systemd-module-upgrade ]] || { echo 'Unsupported native upgrade governance option.' >&2; exit 2; }
 native_nft_downtime="${11:-off}"
 [[ "$native_nft_downtime" == off || "$native_nft_downtime" == native-nft-downtime ]] || { echo 'Unsupported native NFT downtime option.' >&2; exit 2; }
 for tool in sudo unshare ip gcc python3 go; do command -v "$tool" >/dev/null; done
@@ -541,7 +541,17 @@ PY
     source_args=(--predecessor-source-commit "$predecessor_revision")
   fi
   successor="$work/mcnd-native-sdk-migration-v1"
-  go build -mod=readonly -tags=mcnd_native_sdk_migration_v1 -buildvcs=true -p 2 -trimpath \
+  successor_tags=mcnd_native_sdk_migration_v1
+  coin_index_migration=0
+  if [[ "$native_upgrade_governance" == native-systemd-module-upgrade ]]; then
+    [[ "${GITHUB_ACTIONS:-}" == true && "${RUNNER_ENVIRONMENT:-}" == github-hosted ]]
+    successor_tags+=,mcnd_native_coin_index_migration_ci
+    profile_args+=(--systemd-migration)
+    coin_index_migration=1
+    go test -mod=readonly -tags="$successor_tags" -p 2 -count=1 \
+      -run '^TestAddressIndexMigrationPreservesCoinState$' ./decimal/coin/keeper
+  fi
+  go build -mod=readonly -tags="$successor_tags" -buildvcs=true -p 2 -trimpath \
     -ldflags "-X main.buildCommit=$revision" -o "$successor" ./cmd/mcnd
   go version -m "$successor" > "$output/native-governance-upgrade-successor-build.log"
   successor_sha="$(sha256sum "$successor" | awk '{print $1}')"
@@ -550,11 +560,41 @@ PY
       MCND_NATIVE_CONSENSUS_FIXTURE_DIR="$fixture" MCND_NATIVE_CONSENSUS_UPGRADE_GOVERNANCE=1 \
       MCND_NATIVE_CONSENSUS_FULL_PROFILE_UPGRADE="$full_profile" \
       MCND_NATIVE_CONSENSUS_UPGRADE_PENDING_IBC="$pending_ibc" \
+      MCND_NATIVE_COIN_INDEX_MIGRATION_CI="$coin_index_migration" \
       go test -mod=readonly -tags= -trimpath -p 2 -count=1 -timeout 8m -json \
       -run '^TestOwnedAppSignedRegistryBootstrap$/^authenticated_isolated_position_reader$' ./systemcontracts \
       > "$work/native-governance-upgrade-fixture.log" 2>&1); then
     private_fixture_diagnostic "$work/native-governance-upgrade-fixture.log"
     exit 1
+  fi
+  if [[ "$native_upgrade_governance" == native-systemd-module-upgrade ]]; then
+    signer_home=$(mktemp -d "$work/upgrade-signer.XXXXXXXX")
+    gpg --homedir "$signer_home" --batch --no-tty --pinentry-mode loopback --passphrase '' \
+      --quick-generate-key "MintCandy module migration CI ${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}" ed25519 sign 0
+    signer=$(gpg --homedir "$signer_home" --batch --with-colons --list-keys | awk -F: '$1 == "fpr" {print $10}')
+    [[ "$signer" =~ ^[A-F0-9]{40}$ ]]
+    gpg --homedir "$signer_home" --batch --export "$signer" > "$work/upgrade-trusted-keyring.gpg"
+    for phase in predecessor successor; do
+      executable=$predecessor
+      binary_sha=$predecessor_sha
+      if [[ "$phase" == successor ]]; then
+        executable=$successor
+        binary_sha=$successor_sha
+      fi
+      archive="$work/$phase.tar.gz"
+      extracted="$work/$phase-verified"
+      package_report="$output/native-governance-$phase-package.json"
+      "$python" -B "$root/network/tools/native_launch_package.py" build --binary "$executable" \
+        --genesis "$fixture/genesis.json" --source-commit "$revision" --output "$archive" \
+        --signer-home "$signer_home" --signer-fingerprint "$signer"
+      "$python" -B "$root/network/tools/native_launch_package.py" verify --archive "$archive" \
+        --trusted-keyring "$work/upgrade-trusted-keyring.gpg" --signer-fingerprint "$signer" \
+        --output-dir "$extracted" > "$package_report"
+      [[ "$(sha256sum "$extracted/bin/mcnd" | awk '{print $1}')" == "$binary_sha" ]]
+      cmp -- "$extracted/genesis.json" "$fixture/genesis.json"
+    done
+    predecessor="$work/predecessor-verified/bin/mcnd"
+    successor="$work/successor-verified/bin/mcnd"
   fi
   run_native_upgrade() {
     sudo -n unshare --net -- bash -euc 'ip link set lo up; exec "$@"' _ \
@@ -580,16 +620,16 @@ PY
   fi
   run_native_upgrade "${source_args[@]}" --report "$output/native-governance-upgrade.json" |& tee "$output/native-governance-upgrade.log"
   preserve_public_reports
-  "$python" - "$output" "$root" "$revision" "$predecessor_revision" "$predecessor_sha" "$successor_sha" "$full_profile" "$pending_ibc" <<'PY'
+  "$python" - "$output" "$root" "$revision" "$predecessor_revision" "$predecessor_sha" "$successor_sha" "$full_profile" "$pending_ibc" "$successor_tags" <<'PY'
 import json,sys
 from pathlib import Path
 out,root=map(Path,sys.argv[1:3])
-revision,predecessor_revision,predecessor_sha,successor_sha,full_profile,pending_ibc=sys.argv[3:]
+revision,predecessor_revision,predecessor_sha,successor_sha,full_profile,pending_ibc,successor_tags=sys.argv[3:]
 sys.path.insert(0,str(root/'network/tools'))
 from binary_provenance import parse_build_info
 default_build=parse_build_info((out/'mcnd-build.log').read_text())
 successor=parse_build_info((out/'native-governance-upgrade-successor-build.log').read_text())
-assert successor['settings'].pop('-tags') == 'mcnd_native_sdk_migration_v1'
+assert successor['settings'].pop('-tags') == successor_tags
 assert successor==default_build, 'successor build differs from its source default beyond the planned build tag'
 cross_version=predecessor_revision!=revision
 if cross_version:
@@ -602,7 +642,10 @@ assert report['sourceCommit']==revision and report['binarySha256']==predecessor_
 assert report['replacementSha256']==successor_sha and successor_sha!=predecessor_sha,report
 assert report['predecessorSourceCommit']==predecessor_revision and report['replacementSourceCommit']==revision,report
 assert report['fullProfile'] is (full_profile == '1'),report
-assert report['planKind']==('distinct-source-same-family-handler-rehearsal' if cross_version else 'same-source-handler-rehearsal'),report
+systemd_migration='mcnd_native_coin_index_migration_ci' in successor_tags.split(',')
+expected_kind=('systemd-coordinated-module-migration' if systemd_migration else
+               'distinct-source-same-family-handler-rehearsal' if cross_version else 'same-source-handler-rehearsal')
+assert report['planKind']==expected_kind,report
 assert report['rejected']['status']=='PROPOSAL_STATUS_REJECTED' and report['passed']['status']=='PROPOSAL_STATUS_PASSED',report
 plan,application,progress=report['schedule'],report['application'],report['progress']
 assert plan['scheduledAt'] < plan['targetHeight'] == application['appliedHeight'] <= progress['height']-3,report
@@ -620,6 +663,18 @@ if full_profile == '1':
                         'nativeSupplyAtomic':before['nativeSupplyAtomic']}.items():
         assert before[field]==after[field]==value,report
     assert progress['powers']=={'a':1,'b':1} and progress['signers']==['a','b'],report
+if systemd_migration:
+    migration,rollback,systemd=report['coinMigration'],report['rollback'],report['systemd']
+    assert (migration['before']['version'],migration['after']['version'])==(1,2),report
+    assert migration['before']['height']==plan['targetHeight']-1 and migration['after']['height']==plan['targetHeight'],report
+    assert rollback['coinBefore']==migration['before'] and rollback['coinAfter']==migration['after'],report
+    assert rollback['restoredHomeSha256']==systemd['backupHomeSha256'] and len(rollback['restoredHomeSha256'])==3,report
+    assert rollback['restoredAppHash']==application['block']['app_hash'],report
+    assert rollback['migrationAppHash']==migration['appHash'] and rollback['sameCanonicalHistory'] is True,report
+    assert rollback['votingPower']==rollback['witnessVotingPower']==0 and rollback['catchingUp'] is False,report
+    for phase,expected_sha in [('predecessor',predecessor_sha),('successor',successor_sha)]:
+        package=json.loads((out/f'native-governance-{phase}-package.json').read_text())
+        assert package['binarySha256']==expected_sha and package['genesisSha256']==report['genesisSha256'],report
 if pending_ibc == '1':
     packet=report['ibcPacket']
     assert len(packet['packets'])==1 and packet['escrowAtomic']=='1000000000000000000',report

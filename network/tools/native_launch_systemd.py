@@ -1,10 +1,12 @@
 """Install and run the disposable launch follower as a transient systemd service."""
 
 from contextlib import nullcontext
+import base64
 import hashlib
 import json
 import os
 from pathlib import Path
+import re
 import shutil
 import stat
 import subprocess
@@ -12,8 +14,10 @@ import tempfile
 import time
 import uuid
 
+from configure_history import validate_fresh_home
 from del_delegation_smoke import write_config
 from mcnd_process_smoke import private_namespace
+from withdrawal_genesis_smoke import private_bytes
 
 
 def digest(path):
@@ -61,7 +65,7 @@ class SystemdFollower:
         self.unit = f"mcnd-launch-ci-{uuid.uuid4().hex}.service"
         self.submitted = False
 
-    def __enter__(self):
+    def _configure_environment(self):
         import pwd
 
         private_namespace()
@@ -71,19 +75,24 @@ class SystemdFollower:
         if not self.user.pw_uid or not self.user.pw_gid:
             raise RuntimeError("systemd follower must use an unprivileged account")
         self.namespace_path = f"/proc/{os.getpid()}/ns/net"
+
+    def _install_binary(self, bin_dir):
+        bin_dir.mkdir()
+        bin_dir.chmod(0o755)
+        installed = bin_dir / "mcnd"
+        shutil.copyfile(self.source, installed)
+        if digest(installed) != self.expected_sha256:
+            raise RuntimeError("clean installation binary SHA256 differs from the signed package")
+        installed.chmod(0o755)
+        self.binary = str(installed)
+
+    def __enter__(self):
+        self._configure_environment()
         self.root = Path(tempfile.mkdtemp(prefix="mcnd-systemd-launch-", dir="/tmp"))
         try:
             # The service may traverse the root, but only the harness may write it.
             self.root.chmod(0o711)
-            bin_dir = self.root / "bin"
-            bin_dir.mkdir()
-            bin_dir.chmod(0o755)
-            installed = bin_dir / "mcnd"
-            shutil.copyfile(self.source, installed)
-            if digest(installed) != self.expected_sha256:
-                raise RuntimeError("clean installation binary SHA256 differs from the signed package")
-            installed.chmod(0o755)
-            self.binary = str(installed)
+            self._install_binary(self.root / "bin")
         except BaseException:
             shutil.rmtree(self.root)
             raise
@@ -303,4 +312,135 @@ class SystemdFollower:
         guard = self.signals.finish_owned_operation() if self.signals else nullcontext()
         with guard:
             self._stop()
+            shutil.rmtree(self.root)
+
+
+def validator_identity(home):
+    key = json.loads(private_bytes(home / "config/priv_validator_key.json", 8192))
+    pub_key = key["pub_key"]
+    public = base64.b64decode(pub_key["value"], validate=True)
+    if pub_key["type"] != "tendermint/PubKeyEd25519" or len(public) != 32:
+        raise RuntimeError("expected an Ed25519 fixture signing key")
+    address = hashlib.sha256(public).hexdigest()[:40].upper()
+    if key["address"] != address:
+        raise RuntimeError("fixture signing key and consensus address disagree")
+    return address
+
+
+class SystemdValidatorFleet:
+    """Manage only fixture validators and restore backups as non-signing peers."""
+
+    def __init__(self, binary, binary_sha256, signals=None):
+        self.root_binary = str(Path(binary).resolve(strict=True))
+        self.binary_sha256 = binary_sha256
+        self.signals = signals
+        self.services = {}
+        self.original_identities = {}
+        self.replay_identities = {}
+        self.backups = None
+        self.restored = False
+
+    def __enter__(self):
+        private_namespace()
+        if digest(self.root_binary) != self.binary_sha256:
+            raise RuntimeError("fleet binary does not match its expected SHA256")
+        self.root = Path(tempfile.mkdtemp(prefix="mcnd-systemd-fleet-", dir="/tmp"))
+        self.root.chmod(0o711)
+        return self
+
+    def install(self, home):
+        if home.parent != self.root or home.is_symlink() or not re.fullmatch(r"[a-d]", home.name) or home in self.services:
+            raise RuntimeError("expected one new fixture validator home inside the fleet")
+        validate_fresh_home(home)
+        identity = validator_identity(home)
+        if identity in self.original_identities.values():
+            raise RuntimeError("fixture validators must use different signing keys")
+        service = SystemdFollower(self.root_binary, self.binary_sha256, self.signals)
+        service._configure_environment()
+        service.root = self.root
+        service._install_binary(self.root / f"bin-{home.name}")
+        service.prepare(home)
+        self.services[home] = service
+        self.original_identities[home] = identity
+        return service.binary
+
+    def binary_for(self, home):
+        return self.services[home].binary
+
+    def spawn(self, args, log, env):
+        home = Path(args[args.index("--home") + 1])
+        service = self.services[home]
+        identity = validator_identity(home)
+        if self.restored:
+            state = json.loads(private_bytes(home / "data/priv_validator_state.json", 8192))
+            if (identity in self.original_identities.values() or identity in self.replay_identities.values() or
+                state.get("height") != "0" or state.get("round") != 0 or state.get("step") != 0 or
+                any(state.get(name) not in (None, "") for name in ("signature", "signbytes"))):
+                raise RuntimeError("backup replay requires a fresh non-signing consensus key and state")
+            self.replay_identities[home] = identity
+        elif identity != self.original_identities[home]:
+            raise RuntimeError("the fixture validator consensus identity changed before the upgrade")
+        service.prepare(home)
+        return service.spawn(args, log, env)
+
+    def stop(self, service):
+        if service not in self.services.values():
+            raise RuntimeError("cannot stop a service outside this fleet")
+        private_namespace()
+        guard = self.signals.finish_owned_operation() if self.signals else nullcontext()
+        with guard:
+            service._stop(require_unloaded=True)
+
+    def _require_closed_fleet(self):
+        private_namespace()
+        if len(self.services) not in (3, 4) or any(service.submitted for service in self.services.values()):
+            raise RuntimeError("checkpoint and replacement require all fleet services stopped")
+
+    def checkpoint(self):
+        self._require_closed_fleet()
+        if self.backups is not None:
+            raise RuntimeError("fleet checkpoint already exists")
+        directory = self.root / "backups"
+        directory.mkdir(mode=0o700)
+        self.backups = {home.name: copy_offline_home(home, directory / home.name) for home in self.services}
+        return dict(self.backups)
+
+    def replace_binaries(self, binary, sha256):
+        self._require_closed_fleet()
+        if self.backups is None or digest(binary) != sha256:
+            raise RuntimeError("replacement requires a fleet checkpoint and a verified binary")
+        for service in self.services.values():
+            service._replace_binary(binary, sha256)
+
+    def restore(self):
+        self._require_closed_fleet()
+        if self.backups is None or self.restored:
+            raise RuntimeError("restore requires one unused fleet checkpoint")
+        restored = {}
+        for home in self.services:
+            candidate = self.root / f"restored-{home.name}"
+            restored[home.name] = copy_offline_home(self.root / "backups" / home.name, candidate)
+            if restored[home.name] != self.backups[home.name]:
+                raise RuntimeError("restored validator home differs from its offline backup")
+        for home in self.services:
+            home.rename(self.root / f"upgraded-{home.name}")
+            (self.root / f"restored-{home.name}").rename(home)
+        self.replace_binaries(self.root_binary, self.binary_sha256)
+        self.restored = True
+        return restored
+
+    def evidence(self):
+        return {home.name: service.evidence() for home, service in self.services.items()}
+
+    def __exit__(self, *_):
+        guard = self.signals.finish_owned_operation() if self.signals else nullcontext()
+        with guard:
+            errors = []
+            for service in reversed(tuple(self.services.values())):
+                try:
+                    self.stop(service)
+                except (RuntimeError, OSError, subprocess.SubprocessError) as error:
+                    errors.append(str(error))
+            if errors:
+                raise RuntimeError("could not stop all isolated validator services: " + "; ".join(errors))
             shutil.rmtree(self.root)

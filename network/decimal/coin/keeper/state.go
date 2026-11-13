@@ -60,8 +60,10 @@ func (k *StateKeeper) SetParams(ctx sdk.Context, params types.Params) error {
 	return k.params.Set(ctx, &params)
 }
 
-func coinKey(denom string) []byte      { return append([]byte{0x11}, denom...) }
-func addressKey(address string) []byte { return append([]byte{0x13}, strings.ToLower(address)...) }
+func coinKey(denom string) []byte { return append([]byte{0x11}, denom...) }
+func addressKey(address string) []byte {
+	return append([]byte{legacyAddressIndexPrefix}, strings.ToLower(address)...)
+}
 
 func (k *StateKeeper) GetCoin(ctx sdk.Context, denom string) (types.Coin, error) {
 	if !config.CoinDenomValidator.MatchString(denom) {
@@ -94,7 +96,12 @@ func (k *StateKeeper) GetCoinByDRC(ctx sdk.Context, address string) (types.Coin,
 	if !types.ValidContractAddress(address) {
 		return types.Coin{}, errors.New("invalid token contract address")
 	}
-	data, err := k.service.OpenKVStore(ctx).Get(addressKey(address))
+	state := k.service.OpenKVStore(ctx)
+	index, err := activeAddressIndex(state)
+	if err != nil {
+		return types.Coin{}, err
+	}
+	data, err := state.Get(index.key(address))
 	if err != nil {
 		return types.Coin{}, err
 	}
@@ -133,8 +140,14 @@ func (k *StateKeeper) SetCoin(ctx sdk.Context, coin types.Coin) error {
 		return errors.New("token contract assignment is immutable")
 	}
 	state := k.service.OpenKVStore(cached)
+	var indexKey []byte
 	if coin.DRC20Contract != "" {
-		indexed, err := state.Get(addressKey(coin.DRC20Contract))
+		index, err := activeAddressIndex(state)
+		if err != nil {
+			return err
+		}
+		indexKey = index.key(coin.DRC20Contract)
+		indexed, err := state.Get(indexKey)
 		if err != nil {
 			return err
 		}
@@ -145,8 +158,8 @@ func (k *StateKeeper) SetCoin(ctx sdk.Context, coin types.Coin) error {
 	if err := state.Set(coinKey(coin.Denom), data); err != nil {
 		return err
 	}
-	if coin.DRC20Contract != "" {
-		if err := state.Set(addressKey(coin.DRC20Contract), []byte(coin.Denom)); err != nil {
+	if indexKey != nil {
+		if err := state.Set(indexKey, []byte(coin.Denom)); err != nil {
 			return err
 		}
 	}

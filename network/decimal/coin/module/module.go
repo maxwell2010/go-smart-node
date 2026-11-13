@@ -50,7 +50,7 @@ func NewAppModule(k *keeper.StateKeeper, s store.KVStoreService) AppModule {
 }
 func (AppModule) IsOnePerModuleType()      {}
 func (AppModule) IsAppModule()             {}
-func (AppModule) ConsensusVersion() uint64 { return 1 }
+func (AppModule) ConsensusVersion() uint64 { return addressIndexConsensusVersion }
 func (m AppModule) InitGenesis(ctx sdk.Context, cdc codec.JSONCodec, data json.RawMessage) {
 	var g types.GenesisState
 	cdc.MustUnmarshalJSON(data, &g)
@@ -67,6 +67,7 @@ func (m AppModule) ExportGenesis(ctx sdk.Context, cdc codec.JSONCodec) json.RawM
 }
 func (m AppModule) RegisterServices(cfg sdkmodule.Configurator) {
 	types.RegisterQueryServer(cfg.QueryServer(), queryServer{keeper: m.keeper, service: m.service})
+	m.registerAddressIndexMigration(cfg)
 }
 
 func (AppModuleBasic) AutoCLIOptions() *autocliv1.ModuleOptions {

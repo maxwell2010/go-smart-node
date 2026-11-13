@@ -10,11 +10,12 @@ import pathlib
 import re
 import tempfile
 import time
+from urllib.parse import urlencode
 
-from del_delegation_smoke import GAS_LIMIT, GAS_PRICE, balance, native_positions, read_frozen, read_words
+from del_delegation_smoke import GAS_LIMIT, GAS_PRICE, balance, native_positions, read_frozen, read_words, write_config
 from mcnd_process_smoke import ProcessOwner, SignalGuard, private_environment, private_namespace, run_command
-from native_consensus_smoke import ATOMS, INITIAL, check_signatures, committed_header, create_replicas, effective_set, load_fixture, wait_replicas
-from withdrawal_genesis_smoke import CHAIN, EVM_CHAIN, MAX_BLOCKS, SHA256, WORD, check, ethereum, native, private_bytes, readiness_diagnostic, request, safe_diagnostic
+from native_consensus_smoke import ATOMS, INITIAL, check_signatures, committed_header, create_replica, create_replicas, effective_set, load_fixture, wait_replicas
+from withdrawal_genesis_smoke import CHAIN, EVM_CHAIN, MAX_BLOCKS, SHA256, WORD, check, ethereum, native, private_bytes, private_write, readiness_diagnostic, request, safe_diagnostic
 
 
 PLAN = 'mintcandy-native-sdk-migrations-v1'
@@ -302,9 +303,109 @@ def select_pending_plan(node, actions, report):
     return action
 
 
-def run_gate(args, binary, replacement, root, expected, genesis, keys, actions, env, owner, report, ibc=None):
+def read_coin_store(node, key, height):
+    params = urlencode({'path': '"/store/coin/key"', 'data': '0x' + key.hex(), 'height': height, 'prove': 'false'})
+    result = node.rpc(f'abci_query?{params}')['response']
+    check(int(result.get('code', 0)) == 0 and int(result['height']) == height,
+          'coin migration store query failed or used a different height')
+    value = result.get('value')
+    return base64.b64decode(value, validate=True) if value else None
+
+
+def check_coin_module_migration(replicas, genesis, height, version):
+    (coin,) = json.loads(genesis)['app_state']['coin']['coins']
+    address, denom = coin['drc20_address'].lower(), coin['denom']
+    check(re.fullmatch(r'0x[0-9a-f]{40}', address) and denom == 'genesis20', 'invalid migration DRC20 fixture')
+    old_key, new_key = b'\x13' + address.encode('ascii'), b'\x14' + bytes.fromhex(address[2:])
+    expected = (denom.encode(), None, None) if version == 1 else (None, denom.encode(), b'\x02')
+    records = set()
+    for node in replicas:
+        versions = native(f'{UPGRADE_API}/module_versions?module_name=coin', height, base=node.rest)['module_versions']
+        check([(entry['name'], int(entry['version'])) for entry in versions] == [('coin', version)],
+              'persisted coin module version differs from the expected migration stage')
+        check(tuple(read_coin_store(node, key, height) for key in (old_key, new_key, b'\x15')) == expected,
+              'persisted DRC20 address index differs from the expected migration stage')
+        record = read_coin_store(node, b'\x11' + denom.encode(), height)
+        check(record is not None, 'indexed DRC20 coin record is missing')
+        records.add(hashlib.sha256(record).hexdigest())
+    check(len(records) == 1, 'replicas disagree on the DRC20 coin record')
+    return {'height': height, 'module': 'coin', 'version': version, 'denom': denom,
+            'legacyIndexPresent': version == 1, 'binaryIndexPresent': version == 2,
+            'migrationMarkerPresent': version == 2, 'coinRecordSha256': records.pop()}
+
+
+def restore_validator_checkpoint(fleet, replicas, replacement, root, genesis, expected, action, env, owner, report):
+    target = action['planHeight']
+    final = report['progress']['height']
+    report['phase'] = 'witness-retains-canonical-signed-blocks'
+    witness = create_replica(replacement, root, 'rollback-witness', len(replicas), genesis, None, env)
+    write_config(witness.home, 'config.toml', {
+        ('p2p', 'pex'): 'false', ('p2p', 'allow_duplicate_ip'): 'true',
+        ('p2p', 'persistent_peers'): json.dumps(','.join(f'{node.node_id}@127.0.0.1:{node.p2p}' for node in replicas)),
+    })
+    witness.start(replacement, env, owner, 'retain-canonical-blocks')
+    wait_replicas([*replicas, witness], final + 3, 100, report)
+    primary_final = committed_header([*replicas, witness], final + 1)
+    check(int(witness.rpc('status')['validator_info']['voting_power']) == 0,
+          'rollback witness must be a non-voting observer')
+
+    report['phase'] = 'stop-all-signers-and-restore-closed-homes'
+    for node in reversed(replicas):
+        fleet.stop(node.child)
+    check(all(node.child.poll() is not None for node in replicas), 'a primary signer is still running')
+    restored_hashes = fleet.restore()
+    check(restored_hashes == report['systemd']['backupHomeSha256'], 'restored homes differ from closed backups')
+    for node in replicas:
+        # Replay on restored copies without the original signing identities.
+        keys = create_replica(replacement, root, f'nonvoting-{node.label}', node.index, genesis, None, env)
+        for relative in ('config/priv_validator_key.json', 'data/priv_validator_state.json'):
+            private_write(node.home / relative, private_bytes(keys.home / relative, 8192))
+        write_config(node.home, 'config.toml', {
+            ('p2p', 'persistent_peers'): json.dumps(f'{witness.node_id}@127.0.0.1:{witness.p2p}'),
+        })
+    fleet.replace_binaries(replacement, report['replacementSha256'])
+    report['phase'] = 'replay-governed-migration-from-restored-homes'
+    for node in replicas:
+        node.start(fleet.binary_for(node.home), env, fleet, 'restore-replay')
+    wait_replicas([*replicas, witness], final + 1, 125, report)
+    deadline = time.monotonic() + 25
+    while True:
+        statuses = [node.rpc('status') for node in replicas]
+        check(all(status['node_info']['id'] == node.node_id and int(status['validator_info']['voting_power']) == 0
+                  for node, status in zip(replicas, statuses, strict=True)), 'restored services must use fresh non-voting signing identities')
+        if all(not status['sync_info']['catching_up'] for status in statuses):
+            break
+        check(time.monotonic() < deadline, 'restored services did not finish synchronization')
+        time.sleep(0.25)
+    participants = [*replicas, witness]
+    check(committed_header(participants, target) == report['predecessor']['boundary'],
+          'restored checkpoint changed the canonical upgrade block')
+    migration_app_hash = committed_header(participants, target + 1)['app_hash']
+    check(migration_app_hash == report['coinMigration']['appHash'], 'restored migration produced a different AppHash')
+    final_header = committed_header(participants, final + 1)
+    check(final_header == primary_final, 'restored services did not replay the original signed history')
+    check_schedule(replicas, action, target - 1)
+    for node in replicas:
+        check(applied_height(node, target) == target and current_plan(node, target) is None,
+              'restored service did not reapply the exact approved migration')
+    report['rollback'] = {'restoredHomeSha256': restored_hashes, 'restoredHeight': target - 1,
+                          'restoredAppHash': report['predecessor']['boundary']['app_hash'],
+                          'replayedHeight': target, 'migrationAppHash': migration_app_hash,
+                          'verifiedHeight': final, 'appHash': final_header['app_hash'], 'catchingUp': False,
+                          'sameCanonicalHistory': True, 'votingPower': 0, 'witnessVotingPower': 0,
+                          'coinBefore': check_coin_module_migration(replicas, genesis, target - 1, 1),
+                          'coinAfter': check_coin_module_migration(replicas, genesis, target, 2),
+                          'services': fleet.evidence()}
+    report['rollback']['pendingWithdrawal'] = check_pending_withdrawal(replicas, expected, final, report['withdrawal']['before']['dueAt'])
+    check(report['rollback']['coinBefore'] == report['coinMigration']['before'] and
+          report['rollback']['coinAfter'] == report['coinMigration']['after'],
+          'restored module records differ before or after replaying the migration')
+
+
+def run_gate(args, binary, replacement, root, expected, genesis, keys, actions, env, owner, report, ibc=None, fleet=None):
     report['phase'] = 'create-replicas'
-    replicas = create_replicas(binary, root, genesis, keys, env)
+    replicas = create_replicas(fleet.root_binary if fleet else binary, fleet.root if fleet else root, genesis, keys, env,
+                              full_mesh=fleet is not None)
     source = replicas[0]
     initial = report['initialHeight']
     if ibc:
@@ -321,7 +422,7 @@ def run_gate(args, binary, replacement, root, expected, genesis, keys, actions, 
 
     report['phase'] = 'initial-native-consensus'
     for node in replicas:
-        node.start(binary, env, owner, 'upgrade-governance')
+        node.start(fleet.install(node.home) if fleet else binary, env, fleet or owner, 'upgrade-governance')
     first = wait_replicas(replicas, initial + 2, 85, report)
     report['initialPower'] = effective_set(replicas, expected['validators'], initial, INITIAL)
     report['initialSigners'] = check_signatures(replicas, expected['validators'], initial, INITIAL)
@@ -386,13 +487,20 @@ def run_gate(args, binary, replacement, root, expected, genesis, keys, actions, 
     before = committed_header(replicas, target - 1)
     boundary = committed_header(replicas, target)
     report['predecessor'] = {'committedHeight': target - 1, 'boundaryHeight': target, 'boundary': boundary}
+    if fleet:
+        report['coinMigration'] = {'before': check_coin_module_migration(replicas, genesis, target - 1, 1)}
+        report['systemd'] = {'predecessors': fleet.evidence()}
     if args.full_profile:
         report['withdrawal']['before'] = check_pending_withdrawal(replicas, expected, target - 1, due)
     if ibc:
         ibc.mark_checkpoint()
     for node in reversed(replicas):
-        owner.stop(node.child)
+        (fleet or owner).stop(node.child)
         check(node.child.poll() is not None, 'predecessor is still running')
+    if fleet:
+        report['phase'] = 'backup-closed-pre-upgrade-homes'
+        report['systemd']['backupHomeSha256'] = fleet.checkpoint()
+        fleet.replace_binaries(replacement, report['replacementSha256'])
     if ibc:
         report['phase'] = 'backup-closed-pre-upgrade-homes'
         ibc.backup_closed_homes()
@@ -400,7 +508,7 @@ def run_gate(args, binary, replacement, root, expected, genesis, keys, actions, 
 
     report['phase'] = 'successor-replay-and-exact-preblock-application'
     for node in replicas:
-        node.start(replacement, env, owner, 'upgrade-successor')
+        node.start(fleet.binary_for(node.home) if fleet else replacement, env, fleet or owner, 'upgrade-successor')
     # Observe continuing full-profile consensus past the earlier CI frontier.
     tip = wait_replicas(replicas, target + (16 if args.full_profile else 4), 125, report)
     final = tip - 1
@@ -421,6 +529,13 @@ def run_gate(args, binary, replacement, root, expected, genesis, keys, actions, 
     report['progress'] = {'height': final, 'powers': effective_set(replicas, expected['validators'], final, powers),
                           'signers': check_signatures(replicas, expected['validators'], final, powers),
                           **committed_header(replicas, final)}
+    if fleet:
+        report['systemd']['successors'] = fleet.evidence()
+        report['coinMigration'].update(after=check_coin_module_migration(replicas, genesis, target, 2),
+                                       appHash=committed_header(replicas, target + 1)['app_hash'])
+        check(report['coinMigration']['before']['coinRecordSha256'] == report['coinMigration']['after']['coinRecordSha256'],
+              'DRC20 address index migration changed the indexed coin record')
+        restore_validator_checkpoint(fleet, replicas, replacement, root, genesis, expected, action, env, owner, report)
     if ibc:
         applied_app_hash = committed_header(replicas, target + 1)['app_hash']
         report['phase'] = 'hermes-post-upgrade-acknowledgement-and-return'
@@ -456,9 +571,12 @@ def main(argv=None, signals=None):
                         help='Require a distinct predecessor source revision. --source-commit identifies the replacement.')
     parser.add_argument('--full-profile', action='store_true', help='Use the fresh historical, IBC and fee-enabled fixture with a pending DEL claim')
     parser.add_argument('--pending-ibc', action='store_true', help='Carry a real ICS-20 packet across the private native handoff')
+    parser.add_argument('--systemd-migration', action='store_true', help='Run and restore the coordinated module migration in systemd')
     for name in ('reference-binary', 'reference-sha256', 'hermes-binary'):
         parser.add_argument('--' + name)
     args = parser.parse_args(argv)
+    if args.systemd_migration and (not args.full_profile or args.pending_ibc):
+        parser.error('--systemd-migration requires --full-profile without --pending-ibc')
     report = {'status': 'FAIL', 'phase': 'fixture-provenance',
               'scope': 'three loopback replicas across a native governance SDK binary upgrade'}
     with pathlib.Path(args.report).open('x', encoding='utf8') as stream:
@@ -474,6 +592,8 @@ def main(argv=None, signals=None):
                 check(args.pending_ibc and re.fullmatch(r'[0-9a-f]{40}', predecessor_commit) and predecessor_commit != args.source_commit,
                       'cross-version handoff requires the pending IBC profile and distinct full source revisions')
                 plan_kind = 'distinct-source-same-family-handler-rehearsal'
+            if args.systemd_migration:
+                plan_kind = 'systemd-coordinated-module-migration'
             binary = str(pathlib.Path(args.binary).resolve(strict=True))
             replacement = str(pathlib.Path(args.replacement_binary).resolve(strict=True))
             for executable, expected_hash in ((binary, args.binary_sha256), (replacement, args.replacement_sha256)):
@@ -499,7 +619,13 @@ def main(argv=None, signals=None):
                     if args.pending_ibc:
                         from native_upgrade_ibc import NativeUpgradeIBC
                         ibc = NativeUpgradeIBC(args, root, env, report, signals)
-                    run_gate(args, binary, replacement, root, expected, genesis, keys, actions, env, owner, report, ibc)
+                    if args.systemd_migration:
+                        from native_launch_systemd import SystemdValidatorFleet
+
+                        with SystemdValidatorFleet(binary, args.binary_sha256, signals=signals) as fleet:
+                            run_gate(args, binary, replacement, root, expected, genesis, keys, actions, env, owner, report, fleet=fleet)
+                    else:
+                        run_gate(args, binary, replacement, root, expected, genesis, keys, actions, env, owner, report, ibc)
                 finally:
                     try:
                         if ibc:

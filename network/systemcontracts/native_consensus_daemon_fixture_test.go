@@ -136,8 +136,12 @@ func exportNativeConsensusDaemonFixture(t *testing.T, e isolatedBackendEnv, dir 
 		require.Equal(t, launch.evmID, domain.EVMChainID)
 	}
 	var custom *nativeCustomCollateralGenesisFixture
-	if launchRehearsal || os.Getenv(nativeCustomCollateralGenesisPhaseEnv) == "seed" {
-		require.True(t, historical || launchRehearsal)
+	coinIndexMigration := os.Getenv("MCND_NATIVE_COIN_INDEX_MIGRATION_CI") == "1"
+	if coinIndexMigration {
+		require.True(t, fullUpgrade && upgradeGovernance && !launchRehearsal, "coin index migration requires the full upgrade fixture")
+	}
+	if launchRehearsal || coinIndexMigration || os.Getenv(nativeCustomCollateralGenesisPhaseEnv) == "seed" {
+		require.True(t, historical || launchRehearsal || coinIndexMigration)
 		var fixtureVolume int64
 		if os.Getenv(nativeCustomNFTMaxEnv) == "1" && nft != nil {
 			fixtureVolume = 2*int64(nft.units) + 8

@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"errors"
 	"fmt"
-	"strings"
 
 	sdk "github.com/cosmos/cosmos-sdk/types"
 	"github.com/cosmos/gogoproto/proto"
@@ -36,6 +35,9 @@ func (k *StateKeeper) InitGenesis(ctx sdk.Context, genesis *types.GenesisState) 
 	}
 	if occupied {
 		return errors.New("coin genesis requires an empty store")
+	}
+	if err := initAddressIndex(state); err != nil {
+		return err
 	}
 	if err := k.SetParams(child, genesis.Params); err != nil {
 		return err
@@ -72,6 +74,10 @@ func (k *StateKeeper) ExportGenesis(ctx sdk.Context) (*types.GenesisState, error
 	}
 	genesis := types.NewGenesisState(params, nil, nil)
 	state := k.service.OpenKVStore(ctx)
+	index, err := activeAddressIndex(state)
+	if err != nil {
+		return nil, err
+	}
 	iterator, err := state.Iterator(nil, nil)
 	if err != nil {
 		return nil, err
@@ -102,7 +108,7 @@ func (k *StateKeeper) ExportGenesis(ctx sdk.Context) (*types.GenesisState, error
 				return nil, err
 			}
 			if coin.DRC20Contract != "" {
-				indexed, err := state.Get(addressKey(coin.DRC20Contract))
+				indexed, err := state.Get(index.key(coin.DRC20Contract))
 				if err != nil {
 					return nil, err
 				}
@@ -111,10 +117,10 @@ func (k *StateKeeper) ExportGenesis(ctx sdk.Context) (*types.GenesisState, error
 				}
 			}
 			genesis.Coins = append(genesis.Coins, coin)
-		case 0x13:
-			address := string(key[1:])
-			if address != strings.ToLower(address) {
-				return nil, errors.New("non-canonical coin address index")
+		case index.prefix:
+			address, err := index.address(key[1:])
+			if err != nil {
+				return nil, err
 			}
 			coin, err := k.GetCoinByDRC(ctx, address)
 			if err != nil {
@@ -124,6 +130,10 @@ func (k *StateKeeper) ExportGenesis(ctx sdk.Context) (*types.GenesisState, error
 				return nil, errors.New("orphan or invalid coin address index")
 			}
 			indexes++
+		case addressIndexSchemaPrefix:
+			if !index.hasSchemaRow || len(key) != 1 || !bytes.Equal(value, compactAddressIndexSchema) {
+				return nil, errors.New("unexpected coin address index schema row")
+			}
 		case 0x21:
 			var check types.Check
 			if len(value) > maxCoinRecordBytes {
