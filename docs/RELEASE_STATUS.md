@@ -200,6 +200,18 @@ records in `bank`. The rehearsal exercised the local IAVL storage format
 with the existing application and consensus rules.
 [IAVL migration and rollback CI](https://github.com/maxwell2010/go-smart-node/actions/runs/43246566894) · [Evidence](https://github.com/maxwell2010/go-smart-node/actions/runs/43246566894/artifacts/13958681719)
 
+The coordinated systemd upgrade on `32b7f4a` ran three isolated replicas,
+with two active validators signing blocks. The governance-approved plan
+halted the predecessor at committed height 31. After closing the services
+and backing up all homes, the signed successor applied `coin` module
+migration 1 to 2 at height 32. The DRC20 address index changed from text to
+binary keys and the primary coin record retained its SHA256. The services
+agreed on AppHash at height 47. Recovery verified the three backup hashes
+and the height 31 AppHash, then replayed the signed history using fresh
+non-voting identities. AppHash matched the original run at heights 32
+and 47. The module migration is enabled in the CI successor build.
+[Coordinated systemd CI](https://github.com/maxwell2010/go-smart-node/actions/runs/43446310577) · [Evidence](https://github.com/maxwell2010/go-smart-node/actions/runs/43446310577/artifacts/14048472406)
+
 ## Separate release tracks
 
 The selected architecture is a fresh network on a maintained modern stack,
