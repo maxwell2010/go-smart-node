@@ -25,7 +25,14 @@ native_held_del_downtime="${9:-off}"
 native_upgrade_governance="${10:-off}"
 [[ "$native_upgrade_governance" == off || "$native_upgrade_governance" == native-upgrade-governance ||
    "$native_upgrade_governance" == native-full-profile-upgrade || "$native_upgrade_governance" == native-full-ibc-upgrade ||
-   "$native_upgrade_governance" == native-cross-version-ibc-upgrade || "$native_upgrade_governance" == native-systemd-module-upgrade ]] || { echo 'Unsupported native upgrade governance option.' >&2; exit 2; }
+   "$native_upgrade_governance" == native-cross-version-ibc-upgrade || "$native_upgrade_governance" == native-systemd-module-upgrade ||
+   "$native_upgrade_governance" == native-systemd-four-validator-recovery ]] || { echo 'Unsupported native upgrade governance option.' >&2; exit 2; }
+coin_index_migration=0
+resume_signing=0
+case "$native_upgrade_governance" in
+  native-systemd-module-upgrade) coin_index_migration=1 ;;
+  native-systemd-four-validator-recovery) coin_index_migration=1; resume_signing=1 ;;
+esac
 native_nft_downtime="${11:-off}"
 [[ "$native_nft_downtime" == off || "$native_nft_downtime" == native-nft-downtime ]] || { echo 'Unsupported native NFT downtime option.' >&2; exit 2; }
 for tool in sudo unshare ip gcc python3 go; do command -v "$tool" >/dev/null; done
@@ -138,7 +145,7 @@ with (out/'manifest.json').open('w') as stream:
         provenanceVerified=True,
         scope='Default production builds; both source inventories checked before/after; Go VCS metadata checked'),stream,indent=2)
 PY
-if [[ "$native_upgrade_governance" != native-systemd-module-upgrade ]]; then
+if [[ "$coin_index_migration" == 0 ]]; then
 curl --fail --location --proto '=https' --tlsv1.2 --retry 3 \
   'https://github.com/informalsystems/hermes/releases/download/v1.13.3/hermes-v1.13.3-x86_64-unknown-linux-gnu.tar.gz' --output "$work/hermes.tar.gz"
 printf '%s  %s\n' 3582136824ac1984c8884b310c63940a1489f091fa45faca38ed80e5dfe7d51b "$work/hermes.tar.gz" | sha256sum --check
@@ -544,14 +551,18 @@ PY
   fi
   successor="$work/mcnd-native-sdk-migration-v1"
   successor_tags=mcnd_native_sdk_migration_v1
-  coin_index_migration=0
-  if [[ "$native_upgrade_governance" == native-systemd-module-upgrade ]]; then
+  if [[ "$coin_index_migration" == 1 ]]; then
     [[ "${GITHUB_ACTIONS:-}" == true && "${RUNNER_ENVIRONMENT:-}" == github-hosted ]]
     successor_tags+=,mcnd_native_coin_index_migration_ci
     profile_args+=(--systemd-migration)
-    coin_index_migration=1
     go test -mod=readonly -tags="$successor_tags" -p 2 -count=1 \
       -run '^TestAddressIndexMigrationPreservesCoinState$' ./decimal/coin/keeper
+  fi
+  if [[ "$resume_signing" == 1 ]]; then
+    "$python" -B -m unittest discover -s tools -p test_native_launch_systemd.py
+    commit_probe="$work/comet-commit-probe"
+    go build -mod=readonly -p 2 -trimpath -o "$commit_probe" ./tools/comet_commit_probe
+    profile_args+=(--resume-signing --commit-probe "$commit_probe")
   fi
   go build -mod=readonly -tags="$successor_tags" -buildvcs=true -p 2 -trimpath \
     -ldflags "-X main.buildCommit=$revision" -o "$successor" ./cmd/mcnd
@@ -563,13 +574,14 @@ PY
       MCND_NATIVE_CONSENSUS_FULL_PROFILE_UPGRADE="$full_profile" \
       MCND_NATIVE_CONSENSUS_UPGRADE_PENDING_IBC="$pending_ibc" \
       MCND_NATIVE_COIN_INDEX_MIGRATION_CI="$coin_index_migration" \
+      MCND_NATIVE_FOUR_SIGNER_MIGRATION_CI="$resume_signing" \
       go test -mod=readonly -tags= -trimpath -p 2 -count=1 -timeout 8m -json \
       -run '^TestOwnedAppSignedRegistryBootstrap$/^authenticated_isolated_position_reader$' ./systemcontracts \
       > "$work/native-governance-upgrade-fixture.log" 2>&1); then
     private_fixture_diagnostic "$work/native-governance-upgrade-fixture.log"
     exit 1
   fi
-  if [[ "$native_upgrade_governance" == native-systemd-module-upgrade ]]; then
+  if [[ "$coin_index_migration" == 1 ]]; then
     signer_home=$(mktemp -d "$work/upgrade-signer.XXXXXXXX")
     gpg --homedir "$signer_home" --batch --no-tty --pinentry-mode loopback --passphrase '' \
       --quick-generate-key "MintCandy module migration CI ${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}" ed25519 sign 0
@@ -622,11 +634,12 @@ PY
   fi
   run_native_upgrade "${source_args[@]}" --report "$output/native-governance-upgrade.json" |& tee "$output/native-governance-upgrade.log"
   preserve_public_reports
-  "$python" - "$output" "$root" "$revision" "$predecessor_revision" "$predecessor_sha" "$successor_sha" "$full_profile" "$pending_ibc" "$successor_tags" <<'PY'
+  "$python" - "$output" "$root" "$revision" "$predecessor_revision" "$predecessor_sha" "$successor_sha" "$full_profile" "$pending_ibc" "$successor_tags" "$resume_signing" <<'PY'
 import json,sys
 from pathlib import Path
 out,root=map(Path,sys.argv[1:3])
-revision,predecessor_revision,predecessor_sha,successor_sha,full_profile,pending_ibc,successor_tags=sys.argv[3:]
+revision,predecessor_revision,predecessor_sha,successor_sha,full_profile,pending_ibc,successor_tags,resume_signing=sys.argv[3:]
+four_signers=resume_signing=='1'
 sys.path.insert(0,str(root/'network/tools'))
 from binary_provenance import parse_build_info
 default_build=parse_build_info((out/'mcnd-build.log').read_text())
@@ -660,21 +673,34 @@ if full_profile == '1':
     assert claim['unbondingSeconds']==28*24*60*60,report
     assert claim['height']<before['height']==plan['targetHeight']-1<after['height']==progress['height'],report
     assert before['appHash']==application['block']['app_hash'],report
-    for field,value in {'pendingAtomic':'250000000000000000','activeAtomic':'1750000000000000000',
-                        'wrappedBackingAtomic':'3000000000000000000','dueAt':before['dueAt'],
+    active='2250000000000000000' if four_signers else '1750000000000000000'
+    backing='10000000000000000000' if four_signers else '3000000000000000000'
+    for field,value in {'pendingAtomic':'250000000000000000','activeAtomic':active,
+                        'wrappedBackingAtomic':backing,'dueAt':before['dueAt'],
                         'nativeSupplyAtomic':before['nativeSupplyAtomic']}.items():
         assert before[field]==after[field]==value,report
-    assert progress['powers']=={'a':1,'b':1} and progress['signers']==['a','b'],report
+    powers=dict.fromkeys('abcd',2) if four_signers else {'a':1,'b':1}
+    assert progress['powers']==powers and progress['signers']==list(powers),report
 if systemd_migration:
     migration,rollback,systemd=report['coinMigration'],report['rollback'],report['systemd']
     assert (migration['before']['version'],migration['after']['version'])==(1,2),report
     assert migration['before']['height']==plan['targetHeight']-1 and migration['after']['height']==plan['targetHeight'],report
     assert rollback['coinBefore']==migration['before'] and rollback['coinAfter']==migration['after'],report
-    assert rollback['restoredHomeSha256']==systemd['backupHomeSha256'] and len(rollback['restoredHomeSha256'])==3,report
+    assert rollback['restoredHomeSha256']==systemd['backupHomeSha256'] and len(rollback['restoredHomeSha256'])==(4 if four_signers else 3),report
     assert rollback['restoredAppHash']==application['block']['app_hash'],report
     assert rollback['migrationAppHash']==migration['appHash'] and rollback['sameCanonicalHistory'] is True,report
     assert rollback['verifiedHeight']==migration['verifiedHeight'] and rollback['appHash']==migration['verifiedAppHash'],report
     assert rollback['votingPower']==rollback['witnessVotingPower']==0 and rollback['catchingUp'] is False,report
+    if four_signers:
+        resumed=report['signingResumption']
+        watermarks=resumed['watermarks']
+        replayed=resumed['verifiedBeforeSigningHeight']
+        commit=resumed['commit']
+        assert set(watermarks)==set(powers) and len({row['consensusAddress'] for row in watermarks.values()})==4,report
+        assert rollback['verifiedHeight'] < replayed < resumed['verifiedHeight']==commit['height'],report
+        assert all(row['height']<=replayed and row['stateSha256'] for row in watermarks.values()),report
+        assert resumed['retainedOriginalState'] is True and resumed['sameSignedHistory'] is True,report
+        assert resumed['powers']==powers and commit['signers']==list(powers) and commit['verifiedEd25519Signatures']==4,report
     for phase,expected_sha in [('predecessor',predecessor_sha),('successor',successor_sha)]:
         package=json.loads((out/f'native-governance-{phase}-package.json').read_text())
         assert package['binarySha256']==expected_sha and package['genesisSha256']==report['genesisSha256'],report
@@ -698,7 +724,7 @@ if pending_ibc == '1':
     ledger=rollback['pendingLedger']
     assert ledger['packets']==packet['packets'] and ledger['escrowAtomic']==packet['escrowAtomic'],report
     assert ledger['referenceVoucherAtomic']=='0' and ledger['referenceClientHeight']<plan['targetHeight'],report
-print('Native governance tally, exact predecessor halt, successor migration and continued three-node consensus passed.')
+print('Native governance tally, exact predecessor halt, successor migration and continued consensus passed.')
 PY
 fi
 

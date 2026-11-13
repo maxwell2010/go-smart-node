@@ -22,6 +22,7 @@ from withdrawal_genesis_smoke import ADDRESS, CHAIN, EVM_CHAIN, MAX_BLOCKS, SHA2
 ATOMS = 10**18
 INITIAL = (2, 1, 0)
 AFTER = (2, 0, 3)
+FOUR_UPGRADE_POWERS = (2, 2, 2, 2)
 DOWNTIME_INITIAL = (3, 3, 2)
 DOWNTIME_AFTER = (3, 3, 0)
 DOWNTIME_BURN = ATOMS // 50
@@ -95,7 +96,8 @@ def decode_pubkey(record):
     return value
 
 
-def load_fixture(directory, fee_rewards, downtime, jail_recovery, held_downtime, nft_downtime, *, full_upgrade=False):
+def load_fixture(directory, fee_rewards, downtime, jail_recovery, held_downtime, nft_downtime, *, full_upgrade=False,
+                 four_upgrade=False):
     info = directory.lstat()
     check(stat.S_ISDIR(info.st_mode) and stat.S_IMODE(info.st_mode) & 0o077 == 0, 'private fixture directory required')
     expected = json.loads(private_bytes(directory / 'expectations.json', 8192))
@@ -115,7 +117,7 @@ def load_fixture(directory, fee_rewards, downtime, jail_recovery, held_downtime,
         check(not any(route in expected for route in ('delegate', 'topUp')), 'downtime fixture contains an unrelated transaction')
     else:
         check(expected['gasLimit'] == GAS_LIMIT and expected['gasPrice'] == str(GAS_PRICE) and
-              (expected['amount'], expected['topUpAmount']) == (str(3 * ATOMS), str(ATOMS // 4)),
+              (expected['amount'], expected['topUpAmount']) == (str((2 if four_upgrade else 3) * ATOMS), str(ATOMS // 4)),
               'fixture transaction value or gas differs')
         check(type(expected['nonce']) is int and 0 <= expected['nonce'] < 2**32 - 1, 'invalid fixture nonce')
         for route in ('delegate', 'topUp'):
@@ -126,10 +128,14 @@ def load_fixture(directory, fee_rewards, downtime, jail_recovery, held_downtime,
     for name, words in (('supplyData', 0), ('escrowData', 1)):
         check(re.fullmatch(fr'0x[0-9a-f]{{{8 + words * 64}}}', expected[name]), 'invalid fixture WDEL calldata')
     validators = expected['validators']
+    names = 'abcd' if four_upgrade else 'abc'
     initial, after = (DOWNTIME_INITIAL, DOWNTIME_AFTER) if downtime else (INITIAL, AFTER)
     if held_downtime or nft_downtime:
         initial, after = DOWNTIME_AFTER, DOWNTIME_INITIAL
-    check([row['name'] for row in validators] == ['a', 'b', 'c'] and
+    if four_upgrade:
+        check(full_upgrade, 'four voting validators require the full migration fixture')
+        initial = after = FOUR_UPGRADE_POWERS
+    check([row['name'] for row in validators] == list(names) and
           tuple(row['initialPower'] for row in validators) == initial and
           tuple(row['afterStakePower'] for row in validators) == after, 'unexpected fixture initial or changed voting power')
     check(expected['feeRewards'] is fee_rewards, 'fixture fee rewards mode differs')
@@ -155,8 +161,8 @@ def load_fixture(directory, fee_rewards, downtime, jail_recovery, held_downtime,
         key_doc = json.loads(private)
         check(key_doc['address'] == address and decode_pubkey(key_doc['pub_key']) == key, 'fixture validator key identity differs')
         keys.append(private)
-    check(len({row['consensusAddress'] for row in validators}) == 3, 'fixture validators require distinct consensus keys')
-    check(len(reward_addresses) == 3 and not reward_addresses.intersection(
+    check(len({row['consensusAddress'] for row in validators}) == len(names), 'fixture validators require distinct consensus keys')
+    check(len(reward_addresses) == len(names) and not reward_addresses.intersection(
         expected[field] for field in ('actor', 'feeCollector', 'gateway', 'wrapped')), 'fixture reward recipients must be independent')
     genesis = private_bytes(directory / 'genesis.json', 64 * 1024 * 1024)
     doc = json.loads(genesis)
@@ -239,9 +245,11 @@ def create_replica(binary, root, label, index, genesis, key, env, *, chain_id=CH
 
 
 def create_replicas(binary, root, genesis, keys, env, *, full_mesh=False):
+    check(len(keys) in (3, 4), 'fixture requires three or four validator keys')
+    labels = 'abcd'[:len(keys)]
     replicas = [create_replica(binary, root, label, index, genesis, key, env)
-                for index, (label, key) in enumerate(zip(('a', 'b', 'c'), keys, strict=True))]
-    check(len({node.node_id for node in replicas}) == 3, 'P2P node identities must be unique')
+                for index, (label, key) in enumerate(zip(labels, keys, strict=True))]
+    check(len({node.node_id for node in replicas}) == len(keys), 'P2P node identities must be unique')
     source = replicas[0]
     for replica in replicas:
         changes = {('p2p', 'pex'): 'false'}

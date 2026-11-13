@@ -17,7 +17,7 @@ import uuid
 from configure_history import validate_fresh_home
 from del_delegation_smoke import write_config
 from mcnd_process_smoke import private_namespace
-from withdrawal_genesis_smoke import private_bytes
+from withdrawal_genesis_smoke import private_bytes, private_write
 
 
 def digest(path):
@@ -329,8 +329,29 @@ def validator_identity(home):
     return address
 
 
+def validator_watermark(raw):
+    state = json.loads(raw)
+    height, round_number, step = state['height'], state['round'], state['step']
+    if not isinstance(height, str) or not re.fullmatch(r"0|[1-9][0-9]{0,18}", height):
+        raise RuntimeError("invalid height in validator signing state")
+    height = int(height)
+    if (height >= 2**63 or type(round_number) is not int or not 0 <= round_number < 2**31 or
+        type(step) is not int or not 0 <= step <= 3):
+        raise RuntimeError("invalid height, round or step in validator signing state")
+    if height == 0:
+        if round_number or step or any(state.get(name) not in (None, "") for name in ("signature", "signbytes")):
+            raise RuntimeError("fresh validator signing state is not empty")
+    elif (step == 0 or len(base64.b64decode(state.get('signature', ''), validate=True)) != 64 or
+          not re.fullmatch(r"(?:[A-Fa-f0-9]{2})+", state.get('signbytes', ''))):
+        raise RuntimeError("persisted validator signing state lacks its signature or sign bytes")
+    return height, round_number, step
+
+
 class SystemdValidatorFleet:
-    """Manage only fixture validators and restore backups as non-signing peers."""
+    """Manage isolated validator services, their backups and restored signer state."""
+
+    KEY_FILE = Path("config/priv_validator_key.json")
+    STATE_FILE = Path("data/priv_validator_state.json")
 
     def __init__(self, binary, binary_sha256, signals=None):
         self.root_binary = str(Path(binary).resolve(strict=True))
@@ -341,6 +362,8 @@ class SystemdValidatorFleet:
         self.replay_identities = {}
         self.backups = None
         self.restored = False
+        self.signing_checkpoints = None
+        self.signers_reactivated = False
 
     def __enter__(self):
         private_namespace()
@@ -375,17 +398,24 @@ class SystemdValidatorFleet:
         if service.submitted:
             raise RuntimeError("validator service is already submitted")
         identity = validator_identity(home)
-        if self.restored:
-            state = json.loads(private_bytes(home / "data/priv_validator_state.json", 8192))
-            if (identity in self.original_identities.values() or identity in self.replay_identities.values() or
-                state.get("height") != "0" or state.get("round") != 0 or state.get("step") != 0 or
-                any(state.get(name) not in (None, "") for name in ("signature", "signbytes"))):
+        if self.signers_reactivated:
+            key, state, _ = self.signing_checkpoints[home]
+            if (identity != self.original_identities[home] or private_bytes(home / self.KEY_FILE, 8192) != key or
+                private_bytes(home / self.STATE_FILE, 8192) != state):
+                raise RuntimeError("reactivated validator must start with its exact retained key and signing state")
+        elif self.restored:
+            replay_key = self.replay_identities.get(home)
+            if (identity in self.original_identities.values() or
+                (identity != replay_key and identity in self.replay_identities.values()) or
+                validator_watermark(private_bytes(home / self.STATE_FILE, 8192)) != (0, 0, 0)):
                 raise RuntimeError("backup replay requires a fresh non-signing consensus key and state")
-            self.replay_identities[home] = identity
         elif identity != self.original_identities[home]:
             raise RuntimeError("the fixture validator consensus identity changed before the upgrade")
         service.prepare(home)
-        return service.spawn(args, log, env)
+        started = service.spawn(args, log, env)
+        if self.restored and not self.signers_reactivated:
+            self.replay_identities[home] = identity
+        return started
 
     def stop(self, service):
         if service not in self.services.values():
@@ -415,6 +445,50 @@ class SystemdValidatorFleet:
             raise RuntimeError("replacement requires a fleet checkpoint and a verified binary")
         for service in self.services.values():
             service._replace_binary(binary, sha256)
+
+    def _watermark_evidence(self):
+        evidence = {}
+        for home, (_, state, (height, round_number, step)) in self.signing_checkpoints.items():
+            evidence[home.name] = {"height": height, "round": round_number, "step": step,
+                                   "consensusAddress": self.original_identities[home],
+                                   "stateSha256": hashlib.sha256(state).hexdigest()}
+        return evidence
+
+    def capture_signing_watermarks(self):
+        self._require_closed_fleet()
+        if self.backups is None or self.restored or self.signing_checkpoints is not None:
+            raise RuntimeError("retain signing state once, after all updated validators stop and before restore")
+        checkpoints = {}
+        for home in self.services:
+            backup = self.root / "backups" / home.name
+            key = private_bytes(home / self.KEY_FILE, 8192)
+            state = private_bytes(home / self.STATE_FILE, 8192)
+            previous_state = private_bytes(backup / self.STATE_FILE, 8192)
+            watermark = validator_watermark(state)
+            previous = validator_watermark(previous_state)
+            if (validator_identity(home) != self.original_identities[home] or
+                key != private_bytes(backup / self.KEY_FILE, 8192) or watermark < previous or
+                (watermark == previous and state != previous_state)):
+                raise RuntimeError("updated validator signing key or state regressed relative to its backup")
+            checkpoints[home] = key, state, watermark
+        self.signing_checkpoints = checkpoints
+        return self._watermark_evidence()
+
+    def reactivate_signers(self, verified_heights):
+        self._require_closed_fleet()
+        if (not self.restored or self.signers_reactivated or self.signing_checkpoints is None or
+            set(verified_heights) != set(self.services) or set(self.replay_identities) != set(self.services)):
+            raise RuntimeError("signer reactivation requires a verified restored replay by the entire stopped fleet")
+        maximum = max(watermark[0] for _, _, watermark in self.signing_checkpoints.values())
+        for home, height in verified_heights.items():
+            if (type(height) is not int or height < maximum or validator_identity(home) != self.replay_identities[home] or
+                validator_watermark(private_bytes(home / self.STATE_FILE, 8192)) != (0, 0, 0)):
+                raise RuntimeError("restored observer has not safely replayed past all retained signing heights")
+        for home, (key, state, _) in self.signing_checkpoints.items():
+            private_write(home / self.KEY_FILE, key)
+            private_write(home / self.STATE_FILE, state)
+        self.signers_reactivated = True
+        return self._watermark_evidence()
 
     def restore(self):
         self._require_closed_fleet()

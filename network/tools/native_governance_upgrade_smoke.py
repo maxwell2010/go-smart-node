@@ -8,13 +8,14 @@ import hashlib
 import json
 import pathlib
 import re
+import subprocess
 import tempfile
 import time
 from urllib.parse import urlencode
 
 from del_delegation_smoke import GAS_LIMIT, GAS_PRICE, balance, native_positions, read_frozen, read_words, write_config
 from mcnd_process_smoke import ProcessOwner, SignalGuard, private_environment, private_namespace, run_command
-from native_consensus_smoke import ATOMS, INITIAL, check_signatures, committed_header, create_replica, create_replicas, effective_set, load_fixture, wait_replicas
+from native_consensus_smoke import ATOMS, FOUR_UPGRADE_POWERS, INITIAL, check_signatures, committed_header, create_replica, create_replicas, decode_pubkey, effective_set, load_fixture, wait_replicas
 from withdrawal_genesis_smoke import CHAIN, EVM_CHAIN, MAX_BLOCKS, SHA256, WORD, check, ethereum, log_records, native, private_bytes, private_write, readiness_diagnostic, request, safe_diagnostic
 
 
@@ -31,10 +32,10 @@ TX_FAILURES = ('account sequence mismatch', 'incorrect account sequence', 'signa
                'not in voting period', 'circuit breaker', 'native sdk upgrade proposal')
 
 
-def load_governance_fixture(directory, *, full_profile=False, pending_ibc=False):
+def load_governance_fixture(directory, *, full_profile=False, pending_ibc=False, four_upgrade=False):
     expected, genesis, keys, initial = load_fixture(
         directory, fee_rewards=full_profile, downtime=False, jail_recovery=False, held_downtime=False,
-        nft_downtime=False, full_upgrade=full_profile)
+        nft_downtime=False, full_upgrade=full_profile, four_upgrade=four_upgrade)
     doc = json.loads(genesis)['app_state']
     profile = doc['withdrawal_settlement']
     check(profile.get('enable_native_governance') is True and profile.get('enable_native_upgrade_governance') is True,
@@ -58,7 +59,7 @@ def load_governance_fixture(directory, *, full_profile=False, pending_ibc=False)
         first = expected['validators'][0]
         check(claim['validator'].lower() == first['evm'] and claim['validatorNative'] == first['operator'] and
               claim['nonce'] == actions[0]['sequence'] + 4 and
-              int(claim['activeAtomic']) == 7 * ATOMS // 4 and int(claim['pendingAtomic']) == ATOMS // 4 and
+              int(claim['activeAtomic']) == (9 if four_upgrade else 7) * ATOMS // 4 and int(claim['pendingAtomic']) == ATOMS // 4 and
               len(claim['frozenData']) == 1 and re.fullmatch(r'0x[0-9a-f]{72}', claim['frozenData'][0]) and
               re.fullmatch(WORD, claim['hash']) and re.fullmatch(r'0x(?:[0-9a-f]{2}){100,512}', claim['raw']),
               'invalid signed full-profile withdrawal fixture')
@@ -160,9 +161,9 @@ def applied_height(node, height):
     return int(native(f'{UPGRADE_API}/applied_plan/{PLAN}', height, base=node.rest).get('height', '0'))
 
 
-def check_proposal(replicas, proposal_id, height, manifest, accepted):
+def check_proposal(replicas, proposal_id, height, manifest, accepted, voting_weight=VOTING_WEIGHT):
     status = 'PROPOSAL_STATUS_PASSED' if accepted else 'PROPOSAL_STATUS_REJECTED'
-    expected = {'yes_count': VOTING_WEIGHT if accepted else '0', 'no_count': '0' if accepted else VOTING_WEIGHT,
+    expected = {'yes_count': voting_weight if accepted else '0', 'no_count': '0' if accepted else voting_weight,
                 'abstain_count': '0', 'no_with_veto_count': '0'}
     for node in replicas:
         proposal = query_proposal(node, proposal_id, height)
@@ -268,6 +269,7 @@ def check_pending_withdrawal(replicas, expected, height, due):
     claim = expected['upgradeWithdrawal']
     asset = {**expected, **claim}
     active, pending = int(claim['activeAtomic']), int(claim['pendingAtomic'])
+    backing_total = (10 if len(expected['validators']) == 4 else 3) * ATOMS
     native_supply = set()
     for node in replicas:
         check(read_frozen(asset, height, 0, pending, 1, node.evm) == due, 'EVM frozen claim deadline changed')
@@ -278,14 +280,14 @@ def check_pending_withdrawal(replicas, expected, height, due):
         supply = read_words(expected['wrapped'], expected['supplyData'], height, 1, node.evm)[0]
         escrow = read_words(expected['wrapped'], expected['escrowData'], height, 1, node.evm)[0]
         backing = balance(expected['wrapped'], expected['wrappedNative'], height, node.evm, node.rest)
-        check(reserve == active and supply == escrow == backing == 3 * ATOMS,
+        check(reserve == active and supply == escrow == backing == backing_total,
               'Gateway reserve or exact DEL backing differs across the binary handoff')
         bank_supply = native('/cosmos/bank/v1beta1/supply/by_denom?denom=del', height, base=node.rest)['amount']
         check(bank_supply['denom'] == 'del' and int(bank_supply['amount']) >= backing, 'invalid native DEL supply')
         native_supply.add(bank_supply['amount'])
     check(len(native_supply) == 1, 'replicas disagree on native DEL supply')
     return {'height': height, 'pendingAtomic': str(pending), 'activeAtomic': str(active), 'dueAt': due,
-            'wrappedBackingAtomic': str(3 * ATOMS), 'nativeSupplyAtomic': native_supply.pop(),
+            'wrappedBackingAtomic': str(backing_total), 'nativeSupplyAtomic': native_supply.pop(),
             'appHash': committed_header(replicas, height + 1)['app_hash']}
 
 
@@ -334,7 +336,150 @@ def check_coin_module_migration(replicas, genesis, height, version):
             'migrationMarkerPresent': version == 2, 'coinRecordSha256': records.pop()}
 
 
-def restore_validator_checkpoint(fleet, replicas, replacement, root, genesis, expected, action, env, owner, report):
+def canonical_commit(replicas, height):
+    commits = [node.rpc(f'commit?height={height}') for node in replicas]
+    signed = commits[0]['signed_header']
+    check(all(entry['canonical'] is True and entry['signed_header'] == signed for entry in commits) and
+          int(signed['commit']['height']) == height and int(signed['header']['height']) == height and
+          signed['header']['chain_id'] == CHAIN, 'replicas disagree on a canonical signed commit')
+    return signed['commit']
+
+
+def verify_four_signatures(commit, validators, probe):
+    height = int(commit['height'])
+    payload = {'chainId': CHAIN, 'commit': commit,
+               'publicKeys': [base64.b64encode(decode_pubkey(row['publicKey'])).decode('ascii') for row in validators]}
+    result = subprocess.run([str(probe)], input=json.dumps(payload), capture_output=True, text=True, timeout=10)
+    check(result.returncode == 0, 'Comet cryptographic commit verification failed: ' + result.stderr.strip()[:200])
+    verified = json.loads(result.stdout)
+    check(len(verified) == 4 and set(verified) == {row['consensusAddress'] for row in validators},
+          'commit does not contain valid signatures from all four validators')
+    return {'height': height, 'round': int(commit['round']), 'blockHash': commit['block_id']['hash'],
+            'signers': [row['name'] for row in validators], 'verifiedEd25519Signatures': len(verified)}
+
+
+def find_four_signature_commit(replicas, validators, probe, first, last, report):
+    deadline = time.monotonic() + 30
+    height = first
+    while height <= last:
+        tip = wait_replicas(replicas, height + 1, max(1, deadline - time.monotonic()), report)
+        for height in range(height, min(tip - 1, last) + 1):
+            commit = canonical_commit(replicas, height)
+            if sum(int(row['block_id_flag']) == 2 for row in commit['signatures']) == 4:
+                return verify_four_signatures(commit, validators, probe)
+        height += 1
+    raise ValueError('no canonical commit with all four validator signatures in the checked height window')
+
+
+def wait_signing_boundary(replicas, boundary, report):
+    deadline = time.monotonic() + 70
+    while time.monotonic() < deadline:
+        for node in replicas:
+            if node.child.poll() is not None:
+                raise RuntimeError('successor exited before saving the final signed block: ' +
+                                   readiness_diagnostic(node.log, report))
+        try:
+            heights = [int(node.rpc('abci_info')['response']['last_block_height']) for node in replicas]
+            check(max(heights) < boundary, 'a primary signer exceeded the application halt height')
+            if all(height == boundary - 1 for height in heights):
+                # The block RPC may lag until Comet persists the signed boundary.
+                for node in replicas:
+                    node.rpc(f'block?height={boundary}')
+                return committed_header(replicas, boundary)
+        except OSError:
+            pass
+        except ValueError as error:
+            if 'Comet RPC GET /block' not in str(error):
+                raise
+        time.sleep(0.25)
+    raise TimeoutError('successors did not reach the final signed boundary')
+
+
+def checked_abci_state(node):
+    info = node.rpc('abci_info')['response']
+    digest = base64.b64decode(info['last_block_app_hash'], validate=True).hex().upper()
+    check(re.fullmatch(r'[A-F0-9]{64}', digest), 'invalid persisted application hash')
+    return int(info['last_block_height']), digest
+
+
+def resume_validator_signing(fleet, replicas, witness, expected, env, owner, report, watermarks, boundary, probe):
+    from native_launch_systemd import copy_offline_home
+
+    report['phase'] = 'replay-last-signed-block-without-validator-keys'
+    participants = [*replicas, witness]
+    wait_replicas(participants, boundary - 1, 100, report)
+    anchor = committed_header([witness], boundary)['app_hash']
+    for node in replicas:
+        check(checked_abci_state(node) == (boundary - 1, anchor),
+              'restored follower did not reach the common application state before the last signed block')
+    witness_state = checked_abci_state(witness)
+    check(witness_state[0] == boundary, 'canonical witness did not persist the final signed height')
+    signed_boundary = witness.rpc(f'commit?height={boundary}')['signed_header']
+    check(int(signed_boundary['commit']['height']) == boundary and signed_boundary['header']['chain_id'] == CHAIN and
+          signed_boundary['commit']['block_id']['hash'] == report['signingBoundary']['block_hash'],
+          'witness did not preserve the last signed block')
+    old_commit = signed_boundary['commit']
+    boundary_signers = {signature['validator_address'] for signature in old_commit['signatures']
+                        if int(signature['block_id_flag']) == 2 and signature['signature']}
+    check(len(boundary_signers) >= 3 and all(
+        (row['height'], row['round'], row['step']) ==
+        (boundary, int(old_commit['round']), 3) for row in watermarks.values()
+        if row['consensusAddress'] in boundary_signers), 'retained signer state does not cover the last canonical commit')
+
+    for node in reversed(replicas):
+        fleet.stop(node.child)
+    # Once all restored services are closed, hand off the validated Comet stores.
+    # Each restored application.db remains in place and executes the final block
+    # through Comet's startup replay before its original key may be reinstalled.
+    report['phase'] = 'install-closed-canonical-comet-stores'
+    owner.stop(witness.child)
+    check(witness.child.returncode == 0, 'canonical witness did not close its databases')
+    for node in replicas:
+        for database in ('blockstore.db', 'state.db'):
+            current = node.home / 'data' / database
+            current.rename(node.home / f'before-last-block-{database}')
+            copy_offline_home(witness.home / 'data' / database, current)
+        node.start(fleet.binary_for(node.home), env, fleet, 'replay-last-signed-block')
+    wait_replicas(replicas, boundary, 70, report)
+    replayed = {}
+    for node in replicas:
+        check(checked_abci_state(node) == witness_state and int(node.rpc('status')['validator_info']['voting_power']) == 0,
+              'restored service did not replay and verify the last signed block while non-voting')
+        (handshake,) = log_records(node.log, 'ABCI Handshake App Info')
+        check((int(handshake['height']), handshake['hash'].upper()) == (boundary - 1, anchor),
+              'last signed block replay did not open the previously verified restored application')
+        replayed[node.home] = witness_state[0]
+    for node in reversed(replicas):
+        fleet.stop(node.child)
+    retained = fleet.reactivate_signers(replayed)
+    check(retained == watermarks, 'restored signer high-watermarks differ from the closed primary fleet')
+    report['signingResumption'] = {'watermarks': watermarks, 'verifiedBeforeSigningHeight': boundary,
+                                   'verifiedBeforeSigningAppHash': witness_state[1],
+                                   'retainedOriginalState': True}
+    report['phase'] = 'resume-original-validators-after-verified-replay'
+    for node in replicas:
+        write_config(node.home, 'config.toml', {
+            ('p2p', 'persistent_peers'): json.dumps(','.join(f'{peer.node_id}@127.0.0.1:{peer.p2p}' for peer in replicas if peer is not node)),
+        })
+        node.start(fleet.binary_for(node.home), env, fleet, 'resume-original-signing')
+    wait_replicas(replicas, boundary + 5, 90, report)
+    check(committed_header(replicas, boundary) == report['signingBoundary'] and
+          canonical_commit(replicas, boundary) == signed_boundary['commit'] and
+          committed_header(replicas, boundary + 1)['app_hash'] == witness_state[1],
+          'resumed validators changed the prior signed boundary or its application hash')
+    signatures = find_four_signature_commit(replicas, expected['validators'], probe, boundary + 1, boundary + 12, report)
+    new_height = signatures['height']
+    final = committed_header(replicas, new_height + 1)
+    powers = effective_set(replicas, expected['validators'], new_height, FOUR_UPGRADE_POWERS)
+    check(new_height > max(row['height'] for row in watermarks.values()) and
+          all(not node.rpc('status')['sync_info']['catching_up'] for node in replicas),
+          'fresh commit must follow every old signature and all validators must be synchronized')
+    report['signingResumption'].update(verifiedHeight=new_height, appHash=final['app_hash'], powers=powers,
+                                       commit=signatures, sameSignedHistory=True, services=fleet.evidence())
+
+
+def restore_validator_checkpoint(fleet, replicas, replacement, root, genesis, expected, action, env, owner, report,
+                                 *, signing_boundary=None, commit_probe=None):
     from native_launch_systemd import copy_offline_home
 
     target = action['planHeight']
@@ -346,9 +491,16 @@ def restore_validator_checkpoint(fleet, replicas, replacement, root, genesis, ex
     primary_final = committed_header(replicas, final + 1)
     report['coinMigration']['verifiedHeight'] = final
     report['coinMigration']['verifiedAppHash'] = primary_final['app_hash']
+    if signing_boundary is not None:
+        report['phase'] = 'primary-signers-final-signed-boundary'
+        report['signingBoundary'] = wait_signing_boundary(replicas, signing_boundary, report)
     for node in reversed(replicas):
         fleet.stop(node.child)
     check(all(node.child.poll() is not None for node in replicas), 'a primary signer is still running')
+    if signing_boundary is not None:
+        watermarks = fleet.capture_signing_watermarks()
+        check(max(row['height'] for row in watermarks.values()) == signing_boundary,
+              'primary validators have an unexpected signing high-watermark')
 
     witness = create_replica(replacement, root, 'rollback-witness', len(replicas), genesis, None, env)
     write_config(witness.home, 'config.toml', {('p2p', 'pex'): 'false', ('p2p', 'allow_duplicate_ip'): 'true'})
@@ -357,7 +509,7 @@ def restore_validator_checkpoint(fleet, replicas, replacement, root, genesis, ex
     for database in ('application.db', 'blockstore.db', 'state.db'):
         copy_offline_home(replicas[0].home / 'data' / database, witness.home / 'data' / database)
     witness.start(replacement, env, owner, 'retain-canonical-blocks')
-    wait_replicas([witness], final + 3, 60, report)
+    wait_replicas([witness], signing_boundary if signing_boundary is not None else final + 3, 60, report)
     check(committed_header([witness], final + 1) == primary_final and
           int(witness.rpc('status')['validator_info']['voting_power']) == 0,
           'rollback witness must retain the canonical history without voting')
@@ -416,6 +568,9 @@ def restore_validator_checkpoint(fleet, replicas, replacement, root, genesis, ex
     check(report['rollback']['coinBefore'] == report['coinMigration']['before'] and
           report['rollback']['coinAfter'] == report['coinMigration']['after'],
           'restored module records differ before or after replaying the migration')
+    if signing_boundary is not None:
+        resume_validator_signing(fleet, replicas, witness, expected, env, owner, report, watermarks,
+                                 signing_boundary, commit_probe)
 
 
 def run_gate(args, binary, replacement, root, expected, genesis, keys, actions, env, owner, report, ibc=None, fleet=None):
@@ -440,8 +595,14 @@ def run_gate(args, binary, replacement, root, expected, genesis, keys, actions, 
     for node in replicas:
         node.start(fleet.install(node.home) if fleet else binary, env, fleet or owner, 'upgrade-governance')
     first = wait_replicas(replicas, initial + 2, 85, report)
-    report['initialPower'] = effective_set(replicas, expected['validators'], initial, INITIAL)
-    report['initialSigners'] = check_signatures(replicas, expected['validators'], initial, INITIAL)
+    initial_powers = FOUR_UPGRADE_POWERS if args.resume_signing else INITIAL
+    report['initialPower'] = effective_set(replicas, expected['validators'], initial, initial_powers)
+    if args.resume_signing:
+        report['initialCommit'] = find_four_signature_commit(
+            replicas, expected['validators'], args.commit_probe, initial, initial + 6, report)
+        report['initialSigners'] = report['initialCommit']['signers']
+    else:
+        report['initialSigners'] = check_signatures(replicas, expected['validators'], initial, initial_powers)
     action = actions[0]
     account = native('/cosmos/auth/v1beta1/accounts/' + action['actorNative'], first, base=source.rest)['account']
     check(account['address'] == action['actorNative'] and int(account['sequence']) == action['sequence'] and
@@ -468,7 +629,8 @@ def run_gate(args, binary, replacement, root, expected, genesis, keys, actions, 
         check(vote_tx['height'] > proposal_tx['height'], 'vote must be committed after its proposal')
         tally_height = wait_tally(source, proposal_id, vote_tx['height'], report)
         wait_replicas(replicas, tally_height, 40, report)
-        report[label] = {**check_proposal(replicas, proposal_id, tally_height, action['metadata'], accepted),
+        weight = str(10 * ATOMS) if args.resume_signing else VOTING_WEIGHT
+        report[label] = {**check_proposal(replicas, proposal_id, tally_height, action['metadata'], accepted, weight),
                          'proposalTx': proposal_tx, 'voteTx': vote_tx}
         if not accepted:
             for node in replicas:
@@ -523,7 +685,10 @@ def run_gate(args, binary, replacement, root, expected, genesis, keys, actions, 
         ibc.start_reference('reference-primary-branch')
 
     report['phase'] = 'successor-replay-and-exact-preblock-application'
+    signing_boundary = target + 30 if args.resume_signing else None
     for node in replicas:
+        if signing_boundary is not None:
+            write_config(node.home, 'app.toml', {(None, 'halt-height'): str(signing_boundary)})
         node.start(fleet.binary_for(node.home) if fleet else replacement, env, fleet or owner, 'upgrade-successor')
     # Observe continuing full-profile consensus past the earlier CI frontier.
     tip = wait_replicas(replicas, target + (16 if args.full_profile else 4), 125, report)
@@ -540,10 +705,17 @@ def run_gate(args, binary, replacement, root, expected, genesis, keys, actions, 
     if args.full_profile:
         report['withdrawal']['after'] = check_pending_withdrawal(replicas, expected, final, due)
         powers = (1, 1, 0)
+    if args.resume_signing:
+        powers = FOUR_UPGRADE_POWERS
+        report['successorCommit'] = find_four_signature_commit(
+            replicas, expected['validators'], args.commit_probe, target + 1, final, report)
+        signers = report['successorCommit']['signers']
+    else:
+        signers = check_signatures(replicas, expected['validators'], final, powers)
     report['application'] = {'name': PLAN, 'appliedHeight': target, 'sameBinary': False, 'processRestarted': True,
                              'before': before, 'block': boundary}
     report['progress'] = {'height': final, 'powers': effective_set(replicas, expected['validators'], final, powers),
-                          'signers': check_signatures(replicas, expected['validators'], final, powers),
+                          'signers': signers,
                           **committed_header(replicas, final)}
     if fleet:
         report['systemd']['successors'] = fleet.evidence()
@@ -552,7 +724,8 @@ def run_gate(args, binary, replacement, root, expected, genesis, keys, actions, 
                                        appHash=committed_header(replicas, target + 1)['app_hash'])
         check(report['coinMigration']['before']['coinRecordSha256'] == report['coinMigration']['after']['coinRecordSha256'],
               'DRC20 address index migration changed the indexed coin record')
-        restore_validator_checkpoint(fleet, replicas, replacement, root, genesis, expected, action, env, owner, report)
+        restore_validator_checkpoint(fleet, replicas, replacement, root, genesis, expected, action, env, owner, report,
+                                     signing_boundary=signing_boundary, commit_probe=args.commit_probe)
     if ibc:
         applied_app_hash = committed_header(replicas, target + 1)['app_hash']
         report['phase'] = 'hermes-post-upgrade-acknowledgement-and-return'
@@ -589,13 +762,19 @@ def main(argv=None, signals=None):
     parser.add_argument('--full-profile', action='store_true', help='Use the fresh historical, IBC and fee-enabled fixture with a pending DEL claim')
     parser.add_argument('--pending-ibc', action='store_true', help='Carry a real ICS-20 packet across the private native handoff')
     parser.add_argument('--systemd-migration', action='store_true', help='Run and restore the coordinated module migration in systemd')
+    parser.add_argument('--resume-signing', action='store_true', help='Resume the four original signers after verifying the restored state')
+    parser.add_argument('--commit-probe', type=pathlib.Path, help='Canonical Comet Ed25519 commit verifier')
     for name in ('reference-binary', 'reference-sha256', 'hermes-binary'):
         parser.add_argument('--' + name)
     args = parser.parse_args(argv)
     if args.systemd_migration and (not args.full_profile or args.pending_ibc):
         parser.error('--systemd-migration requires --full-profile without --pending-ibc')
+    if args.resume_signing != bool(args.commit_probe) or (args.resume_signing and not args.systemd_migration):
+        parser.error('--resume-signing and --commit-probe require --systemd-migration and each other')
     report = {'status': 'FAIL', 'phase': 'fixture-provenance',
               'scope': 'three loopback replicas across a native governance SDK binary upgrade'}
+    if args.resume_signing:
+        report['scope'] = 'four loopback validators across a native governance SDK binary upgrade and rollback'
     with pathlib.Path(args.report).open('x', encoding='utf8') as stream:
         try:
             private_namespace()
@@ -619,7 +798,8 @@ def main(argv=None, signals=None):
             check(not args.pending_ibc or (args.full_profile and args.reference_binary and args.reference_sha256 and args.hermes_binary),
                   'pending IBC mode requires the full profile and both IBC tools')
             expected, genesis, keys, initial, actions = load_governance_fixture(
-                pathlib.Path(args.fixture), full_profile=args.full_profile, pending_ibc=args.pending_ibc)
+                pathlib.Path(args.fixture), full_profile=args.full_profile, pending_ibc=args.pending_ibc,
+                four_upgrade=args.resume_signing)
             report.update(sourceCommit=args.source_commit, predecessorSourceCommit=predecessor_commit,
                           replacementSourceCommit=args.source_commit, binarySha256=args.binary_sha256,
                           replacementSha256=args.replacement_sha256, initialHeight=initial,

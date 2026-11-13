@@ -72,6 +72,8 @@ func exportNativeConsensusDaemonFixture(t *testing.T, e isolatedBackendEnv, dir 
 	beneficiary := sdk.AccAddress(actor.Bytes()).String()
 	launch, launchRehearsal := nativeLaunchSpecForMode(os.Getenv(nativeLaunchRehearsalEnv))
 	fullUpgrade := launchRehearsal || os.Getenv(nativeConsensusFullUpgradeEnv) == "1"
+	coinIndexMigration := os.Getenv("MCND_NATIVE_COIN_INDEX_MIGRATION_CI") == "1"
+	fourSignerMigration := os.Getenv("MCND_NATIVE_FOUR_SIGNER_MIGRATION_CI") == "1"
 	feeRewards := fullUpgrade || os.Getenv(nativeConsensusFeeRewardsEnv) == "1"
 	ibcV1 := fullUpgrade || os.Getenv(nativeConsensusIBCV1Env) == "1"
 	upgradeGovernance := launchRehearsal || os.Getenv(nativeConsensusUpgradeGovernanceEnv) == "1"
@@ -90,6 +92,15 @@ func exportNativeConsensusDaemonFixture(t *testing.T, e isolatedBackendEnv, dir 
 	keyScope := "mintcandy native consensus process fixture "
 	if fullUpgrade {
 		keyScope = "mintcandy full profile upgrade process fixture "
+	}
+	if coinIndexMigration {
+		require.True(t, fullUpgrade && upgradeGovernance && !launchRehearsal, "coin index migration requires the full upgrade fixture")
+	}
+	if fourSignerMigration {
+		require.True(t, coinIndexMigration, "four-signer migration requires the coin index migration fixture")
+		initial = []int64{2, 2, 2, 2}
+		after = initial
+		keyScope = "mintcandy four validator module migration process fixture "
 	}
 	if launchRehearsal {
 		initial, after = launch.powers, launch.powers
@@ -136,10 +147,6 @@ func exportNativeConsensusDaemonFixture(t *testing.T, e isolatedBackendEnv, dir 
 		require.Equal(t, launch.evmID, domain.EVMChainID)
 	}
 	var custom *nativeCustomCollateralGenesisFixture
-	coinIndexMigration := os.Getenv("MCND_NATIVE_COIN_INDEX_MIGRATION_CI") == "1"
-	if coinIndexMigration {
-		require.True(t, fullUpgrade && upgradeGovernance && !launchRehearsal, "coin index migration requires the full upgrade fixture")
-	}
 	if launchRehearsal || coinIndexMigration || os.Getenv(nativeCustomCollateralGenesisPhaseEnv) == "seed" {
 		require.True(t, historical || launchRehearsal || coinIndexMigration)
 		var fixtureVolume int64
@@ -174,6 +181,9 @@ func exportNativeConsensusDaemonFixture(t *testing.T, e isolatedBackendEnv, dir 
 			require.NotEqual(t, common.BytesToAddress(pub.Address()), address)
 		}
 		reward := crypto.PubkeyToAddress(e.keys[i].PublicKey)
+		if fourSignerMigration && reward == actor {
+			reward = crypto.PubkeyToAddress(e.keys[4].PublicKey)
+		}
 		if launch.fourValidators() {
 			reward = crypto.PubkeyToAddress(nativeFourLaunchStakeKey(e.keys, i).PublicKey)
 			address = reward
@@ -220,6 +230,14 @@ func exportNativeConsensusDaemonFixture(t *testing.T, e isolatedBackendEnv, dir 
 	require.NoError(t, e.app.LoadWithdrawalSettlement(e.ctx()))
 
 	amount := func(power int64) sdkmath.Int { return sdkmath.NewIntWithDecimal(power, 18) }
+	initialStakeBonus := sdkmath.ZeroInt()
+	if fourSignerMigration {
+		// A 0.25 DEL withdrawal must leave all four validators at equal power.
+		initialStakeBonus = amount(1).QuoRaw(2)
+	}
+	initialStake := func(validator nativeConsensusFixtureValidator) sdkmath.Int {
+		return amount(validator.Initial).Add(initialStakeBonus)
+	}
 	pack := func(artifact contracts.Artifact, method string, args ...interface{}) []byte {
 		t.Helper()
 		data, err := artifact.ABI.Pack(method, args...)
@@ -236,7 +254,7 @@ func exportNativeConsensusDaemonFixture(t *testing.T, e isolatedBackendEnv, dir 
 		if launch.fourValidators() {
 			stakeKey = nativeFourLaunchStakeKey(e.keys, i)
 		}
-		e.send(stakeKey, &profile.Gateway, amount(validator.Initial).BigInt(),
+		e.send(stakeKey, &profile.Gateway, initialStake(validator).BigInt(),
 			pack(gateway, "delegateDEL", common.HexToAddress(validator.EVM)), true)
 		seeded++
 	}
@@ -244,7 +262,7 @@ func exportNativeConsensusDaemonFixture(t *testing.T, e isolatedBackendEnv, dir 
 	for _, validator := range validators {
 		active, err := nativeKeeper.GetActiveDELReserve(ctx, validator.Operator)
 		require.NoError(t, err)
-		require.True(t, active.Equal(amount(validator.Initial)))
+		require.True(t, active.Equal(initialStake(validator)))
 	}
 	genesis, err := e.app.ModuleManager.ExportGenesisForModules(ctx, cdc, nil)
 	require.NoError(t, err)
@@ -255,7 +273,7 @@ func exportNativeConsensusDaemonFixture(t *testing.T, e isolatedBackendEnv, dir 
 	require.Empty(t, nativeGenesis.EVMFrozenBindings)
 	require.Empty(t, nativeGenesis.Undelegations)
 	nativeGenesis.Params.MaxValidators = 2
-	if launchRehearsal {
+	if launchRehearsal || fourSignerMigration {
 		nativeGenesis.Params.MaxValidators = uint32(len(validators))
 	}
 	if launch.fourValidators() {
@@ -538,7 +556,7 @@ func exportNativeConsensusDaemonFixture(t *testing.T, e isolatedBackendEnv, dir 
 		expectations["upgradeWithdrawal"] = map[string]interface{}{
 			"raw": hexData(raw), "hash": signed.Hash().Hex(), "nonce": nonce + 4,
 			"validator": target.EVM, "validatorNative": target.Operator,
-			"pendingAtomic": principal.String(), "activeAtomic": amount(target.Initial).Sub(principal).String(),
+			"pendingAtomic": principal.String(), "activeAtomic": initialStake(target).Sub(principal).String(),
 			"frozenData": []string{hexData(pack(gateway, "getFrozenStake", new(big.Int)))},
 		}
 	}
