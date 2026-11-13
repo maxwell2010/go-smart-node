@@ -230,6 +230,16 @@ All four replicas reached height 62 over P2P in this run, so startup replay
 of a missing final block was outside this run's coverage.
 [Four-validator recovery CI](https://github.com/maxwell2010/go-smart-node/actions/runs/43452128668) · [Evidence](https://github.com/maxwell2010/go-smart-node/actions/runs/43452128668/artifacts/14053602020)
 
+The `native-systemd-startup-replay` scope on `3c8a243` exercised that case.
+All four restored replicas reached height 61, and each local blockstore
+reported block 62 as missing. CI supplied the closed canonical CometBFT
+stores and verified that each restored `application.db` stayed byte-for-byte
+intact before restart. Each non-voting replica executed exactly block 62
+during startup with zero peers and matched the witness AppHash. After restoring
+the original keys and latest signing states, all four validators signed block
+63 and agreed on its resulting AppHash.
+[Startup replay CI](https://github.com/maxwell2010/go-smart-node/actions/runs/43456522216) · [Evidence](https://github.com/maxwell2010/go-smart-node/actions/runs/43456522216/artifacts/14055371202)
+
 ## Separate release tracks
 
 The selected architecture is a fresh network on a maintained modern stack,
