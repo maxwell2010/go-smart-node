@@ -20,6 +20,10 @@
 Общий module CI выше относится к `248e97f`; повторная проверка `b1919be`
 охватывает все bridge-пакеты и commit probe, а не весь daemon/process suite.
 
+На `5043694` прошёл [bridge gas CI](https://github.com/maxwell2010/go-smart-node/actions/runs/44281836892).
+Добавлены списание gas перед криптографией, ограничение размеров и проверки
+OOG с откатом и повтором. [Тариф, бюджет и ограничения](BRIDGE_WORK_GAS.md).
+
 ## Что реализовано
 
 | Пакет | Ответственность |
@@ -153,12 +157,13 @@ verifier с London в проверенном стенде. Он не выбир�
 Остаются обязательными:
 
 1. Аудит фактического runtime исходного escrow, immutable/nonproxy policy и доверенная регистрация его hash.
-2. SDK gas metering вычислительной стоимости заголовков и proofs.
+2. Калибровка экспериментального gas-тарифа, лимиты transport decode и проверка полного ante/block-gas пути daemon.
 3. Genesis/governance authority, message handlers и module-account permissions.
 4. Согласованные program vkey/public values и настоящие Tendermint/state proof vectors.
 5. Обратные burn/release, подтверждение выплаты и безопасная обработка timeout.
 6. Полный сценарий на двух daemon с source EVM receipt, commitment proof и сверкой резервов.
 7. Перезапуск, миграция и остановка каждой сети во всех pending-состояниях.
+8. Обнаружение конфликтующих подписанных заголовков и безопасная заморозка клиента.
 
 Успешные unit/EVM проверки не заменяют эти этапы и не меняют
 [статус релиза](../../../docs/RELEASE_STATUS.md).

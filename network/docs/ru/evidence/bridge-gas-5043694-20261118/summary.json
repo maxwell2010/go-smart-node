@@ -1,0 +1,52 @@
+{
+  "status": "PASS",
+  "sourceCommit": "504369493837299e08e51e77a5795d2d14a8a202",
+  "workflowRun": 44281836892,
+  "workflowUrl": "https://github.com/maxwell2010/go-smart-node/actions/runs/44281836892",
+  "tariff": "bridge/workgas/v1",
+  "validatedPackages": [
+    "github.com/maxwell2010/go-smart-node/network/bridge/client",
+    "github.com/maxwell2010/go-smart-node/network/bridge/contracts",
+    "github.com/maxwell2010/go-smart-node/network/bridge/finality",
+    "github.com/maxwell2010/go-smart-node/network/bridge/inbound",
+    "github.com/maxwell2010/go-smart-node/network/bridge/ledger",
+    "github.com/maxwell2010/go-smart-node/network/bridge/protocol",
+    "github.com/maxwell2010/go-smart-node/network/bridge/storage",
+    "github.com/maxwell2010/go-smart-node/network/bridge/workgas",
+    "github.com/maxwell2010/go-smart-node/network/tools/comet_commit_probe"
+  ],
+  "gasIncludingSDKStorageBank": {
+    "receive": 3796839,
+    "receiveWithUpdate": 7251654,
+    "fixtureTransactionBudget": 24000000,
+    "validatorCount": 4
+  },
+  "passedGasChecks": [
+    "--- PASS: TestFiniteGasChargesBootstrapUpdateAndEveryGetter (0.00s)",
+    "--- PASS: TestOutOfGasCannotInitializeOrAdvanceClientAndGasIsNotRefunded (0.00s)",
+    "--- PASS: TestFailingAndCorruptGettersConsumeWorkGasWithoutChangingState (0.00s)",
+    "--- PASS: TestFiniteGasFailureDoesNotCommitOrRefundAndRetryMintsOnce (0.06s)",
+    "--- PASS: TestCurrentInboundFixtureFitsFiniteTwentyFourMillionGas (0.00s)",
+    "--- PASS: TestValidationAndSupplyOverflowDoNotMintOrPanic (0.00s)",
+    "--- PASS: TestPreflightNeverMarshalsOrChecksSignatures (0.00s)",
+    "--- PASS: TestBlockAndProofBoundsRejectBeforeExpensiveProcessing (0.00s)",
+    "--- PASS: TestOverflowChecksNeverWrapMeterCharges (0.00s)",
+    "--- PASS: TestSDKOutOfGasPropagatesAndSpentGasIsNotRefunded (0.00s)"
+  ],
+  "measurements": [
+    "gas_test.go:206: Receive current four-validator fixture SDK gas=3796839 finite budget=24000000",
+    "gas_test.go:206: ReceiveWithUpdate current four-validator fixture SDK gas=7251654 finite budget=24000000"
+  ],
+  "limits": [
+    "Experimental tariff, not worst-case CPU calibrated",
+    "Internal keepers only, no daemon message/ante/block-gas integration",
+    "Four-validator test does not imply maximum 1000 validators fit 24m",
+    "No real transactions or changes to working nodes"
+  ],
+  "wholeModuleValidation": {
+    "workflowRun": 44283538704,
+    "workflowUrl": "https://github.com/maxwell2010/go-smart-node/actions/runs/44283538704",
+    "conclusion": "success",
+    "scope": "whole module, crypto regressions, SDK compatibility, governance tally, ICS20 pending packet upgrade; no daemon bridge process suite"
+  }
+}

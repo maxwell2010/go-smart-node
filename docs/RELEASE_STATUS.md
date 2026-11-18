@@ -287,7 +287,7 @@ real SDK-bank voucher/replay journal now compose atomically. The
 and [whole-module CI](https://github.com/maxwell2010/go-smart-node/actions/runs/44266535485)
 passed on `248e97f`, including cache rollback, reentrancy rejection and LevelDB
 reopen. The deposit-only escrow prototype has no release path and must never
-hold real funds. Public messages, genesis authority, crypto gas metering,
+hold real funds. Public messages, genesis authority, production gas calibration,
 reverse release and two-daemon bridge tests remain open.
 On `b1919be`, the internal route additionally pins an expected escrow runtime
 hash. Exact legacy EthAccount bytes from the `acc` store must authenticate
@@ -299,6 +299,21 @@ and London/SP1 tests, not the whole module or daemon/process suite. Old
 development routes without a code hash fail closed; no migration is supplied.
 Code-byte identity still requires an audited immutable/nonproxy deployment
 policy and does not prove financial semantics or source-bank reserves.
+On `5043694`, deterministic experimental `bridge/workgas/v1` charges precede
+client decode, every actual bootstrap/update verification pass and both proof
+decoders. The [finite-meter bridge scope](https://github.com/maxwell2010/go-smart-node/actions/runs/44281836892)
+passed: OOG at entry, before either proof and after real staged bank mutation
+discards checkpoint, bank, marker and events while retaining consumed gas.
+Retry with a new funded meter pays exactly once. The four-validator fixture
+uses 3,796,839 SDK gas for Receive and 7,251,654 for ReceiveWithUpdate, both
+under a finite 24m budget. This does not cover full daemon ante/block gas or
+prove the 1000-validator maximum fits 24m. Worst-case tariff calibration,
+raw-message predecode bounds and conflicting-header detection/freeze remain
+release gates. [Tariff and evidence](../network/docs/ru/BRIDGE_WORK_GAS.md).
+The [whole-module scope](https://github.com/maxwell2010/go-smart-node/actions/runs/44283538704)
+also passed on `5043694`, including ordinary crypto regressions, SDK keyring
+compatibility, governance tally and ICS20 client upgrade with a pending packet.
+It does not constitute a running two-daemon bridge test.
 Current upstream IBC Solidity requires Cancun; read-only Decimal simulations
 reject PUSH0 and TSTORE. A canonical upstream SP1 v6.0.0 sample proof passes
 against the original standalone verifier compiled for London in CI. This is
