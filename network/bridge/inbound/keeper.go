@@ -237,7 +237,7 @@ func (k *Keeper) receive(ctx sdk.Context, routeID string, deposit protocol.Depos
 	accountClaim := storage.AccountCodeClaim{ChainID: route.SourceChainID, StateHeight: stateHeight,
 		Address: route.SourceEscrow, ExpectedCodeHash: route.ExpectedCodeHash}
 	if err := workgas.ChargeMembership(ctx.GasMeter(), accountAny, accountOps); err != nil {
-		return fmt.Errorf("source escrow proof work: %w", err)
+		return fmt.Errorf("source escrow code work: %w", err)
 	}
 	if err := storage.VerifyAccountCodeMembership(checkpoint, accountClaim, accountAny, accountOps); err != nil {
 		return fmt.Errorf("source escrow code: %w", err)
