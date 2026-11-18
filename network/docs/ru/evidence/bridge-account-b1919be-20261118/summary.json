@@ -1,0 +1,42 @@
+{
+  "status": "PASS",
+  "sourceCommit": "b1919bec2f40b76ca486223594e1c1bacf420004",
+  "workflowRun": 44273486176,
+  "workflowUrl": "https://github.com/maxwell2010/go-smart-node/actions/runs/44273486176",
+  "validatedPackages": [
+    "ok  \tgithub.com/maxwell2010/go-smart-node/network/bridge/client\t0.127s",
+    "ok  \tgithub.com/maxwell2010/go-smart-node/network/bridge/contracts\t0.659s",
+    "ok  \tgithub.com/maxwell2010/go-smart-node/network/bridge/finality\t0.056s",
+    "ok  \tgithub.com/maxwell2010/go-smart-node/network/bridge/inbound\t0.225s",
+    "ok  \tgithub.com/maxwell2010/go-smart-node/network/bridge/ledger\t0.144s",
+    "ok  \tgithub.com/maxwell2010/go-smart-node/network/bridge/protocol\t0.003s",
+    "ok  \tgithub.com/maxwell2010/go-smart-node/network/bridge/storage\t0.034s",
+    "ok  \tgithub.com/maxwell2010/go-smart-node/network/tools/comet_commit_probe\t0.016s"
+  ],
+  "verifiedAccountFlows": [
+    "--- PASS: TestClientOuterCacheRollbackAndCommit (0.00s)",
+    "--- PASS: TestLondonDepositErrorsRollbackValueNonceAndLogs (0.06s)",
+    "--- PASS: TestLondonOuterRollbackAndSingleRetry (0.09s)",
+    "--- PASS: TestSP1V600CanonicalProofOnLondonEVM (0.28s)",
+    "--- PASS: TestStoredClientProofAndRealBankMintOnce (0.00s)",
+    "--- PASS: TestInvalidProofRollsBackHeaderBankAndReplay (0.00s)",
+    "--- PASS: TestAccountAuthenticationFailureRollsBackHeaderMintMarkerAndRetries (0.02s)",
+    "--- PASS: TestCryptographicallyProvenUnknownRuntimeCannotMint (0.00s)",
+    "--- PASS: TestCodeHashPolicyIsRequiredImmutableAndPinnedAcrossRetry (0.00s)",
+    "--- PASS: TestAccountAndStorageMembershipMustShareAuthenticatedRoot (0.00s)",
+    "--- PASS: TestPayoutFailureAndOuterRollbackCannotAdvanceClient (0.01s)",
+    "--- PASS: TestBankStoreAndTypedEventFailuresRollbackRealSDKAccounting (0.00s)",
+    "--- PASS: TestOuterSDKRollbackAlsoDiscardsSuccessfulDeposit (0.00s)",
+    "--- PASS: TestAccountCodeMembershipWithRealCMSProofs (0.00s)",
+    "--- PASS: TestAuthenticatedMalformedLegacyAccountStillFailsClosed (0.00s)",
+    "--- PASS: TestAccountCodeProofCannotBeReboundToAnotherRouteOrHeight (0.00s)",
+    "--- PASS: TestStorageRejectsMalformedProofOperations (0.00s)"
+  ],
+  "scope": "Stored internal bridge controller; real SDK multistore proofs and bank; no daemon routing or external transactions",
+  "limits": [
+    "Runtime hash matches trusted route but does not establish nonproxy semantics or bank reserve invariants",
+    "No public message server, genesis wiring or CPU gas metering",
+    "No actual Tendermint ZK program or reverse burn/release",
+    "Old development route records without ExpectedCodeHash fail closed; no migration implemented"
+  ]
+}

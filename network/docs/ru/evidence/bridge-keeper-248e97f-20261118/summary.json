@@ -1,0 +1,69 @@
+{
+  "status": "PASS",
+  "sourceCommit": "248e97f180075a4dde5f20ee1868b4eb78591b6d",
+  "workflowRun": 44266044517,
+  "workflowUrl": "https://github.com/maxwell2010/go-smart-node/actions/runs/44266044517",
+  "validatedPackages": [
+    "github.com/maxwell2010/go-smart-node/network/bridge/client",
+    "github.com/maxwell2010/go-smart-node/network/bridge/contracts",
+    "github.com/maxwell2010/go-smart-node/network/bridge/finality",
+    "github.com/maxwell2010/go-smart-node/network/bridge/inbound",
+    "github.com/maxwell2010/go-smart-node/network/bridge/ledger",
+    "github.com/maxwell2010/go-smart-node/network/bridge/protocol",
+    "github.com/maxwell2010/go-smart-node/network/bridge/storage",
+    "github.com/maxwell2010/go-smart-node/network/tools/comet_commit_probe"
+  ],
+  "runtimeProfile": {
+    "compiler": "solc 0.8.20+commit.a1b79de6",
+    "evmTarget": "London",
+    "transactionGasLimit": 10000000,
+    "scope": "in-memory canonical geth execution; no Decimal ante/hooks or external transactions"
+  },
+  "gasIncludingIntrinsic": {
+    "escrowDeployment": 326094,
+    "firstDeposit": 69236,
+    "sp1V600Deployment": 1534195,
+    "sp1V600CanonicalProof": 246757
+  },
+  "verifiedFlows": [
+    "persistent client initialization/update/expiry and reopen",
+    "canonical Go/Solidity deposit hash and storage slots",
+    "client update + ICS23 membership + real SDK bank voucher mint in one cache",
+    "rollback after proof, bank, store and typed-event failure",
+    "retry once, reentrant replay rejection, persistent replay and route reopen",
+    "canonical SP1 v6.0.0 sample proof success and tampered proof/public-values/vkey rejection"
+  ],
+  "limits": [
+    "No daemon message routing or production module-account permissions",
+    "Escrow fixture accepts deposits only and cannot return funds; never deploy with real assets",
+    "SP1 sample is not a Tendermint or Decimal proof; no v6.1 positive-vector claim",
+    "Escrow code-hash authentication and SDK crypto gas metering remain integration gates",
+    "Reverse burn/release and two-daemon bridge rehearsal remain pending"
+  ],
+  "wholeModuleValidation": {
+    "workflowRun": 44266535485,
+    "workflowUrl": "https://github.com/maxwell2010/go-smart-node/actions/runs/44266535485",
+    "conclusion": "success",
+    "job": "modern-module",
+    "completedChecks": [
+      "Set up job",
+      "Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1",
+      "Run actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e",
+      "Verify independent dependency graph",
+      "Verify owned sources and integrity guards",
+      "Test ordinary crypto regressions with and without CGO",
+      "Test modern module and native feature port",
+      "Test declared SDK armor, keyring and signature compatibility",
+      "Reproduce pinned system contract artifacts",
+      "Test native ownership against actual SDK governance tally",
+      "Test owned ICS20 and the IBC client upgrade with a pending packet",
+      "Build and execute memory-only family probe",
+      "Test security capture evidence",
+      "Test external relayer lab guards",
+      "Run actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9",
+      "Post Run actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e",
+      "Post Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1",
+      "Complete job"
+    ]
+  }
+}

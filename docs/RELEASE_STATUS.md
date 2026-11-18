@@ -269,8 +269,9 @@ The bridge design selects code-verified finality and state, without a separate
 attestation committee. The first pure Go finality verifier binds an external
 trusted checkpoint, verifies adjacent or skipping Comet light-client updates,
 checks all present Ed25519 signatures and bounds the trusting policy. It is
-not wired to application transfers, has no RPC bootstrap or persistence, and
-does not yet establish state-proof membership or mainnet bridge readiness.
+not wired to public application transfers and has no RPC bootstrap. The
+internal persistent integration is described below; mainnet bridge readiness
+is not established.
 The targeted [finality and quorum unit scope](https://github.com/maxwell2010/go-smart-node/actions/runs/44255729190)
 passed on `90690ba`, including signature tampering, validator rotation, trust
 expiry and cached-power regressions. The combined
@@ -280,10 +281,29 @@ membership at state height 34604902 against the observed header 34604903 root,
 plus tampered claim, root, path, height and malformed-proof rejection. This is
 Merkle-format conformance, not authenticated mainnet bootstrap or a bridge
 deposit. [Stored validation summary](../network/docs/ru/evidence/bridge-primitives-6b4f587-20261118/summary.json).
-The verifiers are not wired to a persistent client keeper, transfer replay
-journal, escrow, or token release. Those integration gates remain open.
+The internal persistent client, fixed route, canonical deposit commitment and
+real SDK-bank voucher/replay journal now compose atomically. The
+[bridge/London CI](https://github.com/maxwell2010/go-smart-node/actions/runs/44266044517)
+and [whole-module CI](https://github.com/maxwell2010/go-smart-node/actions/runs/44266535485)
+passed on `248e97f`, including cache rollback, reentrancy rejection and LevelDB
+reopen. The deposit-only escrow prototype has no release path and must never
+hold real funds. Public messages, genesis authority, crypto gas metering,
+reverse release and two-daemon bridge tests remain open.
+On `b1919be`, the internal route additionally pins an expected escrow runtime
+hash. Exact legacy EthAccount bytes from the `acc` store must authenticate
+that hash under the same H+1 root as the deposit storage proof. The
+[account-proof bridge CI](https://github.com/maxwell2010/go-smart-node/actions/runs/44273486176)
+passed, including proven unknown-code rejection, malformed account data,
+mixed-root rejection, rollback and retry. This scope reruns all bridge packages
+and London/SP1 tests, not the whole module or daemon/process suite. Old
+development routes without a code hash fail closed; no migration is supplied.
+Code-byte identity still requires an audited immutable/nonproxy deployment
+policy and does not prove financial semantics or source-bank reserves.
 Current upstream IBC Solidity requires Cancun; read-only Decimal simulations
-reject PUSH0 and TSTORE. A compatible reverse verifier remains a release gate.
+reject PUSH0 and TSTORE. A canonical upstream SP1 v6.0.0 sample proof passes
+against the original standalone verifier compiled for London in CI. This is
+neither a Decimal/Tendermint proof nor v6.1.0/full IBC Solidity validation.
+See [the keeper rehearsal and remaining gates](../network/docs/ru/BRIDGE_KEEPER_REHEARSAL.md).
 
 ## Separate release tracks
 
