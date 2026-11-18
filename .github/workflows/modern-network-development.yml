@@ -11,7 +11,7 @@ on:
         default: false
         type: boolean
       launch_four_validators:
-        description: Rehearse the proposed four equal stakes and synchronize a peer after one validator stops
+        description: Check four validators; a standalone run also checks quorum loss and verified recovery
         default: false
         type: boolean
       launch_treasury:
@@ -156,6 +156,14 @@ jobs:
             export MCND_NATIVE_LAUNCH_REHEARSAL=4
             launch_options+=(--four-validators)
             allocation_options+=(--allocation-plan network/docs/ru/public-launch-allocation.draft.json)
+          fi
+          if [[ "$LAUNCH_FOUR_VALIDATORS" == true && "$LAUNCH_TREASURY" != true && "$LAUNCH_SIGNED_PACKAGE" != true && -z "$SYSTEMD_PACKAGE_RUN" ]]; then
+            (
+              cd network
+              go test -mod=readonly -p 2 -count=1 -timeout 2m ./tools/comet_commit_probe
+              go build -mod=readonly -p 2 -trimpath -o "$launch_work/comet-commit-probe" ./tools/comet_commit_probe
+            )
+            launch_options+=(--quorum-loss-recovery --commit-probe "$launch_work/comet-commit-probe")
           fi
           if [[ "$LAUNCH_TREASURY" == true ]]; then
             export MCND_NATIVE_TREASURY_PROCESS=1

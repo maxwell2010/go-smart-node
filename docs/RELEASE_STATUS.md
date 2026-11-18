@@ -240,6 +240,16 @@ the original keys and latest signing states, all four validators signed block
 63 and agreed on its resulting AppHash.
 [Startup replay CI](https://github.com/maxwell2010/go-smart-node/actions/runs/43456522216) · [Evidence](https://github.com/maxwell2010/go-smart-node/actions/runs/43456522216/artifacts/14055371202)
 
+The new standalone `launch_four_validators` development run adds loss of
+two equal-power validators, a bounded no-progress observation, and recovery
+of the original signing homes without changing the validator set or quorum.
+The owned commit probe verifies canonical Ed25519 precommits and strict
+voting-power quorum for three or four signers. An offline health observer
+reports stale or inconsistent RPC observations without authorizing bridge
+execution. Local Python guard tests pass; the new Linux process rehearsal
+is pending and must not yet be described as verified release evidence.
+See [the operator liveness guide](../network/docs/ru/CONSENSUS_LIVENESS.md).
+
 ## Separate release tracks
 
 The selected architecture is a fresh network on a maintained modern stack,

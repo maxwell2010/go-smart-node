@@ -3,6 +3,7 @@
 import argparse
 import base64
 from contextlib import nullcontext
+from datetime import datetime, timezone
 import hashlib
 import ipaddress
 import json
@@ -15,6 +16,7 @@ import tempfile
 import time
 
 from configure_history import validate_fresh_home
+from consensus_health import assess
 from del_delegation_smoke import balance, write_config
 from mcnd_process_smoke import ProcessOwner, SignalGuard, private_environment, private_namespace, run_command
 from native_consensus_smoke import (
@@ -175,6 +177,137 @@ def confirm_outage(validators, stopped, rows, powers, owner, report):
         "lastCanonicalCommitHeight": last_height, "signers": signers, "signedPower": signed_power,
         "totalValidatorPower": total_power, "stoppedValidatorPower": members[stopped.label],
     }
+
+
+def verify_quorum_commit(nodes, rows, powers, height, probe, *, missing=()):
+    """Verify canonical history and Ed25519 precommits with the owned probe."""
+    expected = {row["consensusAddress"] for row in rows if row["name"] not in missing}
+    header = committed_header(nodes, height)
+    commits = [node.rpc(f"commit?height={height}") for node in nodes]
+    signed = commits[0]["signed_header"]
+    check(all(row["canonical"] is True and row["signed_header"] == signed for row in commits),
+          "quorum recovery peers disagree on the canonical commit")
+    check(signed["header"]["chain_id"] == nodes[0].chain_id and
+          int(signed["header"]["height"]) == int(signed["commit"]["height"]) == height and
+          signed["commit"]["block_id"]["hash"] == header["block_hash"], "quorum commit header mismatch")
+    payload = {"chainId": nodes[0].chain_id, "commit": signed["commit"],
+               "publicKeys": [base64.b64encode(decode_pubkey(row["publicKey"])).decode("ascii") for row in rows],
+               "votingPowers": list(powers),
+               "allowedMissing": [row["consensusAddress"] for row in rows if row["name"] in missing]}
+    result = subprocess.run([str(probe)], input=json.dumps(payload), text=True, capture_output=True, timeout=10)
+    check(result.returncode == 0, "quorum recovery Ed25519 verification failed: " + result.stderr[:200])
+    verified = json.loads(result.stdout)
+    check(len(verified) == len(expected) and set(verified) == expected,
+          "cryptographic recovery signers differ from the expected set")
+    signed_power = sum(power for row, power in zip(rows, powers, strict=True) if row["consensusAddress"] in verified)
+    check(3 * signed_power > 2 * sum(powers), "verified commit lacks strictly more than two thirds power")
+    return {"height": height, "blockHash": header["block_hash"], "appHash": header["app_hash"],
+            "verifiedEd25519Signatures": len(verified), "signedPower": signed_power, "totalPower": sum(powers)}
+
+
+def restart_original_signer(node, binary, env, owner, state):
+    check(node.child.poll() is not None, "a second signer process would reuse the validator home")
+    path = node.home / "data/priv_validator_state.json"
+    check(private_bytes(path, 8192) == state, "stopped validator signing state changed before restart")
+    identity = private_bytes(node.home / "config/priv_validator_key.json", 8192)
+    node.start(binary, env, owner, "quorum-recovered")
+    check(private_bytes(node.home / "config/priv_validator_key.json", 8192) == identity,
+          "validator recovery changed its signing key")
+
+
+def assess_stalled_minority(nodes):
+    """Feed actual isolated-node observations to the read-only health monitor."""
+    statuses = []
+    for node in nodes:
+        status = node.rpc("status")
+        check(status["node_info"]["id"] == node.node_id, "minority monitor observed a different peer identity")
+        info = status["sync_info"]
+        statuses.append({"source": node.node_id, "chain_id": status["node_info"]["network"],
+                         "height": info["latest_block_height"], "block_hash": info["latest_block_hash"],
+                         "block_time": info["latest_block_time"], "catching_up": info["catching_up"]})
+    round_state = nodes[0].rpc("consensus_state")["round_state"]
+    height = int(round_state["height/round/step"].split("/")[0])
+    validator_set = nodes[0].rpc(f"validators?height={height}")
+    now = datetime.now(timezone.utc)
+    snapshot = {"checked_at_utc": now.isoformat(), "statuses": statuses,
+                "round_state": round_state, "validator_set": validator_set}
+    result = assess(snapshot, nodes[0].chain_id, now=now, max_age_seconds=6, max_snapshot_age_seconds=60)
+    check(result["pause_new_bridge_processing"] is True and result["bridge_execution_authorized"] is False and
+          result["cryptographically_verified"] is False, "halted-source monitor did not fail closed")
+    return result
+
+
+def confirm_quorum_loss_recovery(validators, rows, powers, binary, env, owner, report, probe):
+    """Four equal-power validators: 3/4 live, 2/4 halt, original signers recover."""
+    check(len(validators) == 4 and len(set(powers)) == 1 and powers[0] > 0,
+          "quorum loss requires four equal positive-power validators")
+    live, second, first = validators[:2], validators[2], validators[3]
+    check(first.child.poll() is not None, "first outage validator must already be stopped")
+    first_state = private_bytes(first.home / "data/priv_validator_state.json", 8192)
+    prior = report["outage"]
+    prior["cryptographicCommit"] = verify_quorum_commit(
+        validators[:3], rows, powers, prior["lastCanonicalCommitHeight"], probe, missing=(first.label,))
+    report["phase"] = "two-validator-quorum-loss"
+    before_stop = max(int(node.rpc("abci_info")["response"]["last_block_height"]) for node in validators[:3])
+    owner.stop(second.child)
+    check(second.child.returncode in (0, -signal.SIGINT), "second validator failed graceful shutdown")
+    second_state = private_bytes(second.home / "data/priv_validator_state.json", 8192)
+    # At most two already-voted blocks may drain through independent ABCI and
+    # blockstore persistence after the stop; the window then must stay frozen.
+    deadline, samples = time.monotonic() + 5, []
+    while time.monotonic() < deadline:
+        heights = [int(node.rpc("abci_info")["response"]["last_block_height"]) for node in live]
+        check(max(heights) <= before_stop + 2, "minority committed beyond the bounded in-flight drain")
+        check(all(node.child.poll() is None for node in live), "live minority process exited")
+        samples.append(heights)
+        time.sleep(0.25)
+    frozen = max(samples[-1])
+    deadline, quiet_samples = time.monotonic() + 12, []
+    while time.monotonic() < deadline:
+        heights = [int(node.rpc("abci_info")["response"]["last_block_height"]) for node in live]
+        check(heights == [frozen, frozen], "two-validator minority advanced or did not converge after drain")
+        check(all(node.child.poll() is None for node in live), "halt observation lost a live validator")
+        quiet_samples.append(heights)
+        time.sleep(0.25)
+    frozen_header = committed_header(live, frozen)
+    persisted = [base64.b64decode(node.rpc("abci_info")["response"]["last_block_app_hash"], validate=True).hex().upper()
+                 for node in live]
+    check(len(set(persisted)) == 1 and re.fullmatch(r"[0-9A-F]{64}", persisted[0]),
+          "halted minority peers disagree on the persisted AppHash")
+    monitor = assess_stalled_minority(live)
+    # A read-only monitor is a stop signal, never an alternate finality source.
+    report["quorumLoss"] = {"liveValidators": [node.label for node in live], "livePower": sum(powers[:2]),
+                            "totalPower": sum(powers), "lastCommittedHeight": frozen,
+                            "drainAllowanceBlocks": 2, "drainSeconds": 5, "quietSeconds": 12,
+                            "quietSamples": len(quiet_samples), "bridgeMustPauseNewProcessing": True,
+                            "checkpoint": frozen_header, "persistedAppHash": persisted[0], "monitor": monitor,
+                            "stoppedSigningStateSha256": {
+                                second.label: hashlib.sha256(second_state).hexdigest(),
+                                first.label: hashlib.sha256(first_state).hexdigest()}}
+    report["phase"] = "recover-original-three-validator-quorum"
+    restart_original_signer(second, binary, env, owner, second_state)
+    wait_replicas(validators[:3], frozen + 4, 100, report)
+    check(committed_header(validators[:3], frozen) == frozen_header, "recovery changed the halted canonical prefix")
+    check(committed_header(validators[:3], frozen + 1)["app_hash"] == persisted[0],
+          "post-recovery header does not attest the persisted pre-halt AppHash")
+    report["quorumRecovery"] = verify_quorum_commit(
+        validators[:3], rows, powers, frozen + 2, probe, missing=(first.label,))
+    report["quorumRecovery"]["signingStatePreserved"] = True
+    report["phase"] = "recover-all-four-signers"
+    restart_original_signer(first, binary, env, owner, first_state)
+    first_height = wait_replicas(validators, frozen + 8, 120, report)
+    # Do not require all four votes in the first catchup commit. Search a small
+    # bounded window after the restored signer has caught up.
+    for height in range(first_height + 1, first_height + 13):
+        wait_replicas(validators, height + 1, 30, report)
+        commit = validators[0].rpc(f"commit?height={height}")["signed_header"]["commit"]
+        if sum(int(row["block_id_flag"]) == 2 for row in commit["signatures"]) == 4:
+            report["fourSignerRecovery"] = verify_quorum_commit(validators, rows, powers, height, probe)
+            break
+    else:
+        raise ValueError("all four original signers did not resume within the bounded recovery window")
+    report["fourSignerRecovery"].update(originalHomes=True, signingStatePreserved=True,
+                                       consensusThresholdUnchanged=True)
 
 
 def treasury_state(nodes, fixture, height):
@@ -341,7 +474,7 @@ def verify_systemd_upgrade(systemd, follower, validators, expected, genesis, upg
 
 
 def run_launch(binary, root, genesis, expected, keys, env, owner, report, *, four_validators=False, treasury=None,
-               systemd=None, restart_snapshot=False, upgrade_binary=None):
+               systemd=None, restart_snapshot=False, upgrade_binary=None, quorum_loss_recovery=False, commit_probe=None):
     rows = expected["validators"]
     powers = tuple(row["initialPower"] for row in rows)
     options = {"chain_id": expected["chainId"], "evm_chain_id": expected["evmChainId"]}
@@ -363,6 +496,18 @@ def run_launch(binary, root, genesis, expected, keys, env, owner, report, *, fou
         configure_snapshot_source(live_validators[0])
     configured = {node.label: configure_peers(node, [peer for peer in validators if peer is not node]) for node in validators}
     configured[follower.label] = configure_peers(follower, live_validators)
+    if quorum_loss_recovery:
+        # Fixed test-only timers make the halt observation longer than several
+        # complete propose/prevote/precommit timeout budgets. Genesis and voting
+        # power are unchanged and the production configuration is untouched.
+        for node in validators:
+            write_config(node.home, "config.toml", {
+                ("consensus", "timeout_propose"): '"1s"', ("consensus", "timeout_prevote"): '"1s"',
+                ("consensus", "timeout_precommit"): '"1s"', ("consensus", "timeout_commit"): '"1s"',
+                ("consensus", "timeout_propose_delta"): '"500ms"',
+                ("consensus", "timeout_prevote_delta"): '"500ms"',
+                ("consensus", "timeout_precommit_delta"): '"500ms"',
+            })
     try:
         run_command(binary, validators[0].home, ["genesis", "validate-genesis"], env)
         if systemd is not None:
@@ -381,6 +526,9 @@ def run_launch(binary, root, genesis, expected, keys, env, owner, report, *, fou
         report["initialConfirmedSigners"] = check_signing(validators, rows, 1, last_startup_height)
         report["lastStartupCanonicalCommitHeight"] = last_startup_height
         confirm_outage(live_validators, stopped, rows, powers, owner, report)
+        if quorum_loss_recovery:
+            confirm_quorum_loss_recovery(validators, rows, powers, binary, env, owner, report, commit_probe)
+            stopped, live_validators = None, validators
     # The ordinary peer has its own node and signing keys and a clean home.
     # It starts after the validators have committed a history to replay.
     validate_fresh_home(follower.home)
@@ -443,6 +591,8 @@ def main(argv=None, signals=None):
     for flag in ("binary", "binary-sha256", "archive-sha256", "source-commit", "fixture", "home-parent", "report"):
         parser.add_argument("--" + flag, required=True)
     parser.add_argument("--four-validators", action="store_true", help="check quorum and peer catchup after stopping one of four validators")
+    parser.add_argument("--quorum-loss-recovery", action="store_true", help="halt safely with two of four validators and recover original signers")
+    parser.add_argument("--commit-probe", type=Path, help="owned Comet Ed25519 commit verifier")
     parser.add_argument("--treasury-transfer", action="store_true", help="check the signed transfer pair on the four-validator fixture")
     parser.add_argument("--package-genesis", type=Path, help="use genesis extracted from the verified launch package")
     parser.add_argument("--systemd-follower", action="store_true", help="start the clean installed follower as a systemd service")
@@ -451,6 +601,12 @@ def main(argv=None, signals=None):
     parser.add_argument("--upgrade-package-report", type=Path, help="signature and checksum report for the replacement package")
     parser.add_argument("--iavl-schema-probe", type=Path, help="inspect the IAVL storage upgrade with the node stopped")
     args = parser.parse_args(argv)
+    if args.quorum_loss_recovery and (not args.four_validators or args.commit_probe is None):
+        parser.error("--quorum-loss-recovery requires --four-validators and --commit-probe")
+    if args.commit_probe is not None and not args.quorum_loss_recovery:
+        parser.error("--commit-probe requires --quorum-loss-recovery")
+    if args.quorum_loss_recovery and (args.systemd_follower or args.treasury_transfer or args.upgrade_package):
+        parser.error("quorum recovery must run independently of treasury and systemd upgrade scenarios")
     if args.treasury_transfer and not args.four_validators:
         parser.error("--treasury-transfer requires --four-validators")
     if args.systemd_follower and not args.package_genesis:
@@ -510,7 +666,8 @@ def main(argv=None, signals=None):
                     with service as systemd:
                         run_launch(binary, root, genesis, expected, keys, env, owner, report,
                                    four_validators=args.four_validators, treasury=treasury, systemd=systemd,
-                                   restart_snapshot=args.restart_and_snapshot, upgrade_binary=upgrade_binary)
+                                   restart_snapshot=args.restart_and_snapshot, upgrade_binary=upgrade_binary,
+                                   quorum_loss_recovery=args.quorum_loss_recovery, commit_probe=args.commit_probe)
                 finally:
                     owner.close()
             report.update(status="PASS", phase="complete")

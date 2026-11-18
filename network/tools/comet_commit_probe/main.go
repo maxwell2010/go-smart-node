@@ -16,17 +16,24 @@ import (
 )
 
 type request struct {
-	ChainID string          `json:"chainId"`
-	Commit  json.RawMessage `json:"commit"`
-	Keys    []string        `json:"publicKeys"`
+	ChainID        string          `json:"chainId"`
+	Commit         json.RawMessage `json:"commit"`
+	Keys           []string        `json:"publicKeys"`
+	VotingPowers   []int64         `json:"votingPowers,omitempty"`
+	AllowedMissing []string        `json:"allowedMissing,omitempty"`
 }
 
 func verify(input request) ([]string, error) {
-	if input.ChainID != "mintcandy_990001-1" || len(input.Keys) != 4 {
+	if (input.ChainID != "mintcandy_990001-1" && input.ChainID != "mintcandy_990012-1") || len(input.Keys) != 4 {
 		return nil, errors.New("expected four public keys and the isolated consensus fixture chain ID")
 	}
+	if len(input.VotingPowers) != 0 && len(input.VotingPowers) != len(input.Keys) {
+		return nil, errors.New("voting powers must match the four fixture public keys")
+	}
 	keys := make(map[string]ed25519.PubKey, len(input.Keys))
-	for _, encoded := range input.Keys {
+	powers := make(map[string]int64, len(input.Keys))
+	var totalPower int64
+	for index, encoded := range input.Keys {
 		key, err := base64.StdEncoding.DecodeString(encoded)
 		if err != nil || len(key) != ed25519.PubKeySize {
 			return nil, errors.New("invalid fixture Ed25519 public key")
@@ -37,6 +44,22 @@ func verify(input request) ([]string, error) {
 			return nil, errors.New("duplicate fixture validator")
 		}
 		keys[address] = public
+		power := int64(1)
+		if len(input.VotingPowers) != 0 {
+			power = input.VotingPowers[index]
+		}
+		if power <= 0 || totalPower > types.MaxTotalVotingPower-power {
+			return nil, errors.New("invalid or overflowing fixture voting power")
+		}
+		totalPower += power
+		powers[address] = power
+	}
+	missing := make(map[string]bool, len(input.AllowedMissing))
+	for _, address := range input.AllowedMissing {
+		if _, exists := keys[address]; !exists || missing[address] {
+			return nil, errors.New("unknown or repeated allowed missing validator")
+		}
+		missing[address] = true
 	}
 	var commit types.Commit
 	if err := cmtjson.Unmarshal(input.Commit, &commit); err != nil {
@@ -45,14 +68,20 @@ func verify(input request) ([]string, error) {
 	if err := commit.ValidateBasic(); err != nil {
 		return nil, err
 	}
-	if len(commit.Signatures) != len(keys) || commit.Height <= 0 {
+	if len(commit.Signatures) != len(keys) || commit.Height <= 0 || commit.BlockID.IsZero() {
 		return nil, errors.New("commit does not contain four fixture validators")
 	}
 	addresses := make([]string, 0, len(keys))
+	var signedPower int64
 	for _, signature := range commit.Signatures {
+		// An absent slot has no address or signature. Match the remaining key
+		// set against the caller's exact expected absences after verification.
+		if signature.BlockIDFlag == types.BlockIDFlagAbsent {
+			continue
+		}
 		address := signature.ValidatorAddress.String()
 		key, exists := keys[address]
-		if signature.BlockIDFlag != types.BlockIDFlagCommit || !exists {
+		if signature.BlockIDFlag != types.BlockIDFlagCommit || !exists || missing[address] {
 			return nil, errors.New("commit has a missing, repeated or unknown validator")
 		}
 		vote := cmtproto.Vote{Type: cmtproto.PrecommitType, Height: commit.Height, Round: commit.Round,
@@ -60,8 +89,22 @@ func verify(input request) ([]string, error) {
 		if !key.VerifySignature(types.VoteSignBytes(input.ChainID, &vote), signature.Signature) {
 			return nil, fmt.Errorf("invalid canonical precommit from %s", address)
 		}
+		signedPower += powers[address]
 		delete(keys, address)
 		addresses = append(addresses, address)
+	}
+	if len(keys) != len(missing) {
+		return nil, errors.New("commit absences differ from the expected fixture validators")
+	}
+	for address := range keys {
+		if !missing[address] {
+			return nil, errors.New("an undeclared fixture validator did not sign")
+		}
+	}
+	// Avoid multiplication overflow while preserving the strict +2/3 rule.
+	threshold := totalPower/3*2 + totalPower%3*2/3 + 1
+	if signedPower < threshold {
+		return nil, errors.New("verified signatures do not exceed two thirds of fixture voting power")
 	}
 	return addresses, nil
 }
