@@ -38,11 +38,19 @@ class QuorumRecoveryTest(unittest.TestCase):
         self.assertFalse(result["bridge_execution_authorized"])
         self.assertFalse(result["cryptographically_verified"])
 
-    def test_absent_proposal_fails_closed_with_reason(self):
+    def test_absent_proposal_is_a_valid_stalled_source_observation(self):
         result = launch.assess_stalled_minority(self.minority_nodes(proposal=""))
-        self.assertFalse(result["valid_snapshot"])
+        self.assertTrue(result["valid_snapshot"])
         self.assertTrue(result["pause_new_bridge_processing"])
-        self.assertTrue(any("invalid snapshot" in reason for reason in result["reasons"]))
+        self.assertIn("stale or future-dated source block", result["reasons"])
+
+    def test_invalid_snapshot_cannot_pass_as_stall_diagnosis(self):
+        invalid = {"valid_snapshot": False, "reasons": ["invalid snapshot: malformed validators"],
+                   "pause_new_bridge_processing": True, "bridge_execution_authorized": False,
+                   "cryptographically_verified": False}
+        with patch.object(launch, "assess", return_value=invalid):
+            with self.assertRaisesRegex(ValueError, "valid stalled-source snapshot"):
+                launch.assess_stalled_minority(self.minority_nodes())
 
     def test_cli_requires_four_validators_and_probe(self):
         required = ["--binary", "node", "--binary-sha256", "a" * 64, "--archive-sha256", "b" * 64,

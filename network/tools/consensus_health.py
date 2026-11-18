@@ -63,6 +63,15 @@ def non_nil_hash(value):
     return value.upper()
 
 
+def optional_proposal_hash(value):
+    # Comet may have no proposal in a valid current round, especially during
+    # quorum loss. Only its explicit nil representations are admitted here;
+    # status/committed hashes still require a full, non-nil value.
+    if value is None or value == "" or value == "0" * 64:
+        return None
+    return non_nil_hash(value)
+
+
 def validator_powers(validator_set, height):
     if integer(validator_set["block_height"], 1) != height:
         raise ValueError("validator set does not belong to the observed consensus height")
@@ -88,14 +97,14 @@ def observe_round(round_state, validator_set):
     if height < 1 or not 1 <= step <= 8:
         raise ValueError("invalid consensus height or step")
     powers = validator_powers(validator_set, height)
-    proposal = non_nil_hash(round_state["proposal_block_hash"])
+    proposal = optional_proposal_hash(round_state["proposal_block_hash"])
     current = [row for row in round_state["height_vote_set"] if integer(row["round"]) == round_number]
     if len(current) != 1:
         raise ValueError("missing or ambiguous current round")
     total = sum(powers.values())
     threshold = required_power(total)
     result = {"height": height, "round": round_number, "step": step,
-              "proposal_block_hash": proposal, "total_power": total,
+              "proposal_block_hash": proposal, "proposal_observed": proposal is not None, "total_power": total,
               "required_power": threshold, "validator_count": len(powers),
               "scope": "unverified abbreviated RPC vote observations"}
     for kind, title in (("prevotes", "Prevote"), ("precommits", "Precommit")):
@@ -117,7 +126,7 @@ def observe_round(round_state, validator_set):
                 raise ValueError("vote consensus stage mismatch")
             if set(match["block"]) == {"0"}:
                 nil += power
-            elif proposal.startswith(match["block"]):
+            elif proposal is not None and proposal.startswith(match["block"]):
                 matching += power
             else:
                 other += power

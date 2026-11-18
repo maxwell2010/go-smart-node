@@ -232,6 +232,8 @@ def assess_stalled_minority(nodes):
     snapshot = {"checked_at_utc": now.isoformat(), "statuses": statuses,
                 "round_state": round_state, "validator_set": validator_set}
     result = assess(snapshot, nodes[0].chain_id, now=now, max_age_seconds=6, max_snapshot_age_seconds=60)
+    check(result["valid_snapshot"] is True and "stale or future-dated source block" in result["reasons"],
+          "minority monitor did not diagnose a valid stalled-source snapshot")
     check(result["pause_new_bridge_processing"] is True and result["bridge_execution_authorized"] is False and
           result["cryptographically_verified"] is False, "halted-source monitor did not fail closed")
     return result

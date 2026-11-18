@@ -109,6 +109,11 @@ JSON-снимком. Он не подключается к сети, не под
 `raw` или компактным снимком с `checked_at_utc`, `round_state`, `validator_set`,
 `statuses` и необязательным `failure_groups`.
 
+Пустой `proposal_block_hash` является допустимым состоянием отсутствующего
+предложения: инструмент показывает `proposal_observed=false`, а не ошибку
+снимка. В этом состоянии `observed_other_block_power` означает ненулевые
+голоса без сопоставимого предложения и сам по себе не доказывает конфликт.
+
 ```sh
 python3 -B tools/consensus_health.py \
   --snapshot /path/to/consensus-evidence.json \

@@ -118,6 +118,53 @@ class ConsensusHealthTests(unittest.TestCase):
         self.assertEqual(row["observed_nil_block_power"], 1)
         self.assertEqual(row["missing_votes"], [])
 
+    def test_explicit_absent_proposal_is_valid_and_no_matching_power(self):
+        for empty in ("", None, "0" * 64):
+            with self.subTest(proposal=empty):
+                snapshot = fixture()
+                snapshot["round_state"]["proposal_block_hash"] = empty
+                result = assess_fixture(snapshot)
+                self.assertTrue(result["valid_snapshot"])
+                observed = result["round_observations"]
+                self.assertFalse(observed["proposal_observed"])
+                self.assertIsNone(observed["proposal_block_hash"])
+                for stage in ("prevotes", "precommits"):
+                    self.assertEqual(observed[stage]["observed_power_matching_proposal_prefix"], 0)
+                    self.assertEqual(observed[stage]["observed_other_block_power"], 4)
+                    self.assertFalse(observed[stage]["observation_reaches_threshold"])
+                self.assertFalse(result["bridge_execution_authorized"])
+
+    def test_no_proposal_nil_votes_and_stale_source_remain_separate(self):
+        snapshot = fixture()
+        snapshot["round_state"]["proposal_block_hash"] = ""
+        votes = snapshot["round_state"]["height_vote_set"][0]["prevotes"]
+        votes[0] = vote(0, snapshot["validator_set"]["validators"][0], block="0" * 12)
+        votes[1] = "nil-Vote"
+        for status in snapshot["statuses"]:
+            status["block_time"] = "2026-11-15T11:30:49Z"
+        result = assess_fixture(snapshot)
+        self.assertTrue(result["valid_snapshot"])
+        self.assertTrue(result["pause_new_bridge_processing"])
+        self.assertIn("stale or future-dated source block", result["reasons"])
+        observed = result["round_observations"]["prevotes"]
+        self.assertEqual(observed["observed_nil_block_power"], 1)
+        self.assertEqual(len(observed["missing_votes"]), 1)
+        self.assertEqual(observed["observed_other_block_power"], 2)
+        self.assertEqual(observed["observed_power_matching_proposal_prefix"], 0)
+
+    def test_missing_or_malformed_proposal_remains_invalid(self):
+        snapshot = fixture()
+        del snapshot["round_state"]["proposal_block_hash"]
+        self.assertFalse(assess_fixture(snapshot)["valid_snapshot"])
+        for invalid in (0, False, [], {}, " ", "0", "0" * 63, "B" * 63, "0x" + "B" * 64):
+            with self.subTest(proposal=invalid):
+                snapshot = fixture()
+                snapshot["round_state"]["proposal_block_hash"] = invalid
+                result = assess_fixture(snapshot)
+                self.assertFalse(result["valid_snapshot"])
+                self.assertTrue(result["pause_new_bridge_processing"])
+                self.assertFalse(result["bridge_execution_authorized"])
+
     def test_wrong_vote_context_invalid(self):
         snapshot = fixture()
         validators = snapshot["validator_set"]["validators"]

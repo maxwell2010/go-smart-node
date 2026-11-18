@@ -246,8 +246,14 @@ of the original signing homes without changing the validator set or quorum.
 The owned commit probe verifies canonical Ed25519 precommits and strict
 voting-power quorum for three or four signers. An offline health observer
 reports stale or inconsistent RPC observations without authorizing bridge
-execution. Local Python guard tests pass; the new Linux process rehearsal
-is pending and must not yet be described as verified release evidence.
+execution. The first [Linux rehearsal](https://github.com/maxwell2010/go-smart-node/actions/runs/44246062525)
+passed on `ea558b6`: height 17 stayed unchanged for 12 seconds with two
+live validators, three verified signers resumed at height 19, and all four
+signed height 26. The new follower matched the shared history and AppHash
+at height 31. Its health monitor paused conservatively on an absent proposal
+reported as invalid input. A follow-up fixes that legitimate no-proposal
+state and requires a valid stale-source diagnosis; that strengthened gate
+is pending, not yet verified release evidence.
 See [the operator liveness guide](../network/docs/ru/CONSENSUS_LIVENESS.md).
 
 ## Separate release tracks
