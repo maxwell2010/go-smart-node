@@ -18,6 +18,7 @@ import (
 	cmtcrypto "github.com/cometbft/cometbft/proto/tendermint/crypto"
 	cmt "github.com/cometbft/cometbft/types"
 	sdk "github.com/cosmos/cosmos-sdk/types"
+	gethtypes "github.com/ethereum/go-ethereum/core/types"
 
 	"github.com/maxwell2010/go-smart-node/network/bridge/client"
 	"github.com/maxwell2010/go-smart-node/network/bridge/ledger"
@@ -36,14 +37,17 @@ var (
 
 // Route is registered only by trusted module/genesis code. It pins the source
 // client and audited non-upgradeable escrow, destination identity, activation
-// height and liveness window. Registering an address does not itself prove its
-// code: an authenticated deployment/code-policy procedure remains mandatory.
+// height and liveness window. Each receive authenticates its runtime code hash
+// through the acc store at the same state height and root as storage membership.
+// The pinned hash must come from an authenticated, audited non-proxy deployment;
+// matching runtime code does not independently establish escrow semantics.
 // This profile issues Decimal DEL vouchers only; it cannot mint native DEL.
 type Route struct {
 	ClientID              string
 	SourceChainID         string
 	SourceEVMChainID      uint64
 	SourceEscrow          [20]byte
+	ExpectedCodeHash      [32]byte
 	DestinationChainID    string
 	DestinationEVMChainID uint64
 	DestinationBridgeID   [32]byte
@@ -80,6 +84,7 @@ func routeKey(id string) ([]byte, error) {
 func (route Route) validate() error {
 	if !idPattern.MatchString(route.ClientID) || route.SourceChainID != ledger.OriginChainID ||
 		route.SourceEVMChainID != 75 || route.SourceEscrow == ([20]byte{}) ||
+		route.ExpectedCodeHash == ([32]byte{}) || route.ExpectedCodeHash == [32]byte(gethtypes.EmptyCodeHash) ||
 		route.DestinationBridgeID == ([32]byte{}) || route.MinimumStateHeight <= 0 || route.MaxHeaderAge <= 0 {
 		return errors.New("invalid pinned Decimal DEL inbound route")
 	}
@@ -165,9 +170,9 @@ func (k *Keeper) GetRoute(ctx sdk.Context, id string) (Route, error) {
 // Only the latest authenticated root is accepted. A changed latest root means
 // the relayer must obtain a fresh proof; replay state and balances stay intact.
 func (k *Keeper) Receive(ctx sdk.Context, routeID string, deposit protocol.Deposit,
-	stateHeight int64, ops *cmtcrypto.ProofOps) error {
+	stateHeight int64, accountAny []byte, accountOps, storageOps *cmtcrypto.ProofOps) error {
 	child, write := ctx.CacheContext()
-	if err := k.receive(child, routeID, deposit, stateHeight, ops); err != nil {
+	if err := k.receive(child, routeID, deposit, stateHeight, accountAny, accountOps, storageOps); err != nil {
 		return err
 	}
 	write()
@@ -178,7 +183,7 @@ func (k *Keeper) Receive(ctx sdk.Context, routeID string, deposit protocol.Depos
 // and replay state one SDK transaction. Failure leaves the previous client
 // checkpoint in place as well as reverting any voucher accounting changes.
 func (k *Keeper) ReceiveWithUpdate(ctx sdk.Context, routeID string, candidate *cmt.LightBlock,
-	deposit protocol.Deposit, stateHeight int64, ops *cmtcrypto.ProofOps) error {
+	deposit protocol.Deposit, stateHeight int64, accountAny []byte, accountOps, storageOps *cmtcrypto.ProofOps) error {
 	route, err := k.GetRoute(ctx, routeID)
 	if err != nil {
 		return err
@@ -190,7 +195,7 @@ func (k *Keeper) ReceiveWithUpdate(ctx sdk.Context, routeID string, candidate *c
 	if _, err := k.clients.Update(child, route.ClientID, candidate); err != nil {
 		return err
 	}
-	if err := k.receive(child, routeID, deposit, stateHeight, ops); err != nil {
+	if err := k.receive(child, routeID, deposit, stateHeight, accountAny, accountOps, storageOps); err != nil {
 		return err
 	}
 	write()
@@ -198,7 +203,7 @@ func (k *Keeper) ReceiveWithUpdate(ctx sdk.Context, routeID string, candidate *c
 }
 
 func (k *Keeper) receive(ctx sdk.Context, routeID string, deposit protocol.Deposit,
-	stateHeight int64, ops *cmtcrypto.ProofOps) error {
+	stateHeight int64, accountAny []byte, accountOps, storageOps *cmtcrypto.ProofOps) error {
 	route, err := k.GetRoute(ctx, routeID)
 	if err != nil {
 		return err
@@ -219,9 +224,14 @@ func (k *Keeper) receive(ctx sdk.Context, routeID string, deposit protocol.Depos
 	if checkpoint.ChainID != route.SourceChainID || ctx.BlockTime().Sub(checkpoint.Time) > route.MaxHeaderAge {
 		return errors.New("source header is stale or belongs to a different chain")
 	}
+	accountClaim := storage.AccountCodeClaim{ChainID: route.SourceChainID, StateHeight: stateHeight,
+		Address: route.SourceEscrow, ExpectedCodeHash: route.ExpectedCodeHash}
+	if err := storage.VerifyAccountCodeMembership(checkpoint, accountClaim, accountAny, accountOps); err != nil {
+		return fmt.Errorf("source escrow code: %w", err)
+	}
 	claim := storage.StorageClaim{ChainID: route.SourceChainID, StateHeight: stateHeight,
 		Address: route.SourceEscrow, Slot: protocol.CommitmentSlot(id), Value: id}
-	if err := storage.VerifyStorageMembership(checkpoint, claim, ops); err != nil {
+	if err := storage.VerifyStorageMembership(checkpoint, claim, storageOps); err != nil {
 		return fmt.Errorf("deposit commitment: %w", err)
 	}
 	amount := sdkmath.NewIntFromBigInt(new(big.Int).SetBytes(deposit.Amount[:]))

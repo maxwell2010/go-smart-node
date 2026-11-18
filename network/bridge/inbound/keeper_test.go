@@ -1,7 +1,9 @@
 package inbound
 
 import (
+	"bytes"
 	"context"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"testing"
@@ -29,7 +31,10 @@ import (
 	authtypes "github.com/cosmos/cosmos-sdk/x/auth/types"
 	bankkeeper "github.com/cosmos/cosmos-sdk/x/bank/keeper"
 	banktypes "github.com/cosmos/cosmos-sdk/x/bank/types"
+	gethtypes "github.com/ethereum/go-ethereum/core/types"
+	gethcrypto "github.com/ethereum/go-ethereum/crypto"
 	"github.com/stretchr/testify/require"
+	"google.golang.org/protobuf/encoding/protowire"
 
 	"github.com/maxwell2010/go-smart-node/network/bridge/client"
 	"github.com/maxwell2010/go-smart-node/network/bridge/finality"
@@ -106,15 +111,29 @@ type sourceFixture struct {
 	trusted, candidate *cmt.LightBlock
 	policy             finality.Policy
 	proof              *cmtcrypto.ProofOps
+	accountAny         []byte
+	accountProof       *cmtcrypto.ProofOps
+}
+
+func approvedCodeHash() [32]byte {
+	// Disposable fixture policy, not a deployed or audited production contract.
+	return [32]byte(gethcrypto.Keccak256Hash([]byte("disposable-non-proxy-escrow-runtime")))
 }
 
 func sourceProof(t *testing.T) sourceFixture {
+	return sourceProofForCodeHash(t, approvedCodeHash())
+}
+
+func sourceProofForCodeHash(t *testing.T, codeHash [32]byte) sourceFixture {
 	t.Helper()
 	database := dbm.NewMemDB()
 	defer database.Close()
 	cms := multistore.NewCommitMultiStore(database, log.NewNopLogger(), metrics.NewNoOpMetrics())
 	key := storetypes.NewKVStoreKey("evm")
-	cms.MountStoreWithDB(key, storetypes.StoreTypeIAVL, database)
+	accountStoreKey := storetypes.NewKVStoreKey("acc")
+	// Both stores must be isolated by CMS prefixes while sharing one AppHash.
+	cms.MountStoreWithDB(key, storetypes.StoreTypeIAVL, nil)
+	cms.MountStoreWithDB(accountStoreKey, storetypes.StoreTypeIAVL, nil)
 	require.NoError(t, cms.LoadLatestVersion())
 	require.NoError(t, cms.SetInitialVersion(10))
 	deposit := protocol.Deposit{SourceEVMChainID: 75, DestinationEVMChainID: 990012}
@@ -126,6 +145,19 @@ func sourceProof(t *testing.T) sourceFixture {
 	stateKey := append([]byte{2}, deposit.SourceEscrow[:]...)
 	stateKey = append(stateKey, slot[:]...)
 	cms.GetKVStore(key).Set(stateKey, id[:])
+	accountKey := append([]byte{1}, deposit.SourceEscrow[:]...)
+	accountAddress, err := sdk.Bech32ifyAddressBytes("d0", deposit.SourceEscrow[:])
+	require.NoError(t, err)
+	baseAccount, err := (&authtypes.BaseAccount{Address: accountAddress}).Marshal()
+	require.NoError(t, err)
+	// Legacy Decimal Ethermint body: BaseAccount field 1, hex code_hash field 2.
+	accountBody := protowire.AppendTag(nil, 1, protowire.BytesType)
+	accountBody = protowire.AppendBytes(accountBody, baseAccount)
+	accountBody = protowire.AppendTag(accountBody, 2, protowire.BytesType)
+	accountBody = protowire.AppendString(accountBody, "0x"+hex.EncodeToString(codeHash[:]))
+	accountAny, err := (&codectypes.Any{TypeUrl: "/ethermint.types.v1.EthAccount", Value: accountBody}).Marshal()
+	require.NoError(t, err)
+	cms.GetKVStore(accountStoreKey).Set(accountKey, accountAny)
 	commit := cms.Commit()
 	require.EqualValues(t, 10, commit.Version)
 	cms.Commit()
@@ -134,6 +166,12 @@ func sourceProof(t *testing.T) sourceFixture {
 	require.EqualValues(t, 0, query.Code)
 	require.Equal(t, id[:], query.Value)
 	require.Len(t, query.ProofOps.Ops, 2)
+	accountQuery, err := cms.(storetypes.Queryable).Query(&storetypes.RequestQuery{
+		Path: "/acc/key", Data: accountKey, Height: 10, Prove: true})
+	require.NoError(t, err)
+	require.EqualValues(t, 0, accountQuery.Code)
+	require.Equal(t, accountAny, accountQuery.Value)
+	require.Len(t, accountQuery.ProofOps.Ops, 2)
 	privateKeys := make(map[string]ed25519.PrivKey)
 	rows := make([]*cmt.Validator, 4)
 	for i := range rows {
@@ -170,7 +208,8 @@ func sourceProof(t *testing.T) sourceFixture {
 	copy(anchor.Hash[:], trusted.Hash())
 	policy := finality.Policy{ChainID: ledger.OriginChainID, TrustingPeriod: time.Hour,
 		UnbondingPeriod: 7 * 24 * time.Hour, MaxClockDrift: 30 * time.Second, MaxValidators: 16}
-	return sourceFixture{deposit, anchor, trusted, candidate, policy, query.ProofOps}
+	return sourceFixture{deposit: deposit, anchor: anchor, trusted: trusted, candidate: candidate,
+		policy: policy, proof: query.ProofOps, accountAny: accountAny, accountProof: accountQuery.ProofOps}
 }
 
 func initFixture(t *testing.T, env environment, source sourceFixture) {
@@ -178,6 +217,7 @@ func initFixture(t *testing.T, env environment, source sourceFixture) {
 	require.NoError(t, env.clients.InitClient(env.ctx, "decimal-mainnet", source.anchor, source.trusted, source.policy))
 	route := Route{ClientID: "decimal-mainnet", SourceChainID: ledger.OriginChainID, SourceEVMChainID: 75,
 		SourceEscrow: source.deposit.SourceEscrow, DestinationChainID: env.ctx.ChainID(), DestinationEVMChainID: 990012,
+		ExpectedCodeHash:    approvedCodeHash(),
 		DestinationBridgeID: source.deposit.DestinationBridgeID, MinimumStateHeight: 10, MaxHeaderAge: 5 * time.Minute}
 	require.NoError(t, env.inbound.InitRoute(env.ctx, "decimal-del", route))
 }
@@ -199,12 +239,12 @@ func TestStoredClientProofAndRealBankMintOnce(t *testing.T) {
 	env, source := openEnvironment(t, ""), sourceProof(t)
 	defer env.db.Close()
 	initFixture(t, env, source)
-	require.NoError(t, env.inbound.ReceiveWithUpdate(env.ctx, "decimal-del", source.candidate, source.deposit, 10, source.proof))
+	require.NoError(t, env.inbound.ReceiveWithUpdate(env.ctx, "decimal-del", source.candidate, source.deposit, 10, source.accountAny, source.accountProof, source.proof))
 	assertMint(t, env, source, 25)
 	checkpoint, err := env.clients.LatestCheckpoint(env.ctx, "decimal-mainnet")
 	require.NoError(t, err)
 	require.EqualValues(t, 11, checkpoint.Height)
-	require.ErrorIs(t, env.inbound.Receive(env.ctx, "decimal-del", source.deposit, 10, source.proof), ledger.ErrAlreadyProcessed)
+	require.ErrorIs(t, env.inbound.Receive(env.ctx, "decimal-del", source.deposit, 10, source.accountAny, source.accountProof, source.proof), ledger.ErrAlreadyProcessed)
 	assertMint(t, env, source, 25)
 }
 
@@ -213,13 +253,124 @@ func TestInvalidProofRollsBackHeaderBankAndReplay(t *testing.T) {
 	defer env.db.Close()
 	initFixture(t, env, source)
 	source.proof.Ops[0].Data[0] ^= 1
-	require.Error(t, env.inbound.ReceiveWithUpdate(env.ctx, "decimal-del", source.candidate, source.deposit, 10, source.proof))
+	require.Error(t, env.inbound.ReceiveWithUpdate(env.ctx, "decimal-del", source.candidate, source.deposit, 10, source.accountAny, source.accountProof, source.proof))
 	checkpoint, err := env.clients.LatestCheckpoint(env.ctx, "decimal-mainnet")
 	require.NoError(t, err)
 	require.EqualValues(t, 10, checkpoint.Height)
 	assertMint(t, env, source, 0)
 	source.proof.Ops[0].Data[0] ^= 1
-	require.NoError(t, env.inbound.ReceiveWithUpdate(env.ctx, "decimal-del", source.candidate, source.deposit, 10, source.proof))
+	require.NoError(t, env.inbound.ReceiveWithUpdate(env.ctx, "decimal-del", source.candidate, source.deposit, 10, source.accountAny, source.accountProof, source.proof))
+	assertMint(t, env, source, 25)
+}
+
+func TestAccountAuthenticationFailureRollsBackHeaderMintMarkerAndRetries(t *testing.T) {
+	for _, mode := range []string{"raw-any", "proof-data", "proof-key", "missing-any", "missing-proof", "other-root"} {
+		t.Run(mode, func(t *testing.T) {
+			env, source := openEnvironment(t, ""), sourceProof(t)
+			defer env.db.Close()
+			initFixture(t, env, source)
+			accountAny, ops := bytes.Clone(source.accountAny), source.accountProof
+			switch mode {
+			case "raw-any":
+				accountAny[len(accountAny)-1] ^= 1
+			case "proof-data":
+				ops.Ops[0].Data[0] ^= 1
+			case "proof-key":
+				ops.Ops[0].Key[1] ^= 1
+			case "missing-any":
+				accountAny = nil
+			case "missing-proof":
+				ops = nil
+			case "other-root":
+				otherHash := approvedCodeHash()
+				otherHash[0] ^= 1
+				other := sourceProofForCodeHash(t, otherHash)
+				ops = other.accountProof
+			}
+			beforeEvents := len(env.ctx.EventManager().Events())
+			require.ErrorContains(t, env.inbound.ReceiveWithUpdate(env.ctx, "decimal-del", source.candidate, source.deposit,
+				10, accountAny, ops, source.proof), "source escrow code")
+			checkpoint, err := env.clients.LatestCheckpoint(env.ctx, "decimal-mainnet")
+			require.NoError(t, err)
+			require.EqualValues(t, 10, checkpoint.Height)
+			assertMint(t, env, source, 0)
+			require.Len(t, env.ctx.EventManager().Events(), beforeEvents)
+			if mode == "proof-data" {
+				source.accountProof.Ops[0].Data[0] ^= 1
+			}
+			if mode == "proof-key" {
+				source.accountProof.Ops[0].Key[1] ^= 1
+			}
+			require.NoError(t, env.inbound.ReceiveWithUpdate(env.ctx, "decimal-del", source.candidate, source.deposit,
+				10, source.accountAny, source.accountProof, source.proof))
+			assertMint(t, env, source, 25)
+		})
+	}
+}
+
+func TestCryptographicallyProvenUnknownRuntimeCannotMint(t *testing.T) {
+	unknown := approvedCodeHash()
+	unknown[0] ^= 1
+	env, source := openEnvironment(t, ""), sourceProofForCodeHash(t, unknown)
+	defer env.db.Close()
+	initFixture(t, env, source) // Trusted route still pins approvedCodeHash().
+	require.ErrorContains(t, env.inbound.ReceiveWithUpdate(env.ctx, "decimal-del", source.candidate, source.deposit,
+		10, source.accountAny, source.accountProof, source.proof), "source escrow code")
+	checkpoint, err := env.clients.LatestCheckpoint(env.ctx, "decimal-mainnet")
+	require.NoError(t, err)
+	require.EqualValues(t, 10, checkpoint.Height)
+	assertMint(t, env, source, 0)
+}
+
+func TestCodeHashPolicyIsRequiredImmutableAndPinnedAcrossRetry(t *testing.T) {
+	env, source := openEnvironment(t, ""), sourceProof(t)
+	defer env.db.Close()
+	initFixture(t, env, source)
+	route, err := env.inbound.GetRoute(env.ctx, "decimal-del")
+	require.NoError(t, err)
+	for _, invalid := range [][32]byte{{}, [32]byte(gethtypes.EmptyCodeHash)} {
+		bad := route
+		bad.ExpectedCodeHash = invalid
+		require.Error(t, env.inbound.InitRoute(env.ctx, "invalid-code", bad))
+		_, err := env.inbound.GetRoute(env.ctx, "invalid-code")
+		require.ErrorIs(t, err, ErrRouteNotFound)
+	}
+	wrong := route
+	wrong.ExpectedCodeHash[0] ^= 1
+	require.NoError(t, env.inbound.InitRoute(env.ctx, "wrong-code", wrong))
+	require.ErrorContains(t, env.inbound.ReceiveWithUpdate(env.ctx, "wrong-code", source.candidate, source.deposit,
+		10, source.accountAny, source.accountProof, source.proof), "source escrow code")
+	checkpoint, err := env.clients.LatestCheckpoint(env.ctx, "decimal-mainnet")
+	require.NoError(t, err)
+	require.EqualValues(t, 10, checkpoint.Height)
+	assertMint(t, env, source, 0)
+	require.ErrorIs(t, env.inbound.InitRoute(env.ctx, "decimal-del", wrong), ErrRouteExists)
+	unchanged, err := env.inbound.GetRoute(env.ctx, "decimal-del")
+	require.NoError(t, err)
+	require.Equal(t, approvedCodeHash(), unchanged.ExpectedCodeHash)
+	require.ErrorIs(t, env.inbound.InitRoute(env.ctx, "wrong-code", route), ErrRouteExists)
+	require.NoError(t, env.inbound.ReceiveWithUpdate(env.ctx, "decimal-del", source.candidate, source.deposit,
+		10, source.accountAny, source.accountProof, source.proof))
+	assertMint(t, env, source, 25)
+}
+
+func TestAccountAndStorageMembershipMustShareAuthenticatedRoot(t *testing.T) {
+	env, source := openEnvironment(t, ""), sourceProof(t)
+	defer env.db.Close()
+	initFixture(t, env, source)
+	otherHash := approvedCodeHash()
+	otherHash[0] ^= 1
+	other := sourceProofForCodeHash(t, otherHash)
+	// The EVM key/value is the same; its multistore sibling has a different
+	// account root. A valid account proof cannot authorize that storage proof.
+	require.ErrorContains(t, env.inbound.ReceiveWithUpdate(env.ctx, "decimal-del", source.candidate, source.deposit,
+		10, source.accountAny, source.accountProof, other.proof), "deposit commitment")
+	checkpoint, err := env.clients.LatestCheckpoint(env.ctx, "decimal-mainnet")
+	require.NoError(t, err)
+	require.EqualValues(t, 10, checkpoint.Height)
+	assertMint(t, env, source, 0)
+	require.NoError(t, env.inbound.ReceiveWithUpdate(env.ctx, "decimal-del", source.candidate, source.deposit,
+		10, source.accountAny, source.accountProof, source.proof))
 	assertMint(t, env, source, 25)
 }
 
@@ -241,19 +392,19 @@ func TestPayoutFailureAndOuterRollbackCannotAdvanceClient(t *testing.T) {
 	failed, err := NewKeeper(runtime.NewKVStoreService(env.serviceKey), env.clients, failedLedger)
 	require.NoError(t, err)
 	beforeEvents := len(env.ctx.EventManager().Events())
-	require.Error(t, failed.ReceiveWithUpdate(env.ctx, "decimal-del", source.candidate, source.deposit, 10, source.proof))
+	require.Error(t, failed.ReceiveWithUpdate(env.ctx, "decimal-del", source.candidate, source.deposit, 10, source.accountAny, source.accountProof, source.proof))
 	checkpoint, err := env.clients.LatestCheckpoint(env.ctx, "decimal-mainnet")
 	require.NoError(t, err)
 	require.EqualValues(t, 10, checkpoint.Height)
 	require.Len(t, env.ctx.EventManager().Events(), beforeEvents)
 	assertMint(t, env, source, 0)
 	outer, _ := env.ctx.CacheContext()
-	require.NoError(t, env.inbound.ReceiveWithUpdate(outer, "decimal-del", source.candidate, source.deposit, 10, source.proof))
+	require.NoError(t, env.inbound.ReceiveWithUpdate(outer, "decimal-del", source.candidate, source.deposit, 10, source.accountAny, source.accountProof, source.proof))
 	assertMint(t, env, source, 0)
 	checkpoint, err = env.clients.LatestCheckpoint(env.ctx, "decimal-mainnet")
 	require.NoError(t, err)
 	require.EqualValues(t, 10, checkpoint.Height)
-	require.NoError(t, env.inbound.ReceiveWithUpdate(env.ctx, "decimal-del", source.candidate, source.deposit, 10, source.proof))
+	require.NoError(t, env.inbound.ReceiveWithUpdate(env.ctx, "decimal-del", source.candidate, source.deposit, 10, source.accountAny, source.accountProof, source.proof))
 	assertMint(t, env, source, 25)
 }
 
@@ -286,7 +437,7 @@ func TestRouteAndClaimDomainsArePinned(t *testing.T) {
 			case "local-chain":
 				ctx = ctx.WithChainID("mintcandy_990013-1")
 			}
-			require.Error(t, env.inbound.ReceiveWithUpdate(ctx, "decimal-del", source.candidate, deposit, height, source.proof))
+			require.Error(t, env.inbound.ReceiveWithUpdate(ctx, "decimal-del", source.candidate, deposit, height, source.accountAny, source.accountProof, source.proof))
 			assertMint(t, env, source, 0)
 			cp, err := env.clients.LatestCheckpoint(env.ctx, "decimal-mainnet")
 			require.NoError(t, err)
@@ -301,7 +452,7 @@ func TestStaleSourceBlocksExecutionWithinTrustingPeriod(t *testing.T) {
 	initFixture(t, env, source)
 	require.NoError(t, func() error { _, err := env.clients.Update(env.ctx, "decimal-mainnet", source.candidate); return err }())
 	stale := env.ctx.WithBlockTime(env.ctx.BlockTime().Add(10 * time.Minute))
-	require.ErrorContains(t, env.inbound.Receive(stale, "decimal-del", source.deposit, 10, source.proof), "stale")
+	require.ErrorContains(t, env.inbound.Receive(stale, "decimal-del", source.deposit, 10, source.accountAny, source.accountProof, source.proof), "stale")
 	assertMint(t, env, source, 0)
 }
 
@@ -321,7 +472,7 @@ func TestSourceAgeBoundaryAndCorruptRouteFailClosed(t *testing.T) {
 				state := runtime.NewKVStoreService(env.serviceKey).OpenKVStore(env.ctx)
 				require.NoError(t, state.Set([]byte(routePrefix+"decimal-del"), []byte(`{"version":1,"route_id":"decimal-del","route":{}}`)))
 			}
-			err = env.inbound.Receive(ctx, "decimal-del", source.deposit, 10, source.proof)
+			err = env.inbound.Receive(ctx, "decimal-del", source.deposit, 10, source.accountAny, source.accountProof, source.proof)
 			if mode == "exact-age-boundary" {
 				require.NoError(t, err)
 				assertMint(t, env, source, 25)
@@ -337,13 +488,13 @@ func TestPersistentReplayAndRoutesSurviveLevelDBRestart(t *testing.T) {
 	directory := t.TempDir()
 	env, source := openEnvironment(t, directory), sourceProof(t)
 	initFixture(t, env, source)
-	require.NoError(t, env.inbound.ReceiveWithUpdate(env.ctx, "decimal-del", source.candidate, source.deposit, 10, source.proof))
+	require.NoError(t, env.inbound.ReceiveWithUpdate(env.ctx, "decimal-del", source.candidate, source.deposit, 10, source.accountAny, source.accountProof, source.proof))
 	env.cms.Commit()
 	require.NoError(t, env.db.Close())
 	env = openEnvironment(t, directory)
 	defer env.db.Close()
 	assertMint(t, env, source, 25)
-	require.ErrorIs(t, env.inbound.Receive(env.ctx, "decimal-del", source.deposit, 10, source.proof), ledger.ErrAlreadyProcessed)
+	require.ErrorIs(t, env.inbound.Receive(env.ctx, "decimal-del", source.deposit, 10, source.accountAny, source.accountProof, source.proof), ledger.ErrAlreadyProcessed)
 	route, err := env.inbound.GetRoute(env.ctx, "decimal-del")
 	require.NoError(t, err)
 	require.ErrorIs(t, env.inbound.InitRoute(env.ctx, "decimal-del", route), ErrRouteExists)
