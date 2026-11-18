@@ -24,6 +24,7 @@ import (
 	"github.com/maxwell2010/go-smart-node/network/bridge/ledger"
 	"github.com/maxwell2010/go-smart-node/network/bridge/protocol"
 	"github.com/maxwell2010/go-smart-node/network/bridge/storage"
+	"github.com/maxwell2010/go-smart-node/network/bridge/workgas"
 	"github.com/maxwell2010/go-smart-node/network/identity"
 )
 
@@ -147,6 +148,9 @@ func (k *Keeper) GetRoute(ctx sdk.Context, id string) (Route, error) {
 	if len(data) == 0 || len(data) > 4096 {
 		return zero, errors.New("invalid inbound route record size")
 	}
+	if err := workgas.ChargeDecode(ctx.GasMeter(), len(data)); err != nil {
+		return zero, err
+	}
 	decoder := json.NewDecoder(bytes.NewReader(data))
 	decoder.DisallowUnknownFields()
 	var record routeRecord
@@ -171,6 +175,9 @@ func (k *Keeper) GetRoute(ctx sdk.Context, id string) (Route, error) {
 // the relayer must obtain a fresh proof; replay state and balances stay intact.
 func (k *Keeper) Receive(ctx sdk.Context, routeID string, deposit protocol.Deposit,
 	stateHeight int64, accountAny []byte, accountOps, storageOps *cmtcrypto.ProofOps) error {
+	if err := workgas.ChargeDeposit(ctx.GasMeter()); err != nil {
+		return err
+	}
 	child, write := ctx.CacheContext()
 	if err := k.receive(child, routeID, deposit, stateHeight, accountAny, accountOps, storageOps); err != nil {
 		return err
@@ -184,6 +191,9 @@ func (k *Keeper) Receive(ctx sdk.Context, routeID string, deposit protocol.Depos
 // checkpoint in place as well as reverting any voucher accounting changes.
 func (k *Keeper) ReceiveWithUpdate(ctx sdk.Context, routeID string, candidate *cmt.LightBlock,
 	deposit protocol.Deposit, stateHeight int64, accountAny []byte, accountOps, storageOps *cmtcrypto.ProofOps) error {
+	if err := workgas.ChargeDeposit(ctx.GasMeter()); err != nil {
+		return err
+	}
 	route, err := k.GetRoute(ctx, routeID)
 	if err != nil {
 		return err
@@ -226,11 +236,17 @@ func (k *Keeper) receive(ctx sdk.Context, routeID string, deposit protocol.Depos
 	}
 	accountClaim := storage.AccountCodeClaim{ChainID: route.SourceChainID, StateHeight: stateHeight,
 		Address: route.SourceEscrow, ExpectedCodeHash: route.ExpectedCodeHash}
+	if err := workgas.ChargeMembership(ctx.GasMeter(), accountAny, accountOps); err != nil {
+		return fmt.Errorf("source escrow proof work: %w", err)
+	}
 	if err := storage.VerifyAccountCodeMembership(checkpoint, accountClaim, accountAny, accountOps); err != nil {
 		return fmt.Errorf("source escrow code: %w", err)
 	}
 	claim := storage.StorageClaim{ChainID: route.SourceChainID, StateHeight: stateHeight,
 		Address: route.SourceEscrow, Slot: protocol.CommitmentSlot(id), Value: id}
+	if err := workgas.ChargeMembership(ctx.GasMeter(), id[:], storageOps); err != nil {
+		return fmt.Errorf("deposit proof work: %w", err)
+	}
 	if err := storage.VerifyStorageMembership(checkpoint, claim, storageOps); err != nil {
 		return fmt.Errorf("deposit commitment: %w", err)
 	}

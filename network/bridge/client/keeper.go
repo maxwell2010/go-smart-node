@@ -17,6 +17,7 @@ import (
 	sdk "github.com/cosmos/cosmos-sdk/types"
 
 	"github.com/maxwell2010/go-smart-node/network/bridge/finality"
+	"github.com/maxwell2010/go-smart-node/network/bridge/workgas"
 )
 
 const (
@@ -114,6 +115,9 @@ func (k *Keeper) load(ctx sdk.Context, id string) (persistedRecord, *types.Light
 	corrupt := func(err error) (persistedRecord, *types.LightBlock, error) {
 		return zero, nil, fmt.Errorf("%w: %v", ErrCorruptStore, err)
 	}
+	if err := workgas.ChargeDecode(ctx.GasMeter(), len(data)); err != nil {
+		return corrupt(err)
+	}
 	if len(data) == 0 || len(data) > maxRecordBytes {
 		return corrupt(errors.New("record size"))
 	}
@@ -145,6 +149,9 @@ func (k *Keeper) load(ctx sdk.Context, id string) (persistedRecord, *types.Light
 	}
 	// Validate at the stored signed header time only to check integrity of old
 	// data. This is not an authorization at the current block time.
+	if err := workgas.ChargeBootstrap(ctx.GasMeter(), block); err != nil {
+		return corrupt(err)
+	}
 	verified, err := finality.VerifyBootstrap(record.Latest.Checkpoint, block, record.Latest.Time, record.Policy)
 	if err != nil || !sameCheckpoint(verified, record.Latest) {
 		return corrupt(errors.New("stored checkpoint/block/policy mismatch"))
@@ -179,6 +186,9 @@ func (k *Keeper) InitClient(ctx sdk.Context, id string, anchor finality.Checkpoi
 	if current != nil {
 		return ErrAlreadyInitialized
 	}
+	if err := workgas.ChargeBootstrap(child.GasMeter(), block); err != nil {
+		return err
+	}
 	verified, err := finality.VerifyBootstrap(anchor, block, child.BlockTime(), policy)
 	if err != nil {
 		return err
@@ -203,9 +213,18 @@ func (k *Keeper) InitClient(ctx sdk.Context, id string, anchor finality.Checkpoi
 // The SDK caller must commit its surrounding context for this write to persist.
 func (k *Keeper) Update(ctx sdk.Context, id string, candidate *types.LightBlock) (finality.VerifiedCheckpoint, error) {
 	var zero finality.VerifiedCheckpoint
+	// Reject malformed typed candidates before reading/decoding trusted state.
+	// This cheap input admission charge is separate from actual verification;
+	// it does not duplicate the later signature-verification work charge.
+	if err := workgas.ChargeUpdateInput(ctx.GasMeter(), candidate); err != nil {
+		return zero, err
+	}
 	child, commit := ctx.CacheContext()
 	record, trusted, err := k.load(child, id)
 	if err != nil {
+		return zero, err
+	}
+	if err := workgas.ChargeUpdate(child.GasMeter(), trusted, candidate); err != nil {
 		return zero, err
 	}
 	verified, err := finality.VerifyUpdate(record.Latest.Checkpoint, trusted, candidate, child.BlockTime(), record.Policy)
@@ -232,6 +251,9 @@ func (k *Keeper) Update(ctx sdk.Context, id string, candidate *types.LightBlock)
 func (k *Keeper) fresh(ctx sdk.Context, id string) (persistedRecord, *types.LightBlock, error) {
 	record, block, err := k.load(ctx, id)
 	if err != nil {
+		return persistedRecord{}, nil, err
+	}
+	if err := workgas.ChargeBootstrap(ctx.GasMeter(), block); err != nil {
 		return persistedRecord{}, nil, err
 	}
 	if _, err := finality.VerifyBootstrap(record.Latest.Checkpoint, block, ctx.BlockTime(), record.Policy); err != nil {

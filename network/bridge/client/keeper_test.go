@@ -21,6 +21,7 @@ import (
 	"github.com/cosmos/cosmos-sdk/runtime"
 	sdk "github.com/cosmos/cosmos-sdk/types"
 	"github.com/maxwell2010/go-smart-node/network/bridge/finality"
+	"github.com/maxwell2010/go-smart-node/network/bridge/workgas"
 	"github.com/stretchr/testify/require"
 	"strings"
 	"testing"
@@ -359,4 +360,138 @@ func TestClientLevelDBCommitAndReopen(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, cp, after)
 	require.Equal(t, int64(11), after.Height)
+}
+
+func TestFiniteGasChargesBootstrapUpdateAndEveryGetter(t *testing.T) {
+	ctx, k, service := clientEnvironment(t)
+	anchor, trusted, candidate, _, policy, _ := testFixture(t)
+	limited := ctx.WithGasMeter(storetypes.NewGasMeter(20_000_000))
+	priced := storetypes.NewInfiniteGasMeter()
+	require.NoError(t, workgas.ChargeBootstrap(priced, trusted))
+	require.NoError(t, k.InitClient(limited, "decimal", anchor, trusted, policy))
+	require.GreaterOrEqual(t, limited.GasMeter().GasConsumed(), priced.GasConsumed())
+	stored := storedBytes(t, ctx, service, "decimal")
+	priced = storetypes.NewInfiniteGasMeter()
+	require.NoError(t, workgas.ChargeDecode(priced, len(stored)))
+	require.NoError(t, workgas.ChargeBootstrap(priced, trusted)) // load integrity
+	require.NoError(t, workgas.ChargeBootstrap(priced, trusted)) // current-time check
+	for _, name := range []string{"checkpoint", "block", "policy"} {
+		getter := ctx.WithGasMeter(storetypes.NewGasMeter(20_000_000))
+		switch name {
+		case "checkpoint":
+			_, err := k.LatestCheckpoint(getter, "decimal")
+			require.NoError(t, err)
+		case "block":
+			_, err := k.LatestLightBlock(getter, "decimal")
+			require.NoError(t, err)
+		case "policy":
+			_, err := k.ClientPolicy(getter, "decimal")
+			require.NoError(t, err)
+		}
+		require.GreaterOrEqual(t, getter.GasMeter().GasConsumed(), priced.GasConsumed(), name)
+	}
+	priced = storetypes.NewInfiniteGasMeter()
+	require.NoError(t, workgas.ChargeUpdateInput(priced, candidate))
+	require.NoError(t, workgas.ChargeDecode(priced, len(stored)))
+	require.NoError(t, workgas.ChargeBootstrap(priced, trusted))
+	require.NoError(t, workgas.ChargeUpdate(priced, trusted, candidate))
+	limited = ctx.WithGasMeter(storetypes.NewGasMeter(20_000_000))
+	_, err := k.Update(limited, "decimal", candidate)
+	require.NoError(t, err)
+	require.GreaterOrEqual(t, limited.GasMeter().GasConsumed(), priced.GasConsumed())
+}
+
+func recoverOutOfGas(t *testing.T, fn func()) {
+	t.Helper()
+	var recovered any
+	func() { defer func() { recovered = recover() }(); fn() }()
+	require.IsType(t, storetypes.ErrorOutOfGas{}, recovered, "SDK out-of-gas must reach the transaction boundary")
+}
+
+func TestOutOfGasCannotInitializeOrAdvanceClientAndGasIsNotRefunded(t *testing.T) {
+	ctx, k, service := clientEnvironment(t)
+	anchor, trusted, candidate, _, policy, _ := testFixture(t)
+	priced := storetypes.NewInfiniteGasMeter()
+	require.NoError(t, workgas.ChargeBootstrap(priced, trusted))
+	require.Positive(t, priced.GasConsumed())
+	limited := ctx.WithGasMeter(storetypes.NewGasMeter(priced.GasConsumed() - 1))
+	recoverOutOfGas(t, func() { _ = k.InitClient(limited, "decimal", anchor, trusted, policy) })
+	require.Greater(t, limited.GasMeter().GasConsumed(), limited.GasMeter().Limit())
+	require.Nil(t, storedBytes(t, ctx, service, "decimal"))
+	require.NoError(t, k.InitClient(ctx, "decimal", anchor, trusted, policy))
+	before := storedBytes(t, ctx, service, "decimal")
+	// Measure the real pre-verification path including SDK store gas. Allow
+	// that work, but leave one unit less than the explicit update crypto price.
+	probe := ctx.WithGasMeter(storetypes.NewInfiniteGasMeter())
+	require.NoError(t, workgas.ChargeUpdateInput(probe.GasMeter(), candidate))
+	_, _, err := k.load(probe, "decimal")
+	require.NoError(t, err)
+	priced = storetypes.NewInfiniteGasMeter()
+	require.NoError(t, workgas.ChargeUpdate(priced, trusted, candidate))
+	limit := probe.GasMeter().GasConsumed() + priced.GasConsumed() - 1
+	limited = ctx.WithGasMeter(storetypes.NewGasMeter(limit))
+	recoverOutOfGas(t, func() { _, _ = k.Update(limited, "decimal", candidate) })
+	require.Greater(t, limited.GasMeter().GasConsumed(), limit)
+	require.Equal(t, before, storedBytes(t, ctx, service, "decimal"))
+	_, err = k.Update(ctx, "decimal", candidate)
+	require.NoError(t, err, "fresh meter can retry the same candidate")
+}
+
+func TestFailingAndCorruptGettersConsumeWorkGasWithoutChangingState(t *testing.T) {
+	ctx, k, service := clientEnvironment(t)
+	anchor, trusted, _, _, policy, _ := testFixture(t)
+	require.NoError(t, k.InitClient(ctx, "decimal", anchor, trusted, policy))
+	before := storedBytes(t, ctx, service, "decimal")
+	priced := storetypes.NewInfiniteGasMeter()
+	require.NoError(t, workgas.ChargeDecode(priced, len(before)))
+	require.NoError(t, workgas.ChargeBootstrap(priced, trusted))
+	require.NoError(t, workgas.ChargeBootstrap(priced, trusted))
+	expired := ctx.WithBlockTime(trusted.Time.Add(policy.TrustingPeriod)).WithGasMeter(storetypes.NewGasMeter(20_000_000))
+	_, err := k.LatestCheckpoint(expired, "decimal")
+	require.Error(t, err)
+	require.GreaterOrEqual(t, expired.GasMeter().GasConsumed(), priced.GasConsumed())
+	require.Equal(t, before, storedBytes(t, ctx, service, "decimal"))
+	key, err := clientKey("decimal")
+	require.NoError(t, err)
+	require.NoError(t, service.OpenKVStore(ctx).Set(key, []byte("broken")))
+	priced = storetypes.NewInfiniteGasMeter()
+	require.NoError(t, workgas.ChargeDecode(priced, len("broken")))
+	corrupt := ctx.WithGasMeter(storetypes.NewGasMeter(20_000_000))
+	_, err = k.LatestCheckpoint(corrupt, "decimal")
+	require.ErrorIs(t, err, ErrCorruptStore)
+	require.GreaterOrEqual(t, corrupt.GasMeter().GasConsumed(), priced.GasConsumed())
+	require.Equal(t, []byte("broken"), storedBytes(t, ctx, service, "decimal"))
+}
+
+type readTrackingService struct {
+	corestore.KVStoreService
+	reads *int
+}
+type readTrackingStore struct {
+	corestore.KVStore
+	reads *int
+}
+
+func (s readTrackingService) OpenKVStore(ctx context.Context) corestore.KVStore {
+	return readTrackingStore{s.KVStoreService.OpenKVStore(ctx), s.reads}
+}
+func (s readTrackingStore) Get(key []byte) ([]byte, error) {
+	*s.reads++
+	return s.KVStore.Get(key)
+}
+
+func TestMalformedTypedCandidateChargedAndRejectedBeforeStoredState(t *testing.T) {
+	ctx, _, service := clientEnvironment(t)
+	reads := 0
+	k, err := NewKeeper(readTrackingService{service, &reads})
+	require.NoError(t, err)
+	for _, candidate := range []*types.LightBlock{nil, {}, {SignedHeader: &types.SignedHeader{}}} {
+		limited := ctx.WithGasMeter(storetypes.NewGasMeter(20_000_000))
+		var got finality.VerifiedCheckpoint
+		require.NotPanics(t, func() { got, err = k.Update(limited, "decimal", candidate) })
+		require.Error(t, err)
+		require.Equal(t, finality.VerifiedCheckpoint{}, got)
+		require.Zero(t, reads, "candidate shape must be checked before loading trusted state")
+		require.Positive(t, limited.GasMeter().GasConsumed())
+	}
 }
