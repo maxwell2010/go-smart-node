@@ -56,7 +56,9 @@ func openLedgerFixture(t *testing.T, directory string) ledgerFixture {
 	cms := multistore.NewCommitMultiStore(database, log.NewNopLogger(), metrics.NewNoOpMetrics())
 	authKey, bankKey, bridgeKey := storetypes.NewKVStoreKey("auth"), storetypes.NewKVStoreKey("bank"), storetypes.NewKVStoreKey("bridge")
 	for _, key := range []*storetypes.KVStoreKey{authKey, bankKey, bridgeKey} {
-		cms.MountStoreWithDB(key, storetypes.StoreTypeIAVL, database)
+		// Let the multistore assign a distinct DB prefix per IAVL tree. Sharing
+		// an explicit unprefixed DB would collide at persistent version keys.
+		cms.MountStoreWithDB(key, storetypes.StoreTypeIAVL, nil)
 	}
 	require.NoError(t, cms.LoadLatestVersion())
 	ctx := sdk.NewContext(cms, cmtproto.Header{ChainID: "mintcandy_990012-1", Height: 1}, false, log.NewNopLogger())

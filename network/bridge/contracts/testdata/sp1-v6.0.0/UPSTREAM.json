@@ -1,0 +1,46 @@
+{
+  "repository": "https://github.com/succinctlabs/sp1-contracts",
+  "commit": "d3629729c3216eb51bd4859d027a8eb729399fa4",
+  "verifier_version": "v6.0.0",
+  "files": [
+    {
+      "file": "ISP1Verifier.sol",
+      "upstream_path": "contracts/src/ISP1Verifier.sol",
+      "git_blob_sha1": "21eb13d62dc395e8ef498693db79e8f2210810b3",
+      "sha256": "9e918032a5aa799c1319b14b013154d6a40ca6e5f2267c9f540560abd7fd7689",
+      "bytes": 955,
+      "license": "MIT"
+    },
+    {
+      "file": "SP1VerifierGroth16.sol",
+      "upstream_path": "contracts/src/v6.0.0/SP1VerifierGroth16.sol",
+      "git_blob_sha1": "1c2bb6a60cf105ee76505fb88c3bba68a94124c3",
+      "sha256": "b02203b0252294db5981ad5b38cb217c39562c971d7b6e428eb535bfc6862e91",
+      "bytes": 3237,
+      "license": "MIT"
+    },
+    {
+      "file": "Groth16Verifier.sol",
+      "upstream_path": "contracts/src/v6.0.0/Groth16Verifier.sol",
+      "git_blob_sha1": "646ac86f365ac5bed05d411d47bbd402890bdb95",
+      "sha256": "6b3a34fe9db65b80d54283a98870c083c481e81c89a9cfc665d6477063dc7008",
+      "bytes": 26752,
+      "license": "MIT"
+    },
+    {
+      "file": "UPSTREAM_TEST.sol",
+      "upstream_path": "contracts/test/SP1VerifierGroth16V6.sol",
+      "git_blob_sha1": "4eb1fbfd848b997ad256355ceacd5043ba726ffb",
+      "sha256": "d4ead36d94bf8d83ce4727fcf2b144bb34667fada93bd424da4b72bd559bc540",
+      "bytes": 1840,
+      "license": "MIT"
+    },
+    {
+      "file": "proof.json",
+      "upstream_path": "derived from contracts/test/SP1VerifierGroth16V6.sol constants without proof mutation",
+      "sha256": "2cd9a03c4decb0427b86692af3b2b55ee839cb607596dc2be159a62452319827",
+      "bytes": 1264,
+      "license": "MIT"
+    }
+  ]
+}

@@ -193,7 +193,7 @@ jobs:
           go mod download
           go mod verify
           git diff --exit-code -- go.mod go.sum
-          go test -mod=readonly -p 2 -tags bridgecontracts -count=1 -v -timeout 8m ./bridge/... ./tools/comet_commit_probe |& tee validation-logs/bridge-finality.log
+          go test -mod=readonly -p 2 -tags 'bridgecontracts sp1contracts' -count=1 -v -timeout 8m ./bridge/... ./tools/comet_commit_probe |& tee validation-logs/bridge-finality.log
       - name: Test offline liveness diagnostics and recovery guardrails
         run: |
           python3 -B -m unittest discover -s network/tools -p 'test_consensus_health.py'

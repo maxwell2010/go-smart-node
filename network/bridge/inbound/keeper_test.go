@@ -69,7 +69,8 @@ func openEnvironment(t *testing.T, directory string) environment {
 	cms := multistore.NewCommitMultiStore(database, log.NewNopLogger(), metrics.NewNoOpMetrics())
 	authKey, bankKey, bridgeKey := storetypes.NewKVStoreKey("auth"), storetypes.NewKVStoreKey("bank"), storetypes.NewKVStoreKey("bridge")
 	for _, key := range []*storetypes.KVStoreKey{authKey, bankKey, bridgeKey} {
-		cms.MountStoreWithDB(key, storetypes.StoreTypeIAVL, database)
+		// Let CMS assign a separate DB prefix to each persistent IAVL tree.
+		cms.MountStoreWithDB(key, storetypes.StoreTypeIAVL, nil)
 	}
 	require.NoError(t, cms.LoadLatestVersion())
 	now := time.Date(2026, 11, 18, 0, 2, 0, 0, time.UTC)
@@ -302,6 +303,34 @@ func TestStaleSourceBlocksExecutionWithinTrustingPeriod(t *testing.T) {
 	stale := env.ctx.WithBlockTime(env.ctx.BlockTime().Add(10 * time.Minute))
 	require.ErrorContains(t, env.inbound.Receive(stale, "decimal-del", source.deposit, 10, source.proof), "stale")
 	assertMint(t, env, source, 0)
+}
+
+func TestSourceAgeBoundaryAndCorruptRouteFailClosed(t *testing.T) {
+	for _, mode := range []string{"exact-age-boundary", "over-age-boundary", "corrupt-route"} {
+		t.Run(mode, func(t *testing.T) {
+			env, source := openEnvironment(t, ""), sourceProof(t)
+			defer env.db.Close()
+			initFixture(t, env, source)
+			_, err := env.clients.Update(env.ctx, "decimal-mainnet", source.candidate)
+			require.NoError(t, err)
+			ctx := env.ctx.WithBlockTime(source.candidate.Time.Add(5 * time.Minute))
+			if mode == "over-age-boundary" {
+				ctx = ctx.WithBlockTime(ctx.BlockTime().Add(time.Nanosecond))
+			}
+			if mode == "corrupt-route" {
+				state := runtime.NewKVStoreService(env.serviceKey).OpenKVStore(env.ctx)
+				require.NoError(t, state.Set([]byte(routePrefix+"decimal-del"), []byte(`{"version":1,"route_id":"decimal-del","route":{}}`)))
+			}
+			err = env.inbound.Receive(ctx, "decimal-del", source.deposit, 10, source.proof)
+			if mode == "exact-age-boundary" {
+				require.NoError(t, err)
+				assertMint(t, env, source, 25)
+			} else {
+				require.Error(t, err)
+				assertMint(t, env, source, 0)
+			}
+		})
+	}
 }
 
 func TestPersistentReplayAndRoutesSurviveLevelDBRestart(t *testing.T) {
