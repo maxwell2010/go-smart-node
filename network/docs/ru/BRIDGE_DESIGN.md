@@ -26,7 +26,18 @@ Keeper не заменяет transfer-модуль, router, допуск соо�
 Настройка одного Hermes это не исправляет. Прямой нативный IBC-маршрут
 потребует согласованной доработки Decimal.
 
-## Выбрать модель доверия до тестов с деньгами
+## Выбранная модель: проверка финальности и состояния кодом
+
+Для дальнейшей реализации выбран verifier финальности и состояния без
+отдельной группы мостовых подписантов. Relayer или ZK-prover доставляет
+доказательство, а контракт или модуль проверяет его по зафиксированным
+правилам. Возможность произвольно менять доверенный checkpoint, программу
+доказательства или verifier всё равно является полномочием доверия: такие
+права и процедура первоначального bootstrap требуют явного согласования.
+Отсутствие отдельных подписантов не означает отсутствие этих предпосылок.
+
+Сравнение моделей ниже объясняет границу выбора. Вариант с пороговыми
+подписями не является выбранным способом авторизации переводов.
 
 | Модель | Кто подтверждает исходную операцию | Основная работа |
 | --- | --- | --- |
@@ -52,9 +63,86 @@ probe не реализует доверенный bootstrap, проверку �
 заголовков, смен валидаторов и bridge commitment. Его успешный запуск не
 разрешает mainnet mint или release.
 
-Ни одна модель здесь не утверждена как готовая. Выбор доверия, полномочия
-обновления, аварийной паузы и управления escrow требуется зафиксировать до
+Выбранная модель ещё не реализована как готовый мост. Полномочия обновления,
+аварийной паузы, bootstrap и управления escrow требуется зафиксировать до
 испытаний с реальными средствами.
+
+## Кандидат verifier на EVM Decimal
+
+Для обратного направления, когда Decimal должен проверить состояние нашей
+CometBFT-сети, исследован открытый проект `lfdt-ibc/ibc-contracts`, ревизия
+`a051217d31add33ad4b7affb0d72bd12d933b88d`. Это кандидат, а не проверенная
+совместимость или утверждённая production-зависимость.
+
+Основные исходники:
+
+- [SP1ICS07Tendermint.sol](https://github.com/lfdt-ibc/ibc-contracts/blob/a051217d31add33ad4b7affb0d72bd12d933b88d/ibc-solidity/contracts/light-clients/sp1-ics07/SP1ICS07Tendermint.sol)
+  проверяет публичный результат SP1, известное доверенное состояние и закреплённые program vkey.
+- [update-client](https://github.com/lfdt-ibc/ibc-contracts/blob/a051217d31add33ad4b7affb0d72bd12d933b88d/packages/tendermint-light-client/update-client/src/lib.rs)
+  использует Tendermint light-client verification для заголовка и доверенного состояния.
+- [membership](https://github.com/lfdt-ibc/ibc-contracts/blob/a051217d31add33ad4b7affb0d72bd12d933b88d/packages/tendermint-light-client/membership/src/lib.rs)
+  проверяет ICS-23 membership/non-membership с Cosmos proof specs.
+- Программы `ibc-solidity/programs/sp1-programs/{update-client,membership,uc-and-membership,misbehaviour}`
+  формируют доказываемые вычисления. Комбинированная программа связывает
+  обновление клиента и принадлежность состояния.
+
+Первоначальное доверенное состояние включает chain ID, высоту с revision,
+timestamp, AppHash и `nextValidatorsHash`. Client state содержит trust level,
+trusting period, unbonding period и состояние заморозки. Контракт принимает
+хеш начального consensus state, поэтому правильность checkpoint не возникает
+из одного факта deploy. Нужно независимо согласовать его происхождение,
+закрепить verifier и program vkey, проверить сроки и процедуру восстановления
+истёкшего или замороженного клиента. Порог overlap доверенного набора при
+light-client update нельзя путать с требованием более 2/3 подписей нового commit.
+
+Для перевода недостаточно доказать произвольный ключ в AppHash. Endpoint
+должен проверить точный store prefix и путь commitment, исходный актив,
+операцию, получателя, сумму и маршрут. Путь и bytes value не выбираются
+свободно relayer. Нужны собственные правила bridge commitment или полноценный
+совместимый IBC-маршрут, затем проверка nonce и сохранение результата исполнения.
+
+Перед переносом кандидата обязательны следующие проверки:
+
+1. Его [foundry.toml](https://github.com/lfdt-ibc/ibc-contracts/blob/a051217d31add33ad4b7affb0d72bd12d933b88d/ibc-solidity/foundry.toml)
+   задаёт Solidity 0.8.37 и Cancun. Исходники используют EIP-1153 transient
+   storage для защиты повторного входа и кэша доказательств. Простое понижение
+   compiler target не сохраняет их смысл. В read-only проверке Decimal
+   18 ноября 2026 года в 13:41 по Барнаулу симуляции TSTORE и PUSH0 завершились
+   `invalid opcode`. Текущий Cancun-вариант upstream несовместим с этим EVM
+   как есть. Проверка вызова pairing 0x08 с пустым входом вернула единицу,
+   но она не доказывает проверку полноценного Groth16 proof. Совместимость
+   полного набора precompile и цены газа ещё требуют изолированных тестов.
+2. Закреплённый upstream SP1 contracts commit
+   `d3629729c3216eb51bd4859d027a8eb729399fa4` содержит
+   `contracts/src/v6.1.0/SP1VerifierGroth16.sol` и `Groth16Verifier.sol`.
+   Используются SHA-256 и precompile MODEXP 0x05, BN254 add 0x06,
+   multiply 0x07 и pairing 0x08. Нужны положительные и отрицательные
+   proof vectors, правильные return data и цены газа на Decimal.
+   У этих двух standalone Groth16-исходников `pragma solidity ^0.8.20`;
+   при чтении в них не обнаружены прямые TSTORE/TLOAD/MCOPY. Отдельная сборка
+   оригинального verifier с явно заданным pre-Shanghai target, например
+   London, является кандидатом для проверки без изменения Decimal binary.
+   Такая сборка пока не выполнялась и не подтверждает совместимость всего
+   IBC light client. Адаптер client state и escrow должен обходиться без
+   transient storage, сохраняя проверку vkey, public values, replay и rollback.
+3. Текущий Solidity light client связан с `ICS26Router` через
+   `onlyICS26Router`; это не произвольная externally-callable библиотека.
+   Для собственного escrow потребуется проверенная интеграция router либо
+   отдельный проверенный адаптер с эквивалентными ограничениями вызова.
+4. Upstream реализует IBC v2. В нашей нативной сборке допущен IBC v1,
+   а подключённый общий v2 router сам по себе не разрешает v2-сообщения.
+   Нельзя соединить эти packet formats и commitment paths одним Hermes.
+   Изменение профиля или отдельный bridge-store требует собственных проверок.
+5. [Upstream benchmarks](https://github.com/lfdt-ibc/ibc-contracts/blob/a051217d31add33ad4b7affb0d72bd12d933b88d/ibc-solidity/benchmarks/README.md)
+   дают примерно 551 тыс. gas для одного returning ERC20 receive с Groth16
+   и 1,124 млн для нового Cosmos token receive. Это Foundry Cancun fixture,
+   не замер Decimal. Пакет из 50 receive уже достигает 8,74 млн gas.
+   При исследованном лимите Decimal 10 млн требуется свой замер deploy,
+   client update, одного полного перевода и worst-case batch с запасом.
+   Время и стоимость подготовки ZK-proof измеряются отдельно от газа.
+
+Этот анализ выполнен чтением исходников. Пакеты не устанавливались,
+доказательства не генерировались, контракты не собирались и не развёртывались.
 
 ## Происхождение активов и обеспечение
 
@@ -143,7 +231,7 @@ relayer не блокирует прямой вызов контракта по�
 
 ## Последовательность реализации
 
-1. Утвердить модель доверия и полномочия. Зафиксировать идентичность активов,
+1. Уточнить параметры выбранной доказательной модели и полномочия. Зафиксировать идентичность активов,
    ограничения escrow, версии сообщений и допустимость паузы/возобновления.
 2. Реализовать escrow и guarded-route на одноразовых локальных сетях CI.
    Проверить обычный EVM deploy, нативный bank-учёт, hooks и точный резерв.

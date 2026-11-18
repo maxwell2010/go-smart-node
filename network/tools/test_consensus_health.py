@@ -118,6 +118,39 @@ class ConsensusHealthTests(unittest.TestCase):
         self.assertEqual(row["observed_nil_block_power"], 1)
         self.assertEqual(row["missing_votes"], [])
 
+    def test_tendermint_and_comet_vote_string_layouts(self):
+        for extension in (None, "", "D" * 12):
+            with self.subTest(extension=extension):
+                snapshot = fixture()
+                votes = snapshot["round_state"]["height_vote_set"][0]
+                for stage in ("prevotes", "precommits"):
+                    for index in range(4):
+                        text = votes[stage][index]
+                        if extension is not None:
+                            text = text.replace(" @ ", " " + extension + " @ ")
+                        votes[stage][index] = text
+                # Genuine nil-block vote is distinct from absent nil-Vote.
+                nil_vote = vote(0, snapshot["validator_set"]["validators"][0], block="0" * 12)
+                if extension is not None:
+                    nil_vote = nil_vote.replace(" @ ", " " + extension + " @ ")
+                votes["prevotes"][0] = nil_vote
+                votes["prevotes"][1] = "nil-Vote"
+                result = assess_fixture(snapshot)
+                self.assertTrue(result["valid_snapshot"], result["reasons"])
+                observed = result["round_observations"]
+                self.assertEqual(observed["prevotes"]["observed_nil_block_power"], 1)
+                self.assertEqual(len(observed["prevotes"]["missing_votes"]), 1)
+                self.assertEqual(observed["prevotes"]["observed_power_matching_proposal_prefix"], 2)
+                self.assertEqual(observed["precommits"]["observed_power_matching_proposal_prefix"], 4)
+
+    def test_malformed_comet_extension_slot_rejected(self):
+        for extension in ("BAD", "D" * 11, "D" * 13, "G" * 12, "D" * 12 + " " + "E" * 12):
+            with self.subTest(extension=extension):
+                snapshot = fixture()
+                votes = snapshot["round_state"]["height_vote_set"][0]["prevotes"]
+                votes[0] = votes[0].replace(" @ ", " " + extension + " @ ")
+                self.assertFalse(assess_fixture(snapshot)["valid_snapshot"])
+
     def test_explicit_absent_proposal_is_valid_and_no_matching_power(self):
         for empty in ("", None, "0" * 64):
             with self.subTest(proposal=empty):

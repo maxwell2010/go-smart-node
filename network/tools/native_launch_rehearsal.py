@@ -215,7 +215,7 @@ def restart_original_signer(node, binary, env, owner, state):
           "validator recovery changed its signing key")
 
 
-def assess_stalled_minority(nodes):
+def assess_stalled_minority(nodes, report=None):
     """Feed actual isolated-node observations to the read-only health monitor."""
     statuses = []
     for node in nodes:
@@ -232,8 +232,28 @@ def assess_stalled_minority(nodes):
     snapshot = {"checked_at_utc": now.isoformat(), "statuses": statuses,
                 "round_state": round_state, "validator_set": validator_set}
     result = assess(snapshot, nodes[0].chain_id, now=now, max_age_seconds=6, max_snapshot_age_seconds=60)
+    if report is not None:
+        # Preserve diagnosis before assertions so a CI failure does not erase
+        # the parser reason. Include only bounded public metadata, not the
+        # raw RPC response, full vote signatures, or signing-state contents.
+        report["haltMonitor"] = result
+        if not result["valid_snapshot"]:
+            rounds = round_state.get("height_vote_set") or []
+            report["haltMonitorSample"] = {
+                "checkedAtUTC": now.isoformat(), "statuses": statuses,
+                "roundLocation": str(round_state.get("height/round/step"))[:80],
+                "proposalBlockHash": str(round_state.get("proposal_block_hash"))[:128],
+                "validatorSetHeight": str(validator_set.get("block_height"))[:30],
+                "validatorCount": len(validator_set.get("validators") or []),
+                "validatorTotal": str(validator_set.get("total"))[:30],
+                "voteRounds": [{"round": str(row.get("round"))[:30],
+                    "voteStructure": {kind: [" ".join(str(vote).split()[:3])[:220]
+                        for vote in (row.get(kind) or [])[:4]] for kind in ("prevotes", "precommits")}}
+                    for row in rounds[:3]],
+            }
+    detail = "; ".join(str(reason) for reason in result.get("reasons", []))[:300]
     check(result["valid_snapshot"] is True and "stale or future-dated source block" in result["reasons"],
-          "minority monitor did not diagnose a valid stalled-source snapshot")
+          "minority monitor did not diagnose a valid stalled-source snapshot: " + detail)
     check(result["pause_new_bridge_processing"] is True and result["bridge_execution_authorized"] is False and
           result["cryptographically_verified"] is False, "halted-source monitor did not fail closed")
     return result
@@ -276,7 +296,7 @@ def confirm_quorum_loss_recovery(validators, rows, powers, binary, env, owner, r
                  for node in live]
     check(len(set(persisted)) == 1 and re.fullmatch(r"[0-9A-F]{64}", persisted[0]),
           "halted minority peers disagree on the persisted AppHash")
-    monitor = assess_stalled_minority(live)
+    monitor = assess_stalled_minority(live, report)
     # A read-only monitor is a stop signal, never an alternate finality source.
     report["quorumLoss"] = {"liveValidators": [node.label for node in live], "livePower": sum(powers[:2]),
                             "totalPower": sum(powers), "lastCommittedHeight": frozen,

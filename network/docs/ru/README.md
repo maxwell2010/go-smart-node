@@ -16,6 +16,7 @@
 [Нативный консенсус и выплаты из комиссий на изолированной сети](NATIVE_CONSENSUS_REHEARSAL.md).
 [Потеря кворума, независимость операторов и восстановление подписанта](CONSENSUS_LIVENESS.md).
 [Проект моста MintCandy - Decimal и условия безопасной реализации](BRIDGE_DESIGN.md).
+[Формат доказательств storage Decimal и привязка к AppHash](DECIMAL_STORAGE_PROOFS.md).
 [Удалённая проверка индексов и следующие process gates](REMOTE_CONSENSUS_VERIFICATION_20261103.md).
 [Проверка объединённой сборки 33920c6 и запуск Hermes](MILESTONE_VALIDATION_33920C6.md).
 [Выбранная модель изолированных NFT-позиций](ISOLATED_1155_MODEL.md).

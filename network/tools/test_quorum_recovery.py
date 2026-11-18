@@ -48,9 +48,13 @@ class QuorumRecoveryTest(unittest.TestCase):
         invalid = {"valid_snapshot": False, "reasons": ["invalid snapshot: malformed validators"],
                    "pause_new_bridge_processing": True, "bridge_execution_authorized": False,
                    "cryptographically_verified": False}
+        report = {}
         with patch.object(launch, "assess", return_value=invalid):
-            with self.assertRaisesRegex(ValueError, "valid stalled-source snapshot"):
-                launch.assess_stalled_minority(self.minority_nodes())
+            with self.assertRaisesRegex(ValueError, "invalid snapshot: malformed validators"):
+                launch.assess_stalled_minority(self.minority_nodes(), report)
+        self.assertEqual(report["haltMonitor"], invalid)
+        self.assertEqual(report["haltMonitorSample"]["validatorCount"], 4)
+        self.assertNotIn("raw", report["haltMonitorSample"])
 
     def test_cli_requires_four_validators_and_probe(self):
         required = ["--binary", "node", "--binary-sha256", "a" * 64, "--archive-sha256", "b" * 64,

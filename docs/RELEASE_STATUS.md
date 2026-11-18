@@ -252,9 +252,22 @@ live validators, three verified signers resumed at height 19, and all four
 signed height 26. The new follower matched the shared history and AppHash
 at height 31. Its health monitor paused conservatively on an absent proposal
 reported as invalid input. A follow-up fixes that legitimate no-proposal
-state and requires a valid stale-source diagnosis; that strengthened gate
-is pending, not yet verified release evidence.
+state and requires a valid stale-source diagnosis. That stricter run
+[rejected the snapshot](https://github.com/maxwell2010/go-smart-node/actions/runs/44249902396)
+because the monitor also needed the Comet 0.38 vote-extension display format.
+Both supported RPC layouts now have regression tests. The corrected process
+gate is pending, not yet verified release evidence.
 See [the operator liveness guide](../network/docs/ru/CONSENSUS_LIVENESS.md).
+
+The bridge design selects code-verified finality and state, without a separate
+attestation committee. The first pure Go finality verifier binds an external
+trusted checkpoint, verifies adjacent or skipping Comet light-client updates,
+checks all present Ed25519 signatures and bounds the trusting policy. It is
+not wired to application transfers, has no RPC bootstrap or persistence, and
+does not yet establish state-proof membership or mainnet bridge readiness.
+The targeted `bridge-finality` Linux scope must pass before recording evidence.
+Current upstream IBC Solidity requires Cancun; read-only Decimal simulations
+reject PUSH0 and TSTORE. A compatible reverse verifier remains a release gate.
 
 ## Separate release tracks
 

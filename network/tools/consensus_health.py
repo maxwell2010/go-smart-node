@@ -22,7 +22,9 @@ _VOTE = re.compile(
     r"Vote\{(?P<index>[0-9]+):(?P<address>[0-9A-F]{12}) "
     r"(?P<height>[0-9]+)/(?P<round>[0-9]+)/"
     r"SIGNED_MSG_TYPE_(?P<kind>PREVOTE|PRECOMMIT)\((?P<title>Prevote|Precommit)\) "
-    r"(?P<block>[0-9A-F]{12}) [0-9A-F]{12} @ [^}]+\}"
+    # Tendermint 0.34 prints block/signature; Comet 0.38 adds an extension
+    # fingerprint. The extension slot can be empty (two spaces before '@').
+    r"(?P<block>[0-9A-F]{12}) [0-9A-F]{12}(?: (?:[0-9A-F]{12})?)? @ [^}]+\}"
 )
 
 
