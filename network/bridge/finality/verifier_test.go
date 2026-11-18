@@ -373,3 +373,37 @@ func TestRejectInvalidPolicyAndTime(t *testing.T) {
 		})
 	}
 }
+
+func TestExplicitBootstrapVerification(t *testing.T) {
+	for _, mode := range []string{"valid", "pin", "domain", "expired", "future", "signature", "minority", "nil", "policy"} {
+		t.Run(mode, func(t *testing.T) {
+			anchor, block, _, now, policy, keys := testFixture(t)
+			switch mode {
+			case "pin":
+				anchor.Hash[0] ^= 1
+			case "domain":
+				anchor.ChainID = "other-1"
+			case "expired":
+				now = block.Time.Add(policy.TrustingPeriod)
+			case "future":
+				now = block.Time.Add(-policy.MaxClockDrift)
+			case "signature":
+				block.Commit.Signatures[3].Signature[0] ^= 1
+			case "minority":
+				signTestBlock(t, block, keys, policy.ChainID, map[int]bool{2: true, 3: true}, nil)
+			case "nil":
+				block = nil
+			case "policy":
+				policy.TrustingPeriod = 0
+			}
+			got, err := VerifyBootstrap(anchor, block, now, policy)
+			if mode == "valid" {
+				if err != nil || got.Checkpoint != anchor || got.Time != block.Time {
+					t.Fatalf("bootstrap failed: %+v, %v", got, err)
+				}
+			} else if err == nil || got != (VerifiedCheckpoint{}) {
+				t.Fatalf("invalid bootstrap accepted: %+v, %v", got, err)
+			}
+		})
+	}
+}

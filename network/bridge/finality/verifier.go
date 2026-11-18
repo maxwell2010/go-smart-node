@@ -63,6 +63,43 @@ type Policy struct {
 	MaxValidators   int
 }
 
+// VerifyBootstrap checks an explicitly provisioned trust anchor and its full
+// canonical block. It never establishes trust from the block itself: anchor and
+// policy must already be authenticated by the trusted module/genesis caller.
+// Unlike VerifyUpdate, this verifies the checkpoint itself, not a height change.
+func VerifyBootstrap(anchor Checkpoint, block *types.LightBlock, now time.Time,
+	policy Policy) (VerifiedCheckpoint, error) {
+	var zero VerifiedCheckpoint
+	if err := policy.validate(); err != nil {
+		return zero, err
+	}
+	if anchor.ChainID != policy.ChainID || anchor.Height <= 0 || anchor.Hash == ([32]byte{}) ||
+		now.IsZero() || now.UTC().Year() < 1 || now.UTC().Year() > 9999 {
+		return zero, errors.New("invalid external checkpoint or evaluation time")
+	}
+	trusted, err := checkedCopy(block, policy)
+	if err != nil {
+		return zero, fmt.Errorf("bootstrap block: %w", err)
+	}
+	if trusted.Height != anchor.Height || !bytes.Equal(trusted.Hash(), anchor.Hash[:]) {
+		return zero, errors.New("bootstrap block does not match the external checkpoint")
+	}
+	if !trusted.Time.Before(now.Add(policy.MaxClockDrift)) {
+		return zero, errors.New("bootstrap block is future dated")
+	}
+	if light.HeaderExpired(trusted.SignedHeader, policy.TrustingPeriod, now) {
+		return zero, errors.New("bootstrap checkpoint has expired")
+	}
+	if err := trusted.ValidatorSet.VerifyCommit(policy.ChainID, trusted.Commit.BlockID,
+		trusted.Height, trusted.Commit); err != nil {
+		return zero, fmt.Errorf("bootstrap commit: %w", err)
+	}
+	verified := VerifiedCheckpoint{Checkpoint: anchor, Time: trusted.Time}
+	copy(verified.AppHash[:], trusted.AppHash)
+	copy(verified.NextValidatorsHash[:], trusted.NextValidatorsHash)
+	return verified, nil
+}
+
 func (p Policy) validate() error {
 	if !chainIDPattern.MatchString(p.ChainID) {
 		return errors.New("invalid policy chain ID")

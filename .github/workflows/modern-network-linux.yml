@@ -177,7 +177,15 @@ jobs:
           go-version: '1.26.11'
           cache: true
           cache-dependency-path: network/go.sum
-      - name: Test trusted light-client updates and canonical quorum signatures
+      - name: Install pinned compiler for the isolated London escrow tests
+        shell: bash
+        run: |
+          SOLC="$RUNNER_TEMP/solc-bridge-0.8.20"
+          curl --fail --location --proto '=https' --tlsv1.2 'https://raw.githubusercontent.com/ethereum/solc-bin/gh-pages/linux-amd64/solc-linux-amd64-v0.8.20+commit.a1b79de6' --output "$SOLC"
+          echo "0479d44fdf9c501c25337fdc540419f1593b884a87b47f023da4f1c700fda782  $SOLC" | sha256sum --check
+          chmod 755 "$SOLC"
+          echo "MCND_BRIDGE_SOLC=$SOLC" >> "$GITHUB_ENV"
+      - name: Test persistent bridge accounting, proofs and London EVM escrow
         working-directory: network
         shell: bash
         run: |
@@ -185,7 +193,7 @@ jobs:
           go mod download
           go mod verify
           git diff --exit-code -- go.mod go.sum
-          go test -mod=readonly -p 2 -count=1 -v -timeout 5m ./bridge/... ./tools/comet_commit_probe |& tee validation-logs/bridge-finality.log
+          go test -mod=readonly -p 2 -tags bridgecontracts -count=1 -v -timeout 8m ./bridge/... ./tools/comet_commit_probe |& tee validation-logs/bridge-finality.log
       - name: Test offline liveness diagnostics and recovery guardrails
         run: |
           python3 -B -m unittest discover -s network/tools -p 'test_consensus_health.py'
