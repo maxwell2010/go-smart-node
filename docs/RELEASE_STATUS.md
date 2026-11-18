@@ -255,8 +255,14 @@ reported as invalid input. A follow-up fixes that legitimate no-proposal
 state and requires a valid stale-source diagnosis. That stricter run
 [rejected the snapshot](https://github.com/maxwell2010/go-smart-node/actions/runs/44249902396)
 because the monitor also needed the Comet 0.38 vote-extension display format.
-Both supported RPC layouts now have regression tests. The corrected process
-gate is pending, not yet verified release evidence.
+Both supported RPC layouts now have regression tests. The corrected
+[process gate](https://github.com/maxwell2010/go-smart-node/actions/runs/44255724857)
+passed on `90690ba`: two live validators stopped at height 17 for 12 seconds,
+the monitor accepted a valid stale-source snapshot, and the original three-
+and four-signer quorums resumed. The new follower matched height 31.
+[Stored process evidence](../network/docs/ru/evidence/quorum-recovery-90690ba-20261118/network.json)
+preserves the report beyond the Actions artifact retention period. This
+scenario uses graceful stops, not a 2/2 network partition or a deployed bridge.
 See [the operator liveness guide](../network/docs/ru/CONSENSUS_LIVENESS.md).
 
 The bridge design selects code-verified finality and state, without a separate
@@ -265,7 +271,10 @@ trusted checkpoint, verifies adjacent or skipping Comet light-client updates,
 checks all present Ed25519 signatures and bounds the trusting policy. It is
 not wired to application transfers, has no RPC bootstrap or persistence, and
 does not yet establish state-proof membership or mainnet bridge readiness.
-The targeted `bridge-finality` Linux scope must pass before recording evidence.
+The targeted [finality and quorum unit scope](https://github.com/maxwell2010/go-smart-node/actions/runs/44255729190)
+passed on `90690ba`, including signature tampering, validator rotation, trust
+expiry and cached-power regressions. The separate ICS-23 storage verifier
+and historical positive-membership conformance fixture still require Linux CI.
 Current upstream IBC Solidity requires Cancun; read-only Decimal simulations
 reject PUSH0 and TSTORE. A compatible reverse verifier remains a release gate.
 

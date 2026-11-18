@@ -1,0 +1,446 @@
+{
+  "status": "PASS",
+  "phase": "complete",
+  "initialHeight": 1,
+  "loopbackOnlyNamespace": true,
+  "sourceCommit": "90690ba964f66d072fc54c47801fa629840c5998",
+  "binarySha256": "5ce1c2db6512e68358536971843aa19a2e62cbc314df353e9b2d70df11af651d",
+  "archiveSha256": "94ed4e531d572c4bc0b1c52707cd003630351386c831bbc87dd1168861ec865d",
+  "genesisSha256": "1eec34e9baa5cb106f5bd8528fc217a4018212ac06918dacec41589de8ac25b7",
+  "chainId": "mintcandy_990012-1",
+  "evmChainId": 990012,
+  "initialConfirmedSigners": [
+    "a",
+    "b",
+    "c",
+    "d"
+  ],
+  "lastStartupCanonicalCommitHeight": 11,
+  "outage": {
+    "stoppedValidator": "d",
+    "stopExitCode": 0,
+    "highestCommittedHeightAfterStop": 12,
+    "firstCanonicalCommitHeight": 14,
+    "lastCanonicalCommitHeight": 16,
+    "signers": [
+      "a",
+      "b",
+      "c"
+    ],
+    "signedPower": 30000,
+    "totalValidatorPower": 40000,
+    "stoppedValidatorPower": 10000,
+    "cryptographicCommit": {
+      "height": 16,
+      "blockHash": "C573974F89392F059CE474E240960307BBDBB47EF5282B1269D73E612A8C8313",
+      "appHash": "F5C80688BF7F5AC667C86996096A84EC55E5152914A71773C421987AA9AA82E3",
+      "verifiedEd25519Signatures": 3,
+      "signedPower": 30000,
+      "totalPower": 40000
+    }
+  },
+  "haltMonitor": {
+    "schema_version": 1,
+    "cryptographically_verified": false,
+    "bridge_execution_authorized": false,
+    "pause_new_bridge_processing": true,
+    "action_scope": "monitor recommendation only; no chain or contract state is changed",
+    "valid_snapshot": true,
+    "reasons": [
+      "stale or future-dated source block"
+    ],
+    "round_observations": {
+      "height": 18,
+      "round": 0,
+      "step": 4,
+      "proposal_block_hash": null,
+      "proposal_observed": false,
+      "total_power": 40000,
+      "required_power": 26667,
+      "validator_count": 4,
+      "scope": "unverified abbreviated RPC vote observations",
+      "prevotes": {
+        "observed_power_matching_proposal_prefix": 0,
+        "observed_percent": "0.0000",
+        "observation_reaches_threshold": false,
+        "missing_power_to_threshold": 26667,
+        "observed_nil_block_power": 20000,
+        "observed_other_block_power": 0,
+        "missing_votes": [
+          {
+            "address": "443B9E5B75BD59906BE10A9C78DE6CB8402E3795",
+            "power": 10000
+          },
+          {
+            "address": "66DFE389A3B259688E14E6B2EADA2689393EA6C5",
+            "power": 10000
+          }
+        ]
+      },
+      "precommits": {
+        "observed_power_matching_proposal_prefix": 0,
+        "observed_percent": "0.0000",
+        "observation_reaches_threshold": false,
+        "missing_power_to_threshold": 26667,
+        "observed_nil_block_power": 0,
+        "observed_other_block_power": 0,
+        "missing_votes": [
+          {
+            "address": "443B9E5B75BD59906BE10A9C78DE6CB8402E3795",
+            "power": 10000
+          },
+          {
+            "address": "66DFE389A3B259688E14E6B2EADA2689393EA6C5",
+            "power": 10000
+          },
+          {
+            "address": "79F4774BAC389BD7287AACBE26630BFC506FE9AC",
+            "power": 10000
+          },
+          {
+            "address": "9173F469536E31517DC953FE46F00BBF3E6AE1F2",
+            "power": 10000
+          }
+        ]
+      }
+    },
+    "failure_groups": {},
+    "operator_diversity_evaluated": false,
+    "notice": "Fresh matching RPC observations never prove finality or current signer availability. Source identities and failure-group membership are supplied, not independently verified."
+  },
+  "quorumLoss": {
+    "liveValidators": [
+      "a",
+      "b"
+    ],
+    "livePower": 20000,
+    "totalPower": 40000,
+    "lastCommittedHeight": 17,
+    "drainAllowanceBlocks": 2,
+    "drainSeconds": 5,
+    "quietSeconds": 12,
+    "quietSamples": 48,
+    "bridgeMustPauseNewProcessing": true,
+    "checkpoint": {
+      "validators_hash": "5C6B9C0DE90A1DA24D10441F5998B55C29067CCDDCCABB7E7A11CF6F7FBCACBB",
+      "next_validators_hash": "5C6B9C0DE90A1DA24D10441F5998B55C29067CCDDCCABB7E7A11CF6F7FBCACBB",
+      "app_hash": "B429B89BBF72D5EC80E5EA671355CC28423EA204DC4026A8F33D8179AEB715C4",
+      "block_hash": "801599FA560D2C93BDC3C179C5590D2A2529BD0E93B3E90E566340ACC7F0B986",
+      "proposer_address": "443B9E5B75BD59906BE10A9C78DE6CB8402E3795"
+    },
+    "persistedAppHash": "9D4086C6E8E093D32F6D32AE62B1674EF83207CE0472F5463D252C810839A4BF",
+    "monitor": {
+      "schema_version": 1,
+      "cryptographically_verified": false,
+      "bridge_execution_authorized": false,
+      "pause_new_bridge_processing": true,
+      "action_scope": "monitor recommendation only; no chain or contract state is changed",
+      "valid_snapshot": true,
+      "reasons": [
+        "stale or future-dated source block"
+      ],
+      "round_observations": {
+        "height": 18,
+        "round": 0,
+        "step": 4,
+        "proposal_block_hash": null,
+        "proposal_observed": false,
+        "total_power": 40000,
+        "required_power": 26667,
+        "validator_count": 4,
+        "scope": "unverified abbreviated RPC vote observations",
+        "prevotes": {
+          "observed_power_matching_proposal_prefix": 0,
+          "observed_percent": "0.0000",
+          "observation_reaches_threshold": false,
+          "missing_power_to_threshold": 26667,
+          "observed_nil_block_power": 20000,
+          "observed_other_block_power": 0,
+          "missing_votes": [
+            {
+              "address": "443B9E5B75BD59906BE10A9C78DE6CB8402E3795",
+              "power": 10000
+            },
+            {
+              "address": "66DFE389A3B259688E14E6B2EADA2689393EA6C5",
+              "power": 10000
+            }
+          ]
+        },
+        "precommits": {
+          "observed_power_matching_proposal_prefix": 0,
+          "observed_percent": "0.0000",
+          "observation_reaches_threshold": false,
+          "missing_power_to_threshold": 26667,
+          "observed_nil_block_power": 0,
+          "observed_other_block_power": 0,
+          "missing_votes": [
+            {
+              "address": "443B9E5B75BD59906BE10A9C78DE6CB8402E3795",
+              "power": 10000
+            },
+            {
+              "address": "66DFE389A3B259688E14E6B2EADA2689393EA6C5",
+              "power": 10000
+            },
+            {
+              "address": "79F4774BAC389BD7287AACBE26630BFC506FE9AC",
+              "power": 10000
+            },
+            {
+              "address": "9173F469536E31517DC953FE46F00BBF3E6AE1F2",
+              "power": 10000
+            }
+          ]
+        }
+      },
+      "failure_groups": {},
+      "operator_diversity_evaluated": false,
+      "notice": "Fresh matching RPC observations never prove finality or current signer availability. Source identities and failure-group membership are supplied, not independently verified."
+    },
+    "stoppedSigningStateSha256": {
+      "c": "69bb0b02a939c31c20f434d350409337d70f6cc9435cb0aa9699afed987d6857",
+      "d": "af7f26d8b6eca610fe355ba1a08c1dbef8f7c6e9319092b5fb8c4451ba408b54"
+    }
+  },
+  "quorumRecovery": {
+    "height": 19,
+    "blockHash": "EC0FBE5AE78CEDC5452837884CA5D7C9A0065BBCE79006C915D21CC4590B4791",
+    "appHash": "A983B7390159054425C31BA631B3C3FE2052904E6A8D0364814F19DD87E43874",
+    "verifiedEd25519Signatures": 3,
+    "signedPower": 30000,
+    "totalPower": 40000,
+    "signingStatePreserved": true
+  },
+  "fourSignerRecovery": {
+    "height": 26,
+    "blockHash": "0BAF9DD2136FCB61161DE280BB18CC8EEB974E9799A6CE8C232C0AAD3380EF34",
+    "appHash": "2E73D4E10DD280FF54C3F1218B7E8305E5081AF598580468148EE616D2C7785C",
+    "verifiedEd25519Signatures": 4,
+    "signedPower": 40000,
+    "totalPower": 40000,
+    "originalHomes": true,
+    "signingStatePreserved": true,
+    "consensusThresholdUnchanged": true
+  },
+  "validatorHeightBeforeJoin": 27,
+  "block1Hash": "216DEB483EC242905F340F8408C3908C5B69518886C3C4DD4A91FD2533268023",
+  "verifiedHeight": 31,
+  "appHash": "8B5FE6DB895AB1DB46C5B5AE3F4C514B0D6239DE28F542E584DF8932AC9B2E64",
+  "validators": {
+    "a": 10000,
+    "b": 10000,
+    "c": 10000,
+    "d": 10000
+  },
+  "confirmedSigners": [
+    "a",
+    "b",
+    "c",
+    "d"
+  ],
+  "followerVotingPower": 0,
+  "rpc": {
+    "historicalHeight": 1,
+    "verifiedHeight": 31,
+    "delAtomic": "45000000000000000000000"
+  },
+  "listeners": [
+    "127.0.0.1:1317",
+    "127.0.0.1:1327",
+    "127.0.0.1:1337",
+    "127.0.0.1:1347",
+    "127.0.0.1:1357",
+    "127.0.0.1:28656",
+    "127.0.0.1:28657",
+    "127.0.0.1:29656",
+    "127.0.0.1:29657",
+    "127.0.0.1:30656",
+    "127.0.0.1:30657",
+    "127.0.0.1:31656",
+    "127.0.0.1:31657",
+    "127.0.0.1:32656",
+    "127.0.0.1:32657",
+    "127.0.0.1:6060",
+    "127.0.0.1:8645",
+    "127.0.0.1:8646",
+    "127.0.0.1:8745",
+    "127.0.0.1:8746",
+    "127.0.0.1:8845",
+    "127.0.0.1:8846",
+    "127.0.0.1:8945",
+    "127.0.0.1:8946",
+    "127.0.0.1:9045",
+    "127.0.0.1:9046",
+    "127.0.0.1:9190",
+    "127.0.0.1:9290",
+    "127.0.0.1:9390",
+    "127.0.0.1:9490",
+    "127.0.0.1:9590"
+  ],
+  "configuredPersistentPeers": {
+    "a": [
+      "e8bf6aa8a4cd3c14c01eb170c03415ae312294d7@127.0.0.1:29656",
+      "8e5aa48ad5b3b5c8972d8c90cc4ad7dec2f09eb2@127.0.0.1:30656",
+      "b025d401604d66b1ad8d5049c04ec8531477e36d@127.0.0.1:31656"
+    ],
+    "b": [
+      "e3cbde3435235b0d42dd02be5c83a51c99df3428@127.0.0.1:28656",
+      "8e5aa48ad5b3b5c8972d8c90cc4ad7dec2f09eb2@127.0.0.1:30656",
+      "b025d401604d66b1ad8d5049c04ec8531477e36d@127.0.0.1:31656"
+    ],
+    "c": [
+      "e3cbde3435235b0d42dd02be5c83a51c99df3428@127.0.0.1:28656",
+      "e8bf6aa8a4cd3c14c01eb170c03415ae312294d7@127.0.0.1:29656",
+      "b025d401604d66b1ad8d5049c04ec8531477e36d@127.0.0.1:31656"
+    ],
+    "d": [
+      "e3cbde3435235b0d42dd02be5c83a51c99df3428@127.0.0.1:28656",
+      "e8bf6aa8a4cd3c14c01eb170c03415ae312294d7@127.0.0.1:29656",
+      "8e5aa48ad5b3b5c8972d8c90cc4ad7dec2f09eb2@127.0.0.1:30656"
+    ],
+    "follower": [
+      "e3cbde3435235b0d42dd02be5c83a51c99df3428@127.0.0.1:28656",
+      "e8bf6aa8a4cd3c14c01eb170c03415ae312294d7@127.0.0.1:29656",
+      "8e5aa48ad5b3b5c8972d8c90cc4ad7dec2f09eb2@127.0.0.1:30656"
+    ]
+  },
+  "observedPeers": {
+    "a": [
+      {
+        "node": "b",
+        "nodeId": "e8bf6aa8a4cd3c14c01eb170c03415ae312294d7",
+        "address": "127.0.0.1:29656",
+        "remoteIP": "127.0.0.1",
+        "outbound": false
+      },
+      {
+        "node": "c",
+        "nodeId": "8e5aa48ad5b3b5c8972d8c90cc4ad7dec2f09eb2",
+        "address": "127.0.0.1:30656",
+        "remoteIP": "127.0.0.1",
+        "outbound": false
+      },
+      {
+        "node": "d",
+        "nodeId": "b025d401604d66b1ad8d5049c04ec8531477e36d",
+        "address": "127.0.0.1:31656",
+        "remoteIP": "127.0.0.1",
+        "outbound": false
+      },
+      {
+        "node": "follower",
+        "nodeId": "945c0c6e8b05cdc99c44afe69264816bd8fea980",
+        "address": "127.0.0.1:32656",
+        "remoteIP": "127.0.0.1",
+        "outbound": false
+      }
+    ],
+    "b": [
+      {
+        "node": "a",
+        "nodeId": "e3cbde3435235b0d42dd02be5c83a51c99df3428",
+        "address": "127.0.0.1:28656",
+        "remoteIP": "127.0.0.1",
+        "outbound": true
+      },
+      {
+        "node": "c",
+        "nodeId": "8e5aa48ad5b3b5c8972d8c90cc4ad7dec2f09eb2",
+        "address": "127.0.0.1:30656",
+        "remoteIP": "127.0.0.1",
+        "outbound": true
+      },
+      {
+        "node": "d",
+        "nodeId": "b025d401604d66b1ad8d5049c04ec8531477e36d",
+        "address": "127.0.0.1:31656",
+        "remoteIP": "127.0.0.1",
+        "outbound": false
+      },
+      {
+        "node": "follower",
+        "nodeId": "945c0c6e8b05cdc99c44afe69264816bd8fea980",
+        "address": "127.0.0.1:32656",
+        "remoteIP": "127.0.0.1",
+        "outbound": false
+      }
+    ],
+    "c": [
+      {
+        "node": "a",
+        "nodeId": "e3cbde3435235b0d42dd02be5c83a51c99df3428",
+        "address": "127.0.0.1:28656",
+        "remoteIP": "127.0.0.1",
+        "outbound": true
+      },
+      {
+        "node": "b",
+        "nodeId": "e8bf6aa8a4cd3c14c01eb170c03415ae312294d7",
+        "address": "127.0.0.1:29656",
+        "remoteIP": "127.0.0.1",
+        "outbound": false
+      },
+      {
+        "node": "d",
+        "nodeId": "b025d401604d66b1ad8d5049c04ec8531477e36d",
+        "address": "127.0.0.1:31656",
+        "remoteIP": "127.0.0.1",
+        "outbound": false
+      },
+      {
+        "node": "follower",
+        "nodeId": "945c0c6e8b05cdc99c44afe69264816bd8fea980",
+        "address": "127.0.0.1:32656",
+        "remoteIP": "127.0.0.1",
+        "outbound": false
+      }
+    ],
+    "d": [
+      {
+        "node": "a",
+        "nodeId": "e3cbde3435235b0d42dd02be5c83a51c99df3428",
+        "address": "127.0.0.1:28656",
+        "remoteIP": "127.0.0.1",
+        "outbound": true
+      },
+      {
+        "node": "b",
+        "nodeId": "e8bf6aa8a4cd3c14c01eb170c03415ae312294d7",
+        "address": "127.0.0.1:29656",
+        "remoteIP": "127.0.0.1",
+        "outbound": true
+      },
+      {
+        "node": "c",
+        "nodeId": "8e5aa48ad5b3b5c8972d8c90cc4ad7dec2f09eb2",
+        "address": "127.0.0.1:30656",
+        "remoteIP": "127.0.0.1",
+        "outbound": true
+      }
+    ],
+    "follower": [
+      {
+        "node": "a",
+        "nodeId": "e3cbde3435235b0d42dd02be5c83a51c99df3428",
+        "address": "127.0.0.1:28656",
+        "remoteIP": "127.0.0.1",
+        "outbound": true
+      },
+      {
+        "node": "b",
+        "nodeId": "e8bf6aa8a4cd3c14c01eb170c03415ae312294d7",
+        "address": "127.0.0.1:29656",
+        "remoteIP": "127.0.0.1",
+        "outbound": true
+      },
+      {
+        "node": "c",
+        "nodeId": "8e5aa48ad5b3b5c8972d8c90cc4ad7dec2f09eb2",
+        "address": "127.0.0.1:30656",
+        "remoteIP": "127.0.0.1",
+        "outbound": true
+      }
+    ]
+  }
+}
