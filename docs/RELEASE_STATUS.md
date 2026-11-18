@@ -273,8 +273,15 @@ not wired to application transfers, has no RPC bootstrap or persistence, and
 does not yet establish state-proof membership or mainnet bridge readiness.
 The targeted [finality and quorum unit scope](https://github.com/maxwell2010/go-smart-node/actions/runs/44255729190)
 passed on `90690ba`, including signature tampering, validator rotation, trust
-expiry and cached-power regressions. The separate ICS-23 storage verifier
-and historical positive-membership conformance fixture still require Linux CI.
+expiry and cached-power regressions. The combined
+[finality, storage and quorum scope](https://github.com/maxwell2010/go-smart-node/actions/runs/44258136467)
+passed on `6b4f587`. It verified the fixed historical ContractCenter storage
+membership at state height 34604902 against the observed header 34604903 root,
+plus tampered claim, root, path, height and malformed-proof rejection. This is
+Merkle-format conformance, not authenticated mainnet bootstrap or a bridge
+deposit. [Stored validation summary](../network/docs/ru/evidence/bridge-primitives-6b4f587-20261118/summary.json).
+The verifiers are not wired to a persistent client keeper, transfer replay
+journal, escrow, or token release. Those integration gates remain open.
 Current upstream IBC Solidity requires Cancun; read-only Decimal simulations
 reject PUSH0 and TSTORE. A compatible reverse verifier remains a release gate.
 

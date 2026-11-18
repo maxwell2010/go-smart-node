@@ -1,0 +1,24 @@
+{
+  "status": "PASS",
+  "sourceCommit": "6b4f5878850b338da91acfda6732a87bcac884c1",
+  "workflowRun": 44258136467,
+  "workflowUrl": "https://github.com/maxwell2010/go-smart-node/actions/runs/44258136467",
+  "validatedPackages": [
+    "github.com/maxwell2010/go-smart-node/network/bridge/finality",
+    "github.com/maxwell2010/go-smart-node/network/bridge/storage",
+    "github.com/maxwell2010/go-smart-node/network/tools/comet_commit_probe"
+  ],
+  "historicalMembershipFixture": {
+    "stateHeight": 34604902,
+    "headerHeight": 34604903,
+    "sha256": "a6162a20e4606c7e921fa0a8350dfd05b64b1421a842f9b5c8f240133d349103",
+    "scope": "ContractCenter storage membership conformance; not authenticated bridge escrow or bootstrap"
+  },
+  "scope": "Pure finality/storage verifiers and isolated commit probe; no app wiring or payments",
+  "limits": [
+    "External authenticated checkpoint and policy required",
+    "No keeper persistence or fork monitoring",
+    "No escrow deployment, bank mint/release or replay journal",
+    "Reverse EVM verifier and full two-chain bridge tests remain pending"
+  ]
+}
