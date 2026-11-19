@@ -85,6 +85,52 @@ jobs:
             '.binarySha256 == $sha and .sourceRevision == $commit and .releaseVersion == $version and .includesGenesis == false and .networkLaunchApproved == false' \
             "$release_work/evidence/install.json" >/dev/null
           printf '%s  %s\n' "$RELEASE_BINARY_SHA" "$release_work/bin/mcnd" | sha256sum --check --strict
+      - name: Capture launch parameters from the installed binary
+        shell: bash
+        run: |
+          set -euo pipefail
+          umask 077
+          defaults_home=$(mktemp -d "$RELEASE_WORK/defaults.XXXXXXXX")
+          binary="$RELEASE_WORK/bin/mcnd"
+          env -i PATH="$PATH" HOME="$defaults_home" TZ=UTC "$binary" init launch-parameter-review \
+            --home "$defaults_home" --chain-id mintcandy_990013-1 --evm.evm-chain-id 990013 >/dev/null 2>&1
+          env -i PATH="$PATH" HOME="$defaults_home" TZ=UTC "$binary" genesis validate-genesis \
+            --home "$defaults_home" --evm.evm-chain-id 990013 >/dev/null 2>&1
+          python3 -B - "$defaults_home" "$RELEASE_WORK/evidence" <<'PY'
+          import json
+          from pathlib import Path
+          import sys
+          import tomllib
+
+          home, evidence = map(Path, sys.argv[1:])
+          config = home / 'config'
+          genesis = json.loads((config / 'genesis.json').read_bytes())
+          install = json.loads((evidence / 'install.json').read_bytes())
+          state = genesis['app_state']
+          consensus = genesis['consensus']
+          assert genesis['chain_id'] == 'mintcandy_990013-1' and genesis['initial_height'] == 1
+          assert not consensus.get('validators') and not state['bank'].get('balances')
+          assert not state.get('withdrawal_settlement') and not state['validator'].get('validators')
+          gov = state['gov']['params']
+          for field in ('min_deposit', 'expedited_min_deposit'):
+              assert len(gov[field]) == 1 and gov[field][0]['denom'] == 'del'
+          with (config / 'app.toml').open('rb') as source:
+              app = tomllib.load(source)
+          metadata = next(row for row in state['bank']['denom_metadata'] if row['base'] == 'del')
+          report = dict(
+              status='INSTALLED_BINARY_DEFAULTS', chainId=genesis['chain_id'],
+              releaseVersion=install['releaseVersion'], sourceRevision=install['sourceRevision'],
+              binarySha256=install['binarySha256'], genesisValidatePassed=True,
+              publicGenesisApproved=False, consensus=consensus['params'],
+              feeMarket=state['feemarket']['params'], governance=gov,
+              nativeValidators=state['validator']['params'], mint=state['mint'],
+              displayDenom=metadata['display'], denomUnits=metadata['denom_units'],
+              localMinimumGasPrices=app['minimum-gas-prices'],
+          )
+          with (evidence / 'default-launch-parameters.json').open('x', encoding='utf-8') as out:
+              json.dump(report, out, indent=2, sort_keys=True)
+              out.write('\n')
+          PY
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e
         with:
           go-version: '1.26.11'
