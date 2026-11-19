@@ -1,0 +1,39 @@
+name: Isolated media storage validation
+on:
+  workflow_dispatch:
+  push:
+    branches: ['feat/native-duplicate-vote-master-20261112', 'integration/**', 'release/**']
+    paths: ['network/media/**', '.github/workflows/media-validation.yml']
+  pull_request:
+    paths: ['network/media/**', '.github/workflows/media-validation.yml']
+permissions:
+  contents: read
+jobs:
+  decode-store-restore:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    env:
+      PYTHONDONTWRITEBYTECODE: '1'
+      MCND_MEDIA_TEST_FULL: '1'
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - name: Install the pinned isolated image decoder
+        run: |
+          set -euo pipefail
+          python3 -m venv "$RUNNER_TEMP/media-venv"
+          "$RUNNER_TEMP/media-venv/bin/pip" install --only-binary=:all: --require-hashes -r network/media/requirements-linux-cp312.lock
+      - name: Test decoding, ownership boundaries, quotas and exact backup restore
+        run: |
+          set -euo pipefail
+          export PYTHONPATH="$GITHUB_WORKSPACE/network/media"
+          "$RUNNER_TEMP/media-venv/bin/python" -B -m unittest discover -v -s network/media/tests -p 'test_*.py' 2>&1 | tee "$RUNNER_TEMP/media-validation.log"
+          git diff --exit-code
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+        if: always()
+        with:
+          name: media-validation-${{ github.sha }}
+          path: ${{ runner.temp }}/media-validation.log
+          if-no-files-found: warn
+          retention-days: 30
