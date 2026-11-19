@@ -1,0 +1,8 @@
+{
+  "genesisTimeUtc": "2026-01-01T00:00:00Z",
+  "maxValidators": 16,
+  "minGasPriceAtoms": "1000000000",
+  "govMinDepositAtoms": "10000000000000000000",
+  "govExpeditedMinDepositAtoms": "50000000000000000000",
+  "govMinInitialDepositRatio": "0.01"
+}

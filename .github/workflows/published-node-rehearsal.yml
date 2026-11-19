@@ -135,7 +135,7 @@ jobs:
         with:
           go-version: '1.26.11'
           cache-dependency-path: network/go.sum
-      - name: Generate the isolated four-validator genesis and signature checker
+      - name: Generate the disposable operator fixture and signature checker
         shell: bash
         working-directory: network
         run: |
@@ -145,7 +145,7 @@ jobs:
           go mod verify
           git diff --exit-code -- go.mod go.sum
           export MCND_NATIVE_CONSENSUS_FIXTURE_DIR="$RELEASE_WORK/fixture"
-          export MCND_NATIVE_LAUNCH_REHEARSAL=4-empty
+          export MCND_NATIVE_LAUNCH_REHEARSAL=4-empty-sponsored
           if ! (
             go test -mod=readonly -p 2 -count=1 -timeout 8m -json \
               -run '^TestOwnedAppSignedRegistryBootstrap$/^authenticated_isolated_position_reader$' ./systemcontracts &&
@@ -157,7 +157,37 @@ jobs:
             exit 1
           fi
           go build -mod=readonly -p 2 -trimpath -o "$RELEASE_WORK/comet-commit-probe" ./tools/comet_commit_probe
-          python3 -B tools/native_launch_allocation.py --genesis "$RELEASE_WORK/fixture/public/genesis.json" \
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: ${{ github.sha }}
+          path: launch-assembly
+          persist-credentials: false
+      - name: Build the isolated genesis with the offline assembler
+        shell: bash
+        working-directory: launch-assembly/network
+        run: |
+          set -euo pipefail
+          umask 077
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          go mod verify
+          git diff --exit-code -- go.mod go.sum
+          root="$RELEASE_WORK"
+          mkdir -m 700 -p "$root/assembled/public"
+          go build -mod=readonly -p 2 -trimpath -o "$root/mcnd-genesis" ./cmd/mcnd-genesis
+          "$root/mcnd-genesis" addresses --chain-id mintcandy_990014-1 --evm-chain-id 990014 > "$root/roles.json"
+          python3 -B tools/test_founding_ledger_fixture.py --source "$root/fixture" --roles "$root/roles.json" --output "$root/ledger.json"
+          genesis="$root/assembled/public/genesis.json"
+          inputs=(--ledger "$root/ledger.json" --parameters tools/fixtures/founding-genesis-ci-parameters.json --genesis "$genesis")
+          "$root/mcnd-genesis" build "${inputs[@]}"
+          "$root/mcnd-genesis" verify "${inputs[@]}" > "$root/evidence/assembly.json"
+          install -m 600 "$genesis" "$root/assembled/genesis.json"
+          install -m 600 "$root/fixture/"priv_validator_key_{a,b,c,d}.json "$root/assembled/"
+          jq '{chainId, evmChainId, actor, actorNative,
+            validators: [.validators[] | {name, initialPower, consensusAddress, publicKey}]}' \
+            "$root/fixture/expectations.json" > "$root/assembled/expectations.json"
+          MCND_FOUNDING_LEDGER_SOURCE="$root/fixture" MCND_FOUNDING_LEDGER_FIXTURE="$root/assembled" MCND_FOUNDING_LEDGER_ROLES="$root/roles.json" \
+            python3 -B -m unittest discover -s tools -p test_founding_ledger_fixture.py -v
+          python3 -B tools/native_launch_allocation.py --genesis "$genesis" \
             --output "$RELEASE_WORK/evidence/allocation.json" \
             --allocation-plan docs/ru/public-launch-allocation.draft.json
       - name: Verify quorum recovery, follower replay and systemd snapshot sync
@@ -169,10 +199,11 @@ jobs:
             shift
             local status=0 report="$RELEASE_WORK/evidence/$name.json"
             sudo -n unshare --net -- bash -euc 'ip link set lo up; exec "$@"' _ \
-              env TMPDIR="$RELEASE_WORK" "$(command -v python3)" -B "$GITHUB_WORKSPACE/network/tools/native_launch_rehearsal.py" \
+              env TMPDIR="$RELEASE_WORK" "$(command -v python3)" -B "$GITHUB_WORKSPACE/launch-assembly/network/tools/native_launch_rehearsal.py" \
               --binary "$RELEASE_WORK/bin/mcnd" --binary-sha256 "$RELEASE_BINARY_SHA" \
               --archive-sha256 "$RELEASE_ARCHIVE_SHA" --source-commit "$RELEASE_SOURCE" \
-              --fixture "$RELEASE_WORK/fixture" --home-parent "$RELEASE_WORK" \
+              --fixture "$RELEASE_WORK/assembled" --home-parent "$RELEASE_WORK" \
+              --assembly-report "$RELEASE_WORK/evidence/assembly.json" \
               --report "$report" --four-validators --empty-user-assets "$@" || status=$?
             if [[ -f "$report" ]]; then
               sudo -n chown "$(id -u):$(id -g)" "$report"
@@ -181,8 +212,15 @@ jobs:
             return "$status"
           }
           run_rehearsal quorum --quorum-loss-recovery --commit-probe "$RELEASE_WORK/comet-commit-probe"
-          run_rehearsal systemd --package-genesis "$RELEASE_WORK/fixture/public/genesis.json" \
+          run_rehearsal systemd --package-genesis "$RELEASE_WORK/assembled/public/genesis.json" \
             --systemd-follower --restart-and-snapshot
+          genesis_sha=$(sha256sum "$RELEASE_WORK/assembled/public/genesis.json" | cut -d' ' -f1)
+          jq -e --arg sha "$genesis_sha" '.status == "PASS" and .loopbackOnlyNamespace and .offlineAssembledGenesis and
+            .genesisSha256 == $sha and .followerVotingPower == 0 and .quorumRecovery.verifiedEd25519Signatures == 3 and
+            .fourSignerRecovery.verifiedEd25519Signatures == 4' "$RELEASE_WORK/evidence/quorum.json"
+          jq -e --arg sha "$genesis_sha" '.status == "PASS" and .loopbackOnlyNamespace and .offlineAssembledGenesis and
+            .genesisSha256 == $sha and .systemdFollower.genesisSha256 == $sha and
+            .systemdRestart.sameHome and (.stateSync.restoredHeight > 1)' "$RELEASE_WORK/evidence/systemd.json"
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
         if: always() && env.RELEASE_WORK != ''
         with:

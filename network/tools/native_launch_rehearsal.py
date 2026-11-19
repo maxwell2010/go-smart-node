@@ -28,9 +28,10 @@ from withdrawal_genesis_smoke import ADDRESS, SHA256, bech32_payload, check, eth
 GENESIS_LIMIT = 64 * 1024 * 1024
 
 
-def load_fixture(directory, *, four_validators=False, empty_user_assets=False):
+def load_fixture(directory, *, four_validators=False, empty_user_assets=False, assembly_report=None):
     if four_validators:
-        evm_id, labels, powers = (990013 if empty_user_assets else 990012), ("a", "b", "c", "d"), (10000, 10000, 10000, 10000)
+        evm_id = 990014 if assembly_report is not None else (990013 if empty_user_assets else 990012)
+        labels, powers = ("a", "b", "c", "d"), (10000, 10000, 10000, 10000)
     else:
         evm_id, labels, powers = 990011, ("a", "b", "c"), (4, 4, 2)
     chain_id = f"mintcandy_{evm_id}-1"
@@ -39,6 +40,14 @@ def load_fixture(directory, *, four_validators=False, empty_user_assets=False):
     genesis = private_bytes(directory / "genesis.json", GENESIS_LIMIT)
     public_genesis = private_bytes(directory / "public/genesis.json", GENESIS_LIMIT)
     check(genesis == public_genesis, "public genesis differs from the exact launch fixture")
+    if assembly_report is not None:
+        checked = json.loads(private_bytes(assembly_report, 8192))
+        genesis_sha = hashlib.sha256(genesis).hexdigest()
+        check(checked["status"] == "CANDIDATE_INIT_CHAIN_VERIFIED" and checked["genesisSha256"] == genesis_sha and
+              (checked["chainId"], checked["evmChainId"], checked["validators"], checked["votingPower"]) ==
+              (chain_id, str(evm_id), len(labels), sum(powers)) and checked["bankBalances"] == 8 and
+              checked["initialSupplyAtoms"] == str(5_041_000 * 10**18) and checked["publicGenesisApproved"] is False,
+              "assembled fixture differs from the cold-verified isolated genesis")
     doc = json.loads(genesis)
     state = doc["app_state"]
     profile = state["withdrawal_settlement"]
@@ -62,6 +71,7 @@ def load_fixture(directory, *, four_validators=False, empty_user_assets=False):
         check(int(allocation["initialSupplyAtomic"]) == 5_041_000 * 10**18 and
               all(row["delegator"] == expected["actorNative"] for row in allocation["genesisDelegations"]) and
               len(allocation["genesisDelegations"]) == 4, "empty launch differs from founder allocation")
+        expected["founderBalanceAtomic"] = str(5_000_000 * 10**18)
         check(profile.get("test_grace_until_height", 0) == 0 and int(doc["consensus_params"]["block"]["max_gas"]) == 24_000_000,
               "empty launch must use production penalty and gas rules")
     validators = expected["validators"]
@@ -600,6 +610,8 @@ def run_launch(binary, root, genesis, expected, keys, env, owner, report, *, fou
     check(len(values) == 1 and next(iter(values)) > 0, "nodes disagree on the positive native and EVM balance")
     first_balance = balance(expected["actor"], expected["actorNative"], 1, follower.evm, follower.rest)
     check(first_balance == next(iter(values)), "ordinary peer cannot query the same funded state at block 1")
+    if "founderBalanceAtomic" in expected:
+        check(str(first_balance) == expected["founderBalanceAtomic"], "founder balance differs from the launch plan")
     report["rpc"] = {"historicalHeight": 1, "verifiedHeight": height, "delAtomic": str(first_balance)}
     report.update(verify_network(nodes, follower, configured, env, stopped=stopped))
     if systemd is not None:
@@ -626,6 +638,7 @@ def main(argv=None, signals=None):
         parser.add_argument("--" + flag, required=True)
     parser.add_argument("--four-validators", action="store_true", help="check quorum and peer catchup after stopping one of four validators")
     parser.add_argument("--empty-user-assets", action="store_true", help="rehearse the isolated four-validator founder allocation without user assets")
+    parser.add_argument("--assembly-report", type=Path, help="cold verification report for the offline-assembled isolated genesis")
     parser.add_argument("--quorum-loss-recovery", action="store_true", help="halt safely with two of four validators and recover original signers")
     parser.add_argument("--commit-probe", type=Path, help="owned Comet Ed25519 commit verifier")
     parser.add_argument("--treasury-transfer", action="store_true", help="check the signed transfer pair on the four-validator fixture")
@@ -638,6 +651,8 @@ def main(argv=None, signals=None):
     args = parser.parse_args(argv)
     if args.empty_user_assets and (not args.four_validators or args.treasury_transfer):
         parser.error("--empty-user-assets requires four validators and no treasury transfer fixture")
+    if args.assembly_report and not args.empty_user_assets:
+        parser.error("--assembly-report requires --empty-user-assets")
     if args.quorum_loss_recovery and (not args.four_validators or args.commit_probe is None):
         parser.error("--quorum-loss-recovery requires --four-validators and --commit-probe")
     if args.commit_probe is not None and not args.quorum_loss_recovery:
@@ -665,8 +680,10 @@ def main(argv=None, signals=None):
             with open(binary, "rb") as daemon:
                 check(hashlib.file_digest(daemon, "sha256").hexdigest() == args.binary_sha256, "packaged daemon hash differs")
             genesis, expected, keys = load_fixture(Path(args.fixture), four_validators=args.four_validators,
-                                                   empty_user_assets=args.empty_user_assets)
+                                                   empty_user_assets=args.empty_user_assets, assembly_report=args.assembly_report)
             report["emptyUserAssetGenesis"] = args.empty_user_assets
+            if args.assembly_report:
+                report["offlineAssembledGenesis"] = True
             if args.package_genesis:
                 packaged_genesis = private_bytes(args.package_genesis, GENESIS_LIMIT)
                 check(packaged_genesis == genesis, "verified package genesis differs from the cold-init fixture")

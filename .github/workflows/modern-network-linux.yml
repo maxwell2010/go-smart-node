@@ -123,17 +123,7 @@ jobs:
           go build -mod=readonly -p 2 -trimpath -o "$root/mcnd-genesis" ./cmd/mcnd-genesis
           "$root/mcnd-genesis" addresses --chain-id mintcandy_990014-1 --evm-chain-id 990014 > "$root/roles.json"
           python3 -B tools/test_founding_ledger_fixture.py --source "$root/source" --roles "$root/roles.json" --output "$root/assembly-ledger.json"
-          cat > "$root/parameters.json" <<'JSON'
-          {
-            "genesisTimeUtc": "2026-01-01T00:00:00Z",
-            "maxValidators": 16,
-            "minGasPriceAtoms": "1000000000",
-            "govMinDepositAtoms": "10000000000000000000",
-            "govExpeditedMinDepositAtoms": "50000000000000000000",
-            "govMinInitialDepositRatio": "0.01"
-          }
-          JSON
-          common=(--ledger "$root/assembly-ledger.json" --parameters "$root/parameters.json")
+          common=(--ledger "$root/assembly-ledger.json" --parameters tools/fixtures/founding-genesis-ci-parameters.json)
           genesis="$root/assembled/public/genesis.json"
           "$root/mcnd-genesis" build "${common[@]}" --genesis "$genesis"
           "$root/mcnd-genesis" build "${common[@]}" --genesis "$root/rebuilt.json"
