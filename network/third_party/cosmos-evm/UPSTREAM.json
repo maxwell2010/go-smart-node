@@ -1,5 +1,6 @@
 {
   "addedFiles": {
+    "mempool/reserve_fee_test.go": "06c28e5e870e5af8d794999939a7bbc062ab3bade1ee0717ff783967841f020c",
     "x/vm/keeper/native_work.go": "01ce287a18b47d19233a6ba984909a46a3406a6829e0d1604b02321f42647986"
   },
   "canonicalFiles": {
@@ -1241,6 +1242,7 @@
     "x/vm/wrappers/testutil/mock.go": "08254697a611a729e41d0e3ba5bc94e5f02f06fd35141666612592694aa305b4"
   },
   "modifiedFiles": {
+    "mempool/mempool.go": "b0d7c0ce7e1a2c67d9bf9b0bdf9a4cc24dcdec5fe1feb8e470b1f712516d3157",
     "rpc/backend/comet_to_eth.go": "8bdc539b6c6247fbc2c93ca99b78e40476300205fb3ab9c114b98f62b9cdf155",
     "rpc/backend/tx_info.go": "9edce2233fa9b8afee3fbac8a3d3792b5775d768778a4363ce70b62b2a38e2ce",
     "rpc/backend/tx_info_test.go": "cf19430031f644afe517f5d2a242cd40f320afbf722ba527f94e2ebe66d76863",
@@ -1252,9 +1254,9 @@
     "x/vm/keeper/state_transition.go": "899fb7a5a9b0376827cc6a83229fcfb86c56feef5a92160a9fafbcabc336497b",
     "x/vm/module.go": "61bb2ef5596c3ae4cde20205795bb5c526424479a1cf7c076cba4fb1c6fe69fa"
   },
-  "patchVersion": "v0.6.3-mintcandy.5",
+  "patchVersion": "v0.6.3-mintcandy.6",
   "schemaVersion": 1,
-  "scope": "Decode SDK53 validator operator bytes for COINBASE; bounded and charged native post-processing, atomic rollback, and isolated matching gas estimation for the fresh network; application guard for internal commits outside signed transaction processing; allow early EVM configuration from committed state; keep explicitly authorized reserve-fee conversion gas out of Ethereum execution receipts while retaining SDK block accounting, strict committed fee metadata and optional receipt fee details",
+  "scope": "Decode SDK53 validator operator bytes for COINBASE; bounded and charged native post-processing, atomic rollback, and isolated matching gas estimation for the fresh network; application guard for internal commits outside signed transaction processing; allow early EVM configuration from committed state; keep explicitly authorized reserve-fee conversion gas out of Ethereum execution receipts while retaining SDK block accounting, strict committed fee metadata and optional receipt fee details; retain explicitly authorized reserve-fee envelopes in the SDK mempool lane with Ethereum signer/nonce extraction and reject lossy raw-ETH nonce-gap fallback",
   "upstreamCommit": "71c78b5072a248bae5273c34ad2f53d349799ccd",
   "upstreamModule": "github.com/cosmos/evm",
   "upstreamModuleSum": "h1:1G8+iqyQWslZ2g7873h90Fcr3pL6RV24PgOS1wiK2SY=",

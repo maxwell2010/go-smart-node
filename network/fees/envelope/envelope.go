@@ -66,6 +66,11 @@ func (t *Tx) InnerTx() sdk.Tx { return t.originalTx }
 // Standard EVM ante receives InnerTx, not this aggregate resource limit.
 func (t *Tx) GetGas() uint64 { return t.originalTx.GetGas() + t.auth.ConversionGasLimit }
 
+// IsNativeReserveFeeTx keeps the COMPLETE authorized transport in the SDK
+// mempool lane. A raw Ethereum txpool would discard the separate fee signature
+// and incorrectly require the payer's committed pre-conversion native balance.
+func (t *Tx) IsNativeReserveFeeTx() bool { return true }
+
 type wireAuthorization struct {
 	TxHash              string `json:"tx_hash"`
 	Payer               string `json:"payer"`

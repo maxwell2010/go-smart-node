@@ -176,8 +176,11 @@ func NewExperimentalEVMMempool(
 		cosmosPoolConfig = &defaultConfig
 	}
 
-	cosmosPoolConfig.MaxTx = cosmosPoolMaxTx
-	cosmosPool = sdkmempool.NewPriorityMempool(*cosmosPoolConfig)
+	// Preserve the entire SDK envelope for reserve-paid Ethereum transactions.
+	// Their sender/nonce still come from Ethereum, not absent SDK signatures.
+	poolConfig := withEthereumSignerExtraction(*cosmosPoolConfig)
+	poolConfig.MaxTx = cosmosPoolMaxTx
+	cosmosPool = sdkmempool.NewPriorityMempool(poolConfig)
 
 	evmMempool := &ExperimentalEVMMempool{
 		vmKeeper:      vmKeeper,
@@ -255,6 +258,11 @@ func (m *ExperimentalEVMMempool) InsertInvalidNonce(txBytes []byte) error {
 	tx, err := m.txConfig.TxDecoder()(txBytes)
 	if err != nil {
 		return err
+	}
+	// A failed ante has not established reserve payment. Never strip this
+	// envelope into the raw ETH queue, whose rebroadcast would lose fee consent.
+	if isNativeReserveFeeTx(tx) {
+		return fmt.Errorf("%w: reserve-fee envelopes require sequential successful ante admission", ErrNotEVMTransaction)
 	}
 
 	var ethTxs []*ethtypes.Transaction
@@ -435,6 +443,9 @@ func (m *ExperimentalEVMMempool) Close() error {
 // getEVMMessage validates that the transaction contains exactly one message and returns it if it's an EVM message.
 // Returns an error if the transaction has no messages, multiple messages, or the single message is not an EVM transaction.
 func (m *ExperimentalEVMMempool) getEVMMessage(tx sdk.Tx) (*evmtypes.MsgEthereumTx, error) {
+	if isNativeReserveFeeTx(tx) {
+		return nil, ErrNotEVMTransaction
+	}
 	msgs := tx.GetMsgs()
 	if len(msgs) == 0 {
 		return nil, ErrNoMessages
@@ -447,6 +458,22 @@ func (m *ExperimentalEVMMempool) getEVMMessage(tx sdk.Tx) (*evmtypes.MsgEthereum
 		return nil, ErrNotEVMTransaction
 	}
 	return ethMsg, nil
+}
+
+// This marker selects storage/routing only; it never replaces ante validation.
+// SDK decoders may implement it for explicit, separately authorized fee wrappers.
+func isNativeReserveFeeTx(tx sdk.Tx) bool {
+	marked, ok := tx.(interface{ IsNativeReserveFeeTx() bool })
+	return ok && marked.IsNativeReserveFeeTx()
+}
+
+func withEthereumSignerExtraction(config sdkmempool.PriorityNonceMempoolConfig[math.Int]) sdkmempool.PriorityNonceMempoolConfig[math.Int] {
+	fallback := config.SignerExtractor
+	if fallback == nil {
+		fallback = sdkmempool.NewDefaultSignerExtractionAdapter()
+	}
+	config.SignerExtractor = NewEthSignerExtractionAdapter(fallback)
+	return config
 }
 
 // getIterators prepares iterators over pending EVM and Cosmos transactions.

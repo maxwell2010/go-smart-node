@@ -3,6 +3,7 @@ package nonce_test
 import (
 	"bytes"
 	"context"
+	"encoding/binary"
 	"errors"
 	"math/big"
 	"testing"
@@ -20,6 +21,7 @@ import (
 	"github.com/ethereum/go-ethereum/common"
 	ethtypes "github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/crypto"
+	validatorkeeper "github.com/maxwell2010/go-smart-node/network/decimal/validator/keeper"
 	"github.com/maxwell2010/go-smart-node/network/fees/authorization"
 	"github.com/maxwell2010/go-smart-node/network/fees/nonce"
 	"github.com/stretchr/testify/require"
@@ -139,4 +141,71 @@ func TestStoreFailureCannotConsumeNonce(t *testing.T) {
 	require.NoError(t, err)
 	require.Zero(t, current.Sign())
 	require.NoError(t, k.Consume(ctx, v))
+}
+
+// Production injects the SAME validator store into these two keepers. A bare
+// "fees/..." prefix starts with 0x66 and contaminates the exclusion iterator,
+// even though direct nonce lookups appear to work. Exercise that real iterator
+// boundary and its reader, rather than testing string-prefix arithmetic alone.
+func TestFeeNonceCannotContaminateSharedValidatorNamespaces(t *testing.T) {
+	dir := t.TempDir()
+	ctx, cms, db, k, service := open(t, dir)
+	consensus := sdk.ConsAddress(bytes.Repeat([]byte{0x23}, 20))
+	exclusionKey := append([]byte{0x66}, consensus...)
+	exclusionValue := make([]byte, 17)
+	exclusionValue[0] = 1
+	binary.BigEndian.PutUint64(exclusionValue[1:9], 2)
+	binary.BigEndian.PutUint64(exclusionValue[9:17], 5)
+	require.NoError(t, service.OpenKVStore(ctx).Set(exclusionKey, exclusionValue))
+	// Adjacent deployed namespaces also remain byte-for-byte unchanged.
+	manifestKey, membershipKey := []byte{0x6e}, append([]byte{0x70}, bytes.Repeat([]byte{0x24}, 20)...)
+	require.NoError(t, service.OpenKVStore(ctx).Set(manifestKey, []byte("existing manifest")))
+	require.NoError(t, service.OpenKVStore(ctx).Set(membershipKey, []byte{1}))
+	assertNamespaces := func() {
+		t.Helper()
+		validator, err := validatorkeeper.NewStateKeeperWithDomain(service, "mintcandy_990001-1", 990001)
+		require.NoError(t, err)
+		excluded, err := validator.GetNativeDuplicateVoteExclusion(ctx, consensus)
+		require.NoError(t, err)
+		require.Equal(t, validatorkeeper.NativeDuplicateVoteExclusion{InfractionHeight: 2, SettledHeight: 5}, excluded)
+		it, err := service.OpenKVStore(ctx).Iterator([]byte{0x66}, []byte{0x67})
+		require.NoError(t, err)
+		count := 0
+		for ; it.Valid(); it.Next() {
+			require.Equal(t, exclusionKey, it.Key(), "fee nonce must never enter the duplicate-vote exclusion scan")
+			require.Equal(t, exclusionValue, it.Value())
+			count++
+		}
+		require.NoError(t, it.Close())
+		require.Equal(t, 1, count)
+		for _, entry := range []struct{ key, value []byte }{{manifestKey, []byte("existing manifest")}, {membershipKey, []byte{1}}} {
+			value, err := service.OpenKVStore(ctx).Get(entry.key)
+			require.NoError(t, err)
+			require.Equal(t, entry.value, value)
+		}
+		it, err = service.OpenKVStore(ctx).Iterator([]byte{0x71}, []byte{0x72})
+		require.NoError(t, err)
+		count = 0
+		for ; it.Valid(); it.Next() {
+			require.True(t, bytes.HasPrefix(it.Key(), []byte(nonce.Prefix)))
+			count++
+		}
+		require.NoError(t, it.Close())
+		require.Equal(t, 1, count)
+	}
+	zero := verified(t, big.NewInt(0))
+	require.NoError(t, k.Consume(ctx, zero))
+	assertNamespaces()
+	cms.Commit()
+	require.NoError(t, db.Close())
+	ctx, cms, db, k, service = open(t, dir)
+	defer func() { require.NoError(t, db.Close()) }()
+	assertNamespaces()
+	n, err := k.Current(ctx, zero.Payer())
+	require.NoError(t, err)
+	require.Equal(t, "1", n.String())
+	require.ErrorIs(t, k.Consume(ctx, zero), nonce.ErrReplay)
+	require.NoError(t, k.Consume(ctx, verified(t, big.NewInt(1))))
+	assertNamespaces()
+	cms.Commit()
 }

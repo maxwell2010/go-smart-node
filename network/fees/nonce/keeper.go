@@ -14,7 +14,10 @@ import (
 	"github.com/maxwell2010/go-smart-node/network/fees/authorization"
 )
 
-const Prefix = "fees/nonce/v1/"
+// The production service shares the validator store. A bare ASCII 'f' (0x66)
+// would collide with its duplicate-vote exclusion iterator. Reserve a distinct
+// leading byte for this versioned namespace.
+const Prefix = "\x71fees/nonce/v1/"
 
 var (
 	ErrReplay    = errors.New("fee authorization nonce does not match current nonce")

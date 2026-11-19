@@ -1,6 +1,7 @@
 package app
 
 import (
+	"bytes"
 	"errors"
 	"math"
 	"math/big"
@@ -133,6 +134,9 @@ func (app *App) drc20FeeAnte(next sdk.AnteHandler) sdk.AnteHandler {
 		verified, err := authorization.Verify(policy, raw, auth, outer.FeeSignature(), ctx.BlockTime(), conversionMeter)
 		if err != nil {
 			return ctx, err
+		}
+		if !bytes.Equal(msg.GetFrom(), verified.Payer().Bytes()) {
+			return ctx, errors.New("composite envelope must encode its verified Ethereum sender")
 		}
 		// Reject a stale Ethereum nonce before executing a costly curve call.
 		if app.EVMKeeper.GetNonce(conversionCtx, verified.Payer()) != raw.Nonce() {
