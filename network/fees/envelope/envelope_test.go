@@ -30,6 +30,7 @@ func fixture(t *testing.T) (sdk.TxDecoder, sdk.TxEncoder, []byte, authorization.
 	msg := &evmtypes.MsgEthereumTx{}
 	require.NoError(t, msg.FromSignedEthereumTx(eth, ethtypes.NewEIP155Signer(big.NewInt(990001))))
 	cfg := encoding.MakeConfig(990001)
+	evmtypes.RegisterInterfaces(cfg.InterfaceRegistry)
 	builder := cfg.TxConfig.NewTxBuilder()
 	require.NoError(t, builder.SetMsgs(msg))
 	builder.SetGasLimit(50000)
