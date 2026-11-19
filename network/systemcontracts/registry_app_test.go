@@ -116,6 +116,9 @@ func TestOwnedAppSignedRegistryBootstrap(t *testing.T) {
 	if launch.fourValidators() {
 		accountCount, funding = launch.accountCount, 20_000
 	}
+	if launch.emptyAssets() {
+		funding = 60_000
+	}
 	keys := make([]*ecdsa.PrivateKey, accountCount)
 	accounts := make([]authtypes.GenesisAccount, accountCount)
 	balances := make([]banktypes.Balance, accountCount)
@@ -124,7 +127,7 @@ func TestOwnedAppSignedRegistryBootstrap(t *testing.T) {
 		key, err := registryFixtureKey(i, deterministicAccounts)
 		require.NoError(t, err)
 		if launchRehearsal {
-			key = nativeLaunchAccountKey(i, launch.fourValidators())
+			key = nativeLaunchAccountKey(i, launch)
 		}
 		keys[i], err = crypto.ToECDSA(key.Bytes())
 		require.NoError(t, err)
@@ -132,7 +135,7 @@ func TestOwnedAppSignedRegistryBootstrap(t *testing.T) {
 		require.Equal(t, crypto.PubkeyToAddress(keys[i].PublicKey).Bytes(), accounts[i].GetAddress().Bytes())
 		balances[i] = banktypes.Balance{Address: accounts[i].GetAddress().String(), Coins: funds}
 	}
-	if launch.fourValidators() {
+	if launch.fourValidators() && !launch.emptyAssets() {
 		key := nativeFourLaunchTreasury()
 		accounts = append(accounts, authtypes.NewBaseAccount(sdk.AccAddress(key.Address()), key, uint64(accountCount), 0))
 	}

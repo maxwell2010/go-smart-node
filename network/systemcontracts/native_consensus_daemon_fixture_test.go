@@ -72,7 +72,7 @@ func exportNativeConsensusDaemonFixture(t *testing.T, e isolatedBackendEnv, dir 
 	actor := crypto.PubkeyToAddress(key.PublicKey)
 	beneficiary := sdk.AccAddress(actor.Bytes()).String()
 	launch, launchRehearsal := nativeLaunchSpecForMode(os.Getenv(nativeLaunchRehearsalEnv))
-	emptyAssets := os.Getenv(emptyUserAssetsPhaseEnv) == "seed"
+	emptyAssets := seedEmptyUserAssets()
 	fullUpgrade := launchRehearsal || os.Getenv(nativeConsensusFullUpgradeEnv) == "1"
 	coinIndexMigration := os.Getenv("MCND_NATIVE_COIN_INDEX_MIGRATION_CI") == "1"
 	fourSignerMigration := os.Getenv("MCND_NATIVE_FOUR_SIGNER_MIGRATION_CI") == "1"
@@ -88,7 +88,7 @@ func exportNativeConsensusDaemonFixture(t *testing.T, e isolatedBackendEnv, dir 
 	require.False(t, upgradeGovernance && !fullUpgrade && (feeRewards || ibcV1 || downtime), "the basic upgrade governance fixture has a separate profile")
 	require.False(t, nft != nil && !fullUpgrade && (!downtime || jailRecovery || heldDowntime), "NFT downtime has its own isolated fixture")
 	if fullUpgrade {
-		require.True(t, upgradeGovernance && nft != nil && !downtime && !jailRecovery && !heldDowntime, "full upgrade requires its own fixture and approved NFT origin")
+		require.True(t, upgradeGovernance && (nft != nil || launch.emptyAssets()) && !downtime && !jailRecovery && !heldDowntime, "full upgrade requires its own fixture and NFT profile")
 	}
 	initial, after := []int64{2, 1, 0}, []int64{2, 0, 3}
 	keyScope := "mintcandy native consensus process fixture "
@@ -133,7 +133,7 @@ func exportNativeConsensusDaemonFixture(t *testing.T, e isolatedBackendEnv, dir 
 		initial, after = []int64{4, 4, 2}, []int64{4, 4, 0}
 		keyScope = nativeHistoricalConsensusKeyScope
 	}
-	if emptyAssets {
+	if emptyAssets && !launchRehearsal {
 		require.False(t, fullUpgrade || historical || downtime || launchRehearsal || nft != nil)
 		initial, after = []int64{10000, 10000, 10000, 10000}, []int64{10000, 10000, 10000, 10000}
 		keyScope = "mintcandy empty user assets process fixture "
@@ -261,7 +261,7 @@ func exportNativeConsensusDaemonFixture(t *testing.T, e isolatedBackendEnv, dir 
 		}
 		e.nextGasLimit(gasLimit)
 		stakeKey := key
-		if launch.fourValidators() {
+		if launch.fourValidators() && !emptyAssets {
 			stakeKey = nativeFourLaunchStakeKey(e.keys, i)
 		}
 		e.send(stakeKey, &profile.Gateway, initialStake(validator).BigInt(),
@@ -338,7 +338,9 @@ func exportNativeConsensusDaemonFixture(t *testing.T, e isolatedBackendEnv, dir 
 		}
 	}
 	bank.Balances = balances
-	if launch.fourValidators() {
+	if launch.emptyAssets() {
+		applyNativeEmptyLaunchAllocation(t, &bank, profile.WrappedDEL, launch)
+	} else if launch.fourValidators() {
 		require.NotNil(t, custom)
 		require.NotNil(t, nft)
 		applyNativeFourLaunchAllocation(t, &bank, profile.WrappedDEL, common.HexToAddress(custom.coin.DRC20Contract), nft.address)
@@ -371,6 +373,7 @@ func exportNativeConsensusDaemonFixture(t *testing.T, e isolatedBackendEnv, dir 
 	}
 	if emptyAssets {
 		profile.EnableNFTDelegation = true
+		profile.EnableNativeNFTDowntime = fullUpgrade
 		addEmptyNFTGenesis(t, e, profile, genesis)
 	}
 	if custom != nil {
@@ -379,6 +382,9 @@ func exportNativeConsensusDaemonFixture(t *testing.T, e isolatedBackendEnv, dir 
 		require.Empty(t, coins.Coins)
 		if !emptyAssets {
 			coins.Coins = []cointypes.Coin{custom.coin}
+		}
+		if launch.emptyAssets() {
+			coins.Params.BaseTitle = "MintCandy"
 		}
 		genesis[cointypes.ModuleName] = cdc.MustMarshalJSON(&coins)
 		profile.TokenCenter, profile.CurveConverter = custom.center, custom.converter
@@ -398,6 +404,11 @@ func exportNativeConsensusDaemonFixture(t *testing.T, e isolatedBackendEnv, dir 
 	}
 	doc := cmttypes.GenesisDoc{ChainID: ctx.ChainID(), InitialHeight: ctx.BlockHeight(),
 		GenesisTime: genesisTime, ConsensusParams: cmttypes.DefaultConsensusParams()}
+	if launch.emptyAssets() {
+		doc.ConsensusParams.Block.MaxGas = gasLimit
+		doc.ConsensusParams.Evidence.MaxAgeNumBlocks = 100_000
+		doc.ConsensusParams.Evidence.MaxAgeDuration = 48 * time.Hour
+	}
 	if emptyAssets || historical || fullUpgrade {
 		doc.InitialHeight = 1
 	}

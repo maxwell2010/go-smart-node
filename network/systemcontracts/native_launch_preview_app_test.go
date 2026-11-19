@@ -46,6 +46,9 @@ const (
 	nativeFourLaunchChainID              = "mintcandy_990012-1"
 	nativeFourLaunchEVMChainID    uint64 = 990012
 	nativeFourLaunchKeyScope             = "MintCandy isolated four-validator launch fixture "
+	nativeEmptyLaunchChainID             = "mintcandy_990013-1"
+	nativeEmptyLaunchEVMChainID   uint64 = 990013
+	nativeEmptyLaunchKeyScope            = "MintCandy isolated empty four-validator launch fixture "
 )
 
 var (
@@ -70,6 +73,9 @@ func nativeLaunchSpecForMode(mode string) (nativeLaunchSpec, bool) {
 	case "4":
 		return nativeLaunchSpec{nativeFourLaunchChainID, nativeFourLaunchEVMChainID,
 			[]int64{10_000, 10_000, 10_000, 10_000}, nativeFourLaunchKeyScope, 7, 300}, true
+	case "4-empty":
+		return nativeLaunchSpec{nativeEmptyLaunchChainID, nativeEmptyLaunchEVMChainID,
+			[]int64{10_000, 10_000, 10_000, 10_000}, nativeEmptyLaunchKeyScope, 7, 0}, true
 	default:
 		return nativeLaunchSpec{}, false
 	}
@@ -77,9 +83,16 @@ func nativeLaunchSpecForMode(mode string) (nativeLaunchSpec, bool) {
 
 func (s nativeLaunchSpec) fourValidators() bool { return len(s.powers) == 4 }
 
-func nativeLaunchAccountKey(index int, four bool) *ethsecp.PrivKey {
-	if four {
-		return &ethsecp.PrivKey{Key: crypto.Keccak256([]byte(nativeFourLaunchKeyScope+"account"), []byte{byte(index)})}
+func (s nativeLaunchSpec) emptyAssets() bool { return s.evmID == nativeEmptyLaunchEVMChainID }
+
+func seedEmptyUserAssets() bool {
+	spec, _ := nativeLaunchSpecForMode(os.Getenv(nativeLaunchRehearsalEnv))
+	return spec.emptyAssets() || os.Getenv(emptyUserAssetsPhaseEnv) == "seed"
+}
+
+func nativeLaunchAccountKey(index int, spec nativeLaunchSpec) *ethsecp.PrivKey {
+	if spec.fourValidators() {
+		return &ethsecp.PrivKey{Key: crypto.Keccak256([]byte(spec.keyScope+"account"), []byte{byte(index)})}
 	}
 	return &ethsecp.PrivKey{Key: crypto.Keccak256([]byte("MintCandy isolated launch rehearsal account fixture"), []byte{byte(index)})}
 }
@@ -97,17 +110,58 @@ func nativeFourLaunchTreasury() *multisig.LegacyAminoPubKey {
 }
 
 func nativeFourLaunchBankAllocation(wrapped, drc20, nft common.Address) map[string]int64 {
+	spec, _ := nativeLaunchSpecForMode("4")
 	balances := map[string]int64{
 		sdk.AccAddress(wrapped.Bytes()).String():                                    40_000,
 		sdk.AccAddress(drc20.Bytes()).String():                                      300,
 		sdk.AccAddress(nft.Bytes()).String():                                        100,
-		sdk.AccAddress(nativeLaunchAccountKey(3, true).PubKey().Address()).String(): 45_000,
+		sdk.AccAddress(nativeLaunchAccountKey(3, spec).PubKey().Address()).String(): 45_000,
 		sdk.AccAddress(nativeFourLaunchTreasury().Address()).String():               14_000,
 	}
 	for _, i := range []int{0, 1, 2, 4, 5, 6} {
-		balances[sdk.AccAddress(nativeLaunchAccountKey(i, true).PubKey().Address()).String()] = 100
+		balances[sdk.AccAddress(nativeLaunchAccountKey(i, spec).PubKey().Address()).String()] = 100
 	}
 	return balances
+}
+
+func applyNativeEmptyLaunchAllocation(t *testing.T, bank *banktypes.GenesisState, wrapped common.Address, spec nativeLaunchSpec) {
+	t.Helper()
+	wrappedAccount := sdk.AccAddress(wrapped.Bytes()).String()
+	principal := sdkmath.NewIntWithDecimal(40_000, 18)
+	var balances []banktypes.Balance
+	addBalance := func(address string, amount sdkmath.Int) {
+		balances = append(balances, banktypes.Balance{Address: address, Coins: sdk.NewCoins(sdk.NewCoin(identity.BaseDenom, amount))})
+	}
+	found := false
+	for _, row := range bank.Balances {
+		if row.Address == wrappedAccount {
+			require.True(t, row.Coins.AmountOf(identity.BaseDenom).Equal(principal))
+			found = true
+		}
+	}
+	require.True(t, found, "genesis allocation must retain actual wrapped collateral")
+	addBalance(wrappedAccount, principal)
+	for i := range spec.accountCount {
+		var amount int64 = 200
+		switch i {
+		case 3:
+			amount = 5_000_000
+		case 5, 6:
+			amount = 100
+		}
+		addBalance(sdk.AccAddress(nativeLaunchAccountKey(i, spec).PubKey().Address()).String(), sdkmath.NewIntWithDecimal(amount, 18))
+	}
+	sort.Slice(balances, func(i, j int) bool { return balances[i].Address < balances[j].Address })
+	bank.Supply = sdk.NewCoins()
+	for _, row := range balances {
+		bank.Supply = bank.Supply.Add(row.Coins...)
+	}
+	bank.Balances = balances
+	bank.DenomMetadata = []banktypes.Metadata{{
+		Description: "Native MintCandy coin of the separate MintCandy Network",
+		Base:        identity.BaseDenom, Display: "MSP", Name: "MintCandy", Symbol: "MSP",
+		DenomUnits: []*banktypes.DenomUnit{{Denom: identity.BaseDenom, Exponent: 0}, {Denom: "MSP", Exponent: 18}},
+	}}
 }
 
 func applyNativeFourLaunchAllocation(t *testing.T, bank *banktypes.GenesisState, wrapped, drc20, nft common.Address) {
@@ -171,7 +225,7 @@ func checkNativeLaunchPublicGenesis(t *testing.T, body []byte, spec nativeLaunch
 		require.NotContains(t, text, base64.StdEncoding.EncodeToString(key))
 	}
 	for i := range spec.accountCount {
-		checkPrivateKey(nativeLaunchAccountKey(i, spec.fourValidators()).Bytes())
+		checkPrivateKey(nativeLaunchAccountKey(i, spec).Bytes())
 	}
 	for i := range spec.powers {
 		checkPrivateKey(cmted25519.GenPrivKeyFromSecret([]byte(spec.keyScope + string("abcd"[i]))).Bytes())
@@ -192,7 +246,7 @@ func TestOwnedAppNativeLaunchPreview(t *testing.T) {
 	}
 	binary, err := os.Executable()
 	require.NoError(t, err)
-	for _, mode := range []string{"1", "4"} {
+	for _, mode := range []string{"1", "4", "4-empty"} {
 		t.Run("validator_fixture_"+mode, func(t *testing.T) {
 			runNativeLaunchPreview(t, binary, mode)
 		})
@@ -255,8 +309,14 @@ func verifyNativeLaunchPreview(t *testing.T, dir string, spec nativeLaunchSpec) 
 		profile.EnableNFTDelegation && profile.EnableNativeConsensus && profile.EnableNativeFeeRewards && profile.EnableNativeIBCV1 &&
 		profile.EnableNativeGovernance && profile.EnableNativeUpgradeGovernance && profile.EnableNativeOrdinaryDELDowntime &&
 		profile.EnableNativeHeldDELDowntime && profile.EnableNativeNFTDowntime && profile.EnableNativeDuplicateVote)
-	require.Len(t, coins.Coins, 1)
-	coin := coins.Coins[0]
+	if spec.emptyAssets() {
+		require.Empty(t, coins.Coins)
+		require.Equal(t, int64(24_000_000), doc.ConsensusParams.Block.MaxGas)
+		require.Len(t, bank.DenomMetadata, 1)
+		require.Equal(t, "MSP", bank.DenomMetadata[0].Symbol)
+	} else {
+		require.Len(t, coins.Coins, 1)
+	}
 	params := doc.ConsensusParams.ToProto()
 	init, err := app.InitChain(&abci.RequestInitChain{ChainId: doc.ChainID, InitialHeight: doc.InitialHeight, Time: doc.GenesisTime,
 		ConsensusParams: &params, AppStateBytes: doc.AppState})
@@ -301,11 +361,31 @@ func verifyNativeLaunchPreview(t *testing.T, dir string, spec nativeLaunchSpec) 
 	}
 	require.Equal(t, sdkmath.NewIntWithDecimal(set.TotalVotingPower(), 18).String(), backed(profile.WrappedDEL).String())
 	require.True(t, backed(profile.PositionVault).IsZero())
-	require.Equal(t, sdkmath.NewIntWithDecimal(spec.drc20Reserve, 18).String(), backed(common.HexToAddress(coin.DRC20Contract)).String())
 	for _, role := range []common.Address{profile.Registry, profile.Gateway, profile.Library, profile.NFTCenter, profile.PositionVault,
-		profile.MasterValidator, profile.WrappedDEL, profile.TokenCenter, profile.CurveConverter, common.HexToAddress(coin.DRC20Contract)} {
+		profile.MasterValidator, profile.WrappedDEL, profile.TokenCenter, profile.CurveConverter} {
 		require.NotEmpty(t, app.EVMKeeper.GetCode(ctx, app.EVMKeeper.GetCodeHash(ctx, role)))
 	}
+	if spec.emptyAssets() {
+		var nft nfttypes.GenesisState
+		require.NoError(t, codec.UnmarshalJSON(state[nfttypes.ModuleName], &nft))
+		require.Empty(t, nft.ExternalBindings)
+		require.Len(t, nft.Collections, 1)
+		require.Equal(t, profile.PositionVault.Hex(), nft.Collections[0].AddressDRC)
+		require.Empty(t, nft.Collections[0].Tokens)
+		var native validatortypes.GenesisState
+		require.NoError(t, codec.UnmarshalJSON(state[validatortypes.ModuleName], &native))
+		require.Len(t, native.Delegations, 4)
+		for _, d := range native.Delegations {
+			require.Equal(t, sdk.AccAddress(expect.Actor.Bytes()).String(), d.Delegator)
+		}
+		require.Equal(t, sdkmath.NewIntWithDecimal(5_041_000, 18).String(), total.String())
+		require.Equal(t, sdkmath.NewIntWithDecimal(5_000_000, 18).String(), backed(expect.Actor).String())
+		require.Len(t, bank.Balances, 8)
+		return
+	}
+	coin := common.HexToAddress(coins.Coins[0].DRC20Contract)
+	require.Equal(t, sdkmath.NewIntWithDecimal(spec.drc20Reserve, 18).String(), backed(coin).String())
+	require.NotEmpty(t, app.EVMKeeper.GetCode(ctx, app.EVMKeeper.GetCodeHash(ctx, coin)))
 	if spec.fourValidators() {
 		var nft nfttypes.GenesisState
 		require.NoError(t, codec.UnmarshalJSON(state[nfttypes.ModuleName], &nft))
@@ -322,7 +402,7 @@ func verifyNativeLaunchPreview(t *testing.T, dir string, spec nativeLaunchSpec) 
 		}
 		require.Equal(t, sdkmath.NewIntWithDecimal(100_000, 18).String(), total.String())
 		require.Len(t, bank.Balances, 11)
-		for address, value := range nativeFourLaunchBankAllocation(profile.WrappedDEL, common.HexToAddress(coin.DRC20Contract), origin) {
+		for address, value := range nativeFourLaunchBankAllocation(profile.WrappedDEL, coin, origin) {
 			decoded, err := sdk.AccAddressFromBech32(address)
 			require.NoError(t, err)
 			require.Equal(t, sdkmath.NewIntWithDecimal(value, 18).String(), app.BankKeeper.GetBalance(ctx, decoded, identity.BaseDenom).Amount.String())

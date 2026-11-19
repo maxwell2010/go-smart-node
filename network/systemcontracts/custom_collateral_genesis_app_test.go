@@ -63,7 +63,7 @@ func seedNativeCustomCollateralGenesis(t *testing.T, e isolatedBackendEnv, profi
 
 	// The empty launch fixture installs only system roles and implementation
 	// templates. No user token CREATE or symbol mapping exists in its EVM state.
-	if os.Getenv(emptyUserAssetsPhaseEnv) == "seed" {
+	if seedEmptyUserAssets() {
 		return &nativeCustomCollateralGenesisFixture{center: centerAddress, converter: converterAddress}
 	}
 

@@ -55,7 +55,7 @@ func runIsolatedPositionReader(t *testing.T, e isolatedBackendEnv) {
 	registryImpl, gatewayImpl, factoryImpl, vaultImpl, originImpl := e.deploy(registry), e.deploy(gateway), e.deploy(factory), e.deploy(vault), e.deploy(origin)
 	wrapped := e.deploy(wrapper)
 	extraNFTImplementations := make(map[string]common.Address)
-	allUserNFTFamilies := os.Getenv(emptyUserAssetsPhaseEnv) == "seed" || os.Getenv("MCND_USER_NFT_NATIVE_PHASE") == "seed"
+	allUserNFTFamilies := seedEmptyUserAssets() || os.Getenv("MCND_USER_NFT_NATIVE_PHASE") == "seed"
 	if allUserNFTFamilies {
 		for _, name := range []string{"NewNetworkDRC721", "DRC721Reserveless", "DRC1155Reserveless"} {
 			extraNFTImplementations[name] = e.deploy(e.load(name))
@@ -130,7 +130,7 @@ func runIsolatedPositionReader(t *testing.T, e isolatedBackendEnv) {
 		Refundable, Burnable      bool
 	}
 	var originAddress common.Address
-	if os.Getenv(emptyUserAssetsPhaseEnv) != "seed" {
+	if !seedEmptyUserAssets() {
 		created := call(0, factory, factoryAddress, new(big.Int), true, "createDRC1155", meta{owner, "VIEWISO", "Reader isolated origin", "ipfs://reader-origin", true, true})
 		originAddress = integerAddress(t, factory, "createDRC1155", created)
 	}
@@ -161,7 +161,9 @@ func runIsolatedPositionReader(t *testing.T, e isolatedBackendEnv) {
 		}
 		var nft *nativeNFTDowntimeFixture
 		launch, launchRehearsal := nativeLaunchSpecForMode(os.Getenv(nativeLaunchRehearsalEnv))
-		if launch.fourValidators() {
+		if seedEmptyUserAssets() {
+			// Only the system vault and factory implementations exist at genesis.
+		} else if launch.fourValidators() {
 			fixture := newNativeNFTFixture(origin, originAddress, 100)
 			fixture.unitReserve = 1
 			fixture.mintDEL(t, e, crypto.PubkeyToAddress(e.keys[3].PublicKey))

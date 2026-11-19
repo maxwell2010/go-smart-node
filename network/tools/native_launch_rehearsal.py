@@ -28,9 +28,9 @@ from withdrawal_genesis_smoke import ADDRESS, SHA256, bech32_payload, check, eth
 GENESIS_LIMIT = 64 * 1024 * 1024
 
 
-def load_fixture(directory, *, four_validators=False):
+def load_fixture(directory, *, four_validators=False, empty_user_assets=False):
     if four_validators:
-        evm_id, labels, powers = 990012, ("a", "b", "c", "d"), (10000, 10000, 10000, 10000)
+        evm_id, labels, powers = (990013 if empty_user_assets else 990012), ("a", "b", "c", "d"), (10000, 10000, 10000, 10000)
     else:
         evm_id, labels, powers = 990011, ("a", "b", "c"), (4, 4, 2)
     chain_id = f"mintcandy_{evm_id}-1"
@@ -52,6 +52,18 @@ def load_fixture(directory, *, four_validators=False):
     check(expected["chainId"] == chain_id and expected["evmChainId"] == evm_id, "fixture signing domain mismatch")
     check(re.fullmatch(ADDRESS, expected["actor"]) and bech32_payload(expected["actorNative"]) == expected["actor"].lower(),
           "invalid public balance query account")
+    if empty_user_assets:
+        from native_launch_allocation import allocation_report
+
+        allocation = allocation_report(genesis)
+        check(not state["coin"].get("coins") and not state["nft"].get("external_bindings") and
+              len(state["nft"]["collections"]) == 1 and not (state["nft"]["collections"][0].get("tokens") or []),
+              "empty launch contains user assets")
+        check(int(allocation["initialSupplyAtomic"]) == 5_041_000 * 10**18 and
+              all(row["delegator"] == expected["actorNative"] for row in allocation["genesisDelegations"]) and
+              len(allocation["genesisDelegations"]) == 4, "empty launch differs from founder allocation")
+        check(profile.get("test_grace_until_height", 0) == 0 and int(doc["consensus_params"]["block"]["max_gas"]) == 24_000_000,
+              "empty launch must use production penalty and gas rules")
     validators = expected["validators"]
     check(tuple(row["name"] for row in validators) == labels and
           tuple(row["initialPower"] for row in validators) == powers, "unexpected initial native validator set")
@@ -613,6 +625,7 @@ def main(argv=None, signals=None):
     for flag in ("binary", "binary-sha256", "archive-sha256", "source-commit", "fixture", "home-parent", "report"):
         parser.add_argument("--" + flag, required=True)
     parser.add_argument("--four-validators", action="store_true", help="check quorum and peer catchup after stopping one of four validators")
+    parser.add_argument("--empty-user-assets", action="store_true", help="rehearse the isolated four-validator founder allocation without user assets")
     parser.add_argument("--quorum-loss-recovery", action="store_true", help="halt safely with two of four validators and recover original signers")
     parser.add_argument("--commit-probe", type=Path, help="owned Comet Ed25519 commit verifier")
     parser.add_argument("--treasury-transfer", action="store_true", help="check the signed transfer pair on the four-validator fixture")
@@ -623,6 +636,8 @@ def main(argv=None, signals=None):
     parser.add_argument("--upgrade-package-report", type=Path, help="signature and checksum report for the replacement package")
     parser.add_argument("--iavl-schema-probe", type=Path, help="inspect the IAVL storage upgrade with the node stopped")
     args = parser.parse_args(argv)
+    if args.empty_user_assets and (not args.four_validators or args.treasury_transfer):
+        parser.error("--empty-user-assets requires four validators and no treasury transfer fixture")
     if args.quorum_loss_recovery and (not args.four_validators or args.commit_probe is None):
         parser.error("--quorum-loss-recovery requires --four-validators and --commit-probe")
     if args.commit_probe is not None and not args.quorum_loss_recovery:
@@ -649,7 +664,9 @@ def main(argv=None, signals=None):
             binary = str(Path(args.binary).resolve(strict=True))
             with open(binary, "rb") as daemon:
                 check(hashlib.file_digest(daemon, "sha256").hexdigest() == args.binary_sha256, "packaged daemon hash differs")
-            genesis, expected, keys = load_fixture(Path(args.fixture), four_validators=args.four_validators)
+            genesis, expected, keys = load_fixture(Path(args.fixture), four_validators=args.four_validators,
+                                                   empty_user_assets=args.empty_user_assets)
+            report["emptyUserAssetGenesis"] = args.empty_user_assets
             if args.package_genesis:
                 packaged_genesis = private_bytes(args.package_genesis, GENESIS_LIMIT)
                 check(packaged_genesis == genesis, "verified package genesis differs from the cold-init fixture")

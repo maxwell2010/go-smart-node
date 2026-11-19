@@ -11,7 +11,7 @@ on:
         default: false
         type: boolean
       launch_rehearsal:
-        description: Start packaged validators and replay block 1 on an ordinary peer in a private network
+        description: Rehearse block replay. Combine with launch_four_validators for empty user assets and the proposed MSP allocation.
         default: false
         type: boolean
       launch_four_validators:
@@ -49,7 +49,7 @@ on:
 permissions:
   contents: read
 concurrency:
-  group: mcnd-artifact-${{ github.ref }}-${{ inputs.software_release_version || 'development' }}
+  group: mcnd-artifact-${{ github.ref }}-${{ inputs.software_release_version || 'development' }}-${{ inputs.launch_rehearsal }}-${{ inputs.launch_four_validators }}
   cancel-in-progress: true
 jobs:
   software-release:
@@ -139,6 +139,7 @@ jobs:
         if: inputs.launch_rehearsal || inputs.launch_four_validators || inputs.launch_treasury || inputs.launch_signed_package || inputs.systemd_package_run || inputs.systemd_upgrade_rollback
         shell: bash
         env:
+          LAUNCH_REHEARSAL: ${{ inputs.launch_rehearsal }}
           LAUNCH_FOUR_VALIDATORS: ${{ inputs.launch_four_validators }}
           LAUNCH_TREASURY: ${{ inputs.launch_treasury }}
           LAUNCH_SIGNED_PACKAGE: ${{ inputs.launch_signed_package }}
@@ -172,6 +173,11 @@ jobs:
             launch_options+=(--four-validators)
             # Historical CI fixture has its own allocation; public proposals remain unapproved.
             allocation_options+=(--allocation-plan network/tools/fixtures/launch-four-validator-ci-allocation.json)
+          fi
+          if [[ "$LAUNCH_REHEARSAL" == true && "$LAUNCH_FOUR_VALIDATORS" == true && "$LAUNCH_TREASURY" != true && "$LAUNCH_SIGNED_PACKAGE" != true && -z "$SYSTEMD_PACKAGE_RUN" ]]; then
+            export MCND_NATIVE_LAUNCH_REHEARSAL=4-empty
+            launch_options+=(--empty-user-assets)
+            allocation_options=(--allocation-plan network/docs/ru/public-launch-allocation.draft.json)
           fi
           if [[ "$LAUNCH_FOUR_VALIDATORS" == true && "$LAUNCH_TREASURY" != true && "$LAUNCH_SIGNED_PACKAGE" != true && -z "$SYSTEMD_PACKAGE_RUN" ]]; then
             (
