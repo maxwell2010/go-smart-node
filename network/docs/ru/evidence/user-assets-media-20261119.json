@@ -1,0 +1,30 @@
+{
+  "date": "2026-11-19",
+  "sourceRevision": "610a8e2790c05f8113dea27e3532b9f2db17f1c4",
+  "runUrl": "https://github.com/maxwell2010/go-smart-node/actions/runs/44493235350",
+  "conclusion": "success",
+  "scope": "component metadata pointers and native reserveless lifecycle only",
+  "validated": {
+    "signed_reserveless_identity_with_image_field": true,
+    "metadata_text_survives_leveldb_restart": true,
+    "invalid_utf8_control_and_oversized_identity_rejected": true,
+    "erc721_and_erc1155_collection_and_token_uri_roundtrip": true
+  },
+  "releaseGatesNotPassed": {
+    "empty_user_asset_init_chain": "implementation_required",
+    "public_backed_token_native_admission": "implementation_required",
+    "public_nft_factory_and_mint_native_admission": "implementation_required",
+    "media_upload_decode_ssrf_and_display": "service_required",
+    "pinning_backup_restore_and_retention": "service_required"
+  },
+  "logs": {
+    "reserveless-native.log": {
+      "sha256": "b1e5647fd3237c4c7cde72490701b20076db1d11c802b11659a58d9d8c7a7a74",
+      "bytes": 588
+    },
+    "nft-metadata.log": {
+      "sha256": "9e9b9b2ff6cc5921193a381e412670c8485917db25e1bae8bc13144cf3efc748",
+      "bytes": 3645
+    }
+  }
+}

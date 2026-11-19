@@ -111,3 +111,18 @@ Media proxy использует фиксированные доверенные
 отказ для oversized/control/invalid-UTF8 token metadata и восстановление текстовых
 данных после LevelDB restart. Они не доказывают pinning, декодирование изображения
 или отображение Wallet: эти gates остаются открытыми до создания самих сервисов.
+
+## Результат дополнительного CI от 19 ноября 2026 года
+
+[Прогон 44493235350](https://github.com/maxwell2010/go-smart-node/actions/runs/44493235350)
+на `610a8e2` завершился успешно. `TestOwnedAppNativeReservelessTokenLifecycle`
+выполнил seed/run/restart с настоящей EVM и LevelDB; добавлены проверки identity
+с полем image, отказа для длинного/управляющего/невалидного UTF-8 текста и
+сохранения metadata после перезапуска. Отдельный factory-тест выполнил
+создание и mint для четырёх семейств NFT и точное чтение collection/token URI.
+
+[Машиночитаемый результат и границы](evidence/user-assets-media-20261119.json).
+Этот прогон не запускает новую сеть с пустым user-asset genesis и не снимает
+перечисленные выше ограничения native admission. Изображения не загружались,
+не декодировались и не сохранялись в media-хранилище. Их security/restore gates
+остаются обязательными; тексты и ссылки проверены без их исполнения.
