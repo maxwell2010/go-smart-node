@@ -1,0 +1,63 @@
+{
+  "archiveSha256": "f1233a4b8ea396115bdb7cf8c28e3fb4a2029ba7a77fe10f4db7ed9a557267a5",
+  "binarySha256": "ed7e3a7478fe193f9d3748faeb5af95ab8421b7620237dba1a3873983ee7b3b4",
+  "includesGenesis": false,
+  "networkLaunchApproved": false,
+  "releaseVersion": "1.1.0",
+  "sourceRevision": "b90b5a9348658627a54d0e5b5002ee1d1b394cc2",
+  "status": "software-release",
+  "sourceRef": "refs/heads/feat/native-duplicate-vote-master-20261112",
+  "ci": {
+    "software": "https://github.com/maxwell2010/go-smart-node/actions/runs/44516758296",
+    "launch": "https://github.com/maxwell2010/go-smart-node/actions/runs/44516752555",
+    "ibcUpgradeRollback": "https://github.com/maxwell2010/go-smart-node/actions/runs/44514721177",
+    "systemdStartupReplay": "https://github.com/maxwell2010/go-smart-node/actions/runs/44514715497",
+    "drc20Daemon": "https://github.com/maxwell2010/go-smart-node/actions/runs/44514906044",
+    "avatarSchemaRpc": "https://github.com/maxwell2010/go-smart-node/actions/runs/44512388538"
+  },
+  "localChecks": {
+    "manifest": true,
+    "sha256Sidecar": true,
+    "oidc": true,
+    "binaryExecuted": false
+  },
+  "launchLab": {
+    "chainId": "mintcandy_990013-1",
+    "genesisSha256": "cc971b49d77b9fbea11d1f0e3ed98fcf7d2df9c689736c28bfc9265b72d733a0",
+    "verifiedHeight": 31,
+    "appHash": "8D1005396CF2F8765C74A57CE09A45975BEE63D03FF57C6E7A04E9D8FC0FF593",
+    "confirmedSigners": [
+      "a",
+      "b",
+      "c",
+      "d"
+    ],
+    "emptyUserAssetGenesis": true,
+    "quorumRecovery": {
+      "height": 19,
+      "blockHash": "99088D65B449FC62DB62ADB308233E450D5537A5F04D4436B3E0B34A61863C72",
+      "appHash": "3A3C09A2825CA4E01876059EC859FB1B5A882DA1366909BD0BBC704287942CCD",
+      "verifiedEd25519Signatures": 3,
+      "signedPower": 30000,
+      "totalPower": 40000,
+      "signingStatePreserved": true
+    }
+  },
+  "operationalRevisions": {
+    "ibc": [
+      "de3851c5d45102398244d21c78f57f129fff712d",
+      "1b4babe97e1c239be60da02bd8535dbb62c3cb72"
+    ],
+    "systemd": "1b4babe97e1c239be60da02bd8535dbb62c3cb72"
+  },
+  "approvedPublicParameters": {
+    "chainId": "mintcandy_9905401-1",
+    "evmChainId": 9905401,
+    "supplyMSP": 5041000,
+    "founderFreeMSP": 5000000,
+    "founderDelegationsMSP": 40000,
+    "operatorsGasMSP": 800,
+    "relayersGasMSP": 200
+  },
+  "readyPublicOperatorApplications": 0
+}

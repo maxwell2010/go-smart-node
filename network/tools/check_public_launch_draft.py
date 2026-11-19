@@ -238,12 +238,12 @@ def check_intake(intake):
             'network launch approval inputs remain unresolved')
     release = intake['release']
     software = release['software']
-    require(software['version'] == '1.0.0' and
+    require(software['version'] == '1.1.0' and
             re.fullmatch(r'[0-9a-f]{40}', software['source_revision']) is not None and
             all(re.fullmatch(r'[0-9a-f]{64}', software[name]) is not None
                 for name in ('binary_archive_sha256', 'binary_sha256')),
             'released software metadata requires version and source/archive/binary hashes')
-    require(software['release_url'] == 'https://github.com/maxwell2010/go-smart-node/releases/tag/v1.0.0' and
+    require(software['release_url'] == 'https://github.com/maxwell2010/go-smart-node/releases/tag/v1.1.0' and
             software['signature_scheme'] == 'github_oidc_sigstore', 'software release identity differs')
     require(release['genesis'] and all(value is None for value in release['genesis'].values()),
             'software publication cannot approve or sign an unresolved public genesis')

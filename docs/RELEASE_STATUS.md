@@ -1,5 +1,23 @@
 # Software release verification
 
+[MintCandy Node 1.1.0](https://github.com/maxwell2010/go-smart-node/releases/tag/v1.1.0)
+is published for Linux amd64 at source `b90b5a9348658627a54d0e5b5002ee1d1b394cc2`.
+The package adds empty asset genesis, public asset creation, validator controls,
+avatar metadata transfer and an isolated test grace period.
+[Final release CI](https://github.com/maxwell2010/go-smart-node/actions/runs/44516758296)
+passed module, EVM, mass delegation, IBC, package and publisher checks. The
+archive and GitHub OIDC attestation were verified locally. The separate
+[four-validator rehearsal](https://github.com/maxwell2010/go-smart-node/actions/runs/44516752555)
+used the approved MSP allocation amounts on an isolated signing domain and
+matched AppHash after quorum recovery and follower catch-up. See the
+[recorded revisions and report](../network/docs/ru/evidence/software-release-1.1.0.json).
+
+Public signing domain `mintcandy_9905401-1` / EVM `9905401` and the 5,041,000 MSP
+allocation are approved. Final genesis requires public operator applications,
+wallets, network endpoints and a confirmed start time.
+
+## 1.0.0 software release
+
 The software-only [MintCandy Node 1.0.0](https://github.com/maxwell2010/go-smart-node/releases/tag/v1.0.0)
 is published from immutable source `993c4ae6cca8b66a2c714542e9881424952ec021`.
 The final [44479249249](https://github.com/maxwell2010/go-smart-node/actions/runs/44479249249)
@@ -10,8 +28,7 @@ matched local SHA256/size; the archive, manifest and OIDC bundle were also
 verified locally without executing the binary. Installation instructions,
 SBOM and preserved proof files are permanent release assets. Tag `v1.0.0`
 continues to identify the exact tested source; this record update changes docs only.
-The public network launch remains separate: genesis, supply/allocation,
-operator keys and bootstrap/RPC endpoints have not been approved.
+At the time of 1.0.0, the public genesis and the operator roster were still drafts.
 
 | Verification | Successful evidence |
 | --- | --- |
