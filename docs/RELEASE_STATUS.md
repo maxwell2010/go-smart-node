@@ -2,6 +2,21 @@
 
 Status: NOT READY for a stable production IBC release. No stable tag or release should be published while a required gate below is outstanding.
 
+On 2026-11-19 the release scope was confirmed: complete the node with IBC and
+the agreed token features; DEX, vesting, a proprietary stablecoin and DePIN
+remain separate stages. [Tokenomics proposal review](../network/docs/ru/TOKENOMICS_PROPOSAL_REVIEW.md).
+The [token-features scope](https://github.com/maxwell2010/go-smart-node/actions/runs/44455065325)
+passed on `ee0d1d3`: explicit EIP-712 DRC20 fee authorization, canonical open
+reserve quotes and signed reserveless token lifecycle with disk restart. The
+[whole-module scope](https://github.com/maxwell2010/go-smart-node/actions/runs/44454454149)
+passed on `1a05d63`; subsequent code changes fix tagged tests only.
+Authorization and quote are internal primitives, not completed DRC20 fee
+payment. Ante conversion/payment, durable fee nonce, RPC transport and full
+conversion gas/refund accounting remain required. Reserveless creation and
+owner operations do not yet admit ownership transfer or a bridge controller's
+nested mint path. Financial-profile genesis export remains fail-closed.
+[Stored token validation summary](../network/docs/ru/evidence/token-features-ee0d1d3-20261119/summary.json).
+
 The historical duplicate-vote development branch verifies a 5% debit from
 surviving pre-infraction DEL principal and isolated NFT reserves. Later
 funding survives, including late tranches held in frozen claims. Signed EVM

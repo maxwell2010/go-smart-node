@@ -1,0 +1,31 @@
+{
+  "status": "PASS",
+  "sourceCommit": "ee0d1d3821252cc434c669aa92e48915ce23efaa",
+  "workflowRun": 44455065325,
+  "workflowUrl": "https://github.com/maxwell2010/go-smart-node/actions/runs/44455065325",
+  "checks": [
+    "--- PASS: TestDigestMatchesIndependentGethTypedData (0.00s)",
+    "--- PASS: TestVerifiedFieldsAndNoBigIntegerAliases (0.00s)",
+    "--- PASS: TestSignedFieldAndDomainTamperingRejected (0.00s)",
+    "--- PASS: TestSignatureMustBeExplicitCanonicalFeeAuthorization (0.00s)",
+    "--- PASS: TestMalformedAndExpiredBounds (0.00s)",
+    "--- PASS: TestMeterRequiredAndOutOfGasPropagates (0.00s)",
+    "--- PASS: TestEthereumTransactionBoundsAndProtectedSignature (0.00s)",
+    "--- PASS: TestOwnedAppNativeReservelessTokenLifecycle (0.83s)"
+  ],
+  "scope": "EIP712 fee authorization; actual signed EVM reserveless lifecycle, reserve quotes and LevelDB restart",
+  "wholeModule": {
+    "run": 44454454149,
+    "sourceCommit": "1a05d63",
+    "conclusion": "success",
+    "url": "https://github.com/maxwell2010/go-smart-node/actions/runs/44454454149",
+    "note": "Later code changes fix tagged tests only; not the same SHA"
+  },
+  "limits": [
+    "No DRC20 ante payment/conversion or persistent fee nonce yet",
+    "No public RPC fee authorization transport",
+    "No bridge controller ownership transfer/nested mint admission",
+    "No production genesis export for active financial profile",
+    "Stable production release NOT READY"
+  ]
+}

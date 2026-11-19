@@ -10,6 +10,9 @@
 [проверка зависимостей отдельной сборки](../security/mcnd-sdkarmor-264303b-20261103/README.md).
 [Подробно о синхронизации и хранении](SYNCHRONIZATION_AND_STORAGE.md).
 [Черновик запуска и сбор публичных данных операторов](OPERATOR_LAUNCH.md).
+[Начальное распределение и баланс основателя: параметры для согласования](FOUNDER_BOOTSTRAP_DRAFT.md).
+[Нативная монета, мост, оплата комиссий и gas-price oracle](TOKEN_AND_FEE_MODEL.md).
+[Разбор предложений: однократный выпуск, DEX, vesting, DePIN и арбитраж](TOKENOMICS_PROPOSAL_REVIEW.md).
 [Окно доказательств и восстановление валидатора](SYNCHRONIZATION_AND_STORAGE.md#история-для-штрафа-за-двойную-подпись).
 [Проверка восстановления DEL-стейка на трёх процессах](evidence/del-state-sync-c83a193-20261111/README.md).
 [Ручное и автоматическое завершение возврата стейков](STAKE_WITHDRAWAL_SETTLEMENT.md).
