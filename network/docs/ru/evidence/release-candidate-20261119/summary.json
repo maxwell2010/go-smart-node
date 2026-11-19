@@ -151,5 +151,24 @@
     "tested_evm_block_gas_limit": 24000000
   },
   "running_nodes_touched": false,
-  "heavy_local_builds": false
+  "heavy_local_builds": false,
+  "softwareRelease": {
+    "archiveSha256": "1c8426a37d9f5f5501972d54e96260268760939549d1d1a2e93fe8a65995f495",
+    "binarySha256": "74b7a5b8587951d6d42fac0cc94103181bfaeab257c5068e933eddb79c47996a",
+    "includesGenesis": false,
+    "networkLaunchApproved": false,
+    "releaseVersion": "1.0.0",
+    "sourceRevision": "993c4ae6cca8b66a2c714542e9881424952ec021",
+    "status": "software-release",
+    "runId": 44479249249,
+    "url": "https://github.com/maxwell2010/go-smart-node/actions/runs/44479249249",
+    "conclusion": "success",
+    "localSha256AndOidc": "verified",
+    "installerNoOverwrite": "verified",
+    "tag": "v1.0.0",
+    "releaseUrl": "https://github.com/maxwell2010/go-smart-node/releases/tag/v1.0.0",
+    "publishedAt": "2026-11-19T07:39:28Z",
+    "uploadedAssetsVerified": 12,
+    "installerPublicUrlVerified": true
+  }
 }

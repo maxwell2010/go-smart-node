@@ -1,10 +1,15 @@
 # Software release verification
 
-The separate-network functional, EVM, migration and operational gates below
-have passed. The versioned software archive and strict GitHub OIDC publisher
-attestation passed in [44477103491](https://github.com/maxwell2010/go-smart-node/actions/runs/44477103491).
-Available published assets and their exact source revision are listed in
-[GitHub Releases](https://github.com/maxwell2010/go-smart-node/releases).
+The software-only [MintCandy Node 1.0.0](https://github.com/maxwell2010/go-smart-node/releases/tag/v1.0.0)
+is published from immutable source `993c4ae6cca8b66a2c714542e9881424952ec021`.
+The final [44479249249](https://github.com/maxwell2010/go-smart-node/actions/runs/44479249249)
+passed module, real EVM, mass delegation, governance, IBC harness, reproducibility,
+SBOM/security and strict GitHub OIDC gates. Its actual binary installer passed
+and rejected overwriting an existing destination. All twelve release assets
+matched local SHA256/size; the archive, manifest and OIDC bundle were also
+verified locally without executing the binary. Installation instructions,
+SBOM and preserved proof files are permanent release assets. Tag `v1.0.0`
+continues to identify the exact tested source; this record update changes docs only.
 The public network launch remains separate: genesis, supply/allocation,
 operator keys and bootstrap/RPC endpoints have not been approved.
 

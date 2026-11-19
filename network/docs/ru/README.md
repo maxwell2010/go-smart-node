@@ -4,7 +4,8 @@
 Версионные программные пакеты перечислены в
 [GitHub Releases](https://github.com/maxwell2010/go-smart-node/releases).
 Для установки готового пакета без Go и кэшей сборки используйте
-[однострочник с проверкой GitHub OIDC](SOFTWARE_RELEASE_VERIFICATION.md).
+[готовую инструкцию 1.0.0 с однострочником](https://github.com/maxwell2010/go-smart-node/releases/download/v1.0.0/INSTALL_RU.md)
+и [правила проверки GitHub OIDC](SOFTWARE_RELEASE_VERIFICATION.md).
 Публичный запуск сети требует отдельно утверждённых genesis и операторов.
 Корневой модуль
 и `dscd` относятся к отдельной legacy-сборке/replay. Нельзя заменять
