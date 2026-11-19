@@ -10,6 +10,7 @@ import unittest
 from check_operator_applications import BECH32_GENERATORS, ED25519_TYPE, check_applications, strict_native_address
 from check_public_launch_draft import DEFAULT_DRAFT, DEFAULT_INTAKE, DEFAULT_PLAN, SYSTEM_ROLES, read_json
 from native_launch_allocation import allocation_report, verify_launch_plan
+from prepare_founding_ledger import prepare_ledger
 from test_check_operator_applications import TEST_IDENTITIES
 from verify_public_launch_genesis import verify_candidate
 from withdrawal_genesis_smoke import ALPHABET
@@ -98,6 +99,50 @@ class PublicGenesisLedgerTest(unittest.TestCase):
 
     def verify(self):
         return verify_candidate(self.data(), self.applications, self.plan, self.draft, self.relayer_wallets)
+
+    def test_prepares_deterministic_ledger_and_separate_contract_funding(self):
+        profile = self.document['app_state']['withdrawal_settlement']
+        wrapped = account(profile['wrapped_del'])
+        result = prepare_ledger(self.applications, self.plan, wrapped, profile['gateway'], self.relayer_wallets)
+        self.assertEqual(result['status'], 'FOUNDING_LEDGER_PREPARED')
+        self.assertFalse(result['publicGenesisApproved'])
+        self.assertFalse(result['runtimeInitChainVerified'])
+        self.assertEqual(len(result['bank']['balances']), 8)
+        self.assertEqual(result['bank']['supply'], [coin(self.plan['initial_supply_atoms'])])
+        self.assertEqual(len(result['delegations']), 4)
+        funding = result['contractSetup']['gatewayFunding']
+        self.assertEqual(funding['method'], 'delegateDELTo')
+        self.assertEqual({row['beneficiary'] for row in funding['calls']}, {self.plan['founder_evm_address']})
+        self.assertNotIn('example.invalid', json.dumps(result))
+        self.applications['operators'].reverse()
+        self.assertEqual(result, prepare_ledger(self.applications, self.plan, wrapped, profile['gateway'],
+                                               self.relayer_wallets[::-1]))
+        with self.assertRaisesRegex(ValueError, 'Gateway must differ'):
+            prepare_ledger(self.applications, self.plan, wrapped, profile['wrapped_del'], self.relayer_wallets)
+
+    def test_preparation_cli_requires_four_and_preserves_existing_output(self):
+        tool = Path(__file__).with_name('prepare_founding_ledger.py')
+        profile = self.document['app_state']['withdrawal_settlement']
+        with tempfile.TemporaryDirectory() as directory:
+            intake = Path(directory, 'intake.json')
+            output = Path(directory, 'prepared-ledger.json')
+            cmd = [sys.executable, '-B', str(tool), '--intake', str(intake),
+                   '--gateway', profile['gateway'], '--wrapped-del-wallet', account(profile['wrapped_del']),
+                   '--output', str(output)]
+            for wallet in self.relayer_wallets:
+                cmd.extend(('--relayer-wallet', wallet))
+            intake.write_bytes(DEFAULT_INTAKE.read_bytes())
+            rejected = subprocess.run(cmd, capture_output=True, text=True, check=False)
+            self.assertNotEqual(rejected.returncode, 0)
+            self.assertIn('four complete operator applications', rejected.stderr)
+            self.assertFalse(output.exists())
+            intake.write_text(json.dumps(self.intake), encoding='utf-8')
+            result = subprocess.run(cmd, capture_output=True, text=True, check=False)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            expected = output.read_bytes()
+            rejected = subprocess.run(cmd, capture_output=True, text=True, check=False)
+            self.assertNotEqual(rejected.returncode, 0)
+            self.assertEqual(output.read_bytes(), expected)
 
     def test_checks_every_allocation_and_reports_exact_candidate_hash(self):
         report = self.verify()

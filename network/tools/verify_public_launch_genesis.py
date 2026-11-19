@@ -11,6 +11,7 @@ import re
 from check_operator_applications import check_applications, read_intake, strict_native_address
 from check_public_launch_draft import DEFAULT_DRAFT, DEFAULT_PLAN, SYSTEM_ROLES, check_plan, read_json, require
 from native_launch_allocation import MAX_GENESIS_BYTES, evm_address, summarize_allocation, unique_object, verify_launch_plan
+from prepare_founding_ledger import bank_allocation
 
 
 def verify_cold_launch_profile(doc, draft):
@@ -63,17 +64,11 @@ def verify_cold_launch_profile(doc, draft):
 
 
 def verify_recipients(report, operators, plan, roles, relayer_wallets):
-    planned_amounts = {row['purpose']: row['amount_atoms'] for row in plan['bank_allocation']}
-    wallets = [
-        (plan['founder_evm_address'].lower(), planned_amounts['founder_free_balance_for_distribution_or_sale']),
-        (roles['wrapped_del'], planned_amounts['initial_wdel_backing']),
-    ]
-    wallets.extend((strict_native_address(row['gasWalletAddress'], 'd0'), row['gasBudgetAtoms']) for row in operators)
-    wallets.extend((strict_native_address(wallet, 'd0'), planned_amounts['ibc_relayer_fee_wallet'])
-                   for wallet in relayer_wallets)
-    require(len(relayer_wallets) == 2, 'two IBC relayer gas wallets are required')
-    expected = dict(wallets)
-    require(len(expected) == len(wallets), 'planned founder, backing and gas recipient addresses must be distinct')
+    wrapped = [row['address'] for row in report['bankAllocations'] if row['category'] == 'wrapped_del_backing']
+    require(len(wrapped) == 1 and strict_native_address(wrapped[0], 'd0') == roles['wrapped_del'],
+            'candidate wrapper treasury differs from the system contract')
+    bank = bank_allocation(operators, plan, wrapped[0], relayer_wallets)
+    expected = {strict_native_address(row['address'], 'd0'): row['coins'][0]['amount'] for row in bank['balances']}
     actual = {strict_native_address(row['address'], 'd0'): row['amountAtomic'] for row in report['bankAllocations']}
     require(actual == expected, 'candidate bank recipients or per-wallet amounts differ from the reviewed ledger')
 

@@ -160,6 +160,7 @@ Account-адрес основателя может совпадать с Decimal
 2. В GitHub CI на изолированной копии создать полные defaults точной v1.1.1,
    развернуть утверждённые системные контракты, сформировать authenticated storage,
    native metadata и bindings. Не переносить тестовые ключи и состояния в public genesis.
+   [Подготовка стартового распределения из утверждённых заявок](VALIDATOR_LAUNCH_INTAKE.md#подготовка-стартового-распределения).
 3. Сверить сумму bank balances с supply/base_volume, MSP/WDEL и отсутствие начальных пользовательских резервов origin/DRC20.
    Fee collector и native reward escrow на genesis должны иметь ноль MSP.
    [Сверить кандидата по адресам и ключам с реестром заявок](VALIDATOR_LAUNCH_INTAKE.md#сверка-собранного-genesis).

@@ -10,8 +10,7 @@ from pathlib import Path
 import re
 
 from check_public_launch_draft import (
-    APPROVED_CHAIN_ID, APPROVED_EVM_CHAIN_ID, ATOMS_PER_DEL, DEFAULT_DRAFT,
-    DEFAULT_PLAN, check_contents, check_plan, read_json, require, unique_object,
+    ATOMS_PER_DEL, DEFAULT_DRAFT, DEFAULT_PLAN, check_contents, check_plan, read_json, require, unique_object,
 )
 from withdrawal_genesis_smoke import ALPHABET, bech32_payload
 
@@ -162,8 +161,8 @@ def check_applications(intake, plan):
             and intake['schema_version'] == 2, 'expected operator intake schema 2')
     network = intake.get('network')
     count = plan['approved_validator_count']
-    require(isinstance(network, dict) and network.get('cosmos_chain_id') == APPROVED_CHAIN_ID and
-            network.get('evm_chain_id') == APPROVED_EVM_CHAIN_ID and
+    require(isinstance(network, dict) and network.get('cosmos_chain_id') == plan['chain_id'] and
+            network.get('evm_chain_id') == plan['evm_chain_id'] and
             type(network.get('approved_validator_count')) is int and
             network.get('approved_validator_count') == count, 'intake differs from approved chain domain or roster size')
     rows = intake.get('validators')
@@ -184,8 +183,8 @@ def check_applications(intake, plan):
 
     return {
         'status': 'PRECHECK_PASSED' if len(candidates) == count else 'APPLICATIONS_PENDING',
-        'chainId': APPROVED_CHAIN_ID,
-        'evmChainId': APPROVED_EVM_CHAIN_ID,
+        'chainId': plan['chain_id'],
+        'evmChainId': plan['evm_chain_id'],
         'checkedOperators': len(candidates),
         'requiredOperators': count,
         'missingSlots': count - len(candidates),
