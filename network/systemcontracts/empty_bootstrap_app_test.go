@@ -16,11 +16,13 @@ import (
 	cmttypes "github.com/cometbft/cometbft/types"
 	dbm "github.com/cosmos/cosmos-db"
 	"github.com/cosmos/cosmos-sdk/client/flags"
+	sdk "github.com/cosmos/cosmos-sdk/types"
 	srvflags "github.com/cosmos/evm/server/flags"
 	"github.com/ethereum/go-ethereum/common"
 	ownedapp "github.com/maxwell2010/go-smart-node/network/app"
 	cointypes "github.com/maxwell2010/go-smart-node/network/decimal/coin/types"
 	nfttypes "github.com/maxwell2010/go-smart-node/network/decimal/nft/types"
+	"github.com/maxwell2010/go-smart-node/network/identity"
 	contracts "github.com/maxwell2010/go-smart-node/network/systemcontracts"
 	"github.com/stretchr/testify/require"
 )
@@ -129,23 +131,30 @@ func assertEmptySeedReservelessLifecycle(t *testing.T, l nativeHistoricalLifecyc
 		Address common.Address
 		Supply  string
 	}
-	send := func(to common.Address, data []byte) []byte {
+	send := func(to common.Address, data []byte) ([]byte, uint64) {
 		t.Helper()
 		tx := l.signedEthereumCall(to, sdkmath.ZeroInt(), data)
 		block, response := l.finalizeSignedEthereum(tx)
 		require.Empty(t, response.VmError)
 		l.commit(block)
-		return response.Ret
+		return response.Ret, response.GasUsed
 	}
 	if phase == "run" {
 		checkpoint.Supply = l.supply().String()
 		data, err := center.Pack("createTokenReserveless", "Empty launch reserve-free asset", "emptyfree", true, true,
 			big.NewInt(100), big.NewInt(200), nativeAvatarMetadata)
 		require.NoError(t, err)
-		ret := send(profile.TokenCenter, data)
+		balance := func(address common.Address) sdkmath.Int {
+			return l.app.BankKeeper.GetBalance(l.snapshot(), sdk.AccAddress(address.Bytes()), identity.BaseDenom).Amount
+		}
+		zeroBefore := balance(common.Address{})
+		ret, gas := send(profile.TokenCenter, data)
 		values, err := center.Unpack("createTokenReserveless", ret)
 		require.NoError(t, err)
 		checkpoint.Address = values[0].(common.Address)
+		require.True(t, balance(checkpoint.Address).IsZero())
+		require.True(t, balance(common.Address{}).Equal(zeroBefore))
+		t.Logf("reserveless ticker creation value_atoms=0 reserve_atoms=0 gas_used=%d", gas)
 		_, err = l.app.NativeCoinKeeper.GetCoinByDRC(l.snapshot(), checkpoint.Address.Hex())
 		require.Error(t, err, "reserve-free assets cannot enter backed collateral admission")
 		data, err = free.Pack("mint", l.expect.Actor, big.NewInt(25))
