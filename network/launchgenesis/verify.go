@@ -118,13 +118,19 @@ func VerifyCold(body []byte, ledger Ledger, parameters LaunchParameters) (report
 			return report, fmt.Errorf("InitChain consensus key or power differs")
 		}
 	}
-	block, err := fresh.app.FinalizeBlock(&abci.RequestFinalizeBlock{Height: 1, Time: doc.GenesisTime,
-		NextValidatorsHash: set.Hash(), ProposerAddress: set.Proposer.Address})
+	// A real Comet block supplies its own hash. This probe reuses a deterministic
+	// header for repeated offline results, without claiming an on-chain AppHash.
+	blockHash := sha256.Sum256(append([]byte("mintcandy genesis rehearsal block 1\x00"), body...))
+	block, err := fresh.app.FinalizeBlock(&abci.RequestFinalizeBlock{Height: 1, Time: doc.GenesisTime, Hash: blockHash[:],
+		NextValidatorsHash: set.Hash(), ProposerAddress: set.Validators[0].Address})
 	if err != nil {
 		return report, err
 	}
 	if _, err := fresh.app.Commit(); err != nil {
 		return report, err
+	}
+	if len(block.AppHash) != sha256.Size || !bytes.Equal(block.AppHash, fresh.app.LastCommitID().Hash) {
+		return report, fmt.Errorf("first rehearsal block AppHash differs from the commit")
 	}
 	ctx := fresh.app.NewUncachedContext(false, cmtproto.Header{ChainID: doc.ChainID, Height: 1})
 	for _, row := range ledger.Bank.Balances {
