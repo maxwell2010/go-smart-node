@@ -1,0 +1,88 @@
+{
+  "archiveSha256": "5e2081b86197f24fcec1a0e1421edb387de06f49a520f420734ae649158eeeda",
+  "binarySha256": "a0c0b9b08fc40bc875f289c3c8499a1fcdc1b9396113aed7cf6003554e26467d",
+  "includesGenesis": false,
+  "networkLaunchApproved": false,
+  "releaseVersion": "1.1.1",
+  "sourceRevision": "3880898bf95fe701b9d6f28d6e029a63f88a16ae",
+  "status": "software-release",
+  "sourceRef": "refs/heads/feat/native-duplicate-vote-master-20261112",
+  "minimumNativeValidatorCommission": "0.05",
+  "ci": {
+    "software": "https://github.com/maxwell2010/go-smart-node/actions/runs/44530756651",
+    "attestedBinaryRehearsal": "https://github.com/maxwell2010/go-smart-node/actions/runs/44535605281",
+    "commissionAndRestart": "https://github.com/maxwell2010/go-smart-node/actions/runs/44531029138",
+    "founderStakeBootstrap": "https://github.com/maxwell2010/go-smart-node/actions/runs/44530083524",
+    "nativeHermes": "https://github.com/maxwell2010/go-smart-node/actions/runs/44535821195"
+  },
+  "attestedBinaryRehearsal": {
+    "workflowRevision": "a6f30eb28182513b484e990c5d6991e4541c57a6",
+    "artifactId": 14535807541,
+    "artifactSha256": "1ad355fca247aa84331b643c3512fcdb760297cfa463b1e6456ef1f711509ee3",
+    "reportsSha256": {
+      "allocation.json": "33d9034e108daf18e65b9277a83f0009546052257f663133a9dbe93ab3c15d8f",
+      "install.json": "f0a60cdd95c140402ff74388090eebea4b53b939124a86e75a0be88d1c244009",
+      "quorum.json": "5f4cd01e50b5efb0119ac6fe0b37c2d2d158e12c495818094fe7fa6dda094f98",
+      "systemd.json": "829bc863ea8550293db6c6e027ce833a6ed4d03a51b47e589f00c456a1d0a9e6"
+    },
+    "testChainId": "mintcandy_990013-1",
+    "testGenesisSha256": "cc971b49d77b9fbea11d1f0e3ed98fcf7d2df9c689736c28bfc9265b72d733a0",
+    "isolatedLoopback": true,
+    "minorityPower": 20000,
+    "threeSignerRecovery": {
+      "height": 19,
+      "blockHash": "CBB58FA7D8F78D10CBB8ABBA4B943CFD6E6477D1E859D231ABFC067EFE72B1FA",
+      "appHash": "D1C766AA6B0E0E28F48B59222A791D03B68F85E3C9F4B2BC7BC4A3498695BA2D",
+      "verifiedEd25519Signatures": 3,
+      "signedPower": 30000,
+      "totalPower": 40000,
+      "signingStatePreserved": true
+    },
+    "fourSignerRecovery": {
+      "height": 26,
+      "blockHash": "D7766CE1854A0BEE2B870C5EBA4995D51C75A2EBD36350E7C95D5DB722FCC3D6",
+      "appHash": "B9C0F90F81F53E16FEFE939C58068028A4CDEE725528BFC9A363D108E6764812",
+      "verifiedEd25519Signatures": 4,
+      "signedPower": 40000,
+      "totalPower": 40000,
+      "originalHomes": true,
+      "signingStatePreserved": true,
+      "consensusThresholdUnchanged": true
+    },
+    "follower": {
+      "verifiedHeight": 31,
+      "appHash": "D30279AEF5DDFCB3A9FC6699B6DA429C4449D57E48A75005D5DF217ACEC42833",
+      "followerVotingPower": 0
+    },
+    "systemdRestart": {
+      "loadedHeight": 22,
+      "verifiedHeight": 25,
+      "appHash": "2ED813D1F6FD081AF54ADFDFBED1CF5507B0025FC50193579AB2462A6A448DFA",
+      "sameHome": true,
+      "sameNodeId": true
+    },
+    "stateSync": {
+      "sourceSnapshotHeight": 40,
+      "restoredHeight": 40,
+      "verifiedHeight": 44,
+      "appHash": "CED85E6FC1C99BD28F617B13F219357FBCE1C2C0605696954E14A6570A97015C"
+    }
+  },
+  "nativeHermes": {
+    "runtimeSourceRevision": "a6f30eb28182513b484e990c5d6991e4541c57a6",
+    "runtimeChangesFromArchiveSource": false,
+    "reportSha256": "6a1e54750d126bb45242bf299fe97aec628c590378b99251f127a8dc68c4e079",
+    "testChainId": "mintcandy_990001-1",
+    "counterpartyTestChainId": "ibc-reference-1",
+    "phases": {
+      "client_connection_channel_handshake": "PASS",
+      "native_send": "PASS",
+      "voucher_return": "PASS",
+      "foreign_bank_voucher": "PASS",
+      "foreign_bank_voucher_return": "PASS",
+      "pending_packet_restart": "PASS",
+      "error_ack_refund": "PASS",
+      "timeout_refund": "PASS"
+    }
+  }
+}

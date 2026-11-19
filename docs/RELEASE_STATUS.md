@@ -1,5 +1,20 @@
 # Software release verification
 
+## 1.1.1 software release
+
+[MintCandy Node 1.1.1](https://github.com/maxwell2010/go-smart-node/releases/tag/v1.1.1)
+is published for Linux amd64 at source `3880898bf95fe701b9d6f28d6e029a63f88a16ae`.
+It enforces a 5% minimum native validator commission at genesis,
+registration and signed updates.
+
+The exact attested archive passed the four-validator launch, quorum recovery,
+follower replay, systemd restart and snapshot restore in the isolated rehearsal.
+A separate process test built from the same daemon source exercised ICS-20
+over Hermes, including packet delivery after restart and refunds. See the
+[validation record and run links](../network/docs/ru/evidence/software-release-1.1.1.json).
+
+## 1.1.0 software release
+
 [MintCandy Node 1.1.0](https://github.com/maxwell2010/go-smart-node/releases/tag/v1.1.0)
 is published for Linux amd64 at source `b90b5a9348658627a54d0e5b5002ee1d1b394cc2`.
 The package adds empty asset genesis, public asset creation, validator controls,

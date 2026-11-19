@@ -27,7 +27,7 @@ jobs:
       RELEASE_REF: refs/heads/feat/native-duplicate-vote-master-20261112
       RELEASE_ARCHIVE_SHA: 5e2081b86197f24fcec1a0e1421edb387de06f49a520f420734ae649158eeeda
       RELEASE_BINARY_SHA: a0c0b9b08fc40bc875f289c3c8499a1fcdc1b9396113aed7cf6003554e26467d
-      RELEASE_PACKAGE_RUN: '44530756651'
+      RELEASE_PACKAGE_RUN: ''
       RELEASE_PACKAGE_ATTEMPT: '1'
       GOENV: 'off'
       GOWORK: 'off'

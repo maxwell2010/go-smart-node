@@ -169,9 +169,9 @@ P2P-подключений. Для sentry берите ID из его собст
 
 ## Доверие к программе и окончательному genesis
 
-Программа `mcnd` **1.1.0 уже опубликована**. В JSON-разделе `release.software`
+Программа `mcnd` **1.1.1 уже опубликована**. В JSON-разделе `release.software`
 указаны известные source SHA, SHA256 и GitHub OIDC signer.
-[Установка без Go](https://github.com/maxwell2010/go-smart-node/releases/download/v1.1.0/INSTALL_RU.md),
+[Установка без Go](https://github.com/maxwell2010/go-smart-node/releases/download/v1.1.1/INSTALL_RU.md),
 [строгая проверка GitHub-аттестации](SOFTWARE_RELEASE_VERIFICATION.md).
 Постоянный личный GPG-ключ не требуется для этой software-аттестации.
 
