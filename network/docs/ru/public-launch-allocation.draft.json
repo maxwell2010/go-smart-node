@@ -6,7 +6,7 @@
   "decimals": 18,
   "atoms_per_del": "1000000000000000000",
   "initial_supply_atoms": "5041400000000000000000000",
-  "approved_validator_count": null,
+  "approved_validator_count": 4,
   "proposed_rehearsal_validator_count": 4,
   "founder_evm_address": "0x40900a48273644768c09183e00e43528c17a29f6",
   "founder_address_ownership_confirmed": false,
@@ -149,5 +149,6 @@
     "multisig_required": false,
     "separate_allocation_atoms": "0",
     "purpose": "initial_distribution_contests_and_project_spending_from_founder_balance"
-  }
+  },
+  "approved_initial_stake_per_validator_atoms": "10000000000000000000000"
 }

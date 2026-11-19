@@ -7,7 +7,7 @@
     "evm_chain_id": null,
     "genesis_time_utc": null,
     "initial_height": 1,
-    "approved_validator_count": null,
+    "approved_validator_count": 4,
     "approved_by": null,
     "approval_reference": null
   },

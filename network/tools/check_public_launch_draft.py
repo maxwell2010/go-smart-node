@@ -106,7 +106,7 @@ def check_draft(doc):
             'baseDenom': 'del', 'displayExponent': 18, 'chainIdProposal': doc['chain_id'],
             'blockGasProposal': '24000000', 'unresolvedInputs': len(UNRESOLVED_PATHS),
             'checks': ['unapproved inputs remain null', 'no concrete keys or addresses',
-                       'no declared supply or validator count', 'zero inflation',
+                       'no declared supply or concrete validator roster', 'zero inflation',
                        'matching proposed signing domains']}
 
 
@@ -121,8 +121,10 @@ def check_plan(plan, draft):
     require(plan['native_token_name'] == 'MintCandy' and plan['native_token_symbol'] == 'MSP' and
             plan['display_denom'] == 'MSP' and atomic(plan['atoms_per_native_token']) == ATOMS_PER_DEL,
             'allocation MintCandy MSP identity differs')
-    require(plan['status'] == 'draft_unapproved' and plan['approved_validator_count'] is None,
-            'allocation must remain unapproved with unresolved validator count')
+    require(plan['status'] == 'draft_unapproved' and type(plan['approved_validator_count']) is int and
+            plan['approved_validator_count'] == 4 and
+            atomic(plan['approved_initial_stake_per_validator_atoms']) == 10_000 * ATOMS_PER_DEL,
+            'selected four-validator start or stake size differs')
     decisions = plan['decisions']
     require(decisions['allocation_approved'] is False and
             decisions['initial_asset_creation_approved'] is None and
@@ -163,7 +165,7 @@ def check_plan(plan, draft):
     require(re.fullmatch(r'0x[0-9a-fA-F]{40}', founder) is not None, 'invalid proposed founder address')
     delegations = plan['initial_delegations_within_wdel_backing']
     count = plan['proposed_rehearsal_validator_count']
-    require(type(count) is int and 1 <= count <= 16 and len(delegations) == count and
+    require(type(count) is int and count == plan['approved_validator_count'] and len(delegations) == count and
             len({row['validator_slot'] for row in delegations}) == count,
             'rehearsal slots differ from proposed delegation count')
     for row in delegations:
@@ -177,6 +179,8 @@ def check_plan(plan, draft):
     require(len(backing) == 1 and atomic(backing[0]['amount_atoms']) ==
             sum(atomic(row['amount_atoms']) for row in delegations),
             'WDEL backing differs from proposed delegation total')
+    require(all(atomic(row['amount_atoms']) == atomic(plan['approved_initial_stake_per_validator_atoms'])
+                for row in delegations), 'selected equal validator stake size differs')
     require(plan['allocation_is_additional_to_delegations'] is False,
             'delegations cannot be added to the bank allocation twice')
     for purpose, summary in (('approved_drc20_reserve', 'initial_drc20_reserve_atoms'),
@@ -200,7 +204,7 @@ def check_plan(plan, draft):
             'fee rewards require zero initial collector and vault balances and no emission')
     return {'status': 'PLAN_DRAFT_UNAPPROVED', 'initialSupplyAtoms': str(total),
             'selectedStakeOwnership': 'founder_owned_delegations',
-            'rehearsalValidatorCount': count, 'approvedValidatorCount': None,
+            'rehearsalValidatorCount': count, 'approvedValidatorCount': 4,
             'initialAssetCreationApproved': None}
 
 
@@ -214,8 +218,10 @@ def check_intake(intake):
     require(intake['status'] == 'draft_unapproved' and intake['schema_version'] == 2,
             'intake must remain an unapproved version two template')
     network = intake['network']
+    require(type(network['approved_validator_count']) is int and network['approved_validator_count'] == 4,
+            'intake selected validator count differs')
     require(all(network[name] is None for name in ('cosmos_chain_id', 'evm_chain_id', 'genesis_time_utc',
-                'approved_validator_count', 'approved_by', 'approval_reference')),
+                'approved_by', 'approval_reference')),
             'network launch approval inputs remain unresolved')
     release = intake['release']
     software = release['software']

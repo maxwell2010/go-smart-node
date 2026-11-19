@@ -76,6 +76,16 @@ class PublicLaunchPlanTests(unittest.TestCase):
         self.assertEqual(check_plan(self.plan, self.draft)['status'], 'PLAN_DRAFT_UNAPPROVED')
         self.assertEqual(check_intake(self.intake)['status'], 'INTAKE_DRAFT_UNAPPROVED')
 
+    def test_selected_validator_count_cannot_drift_or_approve_genesis(self):
+        self.assertEqual(check_plan(self.plan, self.draft)['approvedValidatorCount'], 4)
+        self.assertFalse(check_intake(self.intake)['publicGenesisApproved'])
+        self.plan['approved_validator_count'] = 5
+        with self.assertRaisesRegex(ValueError, 'four-validator start'):
+            check_plan(self.plan, self.draft)
+        self.intake['network']['approved_validator_count'] = None
+        with self.assertRaisesRegex(ValueError, 'selected validator count'):
+            check_intake(self.intake)
+
     def test_asset_identity_cannot_diverge_between_launch_documents(self):
         self.plan['native_token_symbol'] = 'DEL'
         with self.assertRaisesRegex(ValueError, 'MSP identity'):
