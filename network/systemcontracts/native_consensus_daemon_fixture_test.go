@@ -31,11 +31,14 @@ import (
 	cointypes "github.com/maxwell2010/go-smart-node/network/decimal/coin/types"
 	validatorkeeper "github.com/maxwell2010/go-smart-node/network/decimal/validator/keeper"
 	validatortypes "github.com/maxwell2010/go-smart-node/network/decimal/validator/types"
+	"github.com/maxwell2010/go-smart-node/network/identity"
+	"github.com/maxwell2010/go-smart-node/network/launchgenesis"
 	contracts "github.com/maxwell2010/go-smart-node/network/systemcontracts"
 	"github.com/stretchr/testify/require"
 )
 
 const nativeConsensusDaemonFixtureEnv = "MCND_NATIVE_CONSENSUS_FIXTURE_DIR"
+const nativeFoundingLedgerEnv = "MCND_FOUNDING_LEDGER_FILE"
 const nativeConsensusFeeRewardsEnv = "MCND_NATIVE_CONSENSUS_FEE_REWARDS"
 const nativeConsensusIBCV1Env = "MCND_NATIVE_CONSENSUS_IBC_V1"
 const nativeConsensusDowntimeEnv = "MCND_NATIVE_CONSENSUS_DEL_DOWNTIME"
@@ -56,6 +59,30 @@ type nativeConsensusFixtureValidator struct {
 	AfterStake   int64  `json:"afterStakePower"`
 }
 
+func exerciseFoundingLedgerRollback(t *testing.T, e isolatedBackendEnv, profile ownedapp.WithdrawalProfile,
+	sponsor common.Address, ledger launchgenesis.Ledger, withdrawalSeconds int64,
+) {
+	t.Helper()
+	ctx, _ := e.ctx().CacheContext()
+	source := sdk.AccAddress(sponsor.Bytes())
+	wrapped := sdk.AccAddress(profile.WrappedDEL.Bytes())
+	balance := e.app.BankKeeper.GetBalance(ctx, source, identity.BaseDenom).Amount
+	budget := sdkmath.NewIntWithDecimal(40_000, 18).SubRaw(1)
+	require.True(t, balance.GT(budget))
+	recipient := sdk.AccAddress(crypto.PubkeyToAddress(e.keys[0].PublicKey).Bytes())
+	require.NoError(t, e.app.BankKeeper.SendCoins(ctx, source, recipient,
+		sdk.NewCoins(sdk.NewCoin(identity.BaseDenom, balance.Sub(budget)))))
+	require.ErrorContains(t, launchgenesis.ApplyFoundingPositions(e.app, ctx, profile, sponsor, ledger, withdrawalSeconds), "funding call 4: execute delegateDELTo")
+	require.True(t, e.app.BankKeeper.GetBalance(ctx, wrapped, identity.BaseDenom).Amount.IsZero())
+	require.True(t, e.app.BankKeeper.GetBalance(ctx, source, identity.BaseDenom).Amount.Equal(budget))
+	state, err := e.app.NativeValidatorKeeper.ExportGenesis(ctx)
+	require.NoError(t, err)
+	require.Empty(t, state.Validators)
+	require.Empty(t, state.Delegations)
+	require.Empty(t, state.EVMStakeBindings)
+	t.Log("founding ledger rolled back after the fourth Gateway funding call exceeded the remaining balance")
+}
+
 func exportNativeConsensusDaemonFixture(t *testing.T, e isolatedBackendEnv, dir string, profile ownedapp.WithdrawalProfile,
 	gateway, master, wrapper, vault contracts.Artifact, nft *nativeNFTDowntimeFixture, gov func(contracts.Artifact, common.Address, string, ...interface{})) {
 	t.Helper()
@@ -72,6 +99,16 @@ func exportNativeConsensusDaemonFixture(t *testing.T, e isolatedBackendEnv, dir 
 	key := e.keys[3]
 	actor := crypto.PubkeyToAddress(key.PublicKey)
 	launch, launchRehearsal := nativeLaunchSpecForMode(os.Getenv(nativeLaunchRehearsalEnv))
+	var foundingLedger *launchgenesis.Ledger
+	if path := os.Getenv(nativeFoundingLedgerEnv); path != "" {
+		require.True(t, launch.sponsoredFounder(), "external ledger replay requires the isolated sponsored fixture")
+		file, err := os.Open(path)
+		require.NoError(t, err)
+		ledger, err := launchgenesis.ReadLedger(file)
+		require.NoError(t, file.Close())
+		require.NoError(t, err)
+		foundingLedger = &ledger
+	}
 	if launch.sponsoredFounder() {
 		actor = nativeSponsoredFounderAddress()
 		incoming := sdk.AccAddress(actor.Bytes())
@@ -227,7 +264,9 @@ func exportNativeConsensusDaemonFixture(t *testing.T, e isolatedBackendEnv, dir 
 			validatortypes.Description{Moniker: moniker}, commission)
 		require.NoError(t, err)
 		row.Online = true
-		require.NoError(t, nativeKeeper.SetValidator(e.ctx(), row))
+		if foundingLedger == nil {
+			require.NoError(t, nativeKeeper.SetValidator(e.ctx(), row))
+		}
 		validators = append(validators, nativeConsensusFixtureValidator{
 			Name: name, Operator: operator, EVM: address.Hex(), Consensus: pub.Address().String(), PubKey: publicKey,
 			Initial: initial[i], AfterStake: after[i],
@@ -238,9 +277,6 @@ func exportNativeConsensusDaemonFixture(t *testing.T, e isolatedBackendEnv, dir 
 			pv.Key.Save()
 		}
 	}
-	for _, validator := range masterValidators {
-		gov(master, profile.MasterValidator, "addValidators", []masterValidator{validator})
-	}
 	withdrawalSeconds := int64(20)
 	if ibcV1 {
 		withdrawalSeconds = int64(validatortypes.DefaultParams().UndelegationTime / time.Second)
@@ -248,7 +284,26 @@ func exportNativeConsensusDaemonFixture(t *testing.T, e isolatedBackendEnv, dir 
 	if historical {
 		withdrawalSeconds = 2
 	}
-	gov(gateway, profile.Gateway, "setFreezeTime", big.NewInt(withdrawalSeconds), new(big.Int))
+	if foundingLedger != nil {
+		sponsor := crypto.PubkeyToAddress(key.PublicKey)
+		exerciseFoundingLedgerRollback(t, e, profile, sponsor, *foundingLedger, withdrawalSeconds)
+		require.NoError(t, launchgenesis.ApplyFoundingPositions(e.app, e.ctx(), profile, sponsor, *foundingLedger, withdrawalSeconds))
+		require.ErrorContains(t,
+			launchgenesis.ApplyFoundingPositions(e.app, e.ctx(), profile, sponsor, *foundingLedger, withdrawalSeconds), "empty native validator roster")
+		for i := range validators {
+			row, err := nativeKeeper.GetValidator(e.ctx(), validators[i].Operator)
+			require.NoError(t, err)
+			validators[i].RewardNative = row.RewardAddress
+			reward, err := sdk.AccAddressFromBech32(row.RewardAddress)
+			require.NoError(t, err)
+			validators[i].Reward = common.BytesToAddress(reward).Hex()
+		}
+	} else {
+		for _, validator := range masterValidators {
+			gov(master, profile.MasterValidator, "addValidators", []masterValidator{validator})
+		}
+		gov(gateway, profile.Gateway, "setFreezeTime", big.NewInt(withdrawalSeconds), new(big.Int))
+	}
 	if !launch.sponsoredFounder() {
 		e.ctx().KVStore(e.app.GetKey(validatortypes.StoreKey)).Set([]byte{ownedapp.WithdrawalProfileKey}, config)
 		require.NoError(t, e.app.LoadWithdrawalSettlement(e.ctx()))
@@ -272,6 +327,10 @@ func exportNativeConsensusDaemonFixture(t *testing.T, e isolatedBackendEnv, dir 
 	var seeded int
 	for i, validator := range validators {
 		if validator.Initial == 0 {
+			continue
+		}
+		if foundingLedger != nil {
+			seeded++
 			continue
 		}
 		e.nextGasLimit(gasLimit)
@@ -369,6 +428,9 @@ func exportNativeConsensusDaemonFixture(t *testing.T, e isolatedBackendEnv, dir 
 	bank.Balances = balances
 	if launch.emptyAssets() {
 		applyNativeEmptyLaunchAllocation(t, &bank, profile.WrappedDEL, actor, launch)
+		if foundingLedger != nil {
+			bank.Balances, bank.Supply = foundingLedger.Bank.Balances, foundingLedger.Bank.Supply
+		}
 	} else if launch.fourValidators() {
 		require.NotNil(t, custom)
 		require.NotNil(t, nft)

@@ -95,17 +95,23 @@ jobs:
           set -euo pipefail
           go test -mod=readonly -p 2 -count=1 -v -timeout 10m -tags appstate \
             -run '^TestOwnedApp(NativeLaunchPreview|NativeValidatorSelfControls)$' ./systemcontracts
-      - name: Compare the prepared founding ledger with an attested cold genesis
+      - name: Replay the prepared founding ledger and attest the cold genesis
         run: |
           set -euo pipefail
           umask 077
-          export MCND_NATIVE_CONSENSUS_FIXTURE_DIR="$(mktemp -d "$RUNNER_TEMP/founding-ledger.XXXXXXXX")"
+          root="$(mktemp -d "$RUNNER_TEMP/founding-ledger.XXXXXXXX")"
+          mkdir -m 700 "$root/source" "$root/replay"
+          export MCND_NATIVE_CONSENSUS_FIXTURE_DIR="$root/source"
           export MCND_NATIVE_LAUNCH_REHEARSAL=4-empty-sponsored
           go test -mod=readonly -p 2 -count=1 -v -timeout 5m -tags appstate \
             -run '^TestOwnedAppSignedRegistryBootstrap$/^authenticated_isolated_position_reader$' ./systemcontracts
+          python3 -B tools/test_founding_ledger_fixture.py --source "$root/source" --output "$root/ledger.json"
+          export MCND_NATIVE_CONSENSUS_FIXTURE_DIR="$root/replay"
+          MCND_FOUNDING_LEDGER_FILE="$root/ledger.json" go test -mod=readonly -p 2 -count=1 -v -timeout 5m -tags appstate \
+            -run '^TestOwnedAppSignedRegistryBootstrap$/^authenticated_isolated_position_reader$' ./systemcontracts
           MCND_NATIVE_LAUNCH_VERIFY=1 go test -mod=readonly -p 2 -count=1 -v -timeout 5m -tags appstate \
             -run '^TestOwnedAppNativeLaunchPreview$' ./systemcontracts
-          MCND_FOUNDING_LEDGER_FIXTURE="$MCND_NATIVE_CONSENSUS_FIXTURE_DIR" \
+          MCND_FOUNDING_LEDGER_SOURCE="$root/source" MCND_FOUNDING_LEDGER_FIXTURE="$root/replay" \
             python3 -B -m unittest discover -s tools -p 'test_founding_ledger_fixture.py' -v
 
   modern-module:
