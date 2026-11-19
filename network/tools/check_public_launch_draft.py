@@ -127,8 +127,13 @@ def check_plan(plan, draft):
     require(decisions['allocation_approved'] is False and
             decisions['initial_asset_creation_approved'] is None and
             all(value is None or value is False for name, value in decisions.items()
-                if name.endswith('_approved') and name != 'treasury_control_approved'),
+                if name.endswith('_approved') and name not in
+                {'treasury_control_approved', 'stake_ownership_approved'}),
             'allocation or asset decision was approved in a draft')
+    require(decisions['stake_ownership_approved'] is True and
+            decisions['selected_stake_ownership'] == 'founder_owned_delegations' and
+            decisions['selected_stake_owner_evm_address'] == plan['founder_evm_address'],
+            'selected founder delegation ownership differs')
     require(plan['founder_address_ownership_confirmed'] is False,
             'public founder address control has not been confirmed')
     require(plan['chain_id'] == draft['chain_id'] and
@@ -194,6 +199,7 @@ def check_plan(plan, draft):
             atomic(plan['fee_collector_atoms']) == atomic(plan['isolated_position_vault_atoms']) == 0,
             'fee rewards require zero initial collector and vault balances and no emission')
     return {'status': 'PLAN_DRAFT_UNAPPROVED', 'initialSupplyAtoms': str(total),
+            'selectedStakeOwnership': 'founder_owned_delegations',
             'rehearsalValidatorCount': count, 'approvedValidatorCount': None,
             'initialAssetCreationApproved': None}
 

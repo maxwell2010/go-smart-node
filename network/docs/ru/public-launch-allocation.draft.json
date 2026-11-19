@@ -12,14 +12,15 @@
   "founder_address_ownership_confirmed": false,
   "decisions": {
     "allocation_approved": false,
-    "stake_ownership_approved": null,
+    "stake_ownership_approved": true,
     "proposed_stake_ownership": "founder_owned_delegations",
-    "alternative_stake_ownership": "gifts_to_approved_validator_operators",
     "treasury_control_approved": true,
     "initial_asset_profile_approved": null,
     "proposed_initial_asset_profile": "full_v1_0_0_profile_with_backed_drc20_and_erc1155_requires_asset_creation_approval",
     "initial_asset_creation_approved": null,
-    "alternative_initial_asset_profile": "del_only_requires_separate_profile_and_new_isolated_ci_validation"
+    "alternative_initial_asset_profile": "del_only_requires_separate_profile_and_new_isolated_ci_validation",
+    "selected_stake_ownership": "founder_owned_delegations",
+    "selected_stake_owner_evm_address": "0x40900a48273644768c09183e00e43528c17a29f6"
   },
   "bank_allocation": [
     {

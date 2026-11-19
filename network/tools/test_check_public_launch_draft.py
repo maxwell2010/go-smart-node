@@ -115,12 +115,19 @@ class PublicLaunchPlanTests(unittest.TestCase):
             check_plan(self.plan, self.draft)
 
     def test_accidental_financial_approval_is_rejected(self):
-        for name in ('allocation_approved', 'initial_asset_creation_approved', 'stake_ownership_approved'):
+        for name in ('allocation_approved', 'initial_asset_creation_approved'):
             with self.subTest(decision=name):
                 plan = copy.deepcopy(self.plan)
                 plan['decisions'][name] = True
                 with self.assertRaisesRegex(ValueError, 'approved in a draft'):
                     check_plan(plan, self.draft)
+
+    def test_selected_founder_delegations_cannot_become_operator_gifts(self):
+        self.assertEqual(check_plan(self.plan, self.draft)['selectedStakeOwnership'],
+                         'founder_owned_delegations')
+        self.plan['decisions']['selected_stake_ownership'] = 'gifts_to_approved_validator_operators'
+        with self.assertRaisesRegex(ValueError, 'founder delegation ownership'):
+            check_plan(self.plan, self.draft)
 
     def test_intake_secrets_and_genesis_approval_are_rejected(self):
         self.intake['validators'][0]['readiness']['seed_phrase'] = 'not-a-real-secret'
