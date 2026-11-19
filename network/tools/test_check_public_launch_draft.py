@@ -130,12 +130,19 @@ class PublicLaunchPlanTests(unittest.TestCase):
             check_plan(self.plan, self.draft)
 
     def test_accidental_financial_approval_is_rejected(self):
-        for name in ('allocation_approved', 'initial_asset_creation_approved'):
+        for name in ('launch_approved', 'initial_asset_creation_approved'):
             with self.subTest(decision=name):
                 plan = copy.deepcopy(self.plan)
                 plan['decisions'][name] = True
-                with self.assertRaisesRegex(ValueError, 'approved in a draft'):
+                with self.assertRaisesRegex(ValueError, 'approval in a draft'):
                     check_plan(plan, self.draft)
+
+    def test_approved_gas_distribution_cannot_drift_at_the_same_total(self):
+        rows = self.plan['bank_allocation']
+        rows[2]['amount_atoms'] = str(201 * 10**18)
+        rows[-1]['amount_atoms'] = str(99 * 10**18)
+        with self.assertRaisesRegex(ValueError, 'gas wallet budgets'):
+            check_plan(self.plan, self.draft)
 
     def test_selected_founder_delegations_cannot_become_operator_gifts(self):
         self.assertEqual(check_plan(self.plan, self.draft)['selectedStakeOwnership'],

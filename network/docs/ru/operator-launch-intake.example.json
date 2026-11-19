@@ -3,8 +3,8 @@
   "network": {
     "name": "MintCandy Network",
     "purpose": null,
-    "cosmos_chain_id": null,
-    "evm_chain_id": null,
+    "cosmos_chain_id": "mintcandy_9905401-1",
+    "evm_chain_id": "9905401",
     "genesis_time_utc": null,
     "initial_height": 1,
     "approved_validator_count": 4,
@@ -27,7 +27,7 @@
   "allocation": {
     "denom": "del",
     "decimals": 18,
-    "expected_total_atoms": null,
+    "expected_total_atoms": "5041000000000000000000000",
     "bank_balances": [
       {
         "address": null,

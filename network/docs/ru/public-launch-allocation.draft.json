@@ -11,7 +11,8 @@
   "founder_evm_address": "0x40900a48273644768c09183e00e43528c17a29f6",
   "founder_address_ownership_confirmed": false,
   "decisions": {
-    "allocation_approved": false,
+    "allocation_approved": true,
+    "chain_id_approved": true,
     "stake_ownership_approved": true,
     "proposed_stake_ownership": "founder_owned_delegations",
     "treasury_control_approved": true,
@@ -118,7 +119,7 @@
   "display_denom": "MSP",
   "atoms_per_native_token": "1000000000000000000",
   "founder_requested_free_balance_atoms": "5000000000000000000000000",
-  "initial_supply_is_proposal": true,
+  "initial_supply_is_proposal": false,
   "treasury_policy": {
     "selection": "founder_single_account",
     "selected_by_founder": true,

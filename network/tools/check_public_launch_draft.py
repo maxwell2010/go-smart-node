@@ -14,6 +14,9 @@ DEFAULT_DRAFT = Path(__file__).resolve().parents[1] / 'docs/ru/public-genesis.dr
 DEFAULT_PLAN = DEFAULT_DRAFT.with_name('public-launch-allocation.draft.json')
 DEFAULT_INTAKE = DEFAULT_DRAFT.with_name('operator-launch-intake.example.json')
 ATOMS_PER_DEL = 10**18
+APPROVED_CHAIN_ID = 'mintcandy_9905401-1'
+APPROVED_EVM_CHAIN_ID = '9905401'
+APPROVED_SUPPLY = 5_041_000 * ATOMS_PER_DEL
 SYSTEM_ROLES = ('registry', 'gateway', 'library', 'nft_center', 'position_vault',
                 'master_validator', 'wrapped_del', 'token_center', 'curve_converter')
 UNRESOLVED_PATHS = (
@@ -77,7 +80,9 @@ def check_draft(doc):
     require(max(evm_id, revision) < 2**64 and evm_id not in {75, 202020, 20202020},
             'invalid proposed signing domain')
     require(domain == {'chain_id': doc['chain_id'], 'evm_chain_id': str(evm_id)},
-            'binding domain differs from proposed chain ID')
+            'binding domain differs from genesis chain ID')
+    require(doc['chain_id'] == APPROVED_CHAIN_ID and str(evm_id) == APPROVED_EVM_CHAIN_ID,
+            'genesis differs from the approved signing domain')
     require(doc['consensus_params']['block']['max_gas'] == '24000000',
             'draft must preserve the proposed 24 million block gas cap')
     state = doc['app_state']
@@ -105,11 +110,11 @@ def check_draft(doc):
             state['withdrawal_settlement']['enable_native_fee_rewards'] is True,
             'draft requires the native consensus and fee reward profile')
     return {'status': 'DRAFT_NOT_RUNNABLE', 'nativeName': 'MintCandy', 'nativeSymbol': 'MSP',
-            'baseDenom': 'del', 'displayExponent': 18, 'chainIdProposal': doc['chain_id'],
+            'baseDenom': 'del', 'displayExponent': 18, 'approvedChainId': doc['chain_id'],
             'blockGasProposal': '24000000', 'unresolvedInputs': len(UNRESOLVED_PATHS),
             'checks': ['unapproved inputs remain null', 'no concrete keys or addresses',
                        'no declared supply or concrete validator roster', 'zero inflation',
-                       'matching proposed signing domains']}
+                       'matching approved signing domains']}
 
 
 def atomic(value):
@@ -128,12 +133,14 @@ def check_plan(plan, draft):
             atomic(plan['approved_initial_stake_per_validator_atoms']) == 10_000 * ATOMS_PER_DEL,
             'selected four-validator start or stake size differs')
     decisions = plan['decisions']
-    require(decisions['allocation_approved'] is False and
-            decisions['initial_asset_creation_approved'] is False and
+    require(decisions['allocation_approved'] is True and decisions['chain_id_approved'] is True,
+            'record the approved allocation and signing domain')
+    require(decisions['initial_asset_creation_approved'] is False and
             all(value is None or value is False for name, value in decisions.items()
                 if name.endswith('_approved') and name not in
-                {'treasury_control_approved', 'stake_ownership_approved', 'initial_asset_profile_approved'}),
-            'allocation or asset decision was approved in a draft')
+                {'allocation_approved', 'chain_id_approved', 'treasury_control_approved',
+                 'stake_ownership_approved', 'initial_asset_profile_approved'}),
+            'unexpected public launch or asset approval in a draft')
     require(decisions['stake_ownership_approved'] is True and
             decisions['selected_stake_ownership'] == 'founder_owned_delegations' and
             decisions['selected_stake_owner_evm_address'] == plan['founder_evm_address'],
@@ -146,11 +153,10 @@ def check_plan(plan, draft):
     require(plan['denom'] == 'del' and type(plan['decimals']) is int and plan['decimals'] == 18 and
             atomic(plan['atoms_per_del']) == ATOMS_PER_DEL, 'invalid MSP denomination scale')
     total = atomic(plan['initial_supply_atoms'])
-    require(total > 0 and plan['initial_supply_is_proposal'] is True,
-            'initial supply must remain a positive unapproved proposal')
+    require(plan['initial_supply_is_proposal'] is False, 'record the approved supply')
     allocations = plan['bank_allocation']
     require(sum(atomic(row['amount_atoms']) for row in allocations) == total,
-            'bank allocation total differs from proposed supply')
+            'bank allocation total differs from approved supply')
     free = [row for row in allocations if row['purpose'] == 'founder_free_balance_for_distribution_or_sale']
     treasury = plan['treasury_policy']
     require(len(free) == 1 and atomic(free[0]['amount_atoms']) ==
@@ -190,6 +196,17 @@ def check_plan(plan, draft):
             atomic(plan['initial_nft_reserve_atoms']) == atomic(plan['initial_drc20_reserve_atoms']) == 0 and
             not any(row['purpose'] in ('approved_drc20_reserve', 'approved_erc1155_origin_reserve')
                     for row in allocations), 'selected empty user asset allocation differs')
+    require(total == APPROVED_SUPPLY, 'initial supply differs from approved allocation')
+    for purpose, slot_field, prefix, wallet_count, amount in (
+        ('validator_fee_wallet', 'validator_slot', 'V', 4, 200),
+        ('ibc_relayer_fee_wallet', 'relayer_slot', 'R', 2, 100),
+    ):
+        gas_rows = [row for row in allocations if row['purpose'] == purpose]
+        require(len(gas_rows) == wallet_count and {row[slot_field] for row in gas_rows} ==
+                {f'{prefix}{i}' for i in range(1, wallet_count + 1)} and
+                all(atomic(row['amount_atoms']) == amount * ATOMS_PER_DEL for row in gas_rows),
+                'gas wallet budgets differ from approved allocation')
+    require(len(allocations) == 8, 'unexpected bank allocation entry')
     require(plan['release_requirements'] and all(value == 'pending' for value in plan['release_requirements'].values()),
             'new user asset release requirements have not been demonstrated yet')
     require(plan['reward_emission'] is False and plan['reward_source'] == 'collected_del_transaction_fees' and
@@ -198,6 +215,7 @@ def check_plan(plan, draft):
     return {'status': 'PLAN_DRAFT_UNAPPROVED', 'initialSupplyAtoms': str(total),
             'selectedStakeOwnership': 'founder_owned_delegations',
             'rehearsalValidatorCount': count, 'approvedValidatorCount': 4,
+            'allocationApproved': True, 'chainIdApproved': True,
             'initialAssetCreationApproved': False, 'userCreationAndMediaReleaseGates': 'pending'}
 
 
@@ -213,7 +231,9 @@ def check_intake(intake):
     network = intake['network']
     require(type(network['approved_validator_count']) is int and network['approved_validator_count'] == 4,
             'intake selected validator count differs')
-    require(all(network[name] is None for name in ('cosmos_chain_id', 'evm_chain_id', 'genesis_time_utc',
+    require(network['cosmos_chain_id'] == APPROVED_CHAIN_ID and network['evm_chain_id'] == APPROVED_EVM_CHAIN_ID,
+            'intake differs from the approved signing domain')
+    require(all(network[name] is None for name in ('genesis_time_utc',
                 'approved_by', 'approval_reference')),
             'network launch approval inputs remain unresolved')
     release = intake['release']
@@ -227,9 +247,9 @@ def check_intake(intake):
             software['signature_scheme'] == 'github_oidc_sigstore', 'software release identity differs')
     require(release['genesis'] and all(value is None for value in release['genesis'].values()),
             'software publication cannot approve or sign an unresolved public genesis')
-    require(intake['allocation']['expected_total_atoms'] is None and
+    require(atomic(intake['allocation']['expected_total_atoms']) == APPROVED_SUPPLY and
             all(value is None for row in intake['allocation']['bank_balances'] for value in row.values()),
-            'intake cannot preapprove proposed allocation amounts or recipients')
+            'intake must preserve approved total and unresolved wallet recipients')
     require(intake['profile']['max_validators'] is None and intake['profile']['block_max_gas'] is None,
             'profile parameters await launch approval')
     for validator in intake['validators']:
