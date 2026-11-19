@@ -152,6 +152,7 @@ func NewRootCmd() *cobra.Command {
 	}
 	addDomainFlags(rootCmd)
 	rootCmd.AddCommand(nativeValidatorRegistrationMetadataCmd())
+	rootCmd.AddCommand(newFeeEnvelopeCmd())
 
 	return rootCmd
 }
@@ -161,7 +162,7 @@ func statelessCommand(cmd *cobra.Command) bool {
 		cmd = cmd.Parent()
 	}
 	switch cmd.Name() {
-	case "version", "completion", "help", nativeValidatorRegistrationMetadataCommandName:
+	case "version", "completion", "help", "fee-envelope", nativeValidatorRegistrationMetadataCommandName:
 		return true
 	default:
 		return false
