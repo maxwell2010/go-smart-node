@@ -12,6 +12,13 @@ used the approved MSP allocation amounts on an isolated signing domain and
 matched AppHash after quorum recovery and follower catch-up. See the
 [recorded revisions and report](../network/docs/ru/evidence/software-release-1.1.0.json).
 
+A [separate rehearsal of the published archive](https://github.com/maxwell2010/go-smart-node/actions/runs/44521204468)
+downloaded the GitHub Release assets and installed the attested Linux amd64
+binary. On the isolated four-validator network, the same binary recovered
+quorum, replayed history on a new follower, resumed after a systemd restart,
+and restored a fresh peer from a height-40 snapshot. The restored peer matched
+the validator AppHash at height 44.
+
 Public signing domain `mintcandy_9905401-1` / EVM `9905401` and the 5,041,000 MSP
 allocation are approved. Final genesis requires public operator applications,
 wallets, network endpoints and a confirmed start time.

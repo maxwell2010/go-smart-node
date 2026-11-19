@@ -13,7 +13,8 @@
     "ibcUpgradeRollback": "https://github.com/maxwell2010/go-smart-node/actions/runs/44514721177",
     "systemdStartupReplay": "https://github.com/maxwell2010/go-smart-node/actions/runs/44514715497",
     "drc20Daemon": "https://github.com/maxwell2010/go-smart-node/actions/runs/44514906044",
-    "avatarSchemaRpc": "https://github.com/maxwell2010/go-smart-node/actions/runs/44512388538"
+    "avatarSchemaRpc": "https://github.com/maxwell2010/go-smart-node/actions/runs/44512388538",
+    "publishedBinaryRehearsal": "https://github.com/maxwell2010/go-smart-node/actions/runs/44521204468"
   },
   "localChecks": {
     "manifest": true,
@@ -59,5 +60,44 @@
     "operatorsGasMSP": 800,
     "relayersGasMSP": 200
   },
-  "readyPublicOperatorApplications": 0
+  "readyPublicOperatorApplications": 0,
+  "publishedBinaryRehearsal": {
+    "workflowRevision": "5950f645b9087e56fcfb3c3d5fef8ea54acb73c5",
+    "artifactSha256": "17d4334e1d9b00fe5d368480fdb51f2d75c93a3aac038bf9e17a653983d58522",
+    "reportSha256": {
+      "allocation.json": "33d9034e108daf18e65b9277a83f0009546052257f663133a9dbe93ab3c15d8f",
+      "install.json": "23f4d8c0590bb5e6a6e8d9d7963d2a8d38f117b66b9ff6cbacb0fd9940eecd37",
+      "quorum.json": "b7aa76193ec8b31655e5d98d1b4a15fd408ce40d2b558782d003fc542337295d",
+      "systemd.json": "ddd353ef91e7c826979f4e618c5b2d1b068cd6a6ee84694638e3568378c12f14"
+    },
+    "testChainId": "mintcandy_990013-1",
+    "testGenesisSha256": "cc971b49d77b9fbea11d1f0e3ed98fcf7d2df9c689736c28bfc9265b72d733a0",
+    "quorumRecovery": {
+      "height": 19,
+      "blockHash": "C681CA44931EA5FDEF200126683775E02C43AAAF0D603C733DED1518A3A9D3DC",
+      "appHash": "3DFBCB2911C56D7518B70C33E9DA63B64AB3D2624778EF8FE39CD3CED13E68E7",
+      "verifiedEd25519Signatures": 3,
+      "signedPower": 30000,
+      "totalPower": 40000,
+      "signingStatePreserved": true
+    },
+    "followerReplay": {
+      "fromHeight": 1,
+      "verifiedHeight": 31,
+      "appHash": "6716B7E4D42975368974E3D5837FFF8B54F59B762DE843C80BF9A655E5F5D2FF"
+    },
+    "systemdRestart": {
+      "loadedHeight": 22,
+      "verifiedHeight": 25,
+      "appHash": "CF11DFAD4D3B4299D6CC1C38C517A248D1EC2DCFA4F680A85174B887E342965A",
+      "sameHome": true,
+      "sameNodeId": true
+    },
+    "snapshotRestore": {
+      "restoredHeight": 40,
+      "verifiedHeight": 44,
+      "appHash": "ACDC3A506E9771951DF79C2F198A7BEC416B0DE5E773046522122F0982265253",
+      "observerVotingPower": 0
+    }
+  }
 }
