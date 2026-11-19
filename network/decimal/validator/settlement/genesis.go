@@ -22,6 +22,8 @@ type GenesisLimits struct {
 	DELValidators []common.Address
 	ActiveDEL     []validatortypes.EVMStakeBinding
 	NFTOrigins    []NFTGenesisOrigin
+	// The system receipt vault must be attested even with no user NFT origins.
+	RequireEmptyNFTVault bool
 	// When positive, require this exact on-chain Gateway withdrawal delay.
 	DELWithdrawalSeconds int64
 }
@@ -38,7 +40,8 @@ type GenesisLimits struct {
 func (e *Executor) AttestGenesis(ctx sdk.Context, rows []validatortypes.EVMFrozenBinding, limits GenesisLimits, attestNFT func(sdk.Context, validatortypes.EVMFrozenBinding) error) (err error) {
 	if e == nil || e.evm == nil || limits.MaxRows == 0 || limits.MaxRows > validatortypes.MaxBindingPageSize || limits.SDKGas == 0 ||
 		len(rows) > int(limits.MaxRows) || len(limits.DELValidators) > int(limits.MaxRows) || len(limits.NFTOrigins) > int(limits.MaxRows) ||
-		(len(limits.DELValidators) != 0 && len(rows) != 0) || (len(limits.NFTOrigins) != 0 && len(limits.DELValidators) == 0) ||
+		(len(limits.DELValidators) != 0 && len(rows) != 0) ||
+		((len(limits.NFTOrigins) != 0 || limits.RequireEmptyNFTVault) && len(limits.DELValidators) == 0) ||
 		len(limits.ActiveDEL) > int(limits.MaxRows) || (len(limits.ActiveDEL) != 0 && len(limits.DELValidators) == 0) ||
 		limits.DELWithdrawalSeconds < 0 || (limits.DELWithdrawalSeconds > 0 && len(limits.DELValidators) == 0) {
 		return errors.New("invalid Gateway genesis attestation limits or row count")
@@ -144,7 +147,7 @@ func (e *Executor) AttestGenesis(ctx sdk.Context, rows []validatortypes.EVMFroze
 		if err := e.attestDELGenesis(child, limits.DELValidators, limits.ActiveDEL, limits.DELWithdrawalSeconds); err != nil {
 			return err
 		}
-		if len(limits.NFTOrigins) != 0 {
+		if len(limits.NFTOrigins) != 0 || limits.RequireEmptyNFTVault {
 			return e.attestFreshNFTGenesis(child, limits.NFTOrigins)
 		}
 		return nil

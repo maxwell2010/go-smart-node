@@ -54,6 +54,12 @@ func runIsolatedPositionReader(t *testing.T, e isolatedBackendEnv) {
 	factory, vault, origin, wrapper := e.load("NewNetworkNFTCenter"), e.load("MintCandyNFTPositionVault"), e.load("MintCandyIsolatedDRC1155"), e.load("MintCandyWrappedDEL")
 	registryImpl, gatewayImpl, factoryImpl, vaultImpl, originImpl := e.deploy(registry), e.deploy(gateway), e.deploy(factory), e.deploy(vault), e.deploy(origin)
 	wrapped := e.deploy(wrapper)
+	extraNFTImplementations := make(map[string]common.Address)
+	if os.Getenv(emptyUserAssetsPhaseEnv) == "seed" {
+		for _, name := range []string{"NewNetworkDRC721", "DRC721Reserveless", "DRC1155Reserveless"} {
+			extraNFTImplementations[name] = e.deploy(e.load(name))
+		}
+	}
 	nonce := e.app.EVMKeeper.GetNonce(e.ctx(), owner)
 	registryAddress, gatewayAddress, factoryAddress, vaultAddress := crypto.CreateAddress(owner, nonce), crypto.CreateAddress(owner, nonce+1), crypto.CreateAddress(owner, nonce+2), crypto.CreateAddress(owner, nonce+3)
 	var configs [][]byte
@@ -78,7 +84,20 @@ func runIsolatedPositionReader(t *testing.T, e isolatedBackendEnv) {
 	require.NoError(t, err)
 	initChild, err := factory.ABI.Pack("upgradeNFT", originImpl, uint8(1), true)
 	require.NoError(t, err)
-	createProxy(factoryAddress, factoryImpl, initFactory, [][]byte{initChild})
+	factoryConfig := [][]byte{initChild}
+	if os.Getenv(emptyUserAssetsPhaseEnv) == "seed" {
+		for _, child := range []struct {
+			name    string
+			kind    uint8
+			reserve bool
+		}{{"NewNetworkDRC721", 0, true}, {"DRC721Reserveless", 0, false}, {"DRC1155Reserveless", 1, false}} {
+			implementation := extraNFTImplementations[child.name]
+			data, err := factory.ABI.Pack("upgradeNFT", implementation, child.kind, child.reserve)
+			require.NoError(t, err)
+			factoryConfig = append(factoryConfig, data)
+		}
+	}
+	createProxy(factoryAddress, factoryImpl, initFactory, factoryConfig)
 	initVault, err := vault.ABI.Pack("initializeFresh", registryAddress, factoryAddress)
 	require.NoError(t, err)
 	createProxy(vaultAddress, vaultImpl, initVault, nil)
@@ -109,8 +128,11 @@ func runIsolatedPositionReader(t *testing.T, e isolatedBackendEnv) {
 		Symbol, Name, ContractURI string
 		Refundable, Burnable      bool
 	}
-	created := call(0, factory, factoryAddress, new(big.Int), true, "createDRC1155", meta{owner, "VIEWISO", "Reader isolated origin", "ipfs://reader-origin", true, true})
-	originAddress := integerAddress(t, factory, "createDRC1155", created)
+	var originAddress common.Address
+	if os.Getenv(emptyUserAssetsPhaseEnv) != "seed" {
+		created := call(0, factory, factoryAddress, new(big.Int), true, "createDRC1155", meta{owner, "VIEWISO", "Reader isolated origin", "ipfs://reader-origin", true, true})
+		originAddress = integerAddress(t, factory, "createDRC1155", created)
+	}
 	metadata := isolationReaderMetadata{
 		originAddress: {Creator: sdk.AccAddress(owner.Bytes()).String(), Denom: "reader_origin", TypeNft: nfttypes.NftType_NFT1155, AddressDRC: originAddress.Hex()},
 		vaultAddress:  {Creator: e.govOwner.Hex(), Denom: "reader_positions", TypeNft: nfttypes.NftType_NFT721, AddressDRC: vaultAddress.Hex()},

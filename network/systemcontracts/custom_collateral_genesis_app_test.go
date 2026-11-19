@@ -61,6 +61,12 @@ func seedNativeCustomCollateralGenesis(t *testing.T, e isolatedBackendEnv, profi
 	gov(registry, profile.Registry, "setContractAddress", "token-center", centerAddress)
 	gov(registry, profile.Registry, "setContractAddress", "curve-converter", converterAddress)
 
+	// The empty launch fixture installs only system roles and implementation
+	// templates. No user token CREATE or symbol mapping exists in its EVM state.
+	if os.Getenv(emptyUserAssetsPhaseEnv) == "seed" {
+		return &nativeCustomCollateralGenesisFixture{center: centerAddress, converter: converterAddress}
+	}
+
 	creator := crypto.PubkeyToAddress(e.keys[3].PublicKey)
 	unit := func(amount int64) sdkmath.Int { return sdkmath.NewIntWithDecimal(amount, 18) }
 	volume := max(int64(10), fixtureVolume)

@@ -62,6 +62,7 @@ type WithdrawalProfile struct {
 	EnableNativeHeldDELDowntime     bool           `json:"enable_native_held_del_downtime,omitempty"`
 	EnableNativeNFTDowntime         bool           `json:"enable_native_nft_downtime,omitempty"`
 	EnableNativeDuplicateVote       bool           `json:"enable_native_duplicate_vote,omitempty"`
+	TestGraceUntilHeight            int64          `json:"test_grace_until_height,omitempty"`
 }
 
 type withdrawalController struct {
@@ -92,7 +93,7 @@ func (app *App) LoadWithdrawalSettlement(ctx sdk.Context) error {
 		return app.verifyNativeConsensusState(ctx, false)
 	}
 	var profile WithdrawalProfile
-	if len(raw) > 1024 || json.Unmarshal(raw, &profile) != nil {
+	if len(raw) > maxWithdrawalProfileJSON || json.Unmarshal(raw, &profile) != nil {
 		return errors.New("invalid stored withdrawal profile")
 	}
 	canonical, err := json.Marshal(profile)
@@ -126,6 +127,9 @@ func (app *App) LoadWithdrawalSettlement(ctx sdk.Context) error {
 }
 
 func (app *App) newWithdrawalController(profile WithdrawalProfile) (*withdrawalController, error) {
+	if err := validateTestGraceProfile(app.evmChainID, profile); err != nil {
+		return nil, err
+	}
 	customCollateral, err := newCustomCollateralRegistry(app, profile)
 	if err != nil {
 		return nil, err
@@ -274,7 +278,16 @@ func (c *withdrawalController) PostTxProcessing(ctx sdk.Context, sender common.A
 	if receipt == nil || receipt.Status != ethtypes.ReceiptStatusSuccessful {
 		return nil
 	}
+	if handled, err := c.admitBackedToken(ctx, sender, msg, receipt); handled {
+		return err
+	}
 	if handled, err := c.admitReservelessToken(ctx, sender, msg, receipt); handled {
+		return err
+	}
+	if handled, err := c.admitUserNFT(ctx, sender, msg, receipt); handled {
+		return err
+	}
+	if handled, err := c.admitNativeValidatorControl(ctx, sender, msg, receipt); handled {
 		return err
 	}
 	if c.isNFTReceiptRedemption(msg) {

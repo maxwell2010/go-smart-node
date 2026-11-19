@@ -25,7 +25,7 @@ const (
 	WithdrawalGenesisKey     = "withdrawal_settlement"
 	maxWithdrawalGenesisRows = 16
 	withdrawalGenesisGas     = 192_000_000
-	maxWithdrawalProfileJSON = 1024
+	maxWithdrawalProfileJSON = 1152
 )
 
 func parseWithdrawalGenesisProfile(raw json.RawMessage) (*WithdrawalProfile, error) {
@@ -186,8 +186,8 @@ func validateWithdrawalGenesisSnapshot(profile WithdrawalProfile, nft *nfttypes.
 }
 
 func freshNFTGenesisOrigins(profile WithdrawalProfile, nft *nfttypes.GenesisState) ([]settlement.NFTGenesisOrigin, error) {
-	if len(nft.IsolatedPositions) != 0 || len(nft.IsolatedVaults) != 1 || len(nft.Collections) < 2 ||
-		len(nft.ExternalBindings) == 0 || len(nft.ExternalBindings) > maxWithdrawalGenesisRows || len(nft.Collections) > len(nft.ExternalBindings)+1 {
+	if len(nft.IsolatedPositions) != 0 || len(nft.IsolatedVaults) != 1 || len(nft.Collections) < 1 ||
+		len(nft.ExternalBindings) > maxWithdrawalGenesisRows || len(nft.Collections) > len(nft.ExternalBindings)+1 {
 		return nil, errors.New("NFT delegation genesis requires bounded origins and one empty isolated vault")
 	}
 	vault := nft.IsolatedVaults[0]
@@ -200,9 +200,11 @@ func freshNFTGenesisOrigins(profile WithdrawalProfile, nft *nfttypes.GenesisStat
 	}
 	ownerCodec := address.NewBech32Codec(identity.Bech32PrefixAccAddr)
 	origins := make([]settlement.NFTGenesisOrigin, 0, len(bindings))
+	receiptCollections := 0
 	for _, collection := range nft.Collections {
 		contract := common.HexToAddress(collection.AddressDRC)
 		if contract == profile.PositionVault {
+			receiptCollections++
 			if collection.TypeNft != nfttypes.NftType_NFT721 || collection.ReserveLess || len(collection.Tokens) != 0 || collection.Supply != 0 {
 				return nil, errors.New("NFT delegation genesis receipt collection must be empty")
 			}
@@ -245,6 +247,9 @@ func freshNFTGenesisOrigins(profile WithdrawalProfile, nft *nfttypes.GenesisStat
 			}
 			origins = append(origins, origin)
 		}
+	}
+	if receiptCollections != 1 {
+		return nil, errors.New("NFT delegation genesis requires exactly one receipt collection")
 	}
 	if len(bindings) != 0 {
 		return nil, errors.New("NFT delegation genesis contains an untracked external binding")
@@ -356,6 +361,7 @@ func (app *App) initWithdrawalGenesis(ctx sdk.Context, req *abci.RequestInitChai
 	gasBefore := read.GasMeter().GasConsumed()
 	limits := settlement.GenesisLimits{
 		MaxRows: maxWithdrawalGenesisRows, SDKGas: withdrawalGenesisGas,
+		RequireEmptyNFTVault: profile.EnableNFTDelegation,
 	}
 	if profile.EnableNativeIBCV1 {
 		limits.DELWithdrawalSeconds, err = nativeIBCWithdrawalSeconds(validators.Params.UndelegationTime)

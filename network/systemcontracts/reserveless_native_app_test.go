@@ -80,6 +80,12 @@ func runNativeReservelessTokens(t *testing.T, dir, phase string) {
 	require.NoError(t, json.Unmarshal(doc.AppState, &state))
 	var profile ownedapp.WithdrawalProfile
 	require.NoError(t, json.Unmarshal(state[ownedapp.WithdrawalGenesisKey], &profile))
+	if os.Getenv(nativeTestGracePhaseEnv) != "" {
+		profile.TestGraceUntilHeight = 5
+		profile.EnableNativeOrdinaryDELDowntime = true
+		state[ownedapp.WithdrawalGenesisKey], err = json.Marshal(profile)
+		require.NoError(t, err)
+	}
 	seedDRC20FeePayer(t, state, expected.Actor)
 	otherKey, err := registryFixtureKey(4, true)
 	require.NoError(t, err)
@@ -126,6 +132,14 @@ func runNativeReservelessTokens(t *testing.T, dir, phase string) {
 		require.NoError(t, err)
 		l.set = cmttypes.NewValidatorSet(validators)
 		l.commit(l.finalize(nil, nil))
+	}
+	if os.Getenv(nativeTestGracePhaseEnv) != "" {
+		runNativeTestGraceLifecycle(t, l, dir, phase)
+		return
+	}
+	if os.Getenv(userNFTNativePhaseEnv) != "" {
+		runNativeUserNFTLifecycle(t, l, dir, phase)
+		return
 	}
 	center, err := contracts.CompiledABI("NewNetworkTokenCenter")
 	require.NoError(t, err)
@@ -203,6 +217,7 @@ func runNativeReservelessTokens(t *testing.T, dir, phase string) {
 		Supply string
 	}
 	if phase == "restart" {
+		assertNativeBackedTokenRestart(t, l, dir)
 		assertDRC20FeeRestart(t, l, dir)
 		readNativeHistoricalJSON(t, filepath.Join(dir, "reserveless.json"), &checkpoint)
 		require.Equal(t, nativeAvatarMetadata, readIdentity(checkpoint.Token), "avatar metadata text must survive disk restart")
@@ -260,6 +275,7 @@ func runNativeReservelessTokens(t *testing.T, dir, phase string) {
 	require.Equal(t, int64(125), app.EVMKeeper.GetState(l.snapshot(), token, supplySlot).Big().Int64())
 	require.Equal(t, baseSupply, l.supply().String(), "ordinary token issuance and destruction must not issue or burn DEL")
 	checkpoint.Token, checkpoint.Supply = token, baseSupply
+	assertNativeBackedTokenLifecycle(t, l, profile, dir)
 	encoded, err := json.Marshal(checkpoint)
 	require.NoError(t, err)
 	require.NoError(t, os.WriteFile(filepath.Join(dir, "reserveless.json"), encoded, 0600))

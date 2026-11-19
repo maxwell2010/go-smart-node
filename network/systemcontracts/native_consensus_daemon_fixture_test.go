@@ -40,6 +40,7 @@ const nativeConsensusIBCV1Env = "MCND_NATIVE_CONSENSUS_IBC_V1"
 const nativeConsensusDowntimeEnv = "MCND_NATIVE_CONSENSUS_DEL_DOWNTIME"
 const nativeConsensusJailRecoveryEnv = "MCND_NATIVE_CONSENSUS_DEL_JAIL_RECOVERY"
 const nativeConsensusHeldDowntimeEnv = "MCND_NATIVE_CONSENSUS_HELD_DEL_DOWNTIME"
+const emptyUserAssetsPhaseEnv = "MCND_EMPTY_USER_ASSETS_PHASE"
 
 type nativeConsensusFixtureValidator struct {
 	Name         string `json:"name"`
@@ -71,10 +72,11 @@ func exportNativeConsensusDaemonFixture(t *testing.T, e isolatedBackendEnv, dir 
 	actor := crypto.PubkeyToAddress(key.PublicKey)
 	beneficiary := sdk.AccAddress(actor.Bytes()).String()
 	launch, launchRehearsal := nativeLaunchSpecForMode(os.Getenv(nativeLaunchRehearsalEnv))
+	emptyAssets := os.Getenv(emptyUserAssetsPhaseEnv) == "seed"
 	fullUpgrade := launchRehearsal || os.Getenv(nativeConsensusFullUpgradeEnv) == "1"
 	coinIndexMigration := os.Getenv("MCND_NATIVE_COIN_INDEX_MIGRATION_CI") == "1"
 	fourSignerMigration := os.Getenv("MCND_NATIVE_FOUR_SIGNER_MIGRATION_CI") == "1"
-	feeRewards := fullUpgrade || os.Getenv(nativeConsensusFeeRewardsEnv) == "1"
+	feeRewards := emptyAssets || fullUpgrade || os.Getenv(nativeConsensusFeeRewardsEnv) == "1"
 	ibcV1 := fullUpgrade || os.Getenv(nativeConsensusIBCV1Env) == "1"
 	upgradeGovernance := launchRehearsal || os.Getenv(nativeConsensusUpgradeGovernanceEnv) == "1"
 	historical := os.Getenv(nativeHistoricalConsensusPhaseEnv) == "seed"
@@ -131,6 +133,11 @@ func exportNativeConsensusDaemonFixture(t *testing.T, e isolatedBackendEnv, dir 
 		initial, after = []int64{4, 4, 2}, []int64{4, 4, 0}
 		keyScope = nativeHistoricalConsensusKeyScope
 	}
+	if emptyAssets {
+		require.False(t, fullUpgrade || historical || downtime || launchRehearsal || nft != nil)
+		initial, after = []int64{10000, 10000, 10000, 10000}, []int64{10000, 10000, 10000, 10000}
+		keyScope = "mintcandy empty user assets process fixture "
+	}
 	commission := sdkmath.LegacyZeroDec()
 	if feeRewards {
 		commission = sdkmath.LegacyMustNewDecFromStr("0.25")
@@ -147,8 +154,8 @@ func exportNativeConsensusDaemonFixture(t *testing.T, e isolatedBackendEnv, dir 
 		require.Equal(t, launch.evmID, domain.EVMChainID)
 	}
 	var custom *nativeCustomCollateralGenesisFixture
-	if launchRehearsal || coinIndexMigration || os.Getenv(nativeCustomCollateralGenesisPhaseEnv) == "seed" {
-		require.True(t, historical || launchRehearsal || coinIndexMigration)
+	if emptyAssets || launchRehearsal || coinIndexMigration || os.Getenv(nativeCustomCollateralGenesisPhaseEnv) == "seed" {
+		require.True(t, emptyAssets || historical || launchRehearsal || coinIndexMigration)
 		var fixtureVolume int64
 		if os.Getenv(nativeCustomNFTMaxEnv) == "1" && nft != nil {
 			fixtureVolume = 2*int64(nft.units) + 8
@@ -179,6 +186,9 @@ func exportNativeConsensusDaemonFixture(t *testing.T, e isolatedBackendEnv, dir 
 		if (jailRecovery || historical) && name == "c" {
 			address = crypto.PubkeyToAddress(e.keys[2].PublicKey)
 			require.NotEqual(t, common.BytesToAddress(pub.Address()), address)
+		}
+		if os.Getenv("MCND_VALIDATOR_CONTROLS_PHASE") != "" {
+			address = crypto.PubkeyToAddress(e.keys[i].PublicKey)
 		}
 		reward := crypto.PubkeyToAddress(e.keys[i].PublicKey)
 		if fourSignerMigration && reward == actor {
@@ -273,7 +283,7 @@ func exportNativeConsensusDaemonFixture(t *testing.T, e isolatedBackendEnv, dir 
 	require.Empty(t, nativeGenesis.EVMFrozenBindings)
 	require.Empty(t, nativeGenesis.Undelegations)
 	nativeGenesis.Params.MaxValidators = 2
-	if launchRehearsal || fourSignerMigration {
+	if emptyAssets || launchRehearsal || fourSignerMigration {
 		nativeGenesis.Params.MaxValidators = uint32(len(validators))
 	}
 	if launch.fourValidators() {
@@ -293,7 +303,7 @@ func exportNativeConsensusDaemonFixture(t *testing.T, e isolatedBackendEnv, dir 
 	if jailRecovery {
 		nativeGenesis.Params.DowntimeJailDuration = jailRecoveryDuration
 	}
-	if historical || fullUpgrade {
+	if emptyAssets || historical || fullUpgrade {
 		nativeGenesis.Params.SlashFractionDoubleSign = sdkmath.LegacyMustNewDecFromStr("0.05")
 		for i := range nativeGenesis.EVMStakeBindings {
 			row := &nativeGenesis.EVMStakeBindings[i]
@@ -359,11 +369,17 @@ func exportNativeConsensusDaemonFixture(t *testing.T, e isolatedBackendEnv, dir 
 		profile.EnableNativeNFTDowntime = true
 		nft.addGenesis(t, e, profile, genesis, beneficiary)
 	}
+	if emptyAssets {
+		profile.EnableNFTDelegation = true
+		addEmptyNFTGenesis(t, e, profile, genesis)
+	}
 	if custom != nil {
 		var coins cointypes.GenesisState
 		require.NoError(t, cdc.UnmarshalJSON(genesis[cointypes.ModuleName], &coins))
 		require.Empty(t, coins.Coins)
-		coins.Coins = []cointypes.Coin{custom.coin}
+		if !emptyAssets {
+			coins.Coins = []cointypes.Coin{custom.coin}
+		}
 		genesis[cointypes.ModuleName] = cdc.MustMarshalJSON(&coins)
 		profile.TokenCenter, profile.CurveConverter = custom.center, custom.converter
 	}
@@ -382,7 +398,7 @@ func exportNativeConsensusDaemonFixture(t *testing.T, e isolatedBackendEnv, dir 
 	}
 	doc := cmttypes.GenesisDoc{ChainID: ctx.ChainID(), InitialHeight: ctx.BlockHeight(),
 		GenesisTime: genesisTime, ConsensusParams: cmttypes.DefaultConsensusParams()}
-	if historical || fullUpgrade {
+	if emptyAssets || historical || fullUpgrade {
 		doc.InitialHeight = 1
 	}
 	if historical {

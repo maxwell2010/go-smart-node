@@ -40,9 +40,28 @@ type NativeDuplicateVoteJob struct {
 // current FinalizeBlock context. Run it before any consensus parameter update
 // in that block. Reobserving an identical liability is idempotent.
 func (k *StateKeeper) EnqueueNativeDuplicateVotePenalties(ctx sdk.Context) (int, error) {
+	return k.EnqueueNativeDuplicateVotePenaltiesWithGrace(ctx, 0)
+}
+
+// EnqueueNativeDuplicateVotePenaltiesWithGrace still validates all Comet
+// evidence. Only liabilities outside the genesis-defined grace period are
+// admitted, including when old evidence arrives after the period has ended.
+func (k *StateKeeper) EnqueueNativeDuplicateVotePenaltiesWithGrace(ctx sdk.Context, graceUntilHeight int64) (int, error) {
+	if graceUntilHeight < 0 {
+		return 0, errors.New("negative native test grace height")
+	}
 	candidates, err := k.PlanNativeDuplicateVotePenalties(ctx)
 	if err != nil {
 		return 0, err
+	}
+	if graceUntilHeight > 0 {
+		eligible := make([]NativeDuplicateVoteCandidate, 0, len(candidates))
+		for _, candidate := range candidates {
+			if ctx.BlockHeight() > graceUntilHeight && candidate.InfractionHeight > graceUntilHeight {
+				eligible = append(eligible, candidate)
+			}
+		}
+		candidates = eligible
 	}
 	child, commit := ctx.CacheContext()
 	added, err := k.enqueueNativeDuplicateVoteCandidates(child, candidates)

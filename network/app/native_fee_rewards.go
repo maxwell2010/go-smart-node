@@ -48,7 +48,7 @@ func (app *App) validateNativeFeeRewardGenesis(ctx sdk.Context, controller *with
 
 func (app *App) beginNativeConsensus(ctx sdk.Context) (sdk.BeginBlock, error) {
 	child, write := ctx.CacheContext()
-	commit, err := app.NativeValidatorKeeper.RecordABCICommit(child)
+	commit, err := app.NativeValidatorKeeper.RecordABCICommitWithGrace(child, app.withdrawals.profile.TestGraceUntilHeight)
 	if err != nil {
 		return sdk.BeginBlock{}, fmt.Errorf("record native prior commit: %w", err)
 	}

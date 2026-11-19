@@ -97,7 +97,7 @@ func TestOwnedAppSignedRegistryBootstrap(t *testing.T) {
 		require.NotEmpty(t, os.Getenv(nativeConsensusDaemonFixtureEnv), "launch rehearsal requires a private fixture directory")
 	}
 	nftFixturePhase := os.Getenv(signedNFTAdmissionPhaseEnv)
-	deterministicAccounts := nftFixturePhase != "" || os.Getenv(nativeHistoricalConsensusPhaseEnv) == "seed"
+	deterministicAccounts := nftFixturePhase != "" || os.Getenv(nativeHistoricalConsensusPhaseEnv) == "seed" || os.Getenv(emptyUserAssetsPhaseEnv) == "seed"
 	var withdrawalDeferrals []string
 	a := ownedapp.NewApp(log.NewLogger(withdrawalFixtureLog{t: t, deferrals: &withdrawalDeferrals}), dbm.NewMemDB(), true, appOptions{flags.FlagHome: t.TempDir(), flags.FlagChainID: chainID, srvflags.EVMChainID: evmChainID})
 	t.Cleanup(func() { require.NoError(t, a.Close()) })
@@ -108,6 +108,11 @@ func TestOwnedAppSignedRegistryBootstrap(t *testing.T) {
 	require.False(t, a.EVMKeeper.HasHooks(), "the control must not overwrite production hooks")
 	a.EVMKeeper.SetHooks(nativeBurnReceiptControl{reject: &rejectNativeBurn, rejected: &rejectedNativeBurns, topic: primitiveABI.Events["NativeBurn"].ID})
 	accountCount, funding := 5, int64(10_000)
+	if os.Getenv(emptyUserAssetsPhaseEnv) == "seed" {
+		// A single founder owns the four 10,000-unit bootstrap delegations.
+		// These are private CI accounts, never public launch allocations.
+		funding = 60_000
+	}
 	if launch.fourValidators() {
 		accountCount, funding = launch.accountCount, 20_000
 	}

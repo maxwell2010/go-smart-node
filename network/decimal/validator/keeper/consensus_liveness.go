@@ -197,6 +197,16 @@ func (k *StateKeeper) signingProgress(ctx sdk.Context) (int64, error) {
 // and updates all participating windows atomically. Existing stores begin
 // observation at the first authenticated block after this feature is enabled.
 func (k *StateKeeper) RecordABCICommit(ctx sdk.Context) (VerifiedABCICommit, error) {
+	return k.RecordABCICommitWithGrace(ctx, 0)
+}
+
+// RecordABCICommitWithGrace authenticates and checkpoints every commit even
+// during a genesis-defined test grace period. Grace observations never enter
+// signing windows and therefore cannot cause a delayed downtime penalty.
+func (k *StateKeeper) RecordABCICommitWithGrace(ctx sdk.Context, graceUntilHeight int64) (VerifiedABCICommit, error) {
+	if graceUntilHeight < 0 {
+		return VerifiedABCICommit{}, errors.New("negative native test grace height")
+	}
 	observed, err := k.VerifyABCICommit(ctx)
 	if err != nil {
 		return VerifiedABCICommit{}, err
@@ -217,6 +227,9 @@ func (k *StateKeeper) RecordABCICommit(ctx sdk.Context) (VerifiedABCICommit, err
 		return VerifiedABCICommit{}, err
 	}
 	for _, vote := range observed.Votes {
+		if graceUntilHeight > 0 && observed.Height <= graceUntilHeight {
+			continue
+		}
 		if err := k.addSigningSample(child, uint16(params.SignedBlocksWindow), observed.Height, vote); err != nil {
 			return VerifiedABCICommit{}, err
 		}

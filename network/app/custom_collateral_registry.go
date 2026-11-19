@@ -79,8 +79,8 @@ func validateCustomCollateralProfile(profile WithdrawalProfile) error {
 }
 
 func validateCustomCollateralGenesis(genesis cointypes.GenesisState) error {
-	if len(genesis.Coins) == 0 || len(genesis.Coins) > maxCustomCollateralCoins || len(genesis.Checks) != 0 {
-		return errors.New("DRC20 genesis requires one to four approved coins and no redeemed checks")
+	if len(genesis.Coins) > maxCustomCollateralCoins || len(genesis.Checks) != 0 {
+		return errors.New("DRC20 genesis requires at most four approved coins and no redeemed checks")
 	}
 	for _, coin := range genesis.Coins {
 		if !cointypes.ValidContractAddress(coin.DRC20Contract) || coin.MinVolume.LT(coinconfig.MinCoinSupply) ||
@@ -233,7 +233,13 @@ func (r *customCollateralRegistry) Coin(ctx sdk.Context, token common.Address) (
 			return r.authenticateCoin(ctx, token, metadata)
 		}
 	}
-	return cointypes.Coin{}, errors.New("DRC20 asset is outside the approved genesis manifest")
+	if bytes.Equal(ctx.KVStore(r.store).Get(backedTokenMembershipKey(token)), entry[:]) {
+		if err := r.authenticateRoles(ctx); err != nil {
+			return cointypes.Coin{}, err
+		}
+		return r.authenticateCoin(ctx, token, metadata)
+	}
+	return cointypes.Coin{}, errors.New("DRC20 asset is outside the authenticated asset registry")
 }
 
 func customCollateralEntry(coin cointypes.Coin) ([customCollateralEntrySize]byte, error) {
@@ -271,7 +277,7 @@ func customCollateralManifest(coins []cointypes.Coin) ([]byte, error) {
 
 func (r *customCollateralRegistry) manifest(ctx sdk.Context) ([]byte, error) {
 	raw := ctx.KVStore(r.store).Get([]byte{customCollateralManifestKey})
-	if len(raw) < 1+customCollateralEntrySize || len(raw) > 1+maxCustomCollateralCoins*customCollateralEntrySize ||
+	if len(raw) < 1 || len(raw) > 1+maxCustomCollateralCoins*customCollateralEntrySize ||
 		raw[0] != customCollateralManifestVersion || (len(raw)-1)%customCollateralEntrySize != 0 {
 		return nil, errors.New("missing or invalid approved DRC20 genesis manifest")
 	}
@@ -285,6 +291,9 @@ func (r *customCollateralRegistry) restrictReserveCredit(ctx context.Context, _,
 		return recipient, nil
 	}
 	sdkCtx := sdk.UnwrapSDKContext(ctx)
+	if sdkCtx.KVStore(r.store).Has(backedTokenMembershipKey(common.BytesToAddress(recipient))) {
+		return nil, errors.New("direct DEL credits to user DRC20 reserves are not admitted")
+	}
 	manifest, err := r.manifest(sdkCtx)
 	if err != nil {
 		return nil, err

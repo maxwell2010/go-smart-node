@@ -47,7 +47,7 @@ func (app *App) preBlockNativeDuplicateVote(ctx sdk.Context) (*sdk.ResponsePreBl
 	}
 	// Authenticated evidence excludes every admitted old key now. Financial
 	// pages may retry later; EndBlock retains the ordinary H+2 set transition.
-	if _, err := keeper.EnqueueNativeDuplicateVotePenalties(child); err != nil {
+	if _, err := keeper.EnqueueNativeDuplicateVotePenaltiesWithGrace(child, app.withdrawals.profile.TestGraceUntilHeight); err != nil {
 		return nil, fmt.Errorf("enqueue native duplicate-vote liabilities: %w", err)
 	}
 	result, err := app.ModuleManager.PreBlock(child)
@@ -65,6 +65,9 @@ func (app *App) preBlockNativeDuplicateVote(ctx sdk.Context) (*sdk.ResponsePreBl
 // Pending history takes precedence for its operator. Alternating priority
 // allows other operators' downtime to progress even while a job is deferred.
 func (app *App) applyNativePenalties(ctx sdk.Context) error {
+	if app.nativeTestGraceActive(ctx) {
+		return nil
+	}
 	if !app.usesNativeDuplicateVote() {
 		_, err := app.applyOrdinaryDELDowntime(ctx)
 		return err
