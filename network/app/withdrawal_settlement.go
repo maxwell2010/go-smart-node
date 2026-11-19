@@ -433,6 +433,9 @@ func (c *withdrawalController) delStakePosition(result settlement.DELTransition)
 type automaticWithdrawalKey struct{}
 
 func (c *withdrawalController) guardInternalCommit(ctx sdk.Context, msg core.Message, logs []*ethtypes.Log) error {
+	if handled, err := c.authorizeReserveFeeCommit(ctx, msg, logs); handled {
+		return err
+	}
 	if c.profile.EnableNativeDuplicateVote && c.profile.EnableNativeGovernance &&
 		(c.executor.AuthorizeNativeValidatorRegistration(ctx, msg) || c.executor.AuthorizeNativeValidatorRetirement(ctx, msg)) {
 		return nil

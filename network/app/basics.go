@@ -54,5 +54,6 @@ func MakeEncodingConfig(evmChainID uint64) evmencoding.Config {
 	basics.RegisterInterfaces(config.InterfaceRegistry)
 	// Governance genesis can retain this message in a completed proposal.
 	authoritytypes.RegisterInterfaces(config.InterfaceRegistry)
+	config.TxConfig = feeTxConfig{config.TxConfig}
 	return config
 }

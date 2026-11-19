@@ -70,6 +70,7 @@ func runNativeReservelessTokens(t *testing.T, dir, phase string) {
 	require.NoError(t, json.Unmarshal(doc.AppState, &state))
 	var profile ownedapp.WithdrawalProfile
 	require.NoError(t, json.Unmarshal(state[ownedapp.WithdrawalGenesisKey], &profile))
+	seedDRC20FeePayer(t, state, expected.Actor)
 	otherKey, err := registryFixtureKey(4, true)
 	require.NoError(t, err)
 	other := common.BytesToAddress(otherKey.PubKey().Address())
@@ -172,6 +173,7 @@ func runNativeReservelessTokens(t *testing.T, dir, phase string) {
 		Supply string
 	}
 	if phase == "restart" {
+		assertDRC20FeeRestart(t, l, dir)
 		readNativeHistoricalJSON(t, filepath.Join(dir, "reserveless.json"), &checkpoint)
 		require.Equal(t, int64(125), app.EVMKeeper.GetState(l.snapshot(), checkpoint.Token, supplySlot).Big().Int64())
 		require.Equal(t, int64(112), balance(checkpoint.Token, expected.Actor))
@@ -184,6 +186,7 @@ func runNativeReservelessTokens(t *testing.T, dir, phase string) {
 	baseSupply := l.supply().String()
 	token := create("Independent reserve-free asset", "freex", true, true, 100, 200, true)
 	assertNativeReserveFeeQuotes(t, l, profile, token)
+	assertNativeDRC20FeePayments(t, l, token, dir)
 	require.Zero(t, app.BankKeeper.GetBalance(l.snapshot(), sdk.AccAddress(token.Bytes()), identity.BaseDenom).Amount.Sign())
 	_, err = app.NativeCoinKeeper.GetCoinByDRC(l.snapshot(), token.Hex())
 	require.Error(t, err, "reserveless asset must never become native backed collateral")

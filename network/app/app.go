@@ -833,7 +833,7 @@ func (app *App) setAnteHandler(txConfig client.TxConfig, maxGasWanted uint64) {
 		panic(err)
 	}
 
-	app.SetAnteHandler(protectEthereumDomain(evmante.NewAnteHandler(options), app.evmChainID))
+	app.SetAnteHandler(protectEthereumDomain(app.drc20FeeAnte(evmante.NewAnteHandler(options)), app.evmChainID))
 }
 
 func (app *App) onPendingTx(hash common.Hash) {
@@ -1014,6 +1014,7 @@ func (app *App) SimulationManager() *module.SimulationManager {
 // RegisterAPIRoutes registers all application module routes with the provided
 // API server.
 func (app *App) RegisterAPIRoutes(apiSvr *api.Server, apiConfig config.APIConfig) {
+	app.registerDRC20FeeRoutes(apiSvr.Router)
 	clientCtx := apiSvr.ClientCtx
 	// Register new tx routes from grpc-gateway.
 	authtx.RegisterGRPCGatewayRoutes(clientCtx, apiSvr.GRPCGatewayRouter)

@@ -238,7 +238,7 @@ jobs:
           go mod verify
           git diff --exit-code -- go.mod go.sum
       - name: Test explicit DRC20 fee authorizations
-        run: go test -mod=readonly -p 2 -count=1 -v -timeout 5m ./fees/authorization |& tee validation-logs/token-fee-authorization.log
+        run: go test -mod=readonly -p 2 -count=1 -v -timeout 5m ./fees/... |& tee validation-logs/token-fee-authorization.log
       - name: Test signed reserveless token lifecycle and disk restart
         run: go test -mod=readonly -p 2 -count=1 -v -timeout 12m -tags appstate -run '^TestOwnedAppNativeReservelessTokenLifecycle$' ./systemcontracts |& tee validation-logs/reserveless-native.log
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
