@@ -110,7 +110,7 @@ func TestActiveDELProvenanceCompactsExpiredPrefixAtDepositCap(t *testing.T) {
 	require.NoError(t, k.ApplyGatewayDELDelegation(split, active, deposit))
 	count, err = k.countDELProvenanceTranches(split, position.Validator)
 	require.NoError(t, err)
-	require.LessOrEqual(t, count, maxDELProvenanceTranches-1)
+	require.LessOrEqual(t, count, maxDELProvenanceTranches, "frozen history does not consume another position's deposit slots")
 	frozen, err := k.GetEVMFrozenBinding(split, active.Gateway[:], index[:])
 	require.NoError(t, err)
 	frozenLots, _, err := k.GetFrozenDELProvenance(split, frozen)

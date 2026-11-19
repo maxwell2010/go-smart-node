@@ -2,9 +2,7 @@ package keeper
 
 import (
 	"bytes"
-	"fmt"
 	"math/big"
-	"strings"
 	"testing"
 	"time"
 
@@ -79,37 +77,6 @@ func TestNativeFeeRewardsUseCommitAndActiveDELExactlyOnce(t *testing.T) {
 	after, err := k.ExportGenesis(ctx)
 	require.NoError(t, err)
 	assertGenesisBytes(t, before, after)
-}
-
-func TestNativeFeeRewardsRejectOversizedActivePositions(t *testing.T) {
-	for _, test := range []struct {
-		name string
-		rows int
-		size int
-	}{
-		{name: "rows", rows: maxNativeFeeRewardRows + 1},
-		{name: "bytes", rows: 20, size: 60 << 10},
-	} {
-		t.Run(test.name, func(t *testing.T) {
-			ctx, _, k := environment(t)
-			g := genesis(t)
-			operator := g.Validators[0]
-			g.Delegations = nil
-			for i := 0; i < test.rows; i++ {
-				id := fmt.Sprintf("%s-%d", strings.Repeat("r", test.size), i)
-				stake := types.NewStakeNFT(id, []uint32{1}, sdk.NewInt64Coin(identity.BaseDenom, 1))
-				g.Delegations = append(g.Delegations, types.Delegation{
-					Delegator: operator.RewardAddress, Validator: operator.OperatorAddress, Stake: stake,
-				})
-			}
-			require.NoError(t, k.InitGenesis(ctx, g))
-			err := k.ValidateNativeFeeRewardAdmission(ctx, func(sdk.AccAddress) bool { return true })
-			require.ErrorIs(t, err, ErrNativeFeeRewardLimit)
-			payouts, err := k.PlanNativeFeeRewards(ctx, sdkmath.OneInt(), []NativeFeeRewardVote{{operator.OperatorAddress, 1}})
-			require.ErrorIs(t, err, ErrNativeFeeRewardLimit)
-			require.Nil(t, payouts)
-		})
-	}
 }
 
 func TestNativeFeeRewardsFullWidthRounding(t *testing.T) {

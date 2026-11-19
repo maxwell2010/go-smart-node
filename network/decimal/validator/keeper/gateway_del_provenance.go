@@ -20,7 +20,6 @@ const (
 	activeDELProvenancePrefix   byte = 0x5d
 	frozenDELProvenancePrefix   byte = 0x5e
 	maxDELProvenanceTranches         = 128
-	maxDELProvenancePositions        = 2 // The managed penalty census bound.
 	delProvenanceTimeSize            = 8 + 4
 	delProvenanceTrancheSize         = 8 + delProvenanceTimeSize + 32
 )
@@ -160,30 +159,33 @@ func (k *StateKeeper) InitializeDELProvenance(ctx sdk.Context, gateway, wrapped 
 	}
 	child, write := ctx.CacheContext()
 	read := child.WithBlockHeight(1)
-	rows, next, err := k.GetEVMStakeBindingsPage(read, nil, types.MaxBindingPageSize)
-	if err != nil {
-		return err
-	}
-	if len(rows) == 0 || next != nil {
-		return errors.New("native stake provenance requires bounded active genesis positions")
-	}
-	counts := make(map[common.Address]int, len(rows))
-	for _, row := range rows {
-		if row.CreatedHeight > 1 || row.UpdatedHeight > 1 {
-			return errors.New("native stake provenance cannot initialize from historical binding heights")
-		}
-		if err := k.VerifyGenesisGatewayDEL(read, gateway, wrapped, row); err != nil {
+	var after []byte
+	initialized := false
+	for {
+		rows, next, err := k.GetEVMStakeBindingsPage(read, after, types.MaxBindingPageSize)
+		if err != nil {
 			return err
 		}
-		operator := common.BytesToAddress(row.Validator)
-		counts[operator]++
-		if counts[operator] > maxDELProvenancePositions {
-			return errors.New("native stake provenance exceeds its genesis validator position limit")
+		for _, row := range rows {
+			if row.CreatedHeight > 1 || row.UpdatedHeight > 1 {
+				return errors.New("native stake provenance cannot initialize from historical binding heights")
+			}
+			if err := k.VerifyGenesisGatewayDEL(read, gateway, wrapped, row); err != nil {
+				return err
+			}
+			key := delProvenanceKey(activeDELProvenancePrefix, row.Gateway, row.StakeID)
+			if err := k.storeDELProvenance(child, key, []DELProvenanceTranche{{FundedAt: ctx.BlockTime(), Amount: row.RawAmount}}, time.Time{}); err != nil {
+				return err
+			}
+			initialized = true
 		}
-		key := delProvenanceKey(activeDELProvenancePrefix, row.Gateway, row.StakeID)
-		if err := k.storeDELProvenance(child, key, []DELProvenanceTranche{{FundedAt: ctx.BlockTime(), Amount: row.RawAmount}}, time.Time{}); err != nil {
-			return err
+		if next == nil {
+			break
 		}
+		after = next
+	}
+	if !initialized {
+		return errors.New("native stake provenance requires active genesis positions")
 	}
 	if err := k.service.OpenKVStore(child).Set([]byte{nativeStakeProvenanceMarker}, []byte{1}); err != nil {
 		return err

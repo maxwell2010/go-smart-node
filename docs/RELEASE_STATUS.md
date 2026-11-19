@@ -5,17 +5,29 @@ Status: NOT READY for a stable production IBC release. No stable tag or release 
 On 2026-11-19 the release scope was confirmed: complete the node with IBC and
 the agreed token features; DEX, vesting, a proprietary stablecoin and DePIN
 remain separate stages. [Tokenomics proposal review](../network/docs/ru/TOKENOMICS_PROPOSAL_REVIEW.md).
-The [token-features scope](https://github.com/maxwell2010/go-smart-node/actions/runs/44455065325)
-passed on `ee0d1d3`: explicit EIP-712 DRC20 fee authorization, canonical open
-reserve quotes and signed reserveless token lifecycle with disk restart. The
-[whole-module scope](https://github.com/maxwell2010/go-smart-node/actions/runs/44454454149)
-passed on `1a05d63`; subsequent code changes fix tagged tests only.
-Authorization and quote are internal primitives, not completed DRC20 fee
-payment. Ante conversion/payment, durable fee nonce, RPC transport and full
-conversion gas/refund accounting remain required. Reserveless creation and
-owner operations do not yet admit ownership transfer or a bridge controller's
-nested mint path. Financial-profile genesis export remains fail-closed.
-[Stored token validation summary](../network/docs/ru/evidence/token-features-ee0d1d3-20261119/summary.json).
+The [token-features scope](https://github.com/maxwell2010/go-smart-node/actions/runs/44461001634)
+and [whole-module scope](https://github.com/maxwell2010/go-smart-node/actions/runs/44461005994)
+both passed on `29784c4`. Actual EVM tests verify DRC20 reserve fee conversion
+and payment from a zero-native-balance payer, isolated fee nonces, REVERT
+fees, ante rollback, receipt accounting and replay rejection after LevelDB
+restart. The full outer envelope is retained in the SDK mempool. Standard
+Ethereum RPC continues to submit native-paid transactions; composite fees
+use Comet/Cosmos broadcast. A daemon RPC end-to-end gate remains required.
+
+The user requires mass delegation before stable. The former two-position
+penalty profile and global reward census are not public-network capacity
+claims. Paged durable penalties, efficient per-position provenance, automatic
+bounded reward payouts and 10/100/1000-position stress tests are in progress.
+Automatic payouts, as in Decimal, were chosen over claim-only rewards.
+The new source must pass the module, signed EVM, multi-node, Hermes,
+cross-version migration and signed-package operational gates again.
+Financial-profile genesis export remains fail-closed.
+
+The public launch draft is parameterized by operator count. Four-node tests
+and five-node financial illustrations are not an approved roster or
+distribution. Its proposed finite gas cap is 24,000,000. Production supply,
+allocations, operator keys, endpoints and a trusted publisher signing identity
+still require approval before an actual public launch.
 
 The historical duplicate-vote development branch verifies a 5% debit from
 surviving pre-infraction DEL principal and isolated NFT reserves. Later

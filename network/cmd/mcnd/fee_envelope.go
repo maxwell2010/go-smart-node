@@ -76,7 +76,12 @@ func newFeeEnvelopeCmd() *cobra.Command {
 			if err := msg.FromSignedEthereumTx(tx, ethtypes.LatestSignerForChainID(policy.EVMChainID)); err != nil {
 				return err
 			}
-			inner, err := msg.BuildTx(config.TxConfig.NewTxBuilder(), identity.BaseDenom)
+			// Offline encoding must not read the process-wide EVM denomination
+			// singleton, which is initialized only by a live application.
+			inner, err := msg.BuildTxWithEvmParams(config.TxConfig.NewTxBuilder(), evmtypes.Params{
+				EvmDenom:             identity.BaseDenom,
+				ExtendedDenomOptions: &evmtypes.ExtendedDenomOptions{ExtendedDenom: identity.BaseDenom},
+			})
 			if err != nil {
 				return err
 			}

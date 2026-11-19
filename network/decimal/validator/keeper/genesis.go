@@ -65,6 +65,9 @@ func (k *StateKeeper) InitGenesis(ctx sdk.Context, g *types.GenesisState) error 
 	if e = k.initActiveDELReserveIndex(child, g.Validators, g.Delegations); e != nil {
 		return e
 	}
+	if e = k.initNativeFeeRewardIndex(child, g.Validators, g.Delegations); e != nil {
+		return e
+	}
 	for _, u := range g.Undelegations {
 		if e = k.put(child, composite(undelegationPrefix, u.Delegator, u.Validator), &u); e != nil {
 			return e
@@ -237,6 +240,9 @@ func (k *StateKeeper) exportGenesis(ctx sdk.Context, auditIndexes bool) (*types.
 		return nil, e
 	}
 	if e = k.validateActiveDELReserveIndex(ctx, g.Validators, g.Delegations); e != nil {
+		return nil, e
+	}
+	if e = k.auditNativeFeeRewardIndex(ctx, g.Delegations); e != nil {
 		return nil, e
 	}
 	if auditIndexes {

@@ -340,6 +340,11 @@ func (k *StateKeeper) SetValidator(ctx sdk.Context, v types.Validator) error {
 			return err
 		}
 	}
+	if previous == nil || previous.RewardAddress != v.RewardAddress {
+		if err := k.markNativeFeeRewardCommission(child, v.OperatorAddress); err != nil {
+			return err
+		}
+	}
 	commit()
 	return nil
 }

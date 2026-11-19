@@ -346,6 +346,9 @@ func (k *StateKeeper) ApplyDelegationBatch(ctx sdk.Context, changes []Delegation
 	if err := k.applyActiveDELReserveDeltas(child, reserveDeltas); err != nil {
 		return err
 	}
+	if err := k.updateNativeFeeRewardOwners(child, changes); err != nil {
+		return err
+	}
 	commit()
 	return nil
 }

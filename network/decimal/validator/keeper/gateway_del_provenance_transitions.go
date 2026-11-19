@@ -7,7 +7,6 @@ import (
 
 	sdkmath "cosmossdk.io/math"
 	sdk "github.com/cosmos/cosmos-sdk/types"
-	"github.com/ethereum/go-ethereum/common"
 	"github.com/maxwell2010/go-smart-node/network/decimal/validator/types"
 )
 
@@ -72,15 +71,12 @@ func (k *StateKeeper) recordDELProvenanceDeposit(ctx sdk.Context, position Gatew
 		return err
 	}
 	if len(updated) > len(lots) {
-		count, err := k.countDELProvenanceTranches(ctx, position.Validator)
-		if err != nil {
-			return err
-		}
-		// Leave one slot for a partial withdrawal to split one funding tranche.
+		// Bound this position's history, independently of other delegators.
+		// A withdrawal can split one tranche into a separate frozen record.
 		const depositLimit = maxDELProvenanceTranches - 1
-		if count >= depositLimit {
+		if len(updated) > depositLimit {
 			if position.HoldDeadline == 0 {
-				compacted, err := k.compactActiveDELProvenance(ctx, position.Validator, lots, count+1-depositLimit)
+				compacted, err := k.compactActiveDELProvenance(ctx, position.Validator, lots, len(updated)-depositLimit)
 				if err != nil {
 					return err
 				}
@@ -88,8 +84,8 @@ func (k *StateKeeper) recordDELProvenanceDeposit(ctx sdk.Context, position Gatew
 					updated = append(compacted, funding)
 				}
 			}
-			if count-len(lots)+len(updated) > depositLimit {
-				return errors.New("DEL deposit exceeds the validator provenance tranche limit")
+			if len(updated) > depositLimit {
+				return errors.New("DEL deposit exceeds the position provenance tranche limit")
 			}
 		}
 	}
@@ -99,40 +95,6 @@ func (k *StateKeeper) recordDELProvenanceDeposit(ctx sdk.Context, position Gatew
 		}
 	}
 	return k.storeDELProvenance(ctx, key, updated, time.Time{})
-}
-
-func (k *StateKeeper) countDELProvenanceTranches(ctx sdk.Context, validator common.Address) (int, error) {
-	active, activeNext, err := k.GetActiveStakePenaltyPage(ctx, validator[:], nil, maxDELProvenancePositions)
-	if err != nil {
-		return 0, err
-	}
-	frozen, frozenNext, err := k.GetValidatorFrozenBindingsPage(ctx, validator[:], nil, maxDELProvenancePositions)
-	if err != nil {
-		return 0, err
-	}
-	if activeNext != nil || frozenNext != nil || len(active)+len(frozen) > maxDELProvenancePositions {
-		return 0, errors.New("DEL provenance exceeds the validator position limit")
-	}
-	count := 0
-	for _, row := range active {
-		if row.Kind == gatewayDELCoinBinding {
-			lots, err := k.GetActiveDELProvenance(ctx, row)
-			if err != nil {
-				return 0, err
-			}
-			count += len(lots)
-		}
-	}
-	for _, row := range frozen {
-		if row.SourceKind == gatewayDELCoinBinding {
-			lots, _, err := k.GetFrozenDELProvenance(ctx, row)
-			if err != nil {
-				return 0, err
-			}
-			count += len(lots)
-		}
-	}
-	return count, nil
 }
 
 func (k *StateKeeper) recordDELProvenanceWithdrawal(ctx sdk.Context, position GatewayDELStake, frozen types.EVMFrozenBinding, entry types.Stake, change DelegationChange) error {

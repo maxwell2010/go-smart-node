@@ -10,17 +10,8 @@ import (
 	sdkmath "cosmossdk.io/math"
 	cmttypes "github.com/cometbft/cometbft/types"
 	sdk "github.com/cosmos/cosmos-sdk/types"
-	"github.com/cosmos/gogoproto/proto"
-	"github.com/maxwell2010/go-smart-node/network/decimal/validator/types"
 	"github.com/maxwell2010/go-smart-node/network/identity"
 )
-
-const (
-	maxNativeFeeRewardRows  = 128
-	maxNativeFeeRewardBytes = 2 << 20
-)
-
-var ErrNativeFeeRewardLimit = errors.New("native fee reward positions exceed the pilot row or byte limit")
 
 // NativeFeeRewardVote is a committing H-1 vote authenticated by the caller.
 // Power must be from that commit, rather than the operator's current state.
@@ -39,8 +30,8 @@ type nativeFeeRewardPositions struct {
 	total  *big.Int
 }
 
-// ValidateNativeFeeRewardAdmission checks the same pilot limits as payout
-// planning, so an admitted stake change cannot make fee distribution unbounded.
+// ValidateNativeFeeRewardAdmission performs a full owner-index policy audit.
+// Use ValidateNativeFeeRewardChanges on the ordinary stake mutation path.
 // The caller supplies the bank and system account restrictions for recipients.
 func (k *StateKeeper) ValidateNativeFeeRewardAdmission(ctx sdk.Context, allowed func(sdk.AccAddress) bool) error {
 	positions, err := k.readNativeFeeRewardPositions(ctx)
@@ -75,7 +66,7 @@ func (k *StateKeeper) ValidateNativeFeeRewardAdmission(ctx sdk.Context, allowed 
 			}
 		}
 	}
-	return nil
+	return k.ValidateNativeFeeRewardChanges(ctx, allowed)
 }
 
 // PlanNativeFeeRewards allocates already-collected DEL without changing state.
@@ -86,15 +77,22 @@ func (k *StateKeeper) PlanNativeFeeRewards(ctx sdk.Context, fees sdkmath.Int, vo
 	if fees.IsNil() || fees.IsNegative() {
 		return nil, errors.New("native fee rewards require initialized nonnegative DEL fees")
 	}
-	if len(votes) > maxNativeFeeRewardRows {
+	params, err := k.GetParams(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if len(votes) > int(params.MaxValidators) {
 		return nil, errors.New("native fee rewards exceed the committing voter limit")
 	}
 	if fees.IsZero() || len(votes) == 0 {
 		return nil, nil
 	}
-	positions, err := k.readNativeFeeRewardPositions(ctx)
+	indexed, err := k.hasNativeFeeRewardIndex(ctx)
 	if err != nil {
 		return nil, err
+	}
+	if !indexed {
+		return nil, ErrNativeFeeRewardIndexUnavailable
 	}
 	type allocation struct {
 		positions  nativeFeeRewardPositions
@@ -127,11 +125,14 @@ func (k *StateKeeper) PlanNativeFeeRewards(ctx sdk.Context, fees sdkmath.Int, vo
 		if err != nil {
 			return nil, err
 		}
-		position, active := positions[vote.Operator]
-		if !active && indexed.Sign() == 0 {
+		position, err := k.readNativeFeeRewardOperator(ctx, vote.Operator)
+		if err != nil {
+			return nil, err
+		}
+		if indexed.Sign() == 0 {
 			continue
 		}
-		if !active || position.total.Cmp(indexed) != 0 {
+		if position.total.Cmp(indexed) != 0 {
 			return nil, errors.New("native fee reward positions differ from the indexed active DEL reserve")
 		}
 		reward, err := feeRewardAddress(validator.RewardAddress)
@@ -178,72 +179,28 @@ func feeRewardAddress(value string) (sdk.AccAddress, error) {
 	return sdk.AccAddress(raw), nil
 }
 
-func (k *StateKeeper) readNativeFeeRewardPositions(ctx sdk.Context) (positions map[string]nativeFeeRewardPositions, err error) {
-	if err = k.checkDelegationIndex(ctx); err != nil {
-		return nil, err
-	}
-	indexed, err := k.hasActiveDELReserveIndex(ctx)
+func (k *StateKeeper) readNativeFeeRewardPositions(ctx sdk.Context) (map[string]nativeFeeRewardPositions, error) {
+	indexed, err := k.hasNativeFeeRewardIndex(ctx)
 	if err != nil {
 		return nil, err
 	}
 	if !indexed {
-		return nil, ErrActiveDELReserveIndexUnavailable
+		return nil, ErrNativeFeeRewardIndexUnavailable
 	}
-	it, err := k.service.OpenKVStore(ctx).Iterator([]byte{delegationPrefix}, []byte{delegationPrefix + 1})
+	validators, err := k.GetValidators(ctx)
 	if err != nil {
 		return nil, err
 	}
-	defer func() {
-		if closeErr := it.Close(); closeErr != nil {
-			positions, err = nil, errors.Join(err, closeErr)
-		}
-	}()
-	positions = make(map[string]nativeFeeRewardPositions)
-	var count, totalBytes int
-	for ; it.Valid(); it.Next() {
-		if err = it.Error(); err != nil {
-			return nil, err
-		}
-		key, data := it.Key(), it.Value()
-		count++
-		totalBytes += len(key) + len(data)
-		if count > maxNativeFeeRewardRows || totalBytes > maxNativeFeeRewardBytes {
-			return nil, ErrNativeFeeRewardLimit
-		}
-		if len(data) > MaxRecordBytes {
-			return nil, errors.New("native fee reward position exceeds the record size limit")
-		}
-		var row types.Delegation
-		if err = proto.Unmarshal(data, &row); err != nil {
-			return nil, err
-		}
-		if !bytes.Equal(key, delegationKey(row)) {
-			return nil, errors.New("native fee reward position key mismatch")
-		}
-		if err = row.Stake.Validate(); err != nil {
-			return nil, err
-		}
-		coin := row.Stake.Stake
-		if coin.Denom != identity.BaseDenom || coin.Amount.IsZero() {
-			continue
-		}
-		owner, err := feeRewardAddress(row.Delegator)
+	positions := make(map[string]nativeFeeRewardPositions)
+	for _, v := range validators {
+		p, err := k.readNativeFeeRewardOperator(ctx, v.OperatorAddress)
 		if err != nil {
 			return nil, err
 		}
-		operator, present := positions[row.Validator]
-		if !present {
-			operator = nativeFeeRewardPositions{owners: make(map[string]*big.Int), total: new(big.Int)}
-			positions[row.Validator] = operator
+		if p.total.Sign() > 0 {
+			positions[v.OperatorAddress] = p
 		}
-		amount := coin.Amount.BigInt()
-		// Holds partition the row's amount. NFT collateral belongs to its
-		// native NFT row; a companion EVM balance is not a delegation row.
-		addNativeFeeReward(operator.owners, string(owner), amount)
-		operator.total.Add(operator.total, amount)
 	}
-	// The SDK cache iterator reports ordinary exhaustion as invalid.
-	// Check errors while the cursor is valid, and always check Close.
 	return positions, nil
 }
 
