@@ -64,6 +64,9 @@ func TestOwnedAppNativeReservelessTokenLifecycle(t *testing.T) {
 func runNativeReservelessTokens(t *testing.T, dir, phase string) {
 	doc, err := cmttypes.GenesisDocFromFile(filepath.Join(dir, "genesis.json"))
 	require.NoError(t, err)
+	// DRC20 fee envelopes require a finite combined block budget. The generic
+	// registry seed intentionally uses Comet defaults (unlimited block gas).
+	doc.ConsensusParams.Block.MaxGas = 24_000_000
 	var expected nativeHistoricalExpectations
 	readNativeHistoricalJSON(t, filepath.Join(dir, "expectations.json"), &expected)
 	var state ownedapp.GenesisState
