@@ -23,7 +23,13 @@ func activeDELCompactionAtLimit(t *testing.T, maxAgeNumBlocks int64, maxAgeDurat
 	if held {
 		position = gatewayDELHoldFixture(2000, 3000, 0)
 	}
-	for h := int64(1); h <= 126; h++ {
+	lastFundingHeight := int64(126)
+	if held {
+		// The unrelated ordinary genesis position no longer consumes this
+		// held position's independent funding-history allowance.
+		lastFundingHeight++
+	}
+	for h := int64(1); h <= lastFundingHeight; h++ {
 		ctx = ctx.WithBlockHeight(h).WithBlockTime(time.Unix(1999+h, 0).UTC())
 		position.Amount = position.Amount.AddRaw(20)
 		require.NoError(t, k.ApplyGatewayDELDelegation(ctx, position, sdkmath.NewInt(20)))
@@ -31,8 +37,12 @@ func activeDELCompactionAtLimit(t *testing.T, maxAgeNumBlocks int64, maxAgeDurat
 	}
 	count, err := k.countDELProvenanceTranches(ctx, position.Validator)
 	require.NoError(t, err)
-	require.Equal(t, maxDELProvenanceTranches-1, count, "no compaction occurs below the deposit cap")
-	return ctx.WithBlockHeight(127).WithBlockTime(time.Unix(2126, 0).UTC()), k, position
+	expected := maxDELProvenanceTranches - 1
+	if held {
+		expected++
+	}
+	require.Equal(t, expected, count, "independent positions retain their own histories")
+	return ctx.WithBlockHeight(lastFundingHeight + 1).WithBlockTime(ctx.BlockTime().Add(time.Second)), k, position
 }
 
 func TestActiveDELProvenanceCompactionRequiresBothExpiredLimits(t *testing.T) {

@@ -21,6 +21,42 @@ func (c *withdrawalController) reconcileNativeDuplicateVoteStakes(ctx sdk.Contex
 	if err != nil {
 		return err
 	}
+	if err := c.reconcileHistoricalPenaltyRows(ctx, active, frozen, master, supply); err != nil {
+		return err
+	}
+	return c.keeper.RequireActiveStakePenaltyCatchup(ctx, validator, master.AfterCursor[:])
+}
+
+func (c *withdrawalController) reconcileNativeDuplicateVoteClaim(ctx sdk.Context, row validatortypes.EVMFrozenBinding,
+	master settlement.MasterPenaltyProof, supply func(sdk.Context) sdkmath.Int,
+) error {
+	if row.SourceKind == validatortypes.EVMStakeBindingKind_EVM_STAKE_BINDING_NFT {
+		plan, err := c.keeper.PlanFrozenNFTHistoricalPenalty(ctx, row, master.InfractionHeight)
+		if err != nil {
+			return err
+		}
+		return c.executor.ApplyFrozenHistoricalNFTPenalty(ctx, row, master, plan.Eligible, supply, func(next sdk.Context, proof settlement.FrozenNFTPenaltyProof) error {
+			return c.keeper.ApplyGatewayFrozenHistoricalNFTPenalty(next, c.nft, row, master.InfractionHeight,
+				proof.BeforeCursor, proof.AfterCursor, proof.RemainingReserve, proof.Eligible)
+		})
+	}
+	plan, err := c.keeper.PlanFrozenDELHistoricalPenalty(ctx, row, master.InfractionHeight)
+	if err != nil {
+		return err
+	}
+	return c.executor.ApplyFrozenHistoricalDELPenalty(ctx, row, master, plan.Eligible, supply, func(next sdk.Context, proof settlement.FrozenDELPenaltyProof) error {
+		var hold *validatorkeeper.GatewayFrozenDELHold
+		if row.NativeTarget.StakeType == validatortypes.StakeType_CoinHold {
+			hold = &validatorkeeper.GatewayFrozenDELHold{
+				WrappedDEL: c.profile.WrappedDEL, HoldDeadline: proof.HoldDeadline, HoldStartTime: proof.HoldStartTime,
+			}
+		}
+		return c.keeper.ApplyGatewayFrozenHistoricalDELPenalty(next, row, hold, master.InfractionHeight,
+			proof.BeforeCursor, proof.AfterCursor, proof.Remaining)
+	})
+}
+
+func (c *withdrawalController) reconcileHistoricalPenaltyRows(ctx sdk.Context, active []validatortypes.EVMStakeBinding, frozen []validatortypes.EVMFrozenBinding, master settlement.MasterPenaltyProof, supply func(sdk.Context) sdkmath.Int) error {
 	for _, row := range active {
 		if row.Kind != validatortypes.EVMStakeBindingKind_EVM_STAKE_BINDING_NFT {
 			continue
@@ -78,34 +114,5 @@ func (c *withdrawalController) reconcileNativeDuplicateVoteStakes(ctx sdk.Contex
 			return err
 		}
 	}
-	return c.keeper.RequireActiveStakePenaltyCatchup(ctx, validator, master.AfterCursor[:])
-}
-
-func (c *withdrawalController) reconcileNativeDuplicateVoteClaim(ctx sdk.Context, row validatortypes.EVMFrozenBinding,
-	master settlement.MasterPenaltyProof, supply func(sdk.Context) sdkmath.Int,
-) error {
-	if row.SourceKind == validatortypes.EVMStakeBindingKind_EVM_STAKE_BINDING_NFT {
-		plan, err := c.keeper.PlanFrozenNFTHistoricalPenalty(ctx, row, master.InfractionHeight)
-		if err != nil {
-			return err
-		}
-		return c.executor.ApplyFrozenHistoricalNFTPenalty(ctx, row, master, plan.Eligible, supply, func(next sdk.Context, proof settlement.FrozenNFTPenaltyProof) error {
-			return c.keeper.ApplyGatewayFrozenHistoricalNFTPenalty(next, c.nft, row, master.InfractionHeight,
-				proof.BeforeCursor, proof.AfterCursor, proof.RemainingReserve, proof.Eligible)
-		})
-	}
-	plan, err := c.keeper.PlanFrozenDELHistoricalPenalty(ctx, row, master.InfractionHeight)
-	if err != nil {
-		return err
-	}
-	return c.executor.ApplyFrozenHistoricalDELPenalty(ctx, row, master, plan.Eligible, supply, func(next sdk.Context, proof settlement.FrozenDELPenaltyProof) error {
-		var hold *validatorkeeper.GatewayFrozenDELHold
-		if row.NativeTarget.StakeType == validatortypes.StakeType_CoinHold {
-			hold = &validatorkeeper.GatewayFrozenDELHold{
-				WrappedDEL: c.profile.WrappedDEL, HoldDeadline: proof.HoldDeadline, HoldStartTime: proof.HoldStartTime,
-			}
-		}
-		return c.keeper.ApplyGatewayFrozenHistoricalDELPenalty(next, row, hold, master.InfractionHeight,
-			proof.BeforeCursor, proof.AfterCursor, proof.Remaining)
-	})
+	return nil
 }

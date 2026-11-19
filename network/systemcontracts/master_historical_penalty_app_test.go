@@ -150,6 +150,36 @@ func runMasterHistoricalPenalty(t *testing.T, e isolatedBackendEnv, profile owne
 	assertEntry(ctx(), 0, firstHeight)
 	assertNoBurn()
 
+	// A new finalized block must reauthenticate the persisted announcement.
+	// A failed page cannot erase the already committed liability or leak its
+	// private financial authority into a later transaction.
+	persisted := settlement.MasterPenaltyProof{Validator: f.validator, Percentage: rate,
+		InfractionHeight: firstHeight, BeforeCursor: common.Hash{}, AfterCursor: common.BigToHash(big.NewInt(1))}
+	resumedContext := ctx().WithBlockHeight(ctx().BlockHeight() + 1)
+	var escaped sdk.Context
+	pageErr := errors.New("reject resumed historical financial page")
+	require.ErrorIs(t, executor.ResumeMasterPenalty(resumedContext, persisted, func(child sdk.Context) error {
+		escaped = child
+		assertState(child, true, 1)
+		return pageErr
+	}), pageErr)
+	assertState(ctx(), true, 1)
+	assertNoBurn()
+	reached := false
+	wrong := persisted
+	wrong.InfractionHeight++
+	require.Error(t, executor.ResumeMasterPenalty(resumedContext, wrong, func(sdk.Context) error { reached = true; return nil }))
+	require.False(t, reached)
+	require.NoError(t, executor.ResumeMasterPenalty(resumedContext, persisted, func(child sdk.Context) error {
+		assertEntry(child, 0, firstHeight)
+		return nil
+	}))
+	require.Error(t, executor.ApplyOrdinaryDELPenalty(escaped, beforeStake, rate, supply, func(sdk.Context, settlement.OrdinaryDELPenaltyProof) error {
+		t.Fatal("a copied context reused a completed page scope")
+		return nil
+	}))
+	assertNoBurn()
+
 	ordinaryProjected := false
 	err = executor.ApplyOrdinaryDELPenalty(ctx(), beforeStake, rate, supply, func(sdk.Context, settlement.OrdinaryDELPenaltyProof) error {
 		ordinaryProjected = true

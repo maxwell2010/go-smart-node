@@ -401,7 +401,7 @@ func (c *withdrawalController) projectGatewayDELDeposit(ctx sdk.Context, positio
 	if err := apply(child, position, amount); err != nil {
 		return err
 	}
-	lots, err := c.ordinaryDowntimeHoldLots(child, position.Validator[:])
+	lots, err := c.nativePairHoldLots(child, position.Validator, position.Beneficiary)
 	if err != nil {
 		return err
 	}
@@ -410,12 +410,12 @@ func (c *withdrawalController) projectGatewayDELDeposit(ctx sdk.Context, positio
 	// still use a timestamp already represented in the native ledger.
 	const depositLimit = nativeDowntimeHoldLots - 1
 	if lots > depositLimit {
-		before, err := c.ordinaryDowntimeHoldLots(ctx, position.Validator[:])
+		before, err := c.nativePairHoldLots(ctx, position.Validator, position.Beneficiary)
 		if err != nil {
 			return err
 		}
 		if lots > before {
-			return fmt.Errorf("native held DEL deposit exceeds its per-validator limit of %d hold lots", depositLimit)
+			return fmt.Errorf("native held DEL deposit exceeds its owner/operator limit of %d hold lots", depositLimit)
 		}
 	}
 	write()

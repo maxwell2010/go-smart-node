@@ -3,6 +3,7 @@ package keeper
 import (
 	"bytes"
 	"errors"
+	"fmt"
 	"math"
 	"slices"
 
@@ -54,6 +55,13 @@ func (k *StateKeeper) RetireNativeValidator(ctx sdk.Context, operator string) er
 	}
 	if !slices.Contains(operators, operator) {
 		return errors.New("native validator retirement requires a live operator")
+	}
+	mutationValidator, err := k.ValidatorAddressCodec().StringToBytes(operator)
+	if err != nil {
+		return err
+	}
+	if err := k.RequireNoPendingNativePenalty(child, mutationValidator); err != nil {
+		return fmt.Errorf("native validator retirement requires no unresolved historical penalty: %w", err)
 	}
 	validator, err := k.GetValidator(child, operator)
 	if err != nil {

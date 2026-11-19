@@ -208,6 +208,9 @@ func (k *StateKeeper) requireRecoveredGatewayValidator(ctx sdk.Context, operator
 }
 
 func (k *StateKeeper) applyGatewayDELDelegation(ctx sdk.Context, next GatewayDELStake, deposited sdkmath.Int, owner, operator string) error {
+	if err := k.RequireNoPendingNativePenalty(ctx, next.Validator[:]); err != nil {
+		return err
+	}
 	if err := k.requireNativeValidatorNotRetired(ctx, operator); err != nil {
 		return err
 	}
@@ -278,6 +281,9 @@ func (k *StateKeeper) ApplyPenalizedGatewayDELWithdrawal(ctx sdk.Context, next G
 }
 
 func (k *StateKeeper) applyGatewayDELWithdrawal(ctx sdk.Context, next GatewayDELStake, index common.Hash, amount sdkmath.Int, deadline time.Time, owner, operator string) error {
+	if err := k.RequireNoPendingNativePenalty(ctx, next.Validator[:]); err != nil {
+		return err
+	}
 	if amount.IsNil() || !amount.IsPositive() || index == common.MaxHash ||
 		deadline.Unix() <= 0 || deadline.Nanosecond() != 0 || deadline.Unix() < ctx.BlockTime().Unix() {
 		return errors.New("invalid Gateway DEL withdrawal or deadline")

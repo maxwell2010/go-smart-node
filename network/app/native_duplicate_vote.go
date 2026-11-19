@@ -100,6 +100,28 @@ func (app *App) applyNativeDuplicateVotePenalty(ctx sdk.Context) (bool, error) {
 }
 
 func (app *App) executeNativeDuplicateVotePenalty(ctx sdk.Context, job validatorkeeper.NativeDuplicateVoteJob) (err error) {
+	rawOperator, err := app.NativeValidatorKeeper.ValidatorAddressCodec().StringToBytes(job.Operator)
+	if err != nil {
+		return err
+	}
+	progress, progressErr := app.NativeValidatorKeeper.GetNativePenaltyProgress(ctx, rawOperator)
+	if progressErr == nil {
+		if progress.Reason != validatorkeeper.NativePenaltyDuplicateVote {
+			return errors.New("another penalty is still being realized")
+		}
+		return app.executePagedPenalty(ctx, progress, &job)
+	}
+	if !errors.Is(progressErr, validatorkeeper.ErrNotFound) {
+		return progressErr
+	}
+	_, _, censusErr := app.withdrawals.ordinaryDowntimePositions(ctx, rawOperator)
+	if errors.Is(censusErr, errPagedPenaltyRequired) {
+		return app.startPagedDuplicatePenalty(ctx, job)
+	}
+	if censusErr != nil {
+		return censusErr
+	}
+
 	child, write := ctx.CacheContext()
 	meter := storetypes.NewGasMeter(withdrawalAttemptGas)
 	child = child.WithGasMeter(meter)

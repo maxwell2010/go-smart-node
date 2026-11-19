@@ -11,6 +11,9 @@ import (
 )
 
 func (c *withdrawalController) checkWithdrawalPayout(ctx sdk.Context, row validatortypes.EVMFrozenBinding) error {
+	if err := c.keeper.RequireNoPendingNativePenalty(ctx, row.SourceValidator); err != nil {
+		return fmt.Errorf("%w: validator has an unsettled penalty: %w", validatorkeeper.ErrWithdrawalAwaitingEvidenceFinality, err)
+	}
 	enabled, err := c.keeper.NativeStakeProvenanceEnabled(ctx)
 	if err != nil || !enabled {
 		return err
@@ -41,17 +44,6 @@ func (c *withdrawalController) checkWithdrawalPayout(ctx sdk.Context, row valida
 	}
 	if !elapsed {
 		return fmt.Errorf("%w: evidence age limit remains open", validatorkeeper.ErrWithdrawalAwaitingEvidenceFinality)
-	}
-	operator, err := c.keeper.ValidatorAddressCodec().BytesToString(row.SourceValidator)
-	if err != nil {
-		return err
-	}
-	pending, err := c.keeper.HasPendingNativeDuplicateVotePenalty(ctx, operator)
-	if err != nil {
-		return err
-	}
-	if pending {
-		return fmt.Errorf("%w: validator has an unsettled penalty", validatorkeeper.ErrWithdrawalAwaitingEvidenceFinality)
 	}
 	return nil
 }

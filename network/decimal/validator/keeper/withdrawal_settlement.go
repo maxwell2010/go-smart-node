@@ -165,6 +165,9 @@ func (k *StateKeeper) attemptWithdrawal(ctx sdk.Context, gas uint64, row *bindin
 		}
 		ctx.GasMeter().ConsumeGas(meter.GasConsumedToLimit(), "withdrawal settlement")
 	}()
+	if err := k.RequireNoPendingNativePenalty(child, row.frozen.SourceValidator); err != nil {
+		return fmt.Errorf("%w: %w", ErrWithdrawalAwaitingEvidenceFinality, err)
+	}
 	plan, err := k.planWithdrawalCompletion(child, row)
 	if err != nil {
 		return err
@@ -208,6 +211,9 @@ func closedWithdrawalBinding(row *bindingRecord, height int64) (*bindingRecord, 
 // Gateway transition and supplies the pre-execution binding in the same outer
 // cache as the EVM and NFT receipt changes. This method only projects state.
 func (k *StateKeeper) ApplyWithdrawalCompletion(ctx sdk.Context, expected types.EVMFrozenBinding) error {
+	if err := k.RequireNoPendingNativePenalty(ctx, expected.SourceValidator); err != nil {
+		return err
+	}
 	if err := k.checkBindingDomain(ctx); err != nil {
 		return err
 	}

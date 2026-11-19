@@ -144,6 +144,46 @@ func (e *Executor) AppendMasterHistoricalPenalty(ctx sdk.Context, validator comm
 	return e.appendMasterPenalty(ctx, proof, nativeSupply, reconcile)
 }
 
+// BeginPagedMasterPenalty makes one authenticated announcement. The callback
+// must atomically persist the exact progress proof and native jail/barrier;
+// financial realization is subsequently resumed under that durable liability.
+func (e *Executor) BeginPagedMasterPenalty(ctx sdk.Context, validator common.Address, percentage uint16, infractionHeight int64,
+	nativeSupply func(sdk.Context) sdkmath.Int, persist func(sdk.Context, MasterPenaltyProof) error) error {
+	if infractionHeight < 0 || (infractionHeight != 0 && (infractionHeight >= ctx.BlockHeight() || percentage != validatorkeeper.HistoricalDELPenaltyPercent)) {
+		return errors.New("invalid paged historical announcement")
+	}
+	return e.appendMasterPenalty(ctx, MasterPenaltyProof{Validator: validator, Percentage: percentage, InfractionHeight: infractionHeight}, nativeSupply, persist)
+}
+
+// ResumeMasterPenalty authenticates the same announced entry afresh in each
+// finalized block. A copied context or caller-provided cursor is not authority:
+// roles, paused state, exact append count and entry contents are verified again.
+func (e *Executor) ResumeMasterPenalty(ctx sdk.Context, proof MasterPenaltyProof, reconcile func(sdk.Context) error) error {
+	if e == nil || reconcile == nil || ctx.ExecMode() != sdk.ExecModeFinalize || proof.Validator == (common.Address{}) || proof.Percentage == 0 || proof.Percentage > 100 ||
+		new(big.Int).Add(proof.BeforeCursor.Big(), big.NewInt(1)).BitLen() > 256 || new(big.Int).Add(proof.BeforeCursor.Big(), big.NewInt(1)).Cmp(proof.AfterCursor.Big()) != 0 {
+		return errors.New("invalid paged Master penalty proof")
+	}
+	child, write := ctx.CacheContext()
+	source, err := e.auth.AuthenticateStakeProfile(child)
+	if err != nil {
+		return err
+	}
+	if _, err := e.verifyMasterPenaltyAppend(child, proof); err != nil {
+		return err
+	}
+	scope := &penaltySourceScope{executor: e, height: child.BlockHeight(), validator: proof.Validator, percentage: proof.Percentage, infractionHeight: proof.InfractionHeight, active: true}
+	defer func() { scope.active = false }()
+	if err := reconcile(child.WithValue(penaltySourceKey{}, scope)); err != nil {
+		return err
+	}
+	scope.active = false
+	if err := e.confirmPenaltySource(child, &source); err != nil {
+		return err
+	}
+	write()
+	return nil
+}
+
 func (e *Executor) appendMasterPenalty(ctx sdk.Context, proof MasterPenaltyProof,
 	nativeSupply func(sdk.Context) sdkmath.Int, reconcile func(sdk.Context, MasterPenaltyProof) error,
 ) error {

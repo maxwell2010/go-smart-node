@@ -122,6 +122,13 @@ func (k *StateKeeper) ApplyNativeDowntimeOutcome(ctx sdk.Context, candidate Nati
 // verifies the operator's exact signed MasterValidator unpause and that its
 // positions have caught up. The historical infraction marker is retained.
 func (k *StateKeeper) ReleaseNativeDowntimeJail(ctx sdk.Context, operator string) error {
+	raw, err := k.ValidatorAddressCodec().StringToBytes(operator)
+	if err != nil {
+		return err
+	}
+	if err := k.RequireNoPendingNativePenalty(ctx, raw); err != nil {
+		return err
+	}
 	child, write := ctx.CacheContext()
 	if err := k.requireNativeValidatorNotRetired(child, operator); err != nil {
 		return err

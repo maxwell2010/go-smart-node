@@ -106,6 +106,9 @@ func gatewayNFTCompanionMutation(ctx sdk.Context, companion GatewayDELStake, pre
 // the owner's direct DEL stake. The caller admits the NFT lineage in the same
 // outer transaction cache.
 func (k *StateKeeper) ApplyGatewayNFTDelegation(ctx sdk.Context, position GatewayNFTPosition) error {
+	if err := k.RequireNoPendingNativePenalty(ctx, position.Companion.Validator[:]); err != nil {
+		return err
+	}
 	companion := position.Companion
 	delegation, row, err := k.gatewayNFTState(ctx, position, companion.PenaltyCursor)
 	if err != nil {
@@ -181,6 +184,9 @@ func (k *StateKeeper) ApplyGatewayPenalizedNFTWithdrawal(ctx sdk.Context, positi
 func (k *StateKeeper) applyGatewayNFTWithdrawal(ctx sdk.Context, position GatewayNFTPosition, index common.Hash,
 	deadline time.Time, cursor common.Hash, companionAcknowledged bool,
 ) error {
+	if err := k.RequireNoPendingNativePenalty(ctx, position.Companion.Validator[:]); err != nil {
+		return err
+	}
 	if index == common.MaxHash || deadline.Unix() <= 0 || deadline.Nanosecond() != 0 || deadline.Unix() <= ctx.BlockTime().Unix() {
 		return errors.New("invalid Gateway NFT withdrawal index or deadline")
 	}

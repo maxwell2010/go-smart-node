@@ -14,6 +14,9 @@ import (
 // The caller authenticates the signed Gateway receipt and both poststates.
 // This projection keeps the pending queue and escrow unchanged.
 func (k *StateKeeper) ApplyGatewayDELHoldReset(ctx sdk.Context, held, ordinary GatewayDELStake, moved sdkmath.Int) error {
+	if err := k.RequireNoPendingNativePenalty(ctx, held.Validator[:], ordinary.Validator[:]); err != nil {
+		return err
+	}
 	owner, operator, err := held.nativePair()
 	if err != nil {
 		return err

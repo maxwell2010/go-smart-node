@@ -20,7 +20,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func withdrawalPayoutFixture(t *testing.T) (*withdrawalController, sdk.Context, validatortypes.EVMFrozenBinding, sdk.ConsAddress) {
+func withdrawalPayoutFixture(t *testing.T) (*withdrawalController, sdk.Context, validatortypes.EVMFrozenBinding, sdk.ConsAddress, *App) {
 	t.Helper()
 	app := newWithdrawalSnapshotTestApp(t)
 	const chain = "mintcandy_990001-1"
@@ -57,11 +57,11 @@ func withdrawalPayoutFixture(t *testing.T) (*withdrawalController, sdk.Context, 
 	row, err := keeper.GetEVMFrozenBinding(ctx, position.Gateway[:], index[:])
 	require.NoError(t, err)
 	controller := &withdrawalController{keeper: keeper, consensusParams: func(sdk.Context) cmtproto.ConsensusParams { return params }}
-	return controller, ctx, row, consensus
+	return controller, ctx, row, consensus, app
 }
 
 func TestWithdrawalPayoutUsesCommittedEvidenceClock(t *testing.T) {
-	c, created, row, _ := withdrawalPayoutFixture(t)
+	c, created, row, _, _ := withdrawalPayoutFixture(t)
 	ctx := created.WithBlockHeight(3).WithBlockTime(created.BlockTime().Add(2 * time.Second))
 	require.NoError(t, c.keeper.RecordNativeEvidenceBlock(ctx))
 	next := ctx.WithBlockHeight(4).WithBlockTime(ctx.BlockTime().Add(time.Nanosecond))
@@ -87,7 +87,7 @@ func TestWithdrawalPayoutUsesCommittedEvidenceClock(t *testing.T) {
 }
 
 func TestWithdrawalPayoutWaitsForPendingValidatorPenalty(t *testing.T) {
-	c, created, row, consensus := withdrawalPayoutFixture(t)
+	c, created, row, consensus, _ := withdrawalPayoutFixture(t)
 	ctx := created.WithBlockHeight(3).WithBlockTime(created.BlockTime().Add(time.Second)).
 		WithCometInfo(payoutTestBlock{evidence: payoutTestEvidenceList{{
 			at: validatorkeeper.CommittedEvidenceBlock{Height: created.BlockHeight(), Time: created.BlockTime()}, consensus: consensus,
@@ -105,6 +105,24 @@ func TestWithdrawalPayoutWaitsForPendingValidatorPenalty(t *testing.T) {
 	require.Len(t, jobs, 1)
 	require.NoError(t, c.keeper.CompleteNativeDuplicateVotePenalty(ctx, jobs[0]))
 	require.NoError(t, c.checkWithdrawalPayout(ctx, row))
+}
+
+func TestWithdrawalPayoutWaitsForGenericPenaltyProgressEvenIfCorrupt(t *testing.T) {
+	c, ctx, row, _, app := withdrawalPayoutFixture(t)
+	// The shared payout gate is reached by both manual complete and the
+	// automatic executor. A malformed durable job cannot release custody.
+	service := runtime.NewKVStoreService(app.keys[validatortypes.StoreKey])
+	for _, reason := range []byte{1, 2} {
+		child, _ := ctx.CacheContext()
+		key := append([]byte{0x72, reason}, row.SourceValidator...)
+		require.NoError(t, service.OpenKVStore(child).Set(key, []byte("corrupt-progress")))
+		err := c.checkWithdrawalPayout(child, row)
+		require.ErrorIs(t, err, validatorkeeper.ErrNativePenaltyPending)
+		require.ErrorIs(t, err, validatorkeeper.ErrWithdrawalAwaitingEvidenceFinality)
+		after, err := c.keeper.GetEVMFrozenBinding(child, row.Gateway, row.FrozenIndex)
+		require.NoError(t, err)
+		require.Equal(t, row, after)
+	}
 }
 
 type payoutTestBlock struct {
