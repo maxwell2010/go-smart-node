@@ -59,7 +59,9 @@
     "curve_converter": null,
     "approved_drc20": [],
     "approved_nft_origins": [],
-    "deployment_evidence": null
+    "deployment_evidence": null,
+    "initial_user_assets": "none_selected_by_founder",
+    "user_asset_creation_release_gate": "pending_empty_bootstrap_creation_and_media_ci"
   },
   "validators": [
     {

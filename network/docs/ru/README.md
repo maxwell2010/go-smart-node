@@ -23,6 +23,7 @@
 [единый проект genesis и распределения](PUBLIC_LAUNCH_DRAFT.md).
 [Начальное распределение и баланс основателя: параметры для согласования](FOUNDER_BOOTSTRAP_DRAFT.md).
 [Нативная монета, мост, оплата комиссий и gas-price oracle](TOKEN_AND_FEE_MODEL.md).
+[Создание пользователями токенов/NFT, аватарки и сохранность данных](USER_ASSET_CREATION_AND_MEDIA.md).
 [Массовое делегирование, порционные штрафы и автоматические награды](MASS_DELEGATION_AND_REWARDS.md).
 [Разбор предложений: однократный выпуск, DEX, vesting, DePIN и арбитраж](TOKENOMICS_PROPOSAL_REVIEW.md).
 [Окно доказательств и восстановление валидатора](SYNCHRONIZATION_AND_STORAGE.md#история-для-штрафа-за-двойную-подпись).

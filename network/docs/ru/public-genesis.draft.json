@@ -69,7 +69,7 @@
         "base_title": "MintCandy",
         "base_volume": null
       },
-      "coins": null,
+      "coins": [],
       "checks": []
     },
     "distribution": null,
@@ -109,7 +109,7 @@
     },
     "nft": {
       "collections": null,
-      "external_bindings": null,
+      "external_bindings": [],
       "isolated_vaults": null,
       "isolated_positions": [],
       "params": null

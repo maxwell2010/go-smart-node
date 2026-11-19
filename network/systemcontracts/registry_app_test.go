@@ -1047,6 +1047,7 @@ func TestOwnedAppSignedRegistryBootstrap(t *testing.T) {
 				collection := result[0].(common.Address)
 				require.NotEqual(t, common.Address{}, collection)
 				asset := freshAsset(kind.artifact)
+				require.Equal(t, meta.ContractURI, query(asset, collection, "contractURI")[0], "collection metadata pointer must round-trip")
 				family := uint8(2) + kind.typ
 				if !kind.reserve {
 					family = uint8(4) + kind.typ
@@ -1085,8 +1086,10 @@ func TestOwnedAppSignedRegistryBootstrap(t *testing.T) {
 				receiptAuth.checkMintAdmissionClosed(t, ctx(), mintedReceipt)
 				if kind.typ == 0 {
 					require.Equal(t, creator, query(asset, collection, "ownerOf", big.NewInt(1))[0])
+					require.Equal(t, "ipfs://fresh-item", query(asset, collection, "tokenURI", big.NewInt(1))[0], "ERC721 metadata pointer must round-trip")
 				} else {
 					require.Equal(t, int64(2), query(asset, collection, "balanceOf", creator, huge)[0].(*big.Int).Int64())
+					require.Equal(t, "ipfs://shared", query(asset, collection, "uri", huge)[0], "ERC1155 metadata pointer must round-trip")
 				}
 				assets = append(assets, pausedAsset{address: collection, artifact: asset, family: family, id: huge})
 				require.Zero(t, value.Cmp(a.EVMKeeper.GetBalance(ctx(), collection).ToBig()))

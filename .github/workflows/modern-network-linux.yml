@@ -244,6 +244,8 @@ jobs:
         run: go test -mod=readonly -p 2 -count=1 -v -timeout 5m ./fees/... |& tee validation-logs/token-fee-authorization.log
       - name: Test signed reserveless token lifecycle and disk restart
         run: go test -mod=readonly -p 2 -count=1 -v -timeout 12m -tags appstate -run '^TestOwnedAppNativeReservelessTokenLifecycle$' ./systemcontracts |& tee validation-logs/reserveless-native.log
+      - name: Test factory collection and NFT metadata pointer round trips
+        run: go test -mod=readonly -p 2 -count=1 -v -timeout 8m -run '^TestOwnedAppSignedRegistryBootstrap$/^atomic_constructor_handoff_to_governance$/^fresh_factory_creation_and_mint$' ./systemcontracts |& tee validation-logs/nft-metadata.log
       - name: Test Ethereum receipts with separate DRC20 conversion fees
         run: go test -mod=readonly -p 2 -count=1 -v -timeout 5m -run 'Test(ParseTxResult|MintCandyReserveFee|ReserveFeeReceipts|ReceiptsFromCometBlock)' github.com/cosmos/evm/rpc/types github.com/cosmos/evm/rpc/backend |& tee validation-logs/reserve-fee-rpc.log
       - name: Test composite fee envelope mempool routing

@@ -117,11 +117,16 @@ class PublicLaunchPlanTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, 'WDEL backing'):
             check_plan(self.plan, self.draft)
 
-    def test_nft_reserve_rate_must_match_exact_bank_amount(self):
-        nft = next(row for row in self.plan['bank_allocation']
-                   if row['purpose'] == 'approved_erc1155_origin_reserve')
-        nft['units'] += 1
-        with self.assertRaisesRegex(ValueError, 'NFT units'):
+    def test_balanced_supply_cannot_hide_unwanted_initial_assets(self):
+        self.plan['bank_allocation'].append({'purpose': 'approved_erc1155_origin_reserve',
+                                             'amount_atoms': '1', 'bank_address': None})
+        self.plan['initial_supply_atoms'] = str(int(self.plan['initial_supply_atoms']) + 1)
+        with self.assertRaisesRegex(ValueError, 'empty user asset allocation'):
+            check_plan(self.plan, self.draft)
+
+    def test_unbuilt_creation_and_storage_cannot_be_declared_ready(self):
+        self.plan['release_requirements']['public_nft_creation_ci'] = 'passed'
+        with self.assertRaisesRegex(ValueError, 'not been demonstrated'):
             check_plan(self.plan, self.draft)
 
     def test_accidental_financial_approval_is_rejected(self):

@@ -5,7 +5,7 @@
   "denom": "del",
   "decimals": 18,
   "atoms_per_del": "1000000000000000000",
-  "initial_supply_atoms": "5041400000000000000000000",
+  "initial_supply_atoms": "5041000000000000000000000",
   "approved_validator_count": 4,
   "proposed_rehearsal_validator_count": 4,
   "founder_evm_address": "0x40900a48273644768c09183e00e43528c17a29f6",
@@ -15,12 +15,11 @@
     "stake_ownership_approved": true,
     "proposed_stake_ownership": "founder_owned_delegations",
     "treasury_control_approved": true,
-    "initial_asset_profile_approved": null,
-    "proposed_initial_asset_profile": "full_v1_0_0_profile_with_backed_drc20_and_erc1155_requires_asset_creation_approval",
-    "initial_asset_creation_approved": null,
-    "alternative_initial_asset_profile": "del_only_requires_separate_profile_and_new_isolated_ci_validation",
+    "initial_asset_profile_approved": true,
+    "initial_asset_creation_approved": false,
     "selected_stake_ownership": "founder_owned_delegations",
-    "selected_stake_owner_evm_address": "0x40900a48273644768c09183e00e43528c17a29f6"
+    "selected_stake_owner_evm_address": "0x40900a48273644768c09183e00e43528c17a29f6",
+    "selected_initial_asset_profile": "empty_user_assets_with_later_user_creation"
   },
   "bank_allocation": [
     {
@@ -70,28 +69,6 @@
       "relayer_slot": "R2",
       "amount_atoms": "100000000000000000000",
       "bank_address": null
-    },
-    {
-      "purpose": "approved_drc20_reserve",
-      "amount_atoms": "300000000000000000000",
-      "bank_address": null,
-      "contract_address": null,
-      "asset_name": null,
-      "asset_parameters": null,
-      "token_supply_atoms": null,
-      "curve_parameters": null,
-      "approved_owners": null
-    },
-    {
-      "purpose": "approved_erc1155_origin_reserve",
-      "amount_atoms": "100000000000000000000",
-      "bank_address": null,
-      "contract_address": null,
-      "token_id": null,
-      "asset_name": null,
-      "units": 100,
-      "reserve_per_unit_atoms": "1000000000000000000",
-      "approved_owners": null
     }
   ],
   "initial_delegations_within_wdel_backing": [
@@ -128,8 +105,8 @@
       "expected_voting_power": "10000"
     }
   ],
-  "initial_nft_reserve_atoms": "100000000000000000000",
-  "initial_drc20_reserve_atoms": "300000000000000000000",
+  "initial_nft_reserve_atoms": "0",
+  "initial_drc20_reserve_atoms": "0",
   "validator_commission_fraction": "0.050000000000000000",
   "fee_collector_atoms": "0",
   "isolated_position_vault_atoms": "0",
@@ -150,5 +127,11 @@
     "separate_allocation_atoms": "0",
     "purpose": "initial_distribution_contests_and_project_spending_from_founder_balance"
   },
-  "approved_initial_stake_per_validator_atoms": "10000000000000000000000"
+  "approved_initial_stake_per_validator_atoms": "10000000000000000000000",
+  "release_requirements": {
+    "empty_user_asset_bootstrap_ci": "pending",
+    "public_backed_token_creation_ci": "pending",
+    "public_nft_creation_ci": "pending",
+    "avatar_metadata_storage_restore_ci": "pending"
+  }
 }

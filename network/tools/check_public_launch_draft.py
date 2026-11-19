@@ -19,10 +19,10 @@ SYSTEM_ROLES = ('registry', 'gateway', 'library', 'nft_center', 'position_vault'
 UNRESOLVED_PATHS = (
     ('genesis_time',), ('app_state', 'auth'),
     ('app_state', 'bank', 'balances'), ('app_state', 'bank', 'supply', 0, 'amount'),
-    ('app_state', 'coin', 'params', 'base_volume'), ('app_state', 'coin', 'coins'),
+    ('app_state', 'coin', 'params', 'base_volume'),
     ('app_state', 'evm', 'accounts'), ('app_state', 'evm', 'preinstalls'),
     ('app_state', 'evm', 'params', 'active_static_precompiles'),
-    ('app_state', 'nft', 'collections'), ('app_state', 'nft', 'external_bindings'),
+    ('app_state', 'nft', 'collections'),
     ('app_state', 'nft', 'isolated_vaults'),
     ('app_state', 'validator', 'validators'), ('app_state', 'validator', 'delegations'),
     ('app_state', 'validator', 'params', 'max_validators'),
@@ -81,6 +81,8 @@ def check_draft(doc):
     require(doc['consensus_params']['block']['max_gas'] == '24000000',
             'draft must preserve the proposed 24 million block gas cap')
     state = doc['app_state']
+    require(state['coin']['coins'] == [] and state['nft']['external_bindings'] == [],
+            'selected genesis cannot contain initial user assets')
     require(state['genutil']['gen_txs'] == [] and state['staking']['validators'] == [] and
             state['staking']['delegations'] == [] and state['staking']['last_total_power'] == '0',
             'native profile cannot import SDK consensus stake or genesis transactions')
@@ -127,10 +129,10 @@ def check_plan(plan, draft):
             'selected four-validator start or stake size differs')
     decisions = plan['decisions']
     require(decisions['allocation_approved'] is False and
-            decisions['initial_asset_creation_approved'] is None and
+            decisions['initial_asset_creation_approved'] is False and
             all(value is None or value is False for name, value in decisions.items()
                 if name.endswith('_approved') and name not in
-                {'treasury_control_approved', 'stake_ownership_approved'}),
+                {'treasury_control_approved', 'stake_ownership_approved', 'initial_asset_profile_approved'}),
             'allocation or asset decision was approved in a draft')
     require(decisions['stake_ownership_approved'] is True and
             decisions['selected_stake_ownership'] == 'founder_owned_delegations' and
@@ -183,29 +185,20 @@ def check_plan(plan, draft):
                 for row in delegations), 'selected equal validator stake size differs')
     require(plan['allocation_is_additional_to_delegations'] is False,
             'delegations cannot be added to the bank allocation twice')
-    for purpose, summary in (('approved_drc20_reserve', 'initial_drc20_reserve_atoms'),
-                             ('approved_erc1155_origin_reserve', 'initial_nft_reserve_atoms')):
-        rows = [row for row in allocations if row['purpose'] == purpose]
-        require(len(rows) == 1 and atomic(rows[0]['amount_atoms']) == atomic(plan[summary]) > 0,
-                'asset reserve differs from proposed bank allocation')
-        row = rows[0]
-        require(row['contract_address'] is None and row['approved_owners'] is None and
-                row['asset_name'] is None, 'asset creation inputs remain unresolved')
-        if purpose == 'approved_erc1155_origin_reserve':
-            require(type(row['units']) is int and row['units'] > 0 and
-                    row['units'] * atomic(row['reserve_per_unit_atoms']) == atomic(row['amount_atoms']),
-                    'NFT units and reserve rate differ from backing')
-            require(row['token_id'] is None, 'NFT identity remains unresolved')
-        else:
-            require(all(row[name] is None for name in ('asset_parameters', 'token_supply_atoms', 'curve_parameters')),
-                    'DRC20 curve and issuance inputs remain unresolved')
+    require(decisions['initial_asset_profile_approved'] is True and
+            decisions['selected_initial_asset_profile'] == 'empty_user_assets_with_later_user_creation' and
+            atomic(plan['initial_nft_reserve_atoms']) == atomic(plan['initial_drc20_reserve_atoms']) == 0 and
+            not any(row['purpose'] in ('approved_drc20_reserve', 'approved_erc1155_origin_reserve')
+                    for row in allocations), 'selected empty user asset allocation differs')
+    require(plan['release_requirements'] and all(value == 'pending' for value in plan['release_requirements'].values()),
+            'new user asset release requirements have not been demonstrated yet')
     require(plan['reward_emission'] is False and plan['reward_source'] == 'collected_del_transaction_fees' and
             atomic(plan['fee_collector_atoms']) == atomic(plan['isolated_position_vault_atoms']) == 0,
             'fee rewards require zero initial collector and vault balances and no emission')
     return {'status': 'PLAN_DRAFT_UNAPPROVED', 'initialSupplyAtoms': str(total),
             'selectedStakeOwnership': 'founder_owned_delegations',
             'rehearsalValidatorCount': count, 'approvedValidatorCount': 4,
-            'initialAssetCreationApproved': None}
+            'initialAssetCreationApproved': False, 'userCreationAndMediaReleaseGates': 'pending'}
 
 
 def check_intake(intake):
