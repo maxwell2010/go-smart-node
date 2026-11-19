@@ -91,6 +91,7 @@ class OperatorApplicationTests(unittest.TestCase):
             ('stake_amount_atoms', '10000000000000000000001', 'initial stake differs'),
             ('gas_budget_atoms', '200', 'operator gas budget'),
             ('commission_fraction', '1.01', 'commission must be'),
+            ('commission_fraction', '0.049999999999999999', 'commission must be at least 5%'),
         ):
             with self.subTest(field=field):
                 document = copy.deepcopy(self.document)

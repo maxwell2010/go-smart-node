@@ -47,14 +47,17 @@ func TestValidatorRegistrationMetadataCommand(t *testing.T) {
 	require.Contains(t, stdout.String(), "--priv-validator-key-file")
 	require.Contains(t, stdout.String(), "--expires-height")
 
-	args := []string{"--chain-id", chainID, "--operator", operatorAddr, "--expires-height", "850", "--commission-percent", "0"}
+	args := []string{"--chain-id", chainID, "--operator", operatorAddr, "--expires-height", "850", "--commission-percent", "5"}
 	require.NoError(t, run(append(args, "--priv-validator-key-file", keyPath)...))
 	privateKey := pv.Key.PrivKey.Bytes()
-	want, err := ownedapp.BuildNativeValidatorRegistrationMetadata(chainID, 990002, operator, 850, 0, ed25519.PrivateKey(privateKey))
+	want, err := ownedapp.BuildNativeValidatorRegistrationMetadata(chainID, 990002, operator, 850, 5, ed25519.PrivateKey(privateKey))
 	require.NoError(t, err)
 	require.Equal(t, want+"\n", stdout.String())
 	require.Empty(t, stderr.String())
 	require.NotContains(t, stdout.String(), base64.StdEncoding.EncodeToString(privateKey))
+	invalid := append([]string{}, args...)
+	invalid[len(invalid)-1] = "4"
+	require.ErrorContains(t, run(append(invalid, "--priv-validator-key-file", keyPath)...), "between 5 and 100 percent")
 
 	malformed := filepath.Join(dir, "malformed.json")
 	const secret = "fixture-secret-never-print"

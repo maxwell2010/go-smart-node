@@ -29,6 +29,7 @@ import (
 	"github.com/ethereum/go-ethereum/crypto"
 	ownedapp "github.com/maxwell2010/go-smart-node/network/app"
 	cointypes "github.com/maxwell2010/go-smart-node/network/decimal/coin/types"
+	validatorkeeper "github.com/maxwell2010/go-smart-node/network/decimal/validator/keeper"
 	validatortypes "github.com/maxwell2010/go-smart-node/network/decimal/validator/types"
 	contracts "github.com/maxwell2010/go-smart-node/network/systemcontracts"
 	"github.com/stretchr/testify/require"
@@ -70,8 +71,14 @@ func exportNativeConsensusDaemonFixture(t *testing.T, e isolatedBackendEnv, dir 
 	const gasLimit = 24_000_000
 	key := e.keys[3]
 	actor := crypto.PubkeyToAddress(key.PublicKey)
-	beneficiary := sdk.AccAddress(actor.Bytes()).String()
 	launch, launchRehearsal := nativeLaunchSpecForMode(os.Getenv(nativeLaunchRehearsalEnv))
+	if launch.sponsoredFounder() {
+		actor = nativeSponsoredFounderAddress()
+		incoming := sdk.AccAddress(actor.Bytes())
+		require.Nil(t, e.app.AccountKeeper.GetAccount(e.ctx(), incoming))
+		e.app.AccountKeeper.SetAccount(e.ctx(), e.app.AccountKeeper.NewAccountWithAddress(e.ctx(), incoming))
+	}
+	beneficiary := sdk.AccAddress(actor.Bytes()).String()
 	emptyAssets := seedEmptyUserAssets()
 	fullUpgrade := launchRehearsal || os.Getenv(nativeConsensusFullUpgradeEnv) == "1"
 	coinIndexMigration := os.Getenv("MCND_NATIVE_COIN_INDEX_MIGRATION_CI") == "1"
@@ -138,7 +145,7 @@ func exportNativeConsensusDaemonFixture(t *testing.T, e isolatedBackendEnv, dir 
 		initial, after = []int64{10000, 10000, 10000, 10000}, []int64{10000, 10000, 10000, 10000}
 		keyScope = "mintcandy empty user assets process fixture "
 	}
-	commission := sdkmath.LegacyZeroDec()
+	commission := sdkmath.LegacyNewDecWithPrec(ownedapp.NativeValidatorMinCommissionPercent, 2)
 	if feeRewards {
 		commission = sdkmath.LegacyMustNewDecFromStr("0.25")
 	}
@@ -236,8 +243,10 @@ func exportNativeConsensusDaemonFixture(t *testing.T, e isolatedBackendEnv, dir 
 		withdrawalSeconds = 2
 	}
 	gov(gateway, profile.Gateway, "setFreezeTime", big.NewInt(withdrawalSeconds), new(big.Int))
-	e.ctx().KVStore(e.app.GetKey(validatortypes.StoreKey)).Set([]byte{ownedapp.WithdrawalProfileKey}, config)
-	require.NoError(t, e.app.LoadWithdrawalSettlement(e.ctx()))
+	if !launch.sponsoredFounder() {
+		e.ctx().KVStore(e.app.GetKey(validatortypes.StoreKey)).Set([]byte{ownedapp.WithdrawalProfileKey}, config)
+		require.NoError(t, e.app.LoadWithdrawalSettlement(e.ctx()))
+	}
 
 	amount := func(power int64) sdkmath.Int { return sdkmath.NewIntWithDecimal(power, 18) }
 	initialStakeBonus := sdkmath.ZeroInt()
@@ -264,8 +273,22 @@ func exportNativeConsensusDaemonFixture(t *testing.T, e isolatedBackendEnv, dir 
 		if launch.fourValidators() && !emptyAssets {
 			stakeKey = nativeFourLaunchStakeKey(e.keys, i)
 		}
-		e.send(stakeKey, &profile.Gateway, initialStake(validator).BigInt(),
-			pack(gateway, "delegateDEL", common.HexToAddress(validator.EVM)), true)
+		operator := common.HexToAddress(validator.EVM)
+		principal := initialStake(validator)
+		if launch.sponsoredFounder() {
+			// The disposable deployment app funds the Gateway with its own
+			// signer. The released app's native InitChain attests this EVM
+			// snapshot against the projected founder-owned positions.
+			e.send(stakeKey, &profile.Gateway, principal.BigInt(), pack(gateway, "delegateDELTo", actor, operator), true)
+			var words [64]byte // Zero token ID and hold timestamp.
+			position := validatorkeeper.GatewayDELStake{
+				Gateway: profile.Gateway, WrappedDEL: profile.WrappedDEL, Beneficiary: actor, Validator: operator,
+				StakeID: crypto.Keccak256Hash(operator[:], actor[:], profile.WrappedDEL[:], words[:]), Amount: principal,
+			}
+			require.NoError(t, nativeKeeper.ApplyGatewayDELDelegation(e.ctx(), position, principal))
+		} else {
+			e.send(stakeKey, &profile.Gateway, principal.BigInt(), pack(gateway, "delegateDEL", operator), true)
+		}
 		seeded++
 	}
 	ctx, cdc := e.ctx(), e.app.AppCodec()
@@ -339,7 +362,7 @@ func exportNativeConsensusDaemonFixture(t *testing.T, e isolatedBackendEnv, dir 
 	}
 	bank.Balances = balances
 	if launch.emptyAssets() {
-		applyNativeEmptyLaunchAllocation(t, &bank, profile.WrappedDEL, launch)
+		applyNativeEmptyLaunchAllocation(t, &bank, profile.WrappedDEL, actor, launch)
 	} else if launch.fourValidators() {
 		require.NotNil(t, custom)
 		require.NotNil(t, nft)

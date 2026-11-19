@@ -2,6 +2,7 @@
 
 import argparse
 import base64
+from decimal import Decimal
 import hashlib
 import ipaddress
 import json
@@ -120,6 +121,7 @@ def check_operator(row, plan):
     commission = row['commission_fraction']
     require(isinstance(commission, str) and re.fullmatch(r'(?:0(?:\.[0-9]{1,18})?|1(?:\.0{1,18})?)', commission),
             'commission must be a decimal string from 0 to 1 with at most 18 fractional digits')
+    require(Decimal(commission) >= Decimal('0.05'), 'native validator commission must be at least 5%')
     moniker = text(row['moniker'], 'moniker', 70)
     text(row['operator_contact'], 'operator contact', 256)
 

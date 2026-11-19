@@ -49,6 +49,9 @@ const (
 	nativeEmptyLaunchChainID             = "mintcandy_990013-1"
 	nativeEmptyLaunchEVMChainID   uint64 = 990013
 	nativeEmptyLaunchKeyScope            = "MintCandy isolated empty four-validator launch fixture "
+	nativeSponsoredLaunchChainID         = "mintcandy_990014-1"
+	nativeSponsoredLaunchEVMID    uint64 = 990014
+	nativeSponsoredLaunchKeyScope        = "MintCandy isolated sponsored founding allocation fixture "
 )
 
 var (
@@ -76,6 +79,9 @@ func nativeLaunchSpecForMode(mode string) (nativeLaunchSpec, bool) {
 	case "4-empty":
 		return nativeLaunchSpec{nativeEmptyLaunchChainID, nativeEmptyLaunchEVMChainID,
 			[]int64{10_000, 10_000, 10_000, 10_000}, nativeEmptyLaunchKeyScope, 7, 0}, true
+	case "4-empty-sponsored":
+		return nativeLaunchSpec{nativeSponsoredLaunchChainID, nativeSponsoredLaunchEVMID,
+			[]int64{10_000, 10_000, 10_000, 10_000}, nativeSponsoredLaunchKeyScope, 7, 0}, true
 	default:
 		return nativeLaunchSpec{}, false
 	}
@@ -83,7 +89,15 @@ func nativeLaunchSpecForMode(mode string) (nativeLaunchSpec, bool) {
 
 func (s nativeLaunchSpec) fourValidators() bool { return len(s.powers) == 4 }
 
-func (s nativeLaunchSpec) emptyAssets() bool { return s.evmID == nativeEmptyLaunchEVMChainID }
+func (s nativeLaunchSpec) emptyAssets() bool {
+	return s.evmID == nativeEmptyLaunchEVMChainID || s.sponsoredFounder()
+}
+
+func (s nativeLaunchSpec) sponsoredFounder() bool { return s.evmID == nativeSponsoredLaunchEVMID }
+
+func nativeSponsoredFounderAddress() common.Address {
+	return common.BytesToAddress(crypto.Keccak256([]byte(nativeSponsoredLaunchChainID + "/address-only-beneficiary")))
+}
 
 func seedEmptyUserAssets() bool {
 	spec, _ := nativeLaunchSpecForMode(os.Getenv(nativeLaunchRehearsalEnv))
@@ -124,7 +138,7 @@ func nativeFourLaunchBankAllocation(wrapped, drc20, nft common.Address) map[stri
 	return balances
 }
 
-func applyNativeEmptyLaunchAllocation(t *testing.T, bank *banktypes.GenesisState, wrapped common.Address, spec nativeLaunchSpec) {
+func applyNativeEmptyLaunchAllocation(t *testing.T, bank *banktypes.GenesisState, wrapped, founder common.Address, spec nativeLaunchSpec) {
 	t.Helper()
 	wrappedAccount := sdk.AccAddress(wrapped.Bytes()).String()
 	principal := sdkmath.NewIntWithDecimal(40_000, 18)
@@ -141,11 +155,12 @@ func applyNativeEmptyLaunchAllocation(t *testing.T, bank *banktypes.GenesisState
 	}
 	require.True(t, found, "genesis allocation must retain actual wrapped collateral")
 	addBalance(wrappedAccount, principal)
+	addBalance(sdk.AccAddress(founder.Bytes()).String(), sdkmath.NewIntWithDecimal(5_000_000, 18))
 	for i := range spec.accountCount {
 		var amount int64 = 200
 		switch i {
 		case 3:
-			amount = 5_000_000
+			continue
 		case 5, 6:
 			amount = 100
 		}
@@ -246,7 +261,7 @@ func TestOwnedAppNativeLaunchPreview(t *testing.T) {
 	}
 	binary, err := os.Executable()
 	require.NoError(t, err)
-	for _, mode := range []string{"1", "4", "4-empty"} {
+	for _, mode := range []string{"1", "4", "4-empty", "4-empty-sponsored"} {
 		t.Run("validator_fixture_"+mode, func(t *testing.T) {
 			runNativeLaunchPreview(t, binary, mode)
 		})
@@ -377,6 +392,21 @@ func verifyNativeLaunchPreview(t *testing.T, dir string, spec nativeLaunchSpec) 
 		require.Len(t, native.Delegations, 4)
 		for _, d := range native.Delegations {
 			require.Equal(t, sdk.AccAddress(expect.Actor.Bytes()).String(), d.Delegator)
+		}
+		if spec.sponsoredFounder() {
+			founder := nativeSponsoredFounderAddress()
+			require.Equal(t, founder, expect.Actor)
+			sponsor := sdk.AccAddress(nativeLaunchAccountKey(3, spec).PubKey().Address())
+			require.True(t, app.BankKeeper.GetBalance(ctx, sponsor, identity.BaseDenom).IsZero())
+			account := app.AccountKeeper.GetAccount(ctx, sdk.AccAddress(founder.Bytes()))
+			require.NotNil(t, account)
+			require.Nil(t, account.GetPubKey())
+			require.Zero(t, account.GetSequence())
+			require.Len(t, native.EVMStakeBindings, len(native.Delegations))
+			for _, binding := range native.EVMStakeBindings {
+				require.Equal(t, founder.Bytes(), binding.Beneficiary)
+				require.NotEqual(t, []byte(sponsor), binding.Beneficiary)
+			}
 		}
 		require.Equal(t, sdkmath.NewIntWithDecimal(5_041_000, 18).String(), total.String())
 		require.Equal(t, sdkmath.NewIntWithDecimal(5_000_000, 18).String(), backed(expect.Actor).String())

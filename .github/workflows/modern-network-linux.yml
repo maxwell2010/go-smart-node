@@ -12,7 +12,7 @@ on:
         description: Validation scenario to run on an isolated GitHub runner
         default: module
         type: choice
-        options: [module, bridge-finality, token-features, token-daemon, mass-delegation, contracts, process, held-downtime, native-upgrade-governance, nft-downtime, native-full-profile-upgrade, native-full-ibc-upgrade, native-cross-version-ibc-upgrade, native-systemd-module-upgrade, native-systemd-four-validator-recovery, native-systemd-startup-replay]
+        options: [module, founding-genesis, bridge-finality, token-features, token-daemon, mass-delegation, contracts, process, held-downtime, native-upgrade-governance, nft-downtime, native-full-profile-upgrade, native-full-ibc-upgrade, native-cross-version-ibc-upgrade, native-systemd-module-upgrade, native-systemd-four-validator-recovery, native-systemd-startup-replay]
       remote_profile:
         description: Also validate the reusable remote-worker scripts
         default: 'off'
@@ -59,6 +59,43 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  founding-genesis:
+    if: github.event_name == 'workflow_dispatch' && inputs.scope == 'founding-genesis'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    env:
+      GOENV: 'off'
+      GOWORK: 'off'
+      GOTOOLCHAIN: local
+      GOMAXPROCS: '2'
+      CGO_ENABLED: '1'
+    defaults:
+      run:
+        shell: bash
+        working-directory: network
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e
+        with:
+          go-version: '1.26.11'
+          cache-dependency-path: network/go.sum
+      - name: Verify the dependency graph and commission boundaries
+        run: |
+          set -euo pipefail
+          go mod download
+          go mod verify
+          git diff --exit-code -- go.mod go.sum
+          go test -mod=readonly -p 2 -count=1 -v -timeout 6m \
+            -run '^Test(NativeConsensusValidatesGenesisSnapshot|ValidateNativeValidatorRegistrationProposal|BuildNativeValidatorRegistrationMetadata|NativeValidatorRegistrationProof.*|ValidatorRegistrationMetadataCommand|ValidatorControlMetadataBoundaries)$' \
+            ./app ./cmd/mcnd
+      - name: Verify founder-owned backing and commission changes with the real EVM
+        run: |
+          set -euo pipefail
+          go test -mod=readonly -p 2 -count=1 -v -timeout 10m -tags appstate \
+            -run '^TestOwnedApp(NativeLaunchPreview|NativeValidatorSelfControls)$' ./systemcontracts
+
   modern-module:
     if: github.event_name != 'workflow_dispatch' || inputs.scope == 'module'
     runs-on: ubuntu-22.04

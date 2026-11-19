@@ -7,6 +7,7 @@ import (
 	"errors"
 	"strings"
 
+	sdkmath "cosmossdk.io/math"
 	"github.com/maxwell2010/go-smart-node/network/identity"
 	"github.com/oasisprotocol/curve25519-voi/curve"
 )
@@ -33,6 +34,9 @@ type nativeValidatorRegistration struct {
 // BuildNativeValidatorRegistrationMetadata signs a registration ownership
 // proof for the proposer account with its separate Ed25519 consensus key.
 func BuildNativeValidatorRegistrationMetadata(chainID string, evmChainID uint64, proposer []byte, expiresHeight int64, commissionPercent uint8, key ed25519.PrivateKey) (string, error) {
+	if err := validateNativeValidatorCommission(sdkmath.LegacyNewDecWithPrec(int64(commissionPercent), 2)); err != nil {
+		return "", err
+	}
 	if len(key) != ed25519.PrivateKeySize {
 		return "", errors.New("invalid Ed25519 consensus private key size")
 	}
@@ -91,6 +95,9 @@ func validateNativeValidatorRegistrationProposal(metadata, chainID string, evmCh
 	copy(candidate.ConsensusPubKey[:], data[nativeValidatorRegistrationHeader:nativeValidatorRegistrationKeyEnd])
 	message, err := candidate.signBytes(chainID, evmChainID)
 	if err != nil {
+		return nil, err
+	}
+	if err := validateNativeValidatorCommission(sdkmath.LegacyNewDecWithPrec(int64(candidate.CommissionPercent), 2)); err != nil {
 		return nil, err
 	}
 	if height <= 0 || height >= candidate.ExpiresHeight {

@@ -5,6 +5,7 @@ import (
 	sdkmath "cosmossdk.io/math"
 	"encoding/json"
 	"errors"
+	"fmt"
 	sdk "github.com/cosmos/cosmos-sdk/types"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core"
@@ -95,8 +96,11 @@ func CanonicalValidatorControlMetadata(raw []byte) ([]byte, error) {
 	}
 	if meta.Commission != nil {
 		v, err := sdkmath.LegacyNewDecFromStr(*meta.Commission)
-		if err != nil || v.IsNegative() || v.GT(sdkmath.LegacyOneDec()) {
-			return nil, errors.New("commission must be between zero and one")
+		if err != nil {
+			return nil, fmt.Errorf("invalid native validator commission: %w", err)
+		}
+		if err := validateNativeValidatorCommission(v); err != nil {
+			return nil, err
 		}
 		normalized := v.String()
 		meta.Commission = &normalized

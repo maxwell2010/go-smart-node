@@ -36,7 +36,7 @@ func encodeValidatorRegistrationProofForTest(data []byte) string {
 }
 
 func TestValidateNativeValidatorRegistrationProposal(t *testing.T) {
-	for _, commission := range []uint8{0, 7, 100} {
+	for _, commission := range []uint8{5, 7, 100} {
 		want, data := validatorRegistrationProofFixture(t, commission)
 		metadata := encodeValidatorRegistrationProofForTest(data)
 		require.LessOrEqual(t, len(metadata), 255)
@@ -48,10 +48,15 @@ func TestValidateNativeValidatorRegistrationProposal(t *testing.T) {
 	got, err := validateNativeValidatorRegistrationProposal("ordinary governance text", "", 0, nil, 0)
 	require.NoError(t, err)
 	require.Nil(t, got)
+	below, proof := validatorRegistrationProofFixture(t, 4)
+	got, err = validateNativeValidatorRegistrationProposal(encodeValidatorRegistrationProofForTest(proof),
+		registrationProofTestChain, registrationProofTestEVM, below.Operator[:], 1)
+	require.ErrorContains(t, err, "between 5% and 100%")
+	require.Nil(t, got)
 }
 
 func TestBuildNativeValidatorRegistrationMetadata(t *testing.T) {
-	want, data := validatorRegistrationProofFixture(t, 0)
+	want, data := validatorRegistrationProofFixture(t, 5)
 	key := ed25519.NewKeyFromSeed(bytes.Repeat([]byte{0x42}, ed25519.SeedSize))
 	metadata, err := BuildNativeValidatorRegistrationMetadata(registrationProofTestChain, registrationProofTestEVM, want.Operator[:], want.ExpiresHeight, want.CommissionPercent, key)
 	require.NoError(t, err)

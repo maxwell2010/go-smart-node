@@ -43,8 +43,11 @@ func nativeValidatorRegistrationMetadataCmd() *cobra.Command {
 			if err != nil || len(proposer) != 20 {
 				return errors.New("operator must be a 20-byte d0 account address")
 			}
-			if expiresHeight <= 1 || commissionPercent > 100 {
-				return errors.New("expiry must be after height 1 and commission must be between 0 and 100")
+			if expiresHeight <= 1 {
+				return errors.New("expiry must be after height 1")
+			}
+			if commissionPercent < ownedapp.NativeValidatorMinCommissionPercent || commissionPercent > 100 {
+				return fmt.Errorf("commission must be between %d and 100 percent", ownedapp.NativeValidatorMinCommissionPercent)
 			}
 			key, err := readRegistrationConsensusKey(keyPath)
 			if err != nil {
@@ -63,7 +66,8 @@ func nativeValidatorRegistrationMetadataCmd() *cobra.Command {
 	f.StringVar(&chainID, flags.FlagChainID, "", "Fresh network chain ID in the form mintcandy_<evm-id>-<revision>")
 	f.StringVar(&operator, "operator", "", "d0 account address that will submit the proposal and receive validator rewards")
 	f.Int64Var(&expiresHeight, "expires-height", 0, "First block height at which the ownership proof is invalid")
-	f.Uint8Var(&commissionPercent, "commission-percent", 0, "Whole validator commission percentage from 0 to 100")
+	f.Uint8Var(&commissionPercent, "commission-percent", ownedapp.NativeValidatorMinCommissionPercent,
+		fmt.Sprintf("Whole validator commission percentage from %d to 100", ownedapp.NativeValidatorMinCommissionPercent))
 	f.StringVar(&keyPath, "priv-validator-key-file", "", "Path to the local CometBFT priv_validator_key.json")
 	for _, flag := range []string{flags.FlagChainID, "operator", "expires-height", "commission-percent", "priv-validator-key-file"} {
 		_ = cmd.MarkFlagRequired(flag)

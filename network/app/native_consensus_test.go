@@ -212,11 +212,15 @@ func TestNativeConsensusValidatesGenesisSnapshot(t *testing.T) {
 		{"jailed signer", func(state *validatortypes.GenesisState) {
 			state.Validators[0].Jailed = true
 		}, "precomputed native power or mismatched eligibility"},
+		{"commission below floor", func(state *validatortypes.GenesisState) {
+			state.Validators[0].Commission = sdkmath.LegacyMustNewDecFromStr("0.049999999999999999")
+		}, "between 5% and 100%"},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			state := &validatortypes.GenesisState{
-				BindingDomain:    &validatortypes.EVMSourceDomain{},
-				Validators:       []validatortypes.Validator{{Status: validatortypes.BondStatus_Unbonded, Online: true}},
+				BindingDomain: &validatortypes.EVMSourceDomain{},
+				Validators: []validatortypes.Validator{{Status: validatortypes.BondStatus_Unbonded, Online: true,
+					Commission: sdkmath.LegacyNewDecWithPrec(NativeValidatorMinCommissionPercent, 2)}},
 				EVMStakeBindings: []validatortypes.EVMStakeBinding{{}},
 				Delegations:      []validatortypes.Delegation{{}},
 			}

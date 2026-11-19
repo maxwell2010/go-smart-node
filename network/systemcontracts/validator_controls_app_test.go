@@ -204,6 +204,10 @@ func runNativeValidatorSelfControls(t *testing.T, dir, phase string) {
 	require.Equal(t, before.RewardAddress, after.RewardAddress)
 	require.Equal(t, before.ConsensusPubkey, after.ConsensusPubkey)
 	require.Equal(t, "0.125000000000000000", after.Commission.String())
+	aboveFloor := read(first.Operator)
+	submit(0, false, "updateValidatorMeta", common.HexToAddress(first.EVM),
+		`{"name":"Rejected commission update","commission":"0.049999999999999999"}`)
+	require.Equal(t, aboveFloor, read(first.Operator))
 	// Reusing the exact signed transaction must fail ante nonce validation and
 	// leave both metadata and Master state unchanged.
 	prior := read(first.Operator)
@@ -217,10 +221,14 @@ func runNativeValidatorSelfControls(t *testing.T, dir, phase string) {
 	require.NotZero(t, result.TxResults[0].Code)
 	l.commit(result)
 	require.Equal(t, prior, read(first.Operator))
+	floor, err := ownedapp.CanonicalValidatorControlMetadata([]byte(`{"name":"Self operator A","description":"Verified signed self control","avatar_uri":"ipfs://bafyfixture/avatar.png","commission":"0.05"}`))
+	require.NoError(t, err)
+	submit(0, true, "updateValidatorMeta", common.HexToAddress(first.EVM), string(floor))
 	submit(0, true, "unpauseSelf")
 	after, err = app.NativeValidatorKeeper.GetValidator(l.snapshot(), first.Operator)
 	require.NoError(t, err)
 	require.True(t, after.Online)
+	require.Equal(t, "0.050000000000000000", after.Commission.String())
 	_, paused, _ = l.masterValidatorState(common.HexToAddress(first.EVM))
 	require.False(t, paused)
 	require.Equal(t, secondBefore, read(second.Operator))

@@ -126,6 +126,11 @@ func validateWithdrawalGenesisSnapshot(profile WithdrawalProfile, nft *nfttypes.
 			(profile.EnableNativeConsensus && val.Jailed) {
 			return errors.New("withdrawal genesis cannot import precomputed native power or mismatched eligibility")
 		}
+		if profile.EnableNativeConsensus {
+			if err := validateNativeValidatorCommission(val.Commission); err != nil {
+				return fmt.Errorf("withdrawal genesis: %w", err)
+			}
+		}
 	}
 	if profile.EnableDELDelegation {
 		if len(validators.Validators) == 0 || len(validators.EVMFrozenBindings) != 0 || len(validators.Undelegations) != 0 {
