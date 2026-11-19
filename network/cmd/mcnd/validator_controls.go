@@ -311,6 +311,7 @@ func newValidatorControlCmd() *cobra.Command {
 	}}
 	flags.AddQueryFlagsToCmd(status)
 	parent.AddCommand(prepare, sign, status)
+	parent.AddCommand(validatorAvatarGenesisCommands()...)
 	return parent
 }
 

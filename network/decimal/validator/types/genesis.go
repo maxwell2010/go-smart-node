@@ -43,6 +43,22 @@ func (g GenesisState) Validate() error {
 	if bonded > uint64(g.Params.MaxValidators) {
 		return fmt.Errorf("bonded validator limit exceeded")
 	}
+	avatars := map[string]bool{}
+	for _, avatar := range g.ValidatorAvatars {
+		if _, exists := vals[avatar.OperatorAddress]; !exists {
+			return fmt.Errorf("validator avatar references unknown operator")
+		}
+		if avatars[avatar.OperatorAddress] {
+			return fmt.Errorf("duplicate validator avatar operator")
+		}
+		avatars[avatar.OperatorAddress] = true
+		if avatar.AvatarURI == "" {
+			return fmt.Errorf("genesis validator avatar reference must not be empty")
+		}
+		if err := ValidateValidatorAvatarURI(avatar.AvatarURI); err != nil {
+			return err
+		}
+	}
 	addressPair := func(delegator, validator string) error {
 		if err := validateAddress(delegator, identity.Bech32PrefixAccAddr); err != nil {
 			return err

@@ -10,9 +10,9 @@ import (
 	"github.com/ethereum/go-ethereum/core"
 	ethtypes "github.com/ethereum/go-ethereum/core/types"
 	validatorkeeper "github.com/maxwell2010/go-smart-node/network/decimal/validator/keeper"
+	validatortypes "github.com/maxwell2010/go-smart-node/network/decimal/validator/types"
 	contracts "github.com/maxwell2010/go-smart-node/network/systemcontracts"
 	"io"
-	"net/url"
 	"strings"
 	"unicode/utf8"
 )
@@ -88,11 +88,9 @@ func CanonicalValidatorControlMetadata(raw []byte) ([]byte, error) {
 	if meta.Description != nil && !valid(*meta.Description, 280) {
 		return nil, errors.New("invalid validator description")
 	}
-	if meta.AvatarURI != nil && *meta.AvatarURI != "" {
-		v := *meta.AvatarURI
-		u, err := url.Parse(v)
-		if !valid(v, 512) || err != nil || u.User != nil || u.Fragment != "" || u.Host == "" || (u.Scheme != "https" && u.Scheme != "ipfs") {
-			return nil, errors.New("avatar URI requires bounded HTTPS or IPFS reference")
+	if meta.AvatarURI != nil {
+		if err := validatortypes.ValidateValidatorAvatarURI(*meta.AvatarURI); err != nil {
+			return nil, err
 		}
 	}
 	if meta.Commission != nil {

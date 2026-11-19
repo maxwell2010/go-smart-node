@@ -113,6 +113,10 @@ func runNativeValidatorSelfControls(t *testing.T, dir, phase string) {
 	l := nativeHistoricalLifecycle{t: t, app: app, doc: doc, expect: expected, target: expected.Validators[0]}
 	first := expected.Validators[0]
 	second := expected.Validators[1]
+	if phase == "restart" && os.Getenv(validatorAvatarGenesisPhaseEnv) == "import-restart" {
+		assertNativeAvatarImportedRestart(t, l, dir)
+		return
+	}
 	if phase == "restart" {
 		validator, err := app.NativeValidatorKeeper.GetValidator(l.snapshot(), first.Operator)
 		require.NoError(t, err)
@@ -130,6 +134,9 @@ func runNativeValidatorSelfControls(t *testing.T, dir, phase string) {
 	require.NoError(t, err)
 	l.set = cmttypes.NewValidatorSet(validators)
 	l.commit(l.finalize(nil, nil))
+	if os.Getenv(validatorAvatarGenesisPhaseEnv) == "import" {
+		assertNativeAvatarGenesisImported(t, l, dir)
+	}
 	master, err := contracts.CompiledABI("NewNetworkMasterValidator")
 	require.NoError(t, err)
 	signedCall := func(index int, method string, args ...interface{}) *ethtypes.Transaction {
@@ -217,4 +224,10 @@ func runNativeValidatorSelfControls(t *testing.T, dir, phase string) {
 	_, paused, _ = l.masterValidatorState(common.HexToAddress(first.EVM))
 	require.False(t, paused)
 	require.Equal(t, secondBefore, read(second.Operator))
+	switch os.Getenv(validatorAvatarGenesisPhaseEnv) {
+	case "source":
+		exportNativeAvatarGenesisFixture(t, l, dir)
+	case "import":
+		exerciseNativeAvatarAfterImport(t, l, profile, dir)
+	}
 }

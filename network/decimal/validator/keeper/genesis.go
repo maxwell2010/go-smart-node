@@ -54,6 +54,11 @@ func (k *StateKeeper) InitGenesis(ctx sdk.Context, g *types.GenesisState) error 
 			return e
 		}
 	}
+	for _, avatar := range g.ValidatorAvatars {
+		if e = k.SetNativeValidatorAvatar(child, avatar.OperatorAddress, avatar.AvatarURI); e != nil {
+			return e
+		}
+	}
 	for _, d := range g.Delegations {
 		if e = k.put(child, delegationKey(d), &d); e != nil {
 			return e
@@ -136,6 +141,9 @@ func (k *StateKeeper) exportGenesis(ctx sdk.Context, auditIndexes bool) (*types.
 		return nil, e
 	}
 	g := &types.GenesisState{Params: p, Validators: vals}
+	if e = k.exportNativeValidatorAvatars(ctx, g); e != nil {
+		return nil, e
+	}
 	decode := func(key, data []byte, m proto.Message, expected func() ([]byte, error)) error {
 		if len(data) > MaxRecordBytes {
 			return errors.New("native validator record exceeds size limit")
