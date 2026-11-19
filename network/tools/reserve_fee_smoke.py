@@ -44,15 +44,25 @@ def load_fixture(directory):
             check(pathlib.PurePath(name).name == name and re.fullmatch(r'[a-z.-]{1,80}', name), 'invalid fixture input path')
             private_bytes(directory / name, 256 * 1024)
     expected = json.loads(private_bytes(directory / 'expectations.json', 8192))
-    check(len(expected['validators']) == 3, 'fee gate requires three distinct native validators')
+    keys = load_validator_keys(directory, expected['validators'])
+    return fixture, genesis, keys, int(doc['initial_height'])
+
+
+def load_validator_keys(directory, validators):
+    check([row['name'] for row in validators] == list('abc'), 'fee gate requires the three named native validators')
     keys = []
-    for row in expected['validators']:
+    identities = set()
+    for row in validators:
         key = private_bytes(directory / f'priv_validator_key_{row["name"]}.json', 8192)
         private = json.loads(key)
-        check(decode_pubkey(private['pub_key']) == decode_pubkey(row['publicKey']) and private['address'] == row['consensusAddress'],
+        public_key = decode_pubkey(row['publicKey'])
+        identity = hashlib.sha256(public_key).hexdigest()[:40].upper()
+        check(identity not in identities and decode_pubkey(private['pub_key']) == public_key and
+              private['address'] == row['consensusAddress'] == identity,
               'fixture validator signing identity differs')
+        identities.add(identity)
         keys.append(key)
-    return fixture, genesis, keys, int(doc['initial_height'])
+    return keys
 
 
 def fee_policy(node, fixture, nonce):

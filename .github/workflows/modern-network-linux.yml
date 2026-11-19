@@ -113,6 +113,7 @@ jobs:
           python3 -m unittest discover -s scripts -p 'test_*.py'
           python3 -m unittest discover -s tools -p 'test_native_consensus_rewards.py'
           python3 -m unittest discover -s tools -p 'test_native_reward_checkpoint.py'
+          python3 -m unittest discover -s tools -p 'test_reserve_fee_smoke.py'
       - name: Test ordinary crypto regressions with and without CGO
         run: |
           go test -mod=readonly -p 2 -count=1 github.com/ethereum/go-ethereum/crypto github.com/ethereum/go-ethereum/crypto/secp256k1 github.com/ethereum/go-ethereum/common/math |& tee validation-logs/geth-crypto-cgo.log

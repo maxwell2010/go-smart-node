@@ -3,6 +3,7 @@
 package systemcontracts_test
 
 import (
+	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
 	"math/big"
@@ -12,7 +13,9 @@ import (
 	"time"
 
 	sdkmath "cosmossdk.io/math"
+	cmted25519 "github.com/cometbft/cometbft/crypto/ed25519"
 	cmtjson "github.com/cometbft/cometbft/libs/json"
+	"github.com/cometbft/cometbft/privval"
 	cmttypes "github.com/cometbft/cometbft/types"
 	sdk "github.com/cosmos/cosmos-sdk/types"
 	authtypes "github.com/cosmos/cosmos-sdk/x/auth/types"
@@ -48,6 +51,25 @@ func TestExportDRC20FeeDaemonFixture(t *testing.T) {
 	var expected nativeHistoricalExpectations
 	readNativeHistoricalJSON(t, filepath.Join(dir, "expectations.json"), &expected)
 	require.Len(t, expected.Validators, 3)
+	// Historical ABCI fixtures intentionally export no consensus signing keys.
+	// This opt-in daemon fixture needs the same disposable CI signers. Rebuild
+	// only the exact deterministic keys used by that seed, and verify their
+	// public identities before writing private files into the private CI root.
+	for index, validator := range expected.Validators {
+		name := string("abc"[index])
+		require.Equal(t, name, validator.Name)
+		signer := cmted25519.GenPrivKeyFromSecret([]byte(nativeHistoricalConsensusKeyScope + name))
+		require.Equal(t, validator.PubKey, base64.StdEncoding.EncodeToString(signer.PubKey().Bytes()))
+		require.Equal(t, validator.Consensus, signer.PubKey().Address().String())
+		pv := privval.NewFilePV(signer, "", "")
+		data, err := cmtjson.MarshalIndent(pv.Key, "", "  ")
+		require.NoError(t, err)
+		file, err := os.OpenFile(filepath.Join(dir, "priv_validator_key_"+name+".json"), os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0600)
+		require.NoError(t, err)
+		_, writeErr := file.Write(data)
+		require.NoError(t, writeErr)
+		require.NoError(t, file.Close())
+	}
 	var state ownedapp.GenesisState
 	require.NoError(t, json.Unmarshal(doc.AppState, &state))
 	var profile ownedapp.WithdrawalProfile
