@@ -274,6 +274,9 @@ func (c *withdrawalController) PostTxProcessing(ctx sdk.Context, sender common.A
 	if receipt == nil || receipt.Status != ethtypes.ReceiptStatusSuccessful {
 		return nil
 	}
+	if handled, err := c.admitReservelessToken(ctx, sender, msg, receipt); handled {
+		return err
+	}
 	if c.isNFTReceiptRedemption(msg) {
 		if sender != msg.From {
 			return errors.New("NFT redemption requires the authenticated transaction sender")
