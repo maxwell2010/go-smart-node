@@ -236,6 +236,7 @@ func verifyPosition(row validatorDeclaration, delegation validatortypes.Delegati
 	}
 	stake := sdkmath.NewIntWithDecimal(10_000, 18)
 	if call.Amount.IsNil() || !call.Amount.Equal(stake) ||
+		delegation.Stake.Stake.Amount.IsNil() ||
 		!delegation.Stake.Equal(validatortypes.NewStakeCoin(sdk.NewCoin(identity.BaseDenom, stake))) {
 		return empty, fmt.Errorf("founding delegation must fund exactly 10000 MSP")
 	}
@@ -269,6 +270,9 @@ func (b BankAllocation) verify(founder, wrapped common.Address, reserve sdkmath.
 			return fmt.Errorf("invalid founding bank balance")
 		}
 		coins := row.Coins[0].Amount
+		if coins.GT(total[0].Amount) {
+			return fmt.Errorf("founding bank balance exceeds supply")
+		}
 		balances[account] = coins
 		sum = sum.Add(coins)
 		if account != founder && account != wrapped {

@@ -25,6 +25,7 @@ def prepared_fixture(source):
     sample = intake['validators'][0]
     relayers = [row['address'] for row in doc['app_state']['bank']['balances']
                 if row['coins'] == [{'denom': 'del', 'amount': str(100 * ATOMS_PER_DEL)}]]
+    initial_reward_wallets = relayers.copy()
     intake['validators'] = []
     for index, operator in enumerate(expected['validators'], 1):
         row = copy.deepcopy(sample)
@@ -32,7 +33,8 @@ def prepared_fixture(source):
             application_id=f'CI-{index}', operator_address=operator['operator'],
             evm_operator_address=operator['evm'],
             consensus_pubkey={'@type': ED25519_TYPE, 'key': operator['publicKey']},
-            reward_address=relayers[(index-1) % len(relayers)], moniker=f"Ledger replay {operator['name']}",
+                reward_address=initial_reward_wallets[(index - 1) % len(initial_reward_wallets)],
+                moniker=f"Ledger replay {operator['name']}",
             commission_fraction='0.05', stake_owner_address=expected['actorNative'],
             beneficiary_address=expected['actorNative'], stake_ownership_model='founder_owned_delegations',
             stake_amount_atoms=str(10_000 * ATOMS_PER_DEL), gas_wallet_address=operator['rewardNative'],
@@ -41,6 +43,8 @@ def prepared_fixture(source):
         node_id = f'{index:040x}'
         row['connectivity'].update(node_id=node_id, p2p_address=f'{node_id}@peer{index}.example.invalid:26656',
                                    role='sentry')
+        if index == 1:
+            row['gas_wallet_address'], relayers[0] = relayers[0], row['gas_wallet_address']
         intake['validators'].append(row)
     applications = check_applications(intake, plan)
     ledger = prepare_ledger(applications, plan, expected['wrappedNative'], expected['gateway'], relayers)

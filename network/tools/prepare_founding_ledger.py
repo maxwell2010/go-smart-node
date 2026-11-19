@@ -68,7 +68,7 @@ def prepare_ledger(applications, plan, wrapped_wallet, gateway, relayer_wallets)
         })
         delegations.append({
             'delegator': row['stakeOwnerAddress'], 'validator': operator,
-            'stake': {'stake': {'denom': plan['denom'], 'amount': amount}},
+            'stake': {'type': 1, 'id': plan['denom'], 'stake': {'denom': plan['denom'], 'amount': amount}},
         })
         meta = {
             'operator_address': operator, 'reward_address': strict_native_address(row['rewardAddress'], 'd0'),
