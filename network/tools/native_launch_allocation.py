@@ -46,7 +46,10 @@ def del_amount(coins):
 
 
 def allocation_report(data):
-    doc = json.loads(data, object_pairs_hook=unique_object)
+    return summarize_allocation(json.loads(data, object_pairs_hook=unique_object), hashlib.sha256(data).hexdigest())
+
+
+def summarize_allocation(doc, genesis_sha256):
     chain_id = doc['chain_id']
     domain = re.fullmatch(r'mintcandy_([1-9][0-9]{0,19})-([1-9][0-9]{0,19})', chain_id)
     check(domain is not None and len(chain_id) <= 50, 'launch audit requires a separate MintCandy chain ID')
@@ -138,7 +141,7 @@ def allocation_report(data):
         'evmChainId': str(evm_id),
         'genesisHeight': 1,
         'genesisTime': doc['genesis_time'],
-        'genesisSha256': hashlib.sha256(data).hexdigest(),
+        'genesisSha256': genesis_sha256,
         'denom': 'del',
         'atomsPerDel': str(ATOMS_PER_DEL),
         'initialSupplyAtomic': str(total),

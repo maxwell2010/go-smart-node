@@ -195,22 +195,25 @@ def check_applications(intake, plan):
     }
 
 
+def read_intake(path):
+    with path.open('rb') as stream:
+        data = stream.read(MAX_INTAKE_BYTES + 1)
+    require(0 < len(data) <= MAX_INTAKE_BYTES, 'invalid intake file size')
+    try:
+        return json.loads(data.decode('utf-8'), object_pairs_hook=unique_object)
+    except (ValueError, RecursionError) as error:
+        raise ValueError('invalid UTF-8 JSON or duplicate intake fields') from error
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('intake', type=Path, help='private copy of operator-launch-intake.example.json')
     parser.add_argument('--require-four', action='store_true', help='return a failing exit status until four applications pass preflight')
     args = parser.parse_args()
     try:
-        with args.intake.open('rb') as stream:
-            data = stream.read(MAX_INTAKE_BYTES + 1)
-        require(0 < len(data) <= MAX_INTAKE_BYTES, 'invalid intake file size')
-        try:
-            intake = json.loads(data.decode('utf-8'), object_pairs_hook=unique_object)
-        except (ValueError, RecursionError) as error:
-            raise ValueError('invalid UTF-8 JSON or duplicate intake fields') from error
         plan = read_json(DEFAULT_PLAN)
         check_plan(plan, read_json(DEFAULT_DRAFT))
-        report = check_applications(intake, plan)
+        report = check_applications(read_intake(args.intake), plan)
     except (OSError, ValueError, RecursionError) as error:
         parser.exit(1, f'operator applications: {error}\n')
     print(json.dumps(report, sort_keys=True, indent=2))
