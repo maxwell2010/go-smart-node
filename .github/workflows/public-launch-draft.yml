@@ -11,6 +11,8 @@ on:
       - 'network/docs/ru/operator-launch-intake.example.json'
       - 'network/tools/check_public_launch_draft.py'
       - 'network/tools/test_check_public_launch_draft.py'
+      - 'network/tools/check_operator_applications.py'
+      - 'network/tools/test_check_operator_applications.py'
   pull_request:
     paths:
       - '.github/workflows/public-launch-draft.yml'
@@ -18,6 +20,8 @@ on:
       - 'network/docs/ru/operator-launch-intake.example.json'
       - 'network/tools/check_public_launch_draft.py'
       - 'network/tools/test_check_public_launch_draft.py'
+      - 'network/tools/check_operator_applications.py'
+      - 'network/tools/test_check_operator_applications.py'
 permissions:
   contents: read
 jobs:
@@ -36,9 +40,18 @@ jobs:
           python3 -B -m unittest discover -s network/tools -p 'test_check_public_launch_draft.py'
           python3 -B network/tools/check_public_launch_draft.py > "$RUNNER_TEMP/public-launch-draft-checks.json"
           git diff --exit-code
+      - name: Verify draft and populated operator preflight scenarios
+        run: |
+          set -euo pipefail
+          python3 -B -m unittest discover -s network/tools -p 'test_check_operator_applications.py' -v
+          python3 -B network/tools/check_operator_applications.py network/docs/ru/operator-launch-intake.example.json > "$RUNNER_TEMP/operator-application-template-check.json"
+          jq -e '.status == "APPLICATIONS_PENDING" and .checkedOperators == 0 and .missingSlots == 4 and .publicGenesisApproved == false' \
+            "$RUNNER_TEMP/operator-application-template-check.json" >/dev/null
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
         with:
           name: public-launch-draft-checks-${{ github.sha }}
-          path: ${{ runner.temp }}/public-launch-draft-checks.json
+          path: |
+            ${{ runner.temp }}/public-launch-draft-checks.json
+            ${{ runner.temp }}/operator-application-template-check.json
           if-no-files-found: error
           retention-days: 30
