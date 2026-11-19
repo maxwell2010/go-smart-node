@@ -90,6 +90,17 @@ class PublicLaunchPlanTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, 'allocation total'):
             check_plan(self.plan, self.draft)
 
+    def test_single_account_decision_cannot_duplicate_treasury_or_reduce_requested_balance(self):
+        self.plan['treasury_policy']['multisig_required'] = True
+        with self.assertRaisesRegex(ValueError, 'single-account treasury'):
+            check_plan(self.plan, self.draft)
+        self.plan['treasury_policy']['multisig_required'] = False
+        self.plan['bank_allocation'][0]['amount_atoms'] = str(4_999_999 * 10**18)
+        self.plan['initial_supply_atoms'] = str(
+            sum(int(row['amount_atoms']) for row in self.plan['bank_allocation']))
+        with self.assertRaisesRegex(ValueError, 'founder requested balance'):
+            check_plan(self.plan, self.draft)
+
     def test_correct_bank_total_cannot_hide_unbacked_delegations(self):
         self.plan['initial_delegations_within_wdel_backing'][0]['amount_atoms'] = str(
             int(self.plan['initial_delegations_within_wdel_backing'][0]['amount_atoms']) + 1)

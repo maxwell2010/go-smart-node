@@ -126,7 +126,8 @@ def check_plan(plan, draft):
     decisions = plan['decisions']
     require(decisions['allocation_approved'] is False and
             decisions['initial_asset_creation_approved'] is None and
-            all(value is None or value is False for name, value in decisions.items() if name.endswith('_approved')),
+            all(value is None or value is False for name, value in decisions.items()
+                if name.endswith('_approved') and name != 'treasury_control_approved'),
             'allocation or asset decision was approved in a draft')
     require(plan['founder_address_ownership_confirmed'] is False,
             'public founder address control has not been confirmed')
@@ -136,10 +137,21 @@ def check_plan(plan, draft):
     require(plan['denom'] == 'del' and type(plan['decimals']) is int and plan['decimals'] == 18 and
             atomic(plan['atoms_per_del']) == ATOMS_PER_DEL, 'invalid MSP denomination scale')
     total = atomic(plan['initial_supply_atoms'])
-    require(total == 100_000 * ATOMS_PER_DEL, 'supply proposal must total exactly 100000 MSP')
+    require(total > 0 and plan['initial_supply_is_proposal'] is True,
+            'initial supply must remain a positive unapproved proposal')
     allocations = plan['bank_allocation']
     require(sum(atomic(row['amount_atoms']) for row in allocations) == total,
             'bank allocation total differs from proposed supply')
+    free = [row for row in allocations if row['purpose'] == 'founder_free_balance_for_distribution_or_sale']
+    treasury = plan['treasury_policy']
+    require(len(free) == 1 and atomic(free[0]['amount_atoms']) ==
+            atomic(plan['founder_requested_free_balance_atoms']) == 5_000_000 * ATOMS_PER_DEL and
+            not any(row['purpose'] == 'operating_treasury' for row in allocations) and
+            decisions['treasury_control_approved'] is True and
+            treasury['selection'] == 'founder_single_account' and treasury['selected_by_founder'] is True and
+            treasury['evm_address'] == plan['founder_evm_address'] == free[0]['evm_address'] and
+            treasury['multisig_required'] is False and atomic(treasury['separate_allocation_atoms']) == 0,
+            'founder requested balance or selected single-account treasury differs')
     require(all(row['bank_address'] is None for row in allocations),
             'bank recipients remain unresolved in the proposal')
     founder = plan['founder_evm_address']

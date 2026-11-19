@@ -5,7 +5,7 @@
   "denom": "del",
   "decimals": 18,
   "atoms_per_del": "1000000000000000000",
-  "initial_supply_atoms": "100000000000000000000000",
+  "initial_supply_atoms": "5041400000000000000000000",
   "approved_validator_count": null,
   "proposed_rehearsal_validator_count": 4,
   "founder_evm_address": "0x40900a48273644768c09183e00e43528c17a29f6",
@@ -15,11 +15,7 @@
     "stake_ownership_approved": null,
     "proposed_stake_ownership": "founder_owned_delegations",
     "alternative_stake_ownership": "gifts_to_approved_validator_operators",
-    "treasury_control_approved": null,
-    "proposed_treasury_control": "separate_threshold_wallet_after_compatibility_validation",
-    "proposed_treasury_threshold": 3,
-    "proposed_treasury_signer_count": 5,
-    "alternative_treasury_control": "separate_founder_controlled_address_with_approved_spending_policy",
+    "treasury_control_approved": true,
     "initial_asset_profile_approved": null,
     "proposed_initial_asset_profile": "full_v1_0_0_profile_with_backed_drc20_and_erc1155_requires_asset_creation_approval",
     "initial_asset_creation_approved": null,
@@ -28,7 +24,7 @@
   "bank_allocation": [
     {
       "purpose": "founder_free_balance_for_distribution_or_sale",
-      "amount_atoms": "49000000000000000000000",
+      "amount_atoms": "5000000000000000000000000",
       "evm_address": "0x40900a48273644768c09183e00e43528c17a29f6",
       "bank_address": null
     },
@@ -37,11 +33,6 @@
       "amount_atoms": "40000000000000000000000",
       "bank_address": null,
       "contract_address": null
-    },
-    {
-      "purpose": "operating_treasury",
-      "amount_atoms": "9600000000000000000000",
-      "bank_address": null
     },
     {
       "purpose": "validator_fee_wallet",
@@ -147,5 +138,15 @@
   "native_token_name": "MintCandy",
   "native_token_symbol": "MSP",
   "display_denom": "MSP",
-  "atoms_per_native_token": "1000000000000000000"
+  "atoms_per_native_token": "1000000000000000000",
+  "founder_requested_free_balance_atoms": "5000000000000000000000000",
+  "initial_supply_is_proposal": true,
+  "treasury_policy": {
+    "selection": "founder_single_account",
+    "selected_by_founder": true,
+    "evm_address": "0x40900a48273644768c09183e00e43528c17a29f6",
+    "multisig_required": false,
+    "separate_allocation_atoms": "0",
+    "purpose": "initial_distribution_contests_and_project_spending_from_founder_balance"
+  }
 }
