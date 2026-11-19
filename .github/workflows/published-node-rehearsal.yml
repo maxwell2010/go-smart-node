@@ -1,4 +1,4 @@
-name: Published MintCandy node rehearsal
+name: Attested MintCandy node rehearsal
 
 on:
   workflow_dispatch:
@@ -8,6 +8,7 @@ on:
 
 permissions:
   contents: read
+  actions: read
   attestations: read
 
 concurrency:
@@ -20,12 +21,14 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 35
     env:
-      RELEASE_TAG: v1.1.0
-      RELEASE_VERSION: 1.1.0
-      RELEASE_SOURCE: b90b5a9348658627a54d0e5b5002ee1d1b394cc2
+      RELEASE_TAG: v1.1.1
+      RELEASE_VERSION: 1.1.1
+      RELEASE_SOURCE: 3880898bf95fe701b9d6f28d6e029a63f88a16ae
       RELEASE_REF: refs/heads/feat/native-duplicate-vote-master-20261112
-      RELEASE_ARCHIVE_SHA: f1233a4b8ea396115bdb7cf8c28e3fb4a2029ba7a77fe10f4db7ed9a557267a5
-      RELEASE_BINARY_SHA: ed7e3a7478fe193f9d3748faeb5af95ab8421b7620237dba1a3873983ee7b3b4
+      RELEASE_ARCHIVE_SHA: 5e2081b86197f24fcec1a0e1421edb387de06f49a520f420734ae649158eeeda
+      RELEASE_BINARY_SHA: a0c0b9b08fc40bc875f289c3c8499a1fcdc1b9396113aed7cf6003554e26467d
+      RELEASE_PACKAGE_RUN: '44530756651'
+      RELEASE_PACKAGE_ATTEMPT: '1'
       GOENV: 'off'
       GOWORK: 'off'
       GOTOOLCHAIN: local
@@ -37,7 +40,7 @@ jobs:
         with:
           ref: ${{ env.RELEASE_SOURCE }}
           persist-credentials: false
-      - name: Install the published archive with the documented verifier
+      - name: Install the exact attested archive with the documented verifier
         env:
           GH_TOKEN: ${{ github.token }}
         shell: bash
@@ -45,16 +48,29 @@ jobs:
           set -euo pipefail
           umask 077
           test "$(git rev-parse HEAD)" = "$RELEASE_SOURCE"
-          release_work=$(mktemp -d "$RUNNER_TEMP/published-mcnd.XXXXXXXX")
+          release_work=$(mktemp -d "$RUNNER_TEMP/attested-mcnd.XXXXXXXX")
           echo "RELEASE_WORK=$release_work" >> "$GITHUB_ENV"
           mkdir -m 700 -- "$release_work/assets" "$release_work/evidence" "$release_work/fixture"
-          tag_sha=$(gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/$RELEASE_TAG" --jq '.object.sha')
-          test "$tag_sha" = "$RELEASE_SOURCE"
-          gh release view "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --json isDraft,isPrerelease \
-            | jq -e '.isDraft == false and .isPrerelease == false' >/dev/null
           archive_name="mcnd-$RELEASE_VERSION-linux-amd64.tar.gz"
-          gh release download "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --dir "$release_work/assets" \
-            --pattern "$archive_name" --pattern "$archive_name.sha256" --pattern provenance.sigstore.json
+          if [[ -n "$RELEASE_PACKAGE_RUN" ]]; then
+            gh api "repos/$GITHUB_REPOSITORY/actions/runs/$RELEASE_PACKAGE_RUN" \
+              | jq -e --arg commit "$RELEASE_SOURCE" --arg repo "$GITHUB_REPOSITORY" \
+                  --arg ref "${RELEASE_REF#refs/heads/}" --argjson attempt "$RELEASE_PACKAGE_ATTEMPT" \
+                '.status == "completed" and .conclusion == "success" and .event == "workflow_dispatch"
+                 and .head_sha == $commit and .head_branch == $ref and .head_repository.full_name == $repo
+                 and .path == ".github/workflows/modern-network-development.yml" and .run_attempt == $attempt' >/dev/null
+            for kind in package attestation; do
+              gh run download "$RELEASE_PACKAGE_RUN" --repo "$GITHUB_REPOSITORY" --dir "$release_work/assets" \
+                --name "mcnd-software-$kind-$RELEASE_SOURCE-$RELEASE_PACKAGE_ATTEMPT"
+            done
+          else
+            tag_sha=$(gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/$RELEASE_TAG" --jq '.object.sha')
+            test "$tag_sha" = "$RELEASE_SOURCE"
+            gh release view "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --json isDraft,isPrerelease \
+              | jq -e '.isDraft == false and .isPrerelease == false' >/dev/null
+            gh release download "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --dir "$release_work/assets" \
+              --pattern "$archive_name" --pattern "$archive_name.sha256" --pattern provenance.sigstore.json
+          fi
           (
             cd "$release_work/assets"
             printf '%s  %s\n' "$RELEASE_ARCHIVE_SHA" "$archive_name" | cmp - "$archive_name.sha256"
@@ -124,7 +140,7 @@ jobs:
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
         if: always() && env.RELEASE_WORK != ''
         with:
-          name: published-mcnd-1.1.0-rehearsal-${{ github.run_id }}-${{ github.run_attempt }}
+          name: attested-mcnd-${{ env.RELEASE_VERSION }}-rehearsal-${{ github.run_id }}-${{ github.run_attempt }}
           path: ${{ env.RELEASE_WORK }}/evidence/*.json
           if-no-files-found: warn
           retention-days: 30
