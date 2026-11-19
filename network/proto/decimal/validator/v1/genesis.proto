@@ -40,6 +40,14 @@ message GenesisState {
   repeated EVMStakeBinding evm_stake_bindings = 12 [(gogoproto.customname)="EVMStakeBindings",(gogoproto.nullable)=false];
   repeated EVMFrozenBinding evm_frozen_bindings = 13 [(gogoproto.customname)="EVMFrozenBindings",(gogoproto.nullable)=false];
   uint64 binding_revision = 14;
+  // Optional references for the separate avatar store. No media bytes or keys.
+  repeated ValidatorAvatar validator_avatars = 15 [(gogoproto.nullable) = false];
+}
+
+// ValidatorAvatar associates a public media reference with its operator.
+message ValidatorAvatar {
+  string operator_address = 1 [(cosmos_proto.scalar) = "cosmos.ValidatorAddressString"];
+  string avatar_uri = 2 [(gogoproto.customname) = "AvatarURI"];
 }
 
 // ValidatorOfflineSince stores when a validator went offline for auto-unbond tracking.

@@ -1,0 +1,92 @@
+name: Validator avatar genesis
+
+on:
+  push:
+    branches: ['feat/native-duplicate-vote-master-20261112']
+    paths: ['network/proto/decimal/validator/v1/genesis.proto', '.github/workflows/validator-avatar-genesis.yml']
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: Generate protobuf artifact or verify committed output and run isolated tests
+        type: choice
+        default: verify
+        options: [generate, verify]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: validator-avatar-genesis-${{ github.ref }}-${{ inputs.mode || 'generate' }}
+  cancel-in-progress: true
+
+jobs:
+  avatar-genesis:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 35
+    env:
+      GOENV: 'off'
+      GOWORK: 'off'
+      GOFLAGS: ''
+      GOTOOLCHAIN: local
+      GOMAXPROCS: '2'
+      CGO_ENABLED: '1'
+      CC: gcc
+    defaults:
+      run:
+        shell: bash
+        working-directory: network
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e
+        with:
+          go-version: '1.26.11'
+          cache: true
+          cache-dependency-path: network/go.sum
+      - name: Prepare pinned protobuf toolchain on the disposable runner
+        run: |
+          mkdir -p validation-logs
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends protobuf-compiler
+          test "$(protoc --version)" = 'libprotoc 3.21.12'
+          export GOBIN="$RUNNER_TEMP/avatar-proto-bin"
+          mkdir -p "$GOBIN"
+          go install github.com/cosmos/gogoproto/protoc-gen-gocosmos@v1.7.2
+          go install github.com/grpc-ecosystem/grpc-gateway/protoc-gen-grpc-gateway@v1.16.0
+          echo "$GOBIN" >> "$GITHUB_PATH"
+          {
+            git rev-parse HEAD
+            go version
+            protoc --version
+            dpkg-query -W protobuf-compiler
+            go version -m "$GOBIN/protoc-gen-gocosmos"
+            go version -m "$GOBIN/protoc-gen-grpc-gateway"
+          } > validation-logs/avatar-protobuf-tools.log
+      - name: Verify module integrity and generate the validator schema
+        run: |
+          go mod download
+          go mod verify |& tee validation-logs/avatar-module-integrity.log
+          git diff --exit-code -- go.mod go.sum
+          bash scripts/generate-native-proto.sh validator
+          sha256sum decimal/validator/types/*.pb.go > validation-logs/avatar-generated-sha256.txt
+          git diff --stat -- decimal/validator/types | tee validation-logs/avatar-generated-diff.txt
+      - name: Check reproducibility of committed generated sources
+        if: github.event_name == 'workflow_dispatch' && inputs.mode == 'verify'
+        run: git diff --exit-code -- decimal/validator/types
+      - name: Test genesis preservation, validation, atomicity and CLI
+        if: github.event_name == 'workflow_dispatch' && inputs.mode == 'verify'
+        run: go test -mod=readonly -p 2 -count=1 -v -timeout 8m ./decimal/validator/types ./decimal/validator/keeper ./app ./cmd/mcnd |& tee validation-logs/validator-avatar-unit.log
+      - name: Test real signed EVM validator controls and genesis import authorization
+        if: github.event_name == 'workflow_dispatch' && inputs.mode == 'verify' && !cancelled()
+        run: go test -mod=readonly -p 2 -count=1 -v -timeout 12m -tags appstate -run '^TestOwnedAppNativeValidator(SelfControls|AvatarGenesis.*)$' ./systemcontracts |& tee validation-logs/validator-avatar-evm.log
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+        if: always()
+        with:
+          name: validator-avatar-genesis-${{ github.sha }}-${{ inputs.mode || 'generate' }}-${{ github.run_attempt }}
+          path: |
+            network/decimal/validator/types/*.pb.go
+            network/validation-logs/avatar-*
+            network/validation-logs/validator-avatar-*
+          retention-days: 14
+          if-no-files-found: error
