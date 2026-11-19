@@ -242,16 +242,16 @@ jobs:
           git diff --exit-code -- go.mod go.sum
       - name: Test explicit DRC20 fee authorizations
         run: go test -mod=readonly -p 2 -count=1 -v -timeout 5m ./fees/... |& tee validation-logs/token-fee-authorization.log
-        - name: Test asset admission, grace period and validator control CLI
-          run: go test -mod=readonly -p 2 -count=1 -v -timeout 5m ./app ./cmd/mcnd ./decimal/nft/keeper ./decimal/validator/keeper ./decimal/validator/settlement |& tee validation-logs/user-assets-controls-unit.log
-        - name: Test empty genesis and signed public token and NFT creation with restart
-          run: go test -mod=readonly -p 2 -count=1 -v -timeout 15m -tags appstate -run '^TestOwnedAppEmptyUserAssetsLifecycle$' ./systemcontracts |& tee validation-logs/empty-user-assets.log
-        - name: Test signed public NFT admission and restart
-          run: go test -mod=readonly -p 2 -count=1 -v -timeout 12m -tags appstate -run '^TestOwnedAppNativeUserNFTLifecycle$' ./systemcontracts |& tee validation-logs/public-user-nft.log
-        - name: Test grace expiry and old evidence across process restart
-          run: go test -mod=readonly -p 2 -count=1 -v -timeout 12m -tags appstate -run '^TestOwnedAppNativeTestGraceLifecycle$' ./systemcontracts |& tee validation-logs/native-test-grace.log
-        - name: Test signed validator self controls, foreign operators and nonce replay
-          run: go test -mod=readonly -p 2 -count=1 -v -timeout 12m -tags appstate -run '^TestOwnedAppNativeValidatorSelfControls$' ./systemcontracts |& tee validation-logs/native-validator-controls.log
+      - name: Test asset admission, grace period and validator control CLI
+        run: go test -mod=readonly -p 2 -count=1 -v -timeout 5m ./app ./cmd/mcnd ./decimal/nft/keeper ./decimal/validator/keeper ./decimal/validator/settlement |& tee validation-logs/user-assets-controls-unit.log
+      - name: Test empty genesis and signed public token and NFT creation with restart
+        run: go test -mod=readonly -p 2 -count=1 -v -timeout 15m -tags appstate -run '^TestOwnedAppEmptyUserAssetsLifecycle$' ./systemcontracts |& tee validation-logs/empty-user-assets.log
+      - name: Test signed public NFT admission and restart
+        run: go test -mod=readonly -p 2 -count=1 -v -timeout 12m -tags appstate -run '^TestOwnedAppNativeUserNFTLifecycle$' ./systemcontracts |& tee validation-logs/public-user-nft.log
+      - name: Test grace expiry and old evidence across process restart
+        run: go test -mod=readonly -p 2 -count=1 -v -timeout 12m -tags appstate -run '^TestOwnedAppNativeTestGraceLifecycle$' ./systemcontracts |& tee validation-logs/native-test-grace.log
+      - name: Test signed validator self controls, foreign operators and nonce replay
+        run: go test -mod=readonly -p 2 -count=1 -v -timeout 12m -tags appstate -run '^TestOwnedAppNativeValidatorSelfControls$' ./systemcontracts |& tee validation-logs/native-validator-controls.log
       - name: Test signed reserveless token lifecycle and disk restart
         run: go test -mod=readonly -p 2 -count=1 -v -timeout 12m -tags appstate -run '^TestOwnedAppNativeReservelessTokenLifecycle$' ./systemcontracts |& tee validation-logs/reserveless-native.log
       - name: Test factory collection and NFT metadata pointer round trips
