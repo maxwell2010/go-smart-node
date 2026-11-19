@@ -1,33 +1,50 @@
-# Production release gates
+# Software release verification
 
-Status: NOT READY for a stable production IBC release. No stable tag or release should be published while a required gate below is outstanding.
+The separate-network functional, EVM, migration and operational gates below
+have passed. The versioned software archive and its GitHub OIDC publisher
+attestation are being prepared. No stable software tag has yet been published.
+The public network launch remains separate: genesis, supply/allocation,
+operator keys and bootstrap/RPC endpoints have not been approved.
 
-On 2026-11-19 the release scope was confirmed: complete the node with IBC and
-the agreed token features; DEX, vesting, a proprietary stablecoin and DePIN
-remain separate stages. [Tokenomics proposal review](../network/docs/ru/TOKENOMICS_PROPOSAL_REVIEW.md).
-The [token-features scope](https://github.com/maxwell2010/go-smart-node/actions/runs/44461001634)
-and [whole-module scope](https://github.com/maxwell2010/go-smart-node/actions/runs/44461005994)
-both passed on `29784c4`. Actual EVM tests verify DRC20 reserve fee conversion
-and payment from a zero-native-balance payer, isolated fee nonces, REVERT
-fees, ante rollback, receipt accounting and replay rejection after LevelDB
-restart. The full outer envelope is retained in the SDK mempool. Standard
-Ethereum RPC continues to submit native-paid transactions; composite fees
-use Comet/Cosmos broadcast. A daemon RPC end-to-end gate remains required.
+| Verification | Successful evidence |
+| --- | --- |
+| Whole module, reward escrow, approved migration with unpaid credits | [44470608682](https://github.com/maxwell2010/go-smart-node/actions/runs/44470608682) |
+| Signed EVM token features, fee conversion, nonce and receipt accounting | [44470617638](https://github.com/maxwell2010/go-smart-node/actions/runs/44470617638) |
+| Actual EVM with 10/100/1000 positions, paged historical penalty, restart and crash replay | [44467813041](https://github.com/maxwell2010/go-smart-node/actions/runs/44467813041) |
+| Three daemon replicas: fee API, envelope CLI/Comet broadcast, EVM revert and replay rejection | [44471630412](https://github.com/maxwell2010/go-smart-node/actions/runs/44471630412) |
+| Signed test launch package, SBOM, source/binary symbol scan | [44470745629](https://github.com/maxwell2010/go-smart-node/actions/runs/44470745629) |
+| Signed package systemd installation, restart and snapshot catch-up | [44471634618](https://github.com/maxwell2010/go-smart-node/actions/runs/44471634618) |
+| Four-validator coordinated module migration, backup rollback, missing-block startup replay and native Hermes | [44472448125](https://github.com/maxwell2010/go-smart-node/actions/runs/44472448125) |
+| Different-version migration and backup rollback with a pending IBC packet | [44472452007](https://github.com/maxwell2010/go-smart-node/actions/runs/44472452007) |
+| Signed package systemd upgrade, physical IAVL schema migration and backup rollback | [44473340885](https://github.com/maxwell2010/go-smart-node/actions/runs/44473340885) |
 
-The user requires mass delegation before stable. The former two-position
-penalty profile and global reward census are not public-network capacity
-claims. Paged durable penalties, efficient per-position provenance, automatic
-bounded reward payouts and 10/100/1000-position stress tests are in progress.
-Automatic payouts, as in Decimal, were chosen over claim-only rewards.
-The new source must pass the module, signed EVM, multi-node, Hermes,
-cross-version migration and signed-package operational gates again.
-Financial-profile genesis export remains fail-closed.
+[Machine-readable revisions and limits](../network/docs/ru/evidence/release-candidate-20261119/summary.json)
+record each source SHA. Runtime Go sources are unchanged between the
+`2a5f4ff` module/package baseline and the `9ef244f` process checkpoint fixes;
+changes in that interval are fixture tests and operator verification tools.
+The final software workflow repeats module, signed EVM, mass delegation,
+governance, IBC harness, contract reproduction and source/binary checks on
+its own exact source commit before issuing an attestation.
 
-The public launch draft is parameterized by operator count. Four-node tests
-and five-node financial illustrations are not an approved roster or
-distribution. Its proposed finite gas cap is 24,000,000. Production supply,
-allocations, operator keys, endpoints and a trusted publisher signing identity
-still require approval before an actual public launch.
+The reward mechanism transfers collected DEL, without reward emission.
+Automatic payouts are bounded and retain unpaid liabilities. Financial
+profile genesis export/import remains fail-closed. The former two-position
+penalty and 128-row reward pilot limits are historical, not current runtime
+capacity claims. Cold financial genesis and direct governance votes have
+separate documented limits.
+
+The scanner found zero distinct symbol advisories in its 2026-11-11 database
+snapshot. This is a scoped automated result, not a formal security audit.
+The OpenPGP launch archive contains a disposable test genesis and uses a
+one-time test signer. It must not be relabelled as an approved public network.
+The versioned software archive omits genesis/keys and uses a separate
+[source-bound publisher procedure](../network/docs/ru/SOFTWARE_RELEASE_VERIFICATION.md).
+
+DEX, vesting, a proprietary stablecoin, DePIN and MEV remain separate stages.
+The Decimal bridge prototype is not a production two-way funds bridge.
+Working nodes were not changed; heavy builds ran on isolated GitHub runners.
+
+## Historical evidence
 
 The historical duplicate-vote development branch verifies a 5% debit from
 surviving pre-infraction DEL principal and isolated NFT reserves. Later

@@ -1,0 +1,188 @@
+name: Versioned mcnd software package and provenance
+on:
+  workflow_call:
+    inputs:
+      release_version:
+        description: Canonical software-only SemVer X.Y.Z
+        required: true
+        type: string
+  workflow_dispatch:
+    inputs:
+      release_version:
+        description: Software-only stable SemVer X.Y.Z; no genesis or network launch
+        required: true
+        default: '1.0.0'
+        type: string
+permissions:
+  contents: read
+concurrency:
+  group: mcnd-software-release-${{ github.ref }}
+  cancel-in-progress: false
+jobs:
+  build-test-package:
+    if: github.repository == 'maxwell2010/go-smart-node' && github.event_name == 'workflow_dispatch' && (github.ref == 'refs/heads/feat/native-duplicate-vote-master-20261112' || startsWith(github.ref, 'refs/heads/release/'))
+    runs-on: ubuntu-24.04
+    timeout-minutes: 75
+    permissions:
+      contents: read
+    env:
+      RELEASE_VERSION: ${{ inputs.release_version }}
+      GOENV: 'off'
+      GOWORK: 'off'
+      GOFLAGS: ''
+      GOTOOLCHAIN: local
+      GOAMD64: 'v1'
+      GOMAXPROCS: '2'
+      CGO_ENABLED: '1'
+      CC: gcc
+      PYTHONDONTWRITEBYTECODE: '1'
+    defaults:
+      run:
+        shell: bash
+        working-directory: network
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          ref: ${{ github.sha }}
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version: '1.26.11'
+          cache-dependency-path: network/go.sum
+      - name: Validate version and exact clean source
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          git diff --exit-code
+          git diff --cached --exit-code
+          python3 -B -c 'import os,sys; sys.path.insert(0,"tools"); from binary_provenance import validate_release_version; validate_release_version(os.environ["RELEASE_VERSION"])'
+          mkdir -p "$RUNNER_TEMP/software-evidence" "$RUNNER_TEMP/software-package"
+      - name: Verify dependencies, owned sources and operator tooling
+        run: |
+          set -euo pipefail
+          go mod download
+          go mod verify
+          git diff --exit-code -- go.mod go.sum
+          python3 -B scripts/verify_owned_evm.py
+          python3 -B scripts/verify_owned_geth.py
+          python3 -B scripts/verify_owned_sdk.py --compiled
+          python3 -B scripts/verify_pion_transport.py
+          python3 -B -m unittest discover -s tools -p 'test_*.py'
+          python3 -B -m unittest discover -s scripts -p 'test_*.py'
+      - name: Test complete module and signed native EVM paths
+        run: |
+          set -euo pipefail
+          go test -mod=readonly -p 2 -count=1 -v -timeout 15m ./... |& tee "$RUNNER_TEMP/software-evidence/module.log"
+          go test -mod=readonly -p 2 -count=1 -v -timeout 12m -tags appstate -run '^TestOwnedAppNativeReservelessTokenLifecycle$' ./systemcontracts |& tee "$RUNNER_TEMP/software-evidence/token-appstate.log"
+          go test -mod=readonly -p 2 -count=1 -v -timeout 8m github.com/cosmos/evm/mempool |& tee "$RUNNER_TEMP/software-evidence/owned-mempool.log"
+          go test -mod=readonly -p 2 -count=1 -v -timeout 5m -run 'Test(ParseTxResult|MintCandyReserveFee|ReserveFeeReceipts|ReceiptsFromCometBlock)' github.com/cosmos/evm/rpc/types github.com/cosmos/evm/rpc/backend |& tee "$RUNNER_TEMP/software-evidence/owned-rpc.log"
+      - name: Reproduce pinned system contract artifacts
+        run: |
+          set -euo pipefail
+          SOLC="$RUNNER_TEMP/solc-software-0.8.20"
+          curl --fail --location --proto '=https' --tlsv1.2 'https://raw.githubusercontent.com/ethereum/solc-bin/gh-pages/linux-amd64/solc-linux-amd64-v0.8.20+commit.a1b79de6' --output "$SOLC"
+          echo "0479d44fdf9c501c25337fdc540419f1593b884a87b47f023da4f1c700fda782  $SOLC" | sha256sum --check
+          chmod 755 "$SOLC"
+          SOLC="$SOLC" python3 -B systemcontracts/build.py
+          SOLC="$SOLC" python3 -B systemcontracts/build_owned_delegation.py
+          git diff --exit-code -- systemcontracts/artifacts
+      - name: Test 10, 100 and 1000 delegations with real EVM
+        run: |
+          set -euo pipefail
+          MCND_MASS_DELEGATION_COUNTS=10,100,1000 go test -mod=readonly -p 2 -count=1 -v -timeout 55m -run '^TestOwnedAppNativeMassDelegationLifecycle$' ./systemcontracts |& tee "$RUNNER_TEMP/software-evidence/mass-delegation.log"
+      - name: Test governance and pending IBC packet harness
+        run: |
+          set -euo pipefail
+          go test -mod=readonly -p 2 -count=1 -v -timeout 10m -tags sdk53 ./decimal/validator/governance |& tee "$RUNNER_TEMP/software-evidence/governance.log"
+          go test -mod=readonly -p 2 -count=1 -v -timeout 10m -tags test -run '^TestOwnApplication(ICS20TwoChains|IBCClientUpgradePendingPacket)$' ./app |& tee "$RUNNER_TEMP/software-evidence/ics20.log"
+      - name: Build source-bound versioned binary and package
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          test -z "$(git status --porcelain)"
+          python3 -B tools/source_inventory.py --source "$GITHUB_WORKSPACE" --output "$RUNNER_TEMP/software-source-inputs.json"
+          go build -mod=readonly -tags= -p 2 -trimpath -ldflags "-X main.buildCommit=$GITHUB_SHA -X main.buildVersion=$RELEASE_VERSION" -o "$RUNNER_TEMP/mcnd-software" ./cmd/mcnd
+          python3 -B tools/package_mcnd.py --binary "$RUNNER_TEMP/mcnd-software" --source "$GITHUB_WORKSPACE" --revision "$GITHUB_SHA" --release-version "$RELEASE_VERSION" --source-inputs "$RUNNER_TEMP/software-source-inputs.json" --output "$RUNNER_TEMP/software-package/mcnd-$RELEASE_VERSION-linux-amd64.tar.gz"
+          python3 -B tools/verify_software_package.py --archive "$RUNNER_TEMP/software-package/mcnd-$RELEASE_VERSION-linux-amd64.tar.gz" --revision "$GITHUB_SHA" --release-version "$RELEASE_VERSION" > "$RUNNER_TEMP/software-evidence/package.json"
+      - name: Validate SBOM and audit exact source and binary
+        run: |
+          set -euo pipefail
+          python3 -m pip install --disable-pip-version-check --target "$RUNNER_TEMP/sbom-validator" --requirement ../scripts/release/requirements-sbom.txt
+          tar -xOzf "$RUNNER_TEMP/software-package/mcnd-$RELEASE_VERSION-linux-amd64.tar.gz" SBOM.cdx.json > "$RUNNER_TEMP/software-evidence/SBOM.cdx.json"
+          PYTHONPATH="$RUNNER_TEMP/sbom-validator" python3 -B ../scripts/release/validate_sbom.py "$RUNNER_TEMP/software-evidence/SBOM.cdx.json"
+          scanner="$RUNNER_TEMP/software-audit-tools/govulncheck"
+          GOBIN="$(dirname "$scanner")" go install golang.org/x/vuln/cmd/govulncheck@v1.9.0
+          for mode in source binary; do
+            target=./cmd/mcnd
+            if [[ "$mode" == binary ]]; then target="$RUNNER_TEMP/mcnd-software"; fi
+            python3 -B ../scripts/audit/capture_govuln.py --raw "$RUNNER_TEMP/software-evidence/$mode.json" --manifest "$RUNNER_TEMP/software-evidence/$mode.complete.json" --source-commit "$GITHUB_SHA" --scope "versioned mcnd software linux/amd64 CGO=1 $mode" -- "$scanner" -json -mode "$mode" "$target"
+            python3 -B ../scripts/audit/govuln_gate.py "$RUNNER_TEMP/software-evidence/$mode.json" --manifest "$RUNNER_TEMP/software-evidence/$mode.complete.json" > "$RUNNER_TEMP/software-evidence/$mode.gate.json"
+          done
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: mcnd-software-package-${{ github.sha }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/software-package/
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 30
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+        if: always()
+        with:
+          name: mcnd-software-evidence-${{ github.sha }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/software-evidence/
+          if-no-files-found: warn
+          retention-days: 30
+  attest-software:
+    needs: build-test-package
+    if: needs.build-test-package.result == 'success' && github.repository == 'maxwell2010/go-smart-node' && github.event_name == 'workflow_dispatch' && (github.ref == 'refs/heads/feat/native-duplicate-vote-master-20261112' || startsWith(github.ref, 'refs/heads/release/'))
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      actions: read
+      id-token: write
+      attestations: write
+    env:
+      RELEASE_VERSION: ${{ inputs.release_version }}
+      PYTHONDONTWRITEBYTECODE: '1'
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+          ref: ${{ github.sha }}
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: mcnd-software-package-${{ github.sha }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/software-package
+      - name: Validate same-run archive before attesting
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          cd "$RUNNER_TEMP/software-package"
+          sha256sum --check --strict "mcnd-$RELEASE_VERSION-linux-amd64.tar.gz.sha256"
+          python3 -B "$GITHUB_WORKSPACE/network/tools/verify_software_package.py" --archive "mcnd-$RELEASE_VERSION-linux-amd64.tar.gz" --revision "$GITHUB_SHA" --release-version "$RELEASE_VERSION" > "$RUNNER_TEMP/software-verified.json"
+          echo "SOFTWARE_ARCHIVE=$RUNNER_TEMP/software-package/mcnd-$RELEASE_VERSION-linux-amd64.tar.gz" >> "$GITHUB_ENV"
+      - uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
+        id: provenance
+        with:
+          subject-path: ${{ env.SOFTWARE_ARCHIVE }}
+          push-to-registry: false
+          create-storage-record: false
+      - name: Verify exact repository, workflow, source and signer identity
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ATTESTATION_BUNDLE: ${{ steps.provenance.outputs.bundle-path }}
+        run: |
+          set -euo pipefail
+          gh attestation verify "$SOFTWARE_ARCHIVE" --repo "$GITHUB_REPOSITORY" --signer-workflow "$GITHUB_REPOSITORY/.github/workflows/software-release.yml" --source-ref "$GITHUB_REF" --source-digest "$GITHUB_SHA" --signer-digest "$GITHUB_SHA" --deny-self-hosted-runners --format json > "$RUNNER_TEMP/software-attestation-verification.json"
+          mkdir -p "$RUNNER_TEMP/software-attestation"
+          cp -- "$ATTESTATION_BUNDLE" "$RUNNER_TEMP/software-attestation/provenance.sigstore.json"
+          cp -- "$RUNNER_TEMP/software-verified.json" "$RUNNER_TEMP/software-attestation-verification.json" "$RUNNER_TEMP/software-attestation/"
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+        with:
+          name: mcnd-software-attestation-${{ github.sha }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/software-attestation/
+          if-no-files-found: error
+          retention-days: 30

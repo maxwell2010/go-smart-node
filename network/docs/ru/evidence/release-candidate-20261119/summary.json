@@ -1,0 +1,155 @@
+{
+  "schema": 1,
+  "date": "2026-11-19",
+  "kind": "release_candidate_validation",
+  "repository": "maxwell2010/go-smart-node",
+  "runtime_baseline": "2a5f4ffdb967adc85fe92aaa9162d6261763f14e",
+  "runtime_unchanged_through": "9ef244f",
+  "non_runtime_changes_between_proofs": [
+    "network/systemcontracts/reserve_fee_daemon_fixture_test.go",
+    "network/tools/native_governance_upgrade_smoke.py",
+    "network/tools/native_reward_checkpoint.py",
+    "network/tools/reserve_fee_smoke.py",
+    "network/tools/test_native_reward_checkpoint.py",
+    "network/tools/test_reserve_fee_smoke.py"
+  ],
+  "checks": [
+    {
+      "scope": "module_and_pending_rewards_migration",
+      "conclusion": "success",
+      "createdAt": "2026-11-19T06:13:34Z",
+      "databaseId": 44470608682,
+      "headSha": "2a5f4ffdb967adc85fe92aaa9162d6261763f14e",
+      "status": "completed",
+      "updatedAt": "2026-11-19T06:19:31Z",
+      "url": "https://github.com/maxwell2010/go-smart-node/actions/runs/44470608682",
+      "workflowName": "Modern network validation"
+    },
+    {
+      "scope": "signed_evm_token_features",
+      "conclusion": "success",
+      "createdAt": "2026-11-19T06:13:38Z",
+      "databaseId": 44470617638,
+      "headSha": "2a5f4ffdb967adc85fe92aaa9162d6261763f14e",
+      "status": "completed",
+      "updatedAt": "2026-11-19T06:15:10Z",
+      "url": "https://github.com/maxwell2010/go-smart-node/actions/runs/44470617638",
+      "workflowName": "Modern network validation"
+    },
+    {
+      "scope": "actual_evm_10_100_1000_positions",
+      "conclusion": "success",
+      "createdAt": "2026-11-19T05:49:38Z",
+      "databaseId": 44467813041,
+      "headSha": "be7c179d4910cb5467a33c366afe00c1dbc5b754",
+      "status": "completed",
+      "updatedAt": "2026-11-19T05:52:27Z",
+      "url": "https://github.com/maxwell2010/go-smart-node/actions/runs/44467813041",
+      "workflowName": "Modern network validation"
+    },
+    {
+      "scope": "three_daemon_reserve_fee_rpc",
+      "conclusion": "success",
+      "createdAt": "2026-11-19T06:22:02Z",
+      "databaseId": 44471630412,
+      "headSha": "524e7d23270ea8b4fc8019e245cb1b4369760290",
+      "status": "completed",
+      "updatedAt": "2026-11-19T06:23:59Z",
+      "url": "https://github.com/maxwell2010/go-smart-node/actions/runs/44471630412",
+      "workflowName": "Modern network validation"
+    },
+    {
+      "scope": "signed_test_package_and_symbol_scan",
+      "conclusion": "success",
+      "createdAt": "2026-11-19T06:14:42Z",
+      "databaseId": 44470745629,
+      "headSha": "2a5f4ffdb967adc85fe92aaa9162d6261763f14e",
+      "status": "completed",
+      "updatedAt": "2026-11-19T06:20:02Z",
+      "url": "https://github.com/maxwell2010/go-smart-node/actions/runs/44470745629",
+      "workflowName": "Modern network development artifacts"
+    },
+    {
+      "scope": "signed_package_systemd_restart_snapshot",
+      "conclusion": "success",
+      "createdAt": "2026-11-19T06:22:04Z",
+      "databaseId": 44471634618,
+      "headSha": "524e7d23270ea8b4fc8019e245cb1b4369760290",
+      "status": "completed",
+      "updatedAt": "2026-11-19T06:27:49Z",
+      "url": "https://github.com/maxwell2010/go-smart-node/actions/runs/44471634618",
+      "workflowName": "Modern network development artifacts"
+    },
+    {
+      "scope": "four_validator_systemd_startup_replay_and_hermes",
+      "conclusion": "success",
+      "createdAt": "2026-11-19T06:28:45Z",
+      "databaseId": 44472448125,
+      "headSha": "9ef244f41764348d45ec37b4697cd618d1c16de4",
+      "status": "completed",
+      "updatedAt": "2026-11-19T06:42:45Z",
+      "url": "https://github.com/maxwell2010/go-smart-node/actions/runs/44472448125",
+      "workflowName": "Modern network validation"
+    },
+    {
+      "scope": "cross_version_pending_ibc_and_backup_rollback",
+      "conclusion": "success",
+      "createdAt": "2026-11-19T06:28:47Z",
+      "databaseId": 44472452007,
+      "headSha": "9ef244f41764348d45ec37b4697cd618d1c16de4",
+      "status": "completed",
+      "updatedAt": "2026-11-19T06:41:31Z",
+      "url": "https://github.com/maxwell2010/go-smart-node/actions/runs/44472452007",
+      "workflowName": "Modern network validation"
+    },
+    {
+      "scope": "signed_package_systemd_upgrade_iavl_rollback",
+      "conclusion": "success",
+      "createdAt": "2026-11-19T06:35:59Z",
+      "databaseId": 44473340885,
+      "headSha": "9ef244f41764348d45ec37b4697cd618d1c16de4",
+      "status": "completed",
+      "updatedAt": "2026-11-19T06:40:38Z",
+      "url": "https://github.com/maxwell2010/go-smart-node/actions/runs/44473340885",
+      "workflowName": "Modern network development artifacts"
+    }
+  ],
+  "signed_test_package": {
+    "run": 44470745629,
+    "source_commit": "2a5f4ffdb967adc85fe92aaa9162d6261763f14e",
+    "archive_sha256": "47812f53d303d3662018c1fb0ce94a9563ba5df27c4258f7136529adc77b1dd3",
+    "signer_fingerprint": "0CF869A62A4A24D14384070464866C51E2EBEC58",
+    "purpose": "disposable_test_launch_only"
+  },
+  "symbol_scan": {
+    "source_and_linux_amd64_binary": "passed",
+    "distinct_symbol_advisories": 0,
+    "database_modified": "2026-11-11T02:51:11Z",
+    "scope": "known symbol advisories, not a formal security audit"
+  },
+  "software_release": {
+    "versioned_package": "in_preparation",
+    "publisher_attestation": "in_preparation",
+    "stable_tag_published": false
+  },
+  "public_network": {
+    "genesis_approved": false,
+    "operator_roster_approved": false,
+    "allocation_approved": false,
+    "bootstrap_endpoints_published": false
+  },
+  "limits": {
+    "runtime_delegation_rows_per_validator_default": 1000,
+    "cold_financial_genesis_positions": 16,
+    "governance_direct_voters_per_proposal": 256,
+    "rewards_sweep_period_blocks": 120,
+    "reward_page_recipients_max": 64,
+    "reward_page_sdk_gas": 4000000,
+    "reward_attempt_sdk_gas": 2000000,
+    "large_penalty_rows_per_attempt": 1,
+    "nft_origin_units_per_return_max": 1024,
+    "tested_evm_block_gas_limit": 24000000
+  },
+  "running_nodes_touched": false,
+  "heavy_local_builds": false
+}

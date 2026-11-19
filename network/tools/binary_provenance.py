@@ -4,12 +4,18 @@ This detects accidental build/input mismatches. It is not a signed compiler
 attestation and does not replace owned-source or module-integrity verification.
 """
 import json
+import re
 from pathlib import Path
 import subprocess
 
 from source_inventory import json_records, production_environment
 
 MAIN_MODULE = "github.com/maxwell2010/go-smart-node/network"
+
+def validate_release_version(value):
+    if not isinstance(value,str) or len(value)>64 or not re.fullmatch(r"(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)",value):
+        raise ValueError("release-version must be canonical stable SemVer X.Y.Z")
+    return value
 
 
 def parse_build_info(info):
@@ -59,7 +65,7 @@ def module_identity(module):
     return result
 
 
-def verify_binary_build(info, source, revision, go_version, *, environment=None, package_loader=None):
+def verify_recorded_build(info, revision, go_version, *, release_version=None):
     metadata = parse_build_info(info)
     if metadata["goVersion"] != go_version or metadata.get("path") != MAIN_MODULE + "/cmd/mcnd":
         raise ValueError("binary toolchain or main package differs from default build policy")
@@ -73,8 +79,20 @@ def verify_binary_build(info, source, revision, go_version, *, environment=None,
         raise ValueError("binary settings or clean VCS revision differ from default build policy")
     # Fixed Go toolchain/default flags emit no additional instrumentation or
     # compiler/linker overrides. Preserve, but do not interpret, the VCS time.
-    if set(settings) - set(required) - {"vcs.time"}:
+    optional={"vcs.time"}
+    if release_version is not None:
+        validate_release_version(release_version)
+        optional.add("-ldflags")
+        expected_flags="-X main.buildCommit="+revision+" -X main.buildVersion="+release_version
+        if "-ldflags" in settings and settings["-ldflags"]!=expected_flags:
+            raise ValueError("binary contains unsupported release linker settings")
+    if set(settings) - set(required) - optional:
         raise ValueError("binary contains unsupported default-build settings")
+    return metadata
+
+
+def verify_binary_build(info, source, revision, go_version, *, environment=None, package_loader=None, release_version=None):
+    metadata=verify_recorded_build(info,revision,go_version,release_version=release_version)
     environment = production_environment(environment)
     if package_loader is None:
         raw = subprocess.check_output(

@@ -1,11 +1,12 @@
-"""Package a source-bound Linux amd64 DEVELOPMENT binary; never publish it."""
+"""Package a source-bound Linux amd64 binary; development by default, no publishing."""
 import argparse, hashlib, io, json, os, pathlib, platform, subprocess, sys, tarfile, tempfile
 from install_mcnd import pinned_go_version, validate_revision
 from source_inventory import production_environment, verify_build_inputs
-from binary_provenance import verify_binary_build
+from binary_provenance import verify_binary_build, validate_release_version
 from mcnd_sbom import make_sbom
 
-def package(binary,source,revision,output,source_inputs=None):
+def package(binary,source,revision,output,source_inputs=None,release_version=None):
+ if release_version is not None:validate_release_version(release_version)
  validate_revision(revision);source=pathlib.Path(source).resolve(strict=True);binary=pathlib.Path(binary).resolve(strict=True)
  if subprocess.check_output(["git","-C",str(source),"rev-parse","HEAD"],text=True).strip()!=revision:raise ValueError("source mismatch")
  if subprocess.check_output(["git","-C",str(source),"status","--porcelain","--untracked-files=no"],text=True).strip():raise ValueError("source has tracked modifications")
@@ -18,19 +19,22 @@ def package(binary,source,revision,output,source_inputs=None):
  environment=production_environment()
  info=subprocess.check_output(["go","version","-m",str(binary)],text=True,env=environment)
  expected_go=pinned_go_version(module_text)
- verified_build=verify_binary_build(info,source,revision,expected_go,environment=environment)
+ verified_build=verify_binary_build(info,source,revision,expected_go,environment=environment,release_version=release_version)
  runtime_version=None
  if "main.buildCommit=" in info:
   if "main.buildCommit="+revision not in info:raise ValueError("binary lacks exact source buildCommit")
- else:
+ if "main.buildCommit=" not in info or release_version is not None:
   # Go omits linker flags from build info under -trimpath.
   if platform.system()!="Linux" or platform.machine()!="x86_64":raise ValueError("trimpath provenance requires native Linux amd64 version verification")
   with tempfile.TemporaryDirectory(prefix="mcnd-package-version-") as version_home:
    runtime_version=json.loads(subprocess.check_output([str(binary),"version","--long","--output","json","--home",version_home],text=True,timeout=30))
   if runtime_version.get("commit")!=revision or runtime_version.get("server_name")!="mcnd":raise ValueError("runtime binary source commit mismatch")
+  if release_version is not None and runtime_version.get("version")!=release_version:raise ValueError("runtime binary release version mismatch")
  inventory=verify_build_inputs(source,environment=environment)
  if source_inputs is not None and json.loads(pathlib.Path(source_inputs).read_bytes())!=inventory:raise ValueError("production source inputs differ from the pre-build inventory")
- data={"bin/mcnd":binary.read_bytes(),"BUILD_INFO.txt":info.encode(),"DEVELOPMENT.txt":b"DEVELOPMENT ONLY. Native feature integration and release gates remain incomplete.\n"}
+ data={"bin/mcnd":binary.read_bytes(),"BUILD_INFO.txt":info.encode()}
+ if release_version is None:data["DEVELOPMENT.txt"]=b"DEVELOPMENT ONLY. Native feature integration and release gates remain incomplete.\n"
+ else:data["SOFTWARE_RELEASE.txt"]=("MintCandy mcnd software release "+release_version+"\nSource: "+revision+"\nNo genesis, operator keys, public endpoints or network-launch approval included.\nVerify the GitHub OIDC attestation before installing this software.\n").encode()
  data["SOURCE_INPUTS.json"]=(json.dumps(inventory,sort_keys=True,indent=2)+"\n").encode()
  data["VERIFIED_BUILD.json"]=(json.dumps(verified_build,sort_keys=True,indent=2)+"\n").encode()
  if runtime_version is not None:data["CLI_VERSION.json"]=(json.dumps(runtime_version,sort_keys=True,indent=2)+"\n").encode()
@@ -39,12 +43,13 @@ def package(binary,source,revision,output,source_inputs=None):
  for path in [source/"LICENSE",source/"network/LICENSE",*sorted((source/"network/systemcontracts").glob("LICENSE*")),*notices,*sorted(third_party.glob("*/UPSTREAM.json"))]:
   if path.is_file():data["provenance/"+path.relative_to(source).as_posix()]=path.read_bytes()
  binary_sha256=hashlib.sha256(data["bin/mcnd"]).hexdigest()
- data["SBOM.cdx.json"]=(json.dumps(make_sbom(verified_build,inventory,data,binary_sha256),sort_keys=True,indent=2)+"\n").encode()
+ data["SBOM.cdx.json"]=(json.dumps(make_sbom(verified_build,inventory,data,binary_sha256,release_version=release_version),sort_keys=True,indent=2)+"\n").encode()
  manifest={"schemaVersion":1,"status":"development","sourceRevision":revision,"binarySha256":binary_sha256,"files":{name:hashlib.sha256(value).hexdigest() for name,value in data.items()},"dependencyScope":"Go build information records effective module replacements. UPSTREAM manifests identify local owned patches; this is not a complete security audit or signed provenance."}
+ if release_version is not None:manifest.update(status="software-release",releaseVersion=release_version,includesGenesis=False,networkLaunchApproved=False)
  data["MANIFEST.json"]=(json.dumps(manifest,indent=2)+"\n").encode()
  output=pathlib.Path(output);output.parent.mkdir(parents=True,exist_ok=True)
  if os.path.lexists(output.with_name(output.name+".sha256")):raise ValueError("checksum sidecar already exists")
- with output.open("xb") as stream, tarfile.open(fileobj=stream,mode="w:gz") as archive:
+ with output.open("xb") as stream, tarfile.open(fileobj=stream,mode="w:gz",format=tarfile.USTAR_FORMAT if release_version is not None else tarfile.DEFAULT_FORMAT) as archive:
   for name,value in sorted(data.items()):
    entry=tarfile.TarInfo(name);entry.size=len(value);entry.mode=0o755 if name=="bin/mcnd" else 0o644;entry.mtime=0
    archive.addfile(entry,io.BytesIO(value))
@@ -55,4 +60,5 @@ if __name__=="__main__":
  parser=argparse.ArgumentParser(description=__doc__)
  for name in ("binary","source","revision","output"):parser.add_argument("--"+name,required=True)
  parser.add_argument("--source-inputs",help="matching production inventory captured before building")
- args=parser.parse_args();package(args.binary,args.source,args.revision,args.output,args.source_inputs)
+ parser.add_argument("--release-version",help="explicit software-only stable SemVer; does not approve a public network")
+ args=parser.parse_args();package(args.binary,args.source,args.revision,args.output,args.source_inputs,args.release_version)

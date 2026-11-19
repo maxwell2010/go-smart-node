@@ -2,6 +2,10 @@ name: Modern network development artifacts
 on:
   workflow_dispatch:
     inputs:
+      software_release_version:
+        description: Optional software-only SemVer X.Y.Z; empty keeps ordinary development packaging
+        default: ''
+        type: string
       security_audit:
         description: Check the exact daemon and source with pinned govulncheck
         default: false
@@ -48,7 +52,18 @@ concurrency:
   group: mcnd-artifact-${{ github.ref }}
   cancel-in-progress: true
 jobs:
+  software-release:
+    if: inputs.software_release_version != '' && github.repository == 'maxwell2010/go-smart-node' && github.event_name == 'workflow_dispatch' && (github.ref == 'refs/heads/feat/native-duplicate-vote-master-20261112' || startsWith(github.ref, 'refs/heads/release/'))
+    permissions:
+      contents: read
+      actions: read
+      id-token: write
+      attestations: write
+    uses: ./.github/workflows/software-release.yml
+    with:
+      release_version: ${{ inputs.software_release_version }}
   linux-amd64:
+    if: ${{ !inputs.software_release_version }}
     runs-on: ubuntu-24.04
     timeout-minutes: 40
     permissions:

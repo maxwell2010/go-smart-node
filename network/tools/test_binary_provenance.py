@@ -1,7 +1,7 @@
 import copy
 import unittest
 
-from binary_provenance import MAIN_MODULE, parse_build_info, verify_binary_build
+from binary_provenance import MAIN_MODULE, parse_build_info, verify_binary_build, validate_release_version
 
 
 REVISION = "a" * 40
@@ -77,6 +77,22 @@ class BinaryProvenanceTest(unittest.TestCase):
             self.verify(info, packages + [wrong])
         with self.assertRaisesRegex(ValueError, "incomplete"):
             self.verify(info, packages + [{"Incomplete": True}])
+
+    def test_release_metadata_only_allows_exact_commit_and_canonical_version(self):
+        info,packages=self.fixture()
+        flags="-X main.buildCommit="+REVISION+" -X main.buildVersion=1.0.0"
+        verify=lambda value:verify_binary_build(value,".",REVISION,VERSION,environment={},package_loader=lambda:packages,release_version="1.0.0")
+        verify(info)
+        verify(info+"\tbuild\t-ldflags="+flags+"\n")
+        for suffix in (" -s"," -w"," -L /tmp/extra"," -X other.symbol=1"):
+            with self.subTest(suffix=suffix),self.assertRaisesRegex(ValueError,"release linker"):
+                verify(info+"\tbuild\t-ldflags="+flags+suffix+"\n")
+        with self.assertRaisesRegex(ValueError,"release linker"):
+            verify(info+"\tbuild\t-ldflags="+flags.replace(REVISION,"b"*40)+"\n")
+        with self.assertRaisesRegex(ValueError,"unsupported default-build"):
+            self.verify(info+"\tbuild\t-ldflags="+flags+"\n",packages)
+        for value in ("v1.0.0","01.0.0","1.0","1.0.0-dev","1.0.0+build","1.0.0\n","1.0.0 -s",None):
+            with self.subTest(value=value),self.assertRaises(ValueError):validate_release_version(value)
 
 
 if __name__ == "__main__":

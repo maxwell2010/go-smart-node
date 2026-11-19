@@ -74,7 +74,10 @@ def _remote_component(declared, effective):
     }
 
 
-def make_sbom(verified_build, source_inventory, archive_files, binary_sha256):
+def make_sbom(verified_build, source_inventory, archive_files, binary_sha256, *, release_version=None):
+    if release_version is not None:
+        from binary_provenance import validate_release_version
+        validate_release_version(release_version)
     revision = verified_build["settings"]["vcs.revision"]
     if source_inventory["sourceRevision"] != revision:
         raise ValueError("SBOM source inventory differs from verified binary revision")
@@ -94,7 +97,7 @@ def make_sbom(verified_build, source_inventory, archive_files, binary_sha256):
         "specVersion": "1.5",
         "version": 1,
         "metadata": {"component": {
-            "type": "application", "bom-ref": "mcnd", "name": "mcnd", "version": revision,
+            "type": "application", "bom-ref": "mcnd", "name": "mcnd", "version": release_version or revision,
             "hashes": [{"alg": "SHA-256", "content": binary_sha256}],
             "properties": _properties({
                 "source.commit": revision,
