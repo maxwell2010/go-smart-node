@@ -174,20 +174,25 @@ func (b *Backend) EthBlockFromCometBlock(
 	}
 
 	// 8. Gas Used
-	gasUsed := uint64(0)
-	for _, txsResult := range blockRes.TxsResults {
-		// workaround for cosmos-sdk bug. https://github.com/cosmos/cosmos-sdk/issues/10832
-		if ShouldIgnoreGasUsed(txsResult) {
-			// block gas limit has exceeded, other txs must have failed with same reason.
-			break
-		}
-		gasUsed += uint64(txsResult.GetGasUsed()) // #nosec G115 -- checked for int overflow already
-	}
-	ethHeader.GasUsed = gasUsed
+	ethHeader.GasUsed = cometBlockGasUsed(blockRes)
 
 	// 9. create eth block
 	ethBlock := ethtypes.NewBlock(ethHeader, body, receipts, trie.NewStackTrie(nil))
 	return ethBlock, nil
+}
+
+// Header accounting includes SDK ante conversion work, unlike the execution
+// gas of each original Ethereum receipt. Count each ABCI result exactly once.
+func cometBlockGasUsed(blockRes *cmtrpctypes.ResultBlockResults) uint64 {
+	gasUsed := uint64(0)
+	for _, result := range blockRes.TxsResults {
+		// Preserve the existing block-limit workaround (SDK issue #10832).
+		if ShouldIgnoreGasUsed(result) {
+			break
+		}
+		gasUsed += uint64(result.GetGasUsed()) // #nosec G115 -- existing validated ABCI gas profile
+	}
+	return gasUsed
 }
 
 func (b *Backend) MinerFromCometBlock(

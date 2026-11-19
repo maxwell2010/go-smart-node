@@ -1241,15 +1241,20 @@
     "x/vm/wrappers/testutil/mock.go": "08254697a611a729e41d0e3ba5bc94e5f02f06fd35141666612592694aa305b4"
   },
   "modifiedFiles": {
+    "rpc/backend/comet_to_eth.go": "8bdc539b6c6247fbc2c93ca99b78e40476300205fb3ab9c114b98f62b9cdf155",
+    "rpc/backend/tx_info.go": "9edce2233fa9b8afee3fbac8a3d3792b5775d768778a4363ce70b62b2a38e2ce",
+    "rpc/backend/tx_info_test.go": "cf19430031f644afe517f5d2a242cd40f320afbf722ba527f94e2ebe66d76863",
+    "rpc/types/events.go": "3c56531f33696de7d2825c0b30c0745244fb3f37369f285cabb79e3458f5327a",
+    "rpc/types/events_test.go": "447fca30b689d0bd45d5242b581a2066d1d84e8f30e722ac3a635c1e1151ab70",
     "x/vm/keeper/block_proposer.go": "50ea27632ae1910a2de1f78a6a20b848e44acac9b9c96ccef544153c9d9db79a",
     "x/vm/keeper/grpc_query.go": "e010d75efbc5686d35343b74c4d0a6af6751b695dadad50d580aeb0155cdaa10",
     "x/vm/keeper/keeper.go": "13b927ebddfe20b69599d62f07111fe8f4eb2f199d78573544dc6d763737c8f4",
     "x/vm/keeper/state_transition.go": "899fb7a5a9b0376827cc6a83229fcfb86c56feef5a92160a9fafbcabc336497b",
     "x/vm/module.go": "61bb2ef5596c3ae4cde20205795bb5c526424479a1cf7c076cba4fb1c6fe69fa"
   },
-  "patchVersion": "v0.6.3-mintcandy.4",
+  "patchVersion": "v0.6.3-mintcandy.5",
   "schemaVersion": 1,
-  "scope": "Decode SDK53 validator operator bytes for COINBASE; bounded and charged native post-processing, atomic rollback, and isolated matching gas estimation for the fresh network; application guard for internal commits outside signed transaction processing; allow early EVM configuration from committed state",
+  "scope": "Decode SDK53 validator operator bytes for COINBASE; bounded and charged native post-processing, atomic rollback, and isolated matching gas estimation for the fresh network; application guard for internal commits outside signed transaction processing; allow early EVM configuration from committed state; keep explicitly authorized reserve-fee conversion gas out of Ethereum execution receipts while retaining SDK block accounting, strict committed fee metadata and optional receipt fee details",
   "upstreamCommit": "71c78b5072a248bae5273c34ad2f53d349799ccd",
   "upstreamModule": "github.com/cosmos/evm",
   "upstreamModuleSum": "h1:1G8+iqyQWslZ2g7873h90Fcr3pL6RV24PgOS1wiK2SY=",

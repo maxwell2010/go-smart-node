@@ -210,7 +210,29 @@ func (b *Backend) GetTransactionReceipt(hash common.Hash) (map[string]interface{
 		return nil, fmt.Errorf("failed to get sender: %w", err)
 	}
 
-	return rpctypes.RPCMarshalReceipt(receipts[0], ethTx, from)
+	fields, err := rpctypes.RPCMarshalReceipt(receipts[0], ethTx, from)
+	if err != nil {
+		return nil, err
+	}
+	if uint64(res.TxIndex) >= uint64(len(blockRes.TxsResults)) {
+		return nil, fmt.Errorf("receipt transaction index exceeds committed results")
+	}
+	fee, err := rpctypes.ParseMintCandyFeeEvent(blockRes.TxsResults[res.TxIndex])
+	if err != nil {
+		return nil, err
+	}
+	if fee != nil {
+		if fee.Transaction != ethMsg.Hash() {
+			return nil, fmt.Errorf("receipt reserve fee hash differs from Ethereum transaction")
+		}
+		fields["mintcandyFee"] = map[string]interface{}{
+			"payer": fee.Payer, "token": fee.Token, "feeNonce": fee.FeeNonce,
+			"tokenInput": fee.TokenInput, "nativeOutput": fee.NativeOutput,
+			"conversionFee": fee.ConversionFee, "conversionGas": hexutil.Uint64(fee.ConversionGas),
+			"refundAsset": "native del",
+		}
+	}
+	return fields, nil
 }
 
 // GetTransactionLogs returns the transaction logs identified by hash.

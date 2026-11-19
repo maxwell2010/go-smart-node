@@ -2,6 +2,7 @@ package types
 
 import (
 	"fmt"
+	"math/big"
 	"strconv"
 
 	"github.com/ethereum/go-ethereum/common"
@@ -123,6 +124,21 @@ func ParseTxResult(result *abci.ExecTxResult, tx sdk.Tx) (*ParsedTxs, error) {
 
 	// some old versions miss some events, fill it with tx result
 	gasUsed := uint64(result.GasUsed) // #nosec G115
+	fee, err := ParseMintCandyFeeEvent(result)
+	if err != nil {
+		return nil, err
+	}
+	if fee != nil {
+		if len(p.Txs) != 1 || fee.Transaction != p.Txs[0].Hash || result.GasUsed < 0 || fee.ConversionGas > gasUsed {
+			return nil, fmt.Errorf("reserve fee event does not match one bounded Ethereum result")
+		}
+		gasUsed -= fee.ConversionGas
+		// Explicit EVM gas and combined SDK gas must reconcile exactly. Older
+		// event formats without a gas count can still use the checked fallback.
+		if result.Code == 0 && p.Txs[0].GasUsed != 0 && p.Txs[0].GasUsed != gasUsed {
+			return nil, fmt.Errorf("reserve fee gas differs from the committed EVM gas")
+		}
+	}
 	if len(p.Txs) == 1 {
 		p.Txs[0].GasUsed = gasUsed
 	}
@@ -138,6 +154,80 @@ func ParseTxResult(result *abci.ExecTxResult, tx sdk.Tx) (*ParsedTxs, error) {
 		}
 	}
 	return p, nil
+}
+
+// MintCandyFee is additional ante payment metadata, separate from Ethereum's
+// signed execution gas. Values are parsed only from committed SDK events, not
+// arbitrary EVM logs. It establishes no signature or reserve authorization.
+type MintCandyFee struct {
+	Payer, Token                                      common.Address
+	Transaction                                       common.Hash
+	FeeNonce, TokenInput, NativeOutput, ConversionFee string
+	ConversionGas                                     uint64
+}
+
+// ParseMintCandyFeeEvent bounds and validates the one supported fee event.
+// Malformed/duplicate metadata is an error, not a reason to publish inflated
+// receipt.gasUsed. Standard non-opted-in transactions retain their old behavior.
+func ParseMintCandyFeeEvent(result *abci.ExecTxResult) (*MintCandyFee, error) {
+	if result == nil {
+		return nil, fmt.Errorf("missing reserve fee transaction result")
+	}
+	var found *MintCandyFee
+	for _, event := range result.Events {
+		if event.Type != "mintcandy_drc20_fee" {
+			continue
+		}
+		if found != nil || len(event.Attributes) != 8 {
+			return nil, fmt.Errorf("duplicate or malformed reserve fee event")
+		}
+		fields := make(map[string]string, 8)
+		for _, attr := range event.Attributes {
+			if _, exists := fields[attr.Key]; exists {
+				return nil, fmt.Errorf("duplicate reserve fee attribute")
+			}
+			switch attr.Key {
+			case "payer", "token", "transaction", "fee_nonce", "token_input", "native_output", "conversion_fee", "conversion_gas":
+			default:
+				return nil, fmt.Errorf("unknown reserve fee attribute")
+			}
+			fields[attr.Key] = attr.Value
+		}
+		payer, token := fields["payer"], fields["token"]
+		if len(payer) != 42 || len(token) != 42 || !common.IsHexAddress(payer) || !common.IsHexAddress(token) {
+			return nil, fmt.Errorf("invalid reserve fee addresses")
+		}
+		txHash := fields["transaction"]
+		if len(txHash) != 66 || common.HexToHash(txHash).Hex() != txHash || common.HexToHash(txHash) == (common.Hash{}) {
+			return nil, fmt.Errorf("invalid reserve fee transaction hash")
+		}
+		values := make(map[string]*big.Int, 5)
+		for _, key := range []string{"fee_nonce", "token_input", "native_output", "conversion_fee", "conversion_gas"} {
+			s := fields[key]
+			if len(s) == 0 || len(s) > 78 || (len(s) > 1 && s[0] == '0') {
+				return nil, fmt.Errorf("invalid reserve fee integer")
+			}
+			for _, c := range s {
+				if c < '0' || c > '9' {
+					return nil, fmt.Errorf("invalid reserve fee decimal")
+				}
+			}
+			n, ok := new(big.Int).SetString(s, 10)
+			if !ok || n.BitLen() > 256 || (key != "fee_nonce" && n.Sign() == 0) {
+				return nil, fmt.Errorf("reserve fee integer exceeds bounds")
+			}
+			values[key] = n
+		}
+		if !values["conversion_gas"].IsUint64() || values["conversion_fee"].Cmp(values["native_output"]) > 0 {
+			return nil, fmt.Errorf("invalid reserve fee gas or payment")
+		}
+		found = &MintCandyFee{Payer: common.HexToAddress(payer), Token: common.HexToAddress(token), Transaction: common.HexToHash(txHash),
+			FeeNonce: fields["fee_nonce"], TokenInput: fields["token_input"], NativeOutput: fields["native_output"], ConversionFee: fields["conversion_fee"], ConversionGas: values["conversion_gas"].Uint64()}
+		if found.Payer == (common.Address{}) || found.Token == (common.Address{}) {
+			return nil, fmt.Errorf("zero reserve fee address")
+		}
+	}
+	return found, nil
 }
 
 // ParseTxIndexerResult parse tm tx result to a format compatible with the custom tx indexer.

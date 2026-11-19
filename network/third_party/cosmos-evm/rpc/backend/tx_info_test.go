@@ -503,3 +503,40 @@ func TestReceiptsFromCometBlock(t *testing.T) {
 		})
 	}
 }
+
+func TestReserveFeeReceiptsKeepSignedExecutionGasAndHeaderCountsAnte(t *testing.T) {
+	backend := setupMockBackend(t)
+	msg := buildMsgEthereumTx(t)
+	result := &abcitypes.ExecTxResult{GasUsed: 521000, Events: []abcitypes.Event{
+		{Type: "mintcandy_drc20_fee", Attributes: []abcitypes.EventAttribute{
+			{Key: "payer", Value: "0x1111111111111111111111111111111111111111"},
+			{Key: "token", Value: "0x2222222222222222222222222222222222222222"},
+			{Key: "transaction", Value: msg.Hash().Hex()}, {Key: "fee_nonce", Value: "0"},
+			{Key: "token_input", Value: "1000000000000000000"}, {Key: "native_output", Value: "1000000000000000000"},
+			{Key: "conversion_fee", Value: "500000000000000"}, {Key: "conversion_gas", Value: "500000"},
+		}},
+		{Type: evmtypes.EventTypeEthereumTx, Attributes: []abcitypes.EventAttribute{
+			{Key: "ethereumTxHash", Value: msg.Hash().Hex()}, {Key: "txIndex", Value: "0"},
+			{Key: "txGasUsed", Value: "21000"}, {Key: "amount", Value: "0"},
+		}},
+	}}
+	parsed, err := rpctypes.ParseTxResult(result, nil)
+	require.NoError(t, err)
+	data := &sdk.TxMsgData{MsgResponses: []*codectypes.Any{codectypes.UnsafePackAny(&evmtypes.MsgEthereumTxResponse{Hash: msg.Hash().Hex(), GasUsed: 21000})}}
+	encodingConfig := encoding.MakeConfig(constants.ExampleChainID.EVMChainID)
+	result.Data, err = encodingConfig.Codec.Marshal(data)
+	require.NoError(t, err)
+	indexed := &servertypes.TxResult{Height: 100, TxIndex: 0, EthTxIndex: 0, MsgIndex: 0, GasUsed: parsed.Txs[0].GasUsed}
+	backend.Indexer = &MockIndexer{txResults: map[common.Hash]*servertypes.TxResult{msg.Hash(): indexed}}
+	query := backend.QueryClient.QueryClient.(*mocks.EVMQueryClient)
+	query.On("BaseFee", mock.Anything, mock.Anything).Return(&evmtypes.QueryBaseFeeResponse{}, nil)
+	block := &tmrpctypes.ResultBlock{Block: &tmtypes.Block{Header: tmtypes.Header{Height: 100}}}
+	blockResults := &tmrpctypes.ResultBlockResults{Height: 100, TxsResults: []*abcitypes.ExecTxResult{result}}
+	receipts, err := backend.ReceiptsFromCometBlock(block, blockResults, []*evmtypes.MsgEthereumTx{msg})
+	require.NoError(t, err)
+	require.Len(t, receipts, 1)
+	require.EqualValues(t, 21000, receipts[0].GasUsed)
+	require.EqualValues(t, 21000, receipts[0].CumulativeGasUsed)
+	require.LessOrEqual(t, receipts[0].GasUsed, msg.GetGas())
+	require.EqualValues(t, 521000, cometBlockGasUsed(blockResults), "combined header gas includes ante once and is not re-added to receipt gas")
+}

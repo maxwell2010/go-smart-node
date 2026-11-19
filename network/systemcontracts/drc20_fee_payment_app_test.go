@@ -41,11 +41,14 @@ func reserveFeePayer(t *testing.T) (*ecdsa.PrivateKey, common.Address) {
 // supply increase, or post-genesis backdoor is used to fund the gasless actor.
 func seedDRC20FeePayer(t *testing.T, state ownedapp.GenesisState, actor common.Address) {
 	t.Helper()
+	cdc := ownedapp.MakeEncodingConfig(990001).Codec
 	var coins cointypes.GenesisState
-	require.NoError(t, json.Unmarshal(state[cointypes.ModuleName], &coins))
+	require.NoError(t, cdc.UnmarshalJSON(state[cointypes.ModuleName], &coins))
 	require.Len(t, coins.Coins, 1)
 	var evm evmtypes.GenesisState
-	require.NoError(t, json.Unmarshal(state[evmtypes.ModuleName], &evm))
+	// The EVM genesis contains protobuf enums (e.g. AccessType); standard
+	// encoding/json cannot read their canonical string representation.
+	require.NoError(t, cdc.UnmarshalJSON(state[evmtypes.ModuleName], &evm))
 	_, payer := reserveFeePayer(t)
 	token := common.HexToAddress(coins.Coins[0].DRC20Contract)
 	fromSlot := crypto.Keccak256Hash(common.BytesToHash(actor.Bytes()).Bytes(), feeBalanceMapSlot[:])
@@ -70,7 +73,7 @@ func seedDRC20FeePayer(t *testing.T, state ownedapp.GenesisState, actor common.A
 	}
 	require.True(t, found)
 	var err error
-	state[evmtypes.ModuleName], err = json.Marshal(evm)
+	state[evmtypes.ModuleName], err = cdc.MarshalJSON(&evm)
 	require.NoError(t, err)
 }
 
@@ -104,7 +107,7 @@ func assertNativeDRC20FeePayments(t *testing.T, l nativeHistoricalLifecycle, fre
 	var state ownedapp.GenesisState
 	require.NoError(t, json.Unmarshal(l.doc.AppState, &state))
 	var coins cointypes.GenesisState
-	require.NoError(t, json.Unmarshal(state[cointypes.ModuleName], &coins))
+	require.NoError(t, l.app.AppCodec().UnmarshalJSON(state[cointypes.ModuleName], &coins))
 	token := common.HexToAddress(coins.Coins[0].DRC20Contract)
 	unit := func(n int64) *big.Int { return sdkmath.NewIntWithDecimal(n, 18).BigInt() }
 	freeABI, err := contracts.CompiledABI("DRC20Reserveless")

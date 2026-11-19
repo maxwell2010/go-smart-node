@@ -241,6 +241,8 @@ jobs:
         run: go test -mod=readonly -p 2 -count=1 -v -timeout 5m ./fees/... |& tee validation-logs/token-fee-authorization.log
       - name: Test signed reserveless token lifecycle and disk restart
         run: go test -mod=readonly -p 2 -count=1 -v -timeout 12m -tags appstate -run '^TestOwnedAppNativeReservelessTokenLifecycle$' ./systemcontracts |& tee validation-logs/reserveless-native.log
+      - name: Test Ethereum receipts with separate DRC20 conversion fees
+        run: go test -mod=readonly -p 2 -count=1 -v -timeout 5m -run 'Test(ParseTxResult|MintCandyReserveFee|ReserveFeeReceipts|ReceiptsFromCometBlock)' github.com/cosmos/evm/rpc/types github.com/cosmos/evm/rpc/backend |& tee validation-logs/reserve-fee-rpc.log
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
         if: always()
         with:
