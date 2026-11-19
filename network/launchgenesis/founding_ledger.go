@@ -225,7 +225,7 @@ func verifyPosition(row validatorDeclaration, delegation validatortypes.Delegati
 	if err := decodeLedgerJSON([]byte(registration.Meta), &meta); err != nil {
 		return empty, fmt.Errorf("invalid Master validator metadata: %w", err)
 	}
-	if founder == operator || owner != founder || call.Beneficiary != founder ||
+	if owner != founder || call.Beneficiary != founder ||
 		operator != registration.Validator || operator != call.Validator || row.Operator != delegation.Validator ||
 		row.Operator != meta.Operator || reward != meta.Reward || row.Description != meta.Description ||
 		row.PubKey.Type != "/cosmos.crypto.ed25519.PubKey" || len(row.PubKey.Key) != ed25519.PubKeySize ||

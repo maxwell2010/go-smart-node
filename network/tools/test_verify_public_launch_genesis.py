@@ -110,6 +110,11 @@ class PublicGenesisLedgerTest(unittest.TestCase):
         self.assertEqual(len(result['bank']['balances']), 8)
         self.assertEqual(result['bank']['supply'], [coin(self.plan['initial_supply_atoms'])])
         self.assertEqual(len(result['delegations']), 4)
+        for delegation in result['delegations']:
+            self.assertEqual(delegation['stake'], {
+                'type': 1, 'id': self.plan['denom'],
+                'stake': coin(self.plan['approved_initial_stake_per_validator_atoms']),
+            })
         funding = result['contractSetup']['gatewayFunding']
         self.assertEqual(funding['method'], 'delegateDELTo')
         self.assertEqual({row['beneficiary'] for row in funding['calls']}, {self.plan['founder_evm_address']})
