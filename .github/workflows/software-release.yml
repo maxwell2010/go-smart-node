@@ -74,6 +74,10 @@ jobs:
           set -euo pipefail
           go test -mod=readonly -p 2 -count=1 -v -timeout 15m ./... |& tee "$RUNNER_TEMP/software-evidence/module.log"
           go test -mod=readonly -p 2 -count=1 -v -timeout 12m -tags appstate -run '^TestOwnedAppNativeReservelessTokenLifecycle$' ./systemcontracts |& tee "$RUNNER_TEMP/software-evidence/token-appstate.log"
+          go test -mod=readonly -p 2 -count=1 -v -timeout 12m -tags appstate -run '^TestOwnedApp(EmptyUserAssetsLifecycle|NativeUserNFTLifecycle|NativeTestGrace(Lifecycle|DowntimeLifecycle)|NativeValidator(SelfControls|AvatarGenesisLifecycle))$' ./systemcontracts |& tee "$RUNNER_TEMP/software-evidence/launch-assets-validator-appstate.log"
+          for scenario in EmptyUserAssetsLifecycle NativeUserNFTLifecycle NativeTestGraceLifecycle NativeTestGraceDowntimeLifecycle NativeValidatorSelfControls NativeValidatorAvatarGenesisLifecycle; do
+            grep -Fq -- "--- PASS: TestOwnedApp$scenario (" "$RUNNER_TEMP/software-evidence/launch-assets-validator-appstate.log"
+          done
           go test -mod=readonly -p 2 -count=1 -v -timeout 8m github.com/cosmos/evm/mempool |& tee "$RUNNER_TEMP/software-evidence/owned-mempool.log"
           go test -mod=readonly -p 2 -count=1 -v -timeout 5m -run 'Test(ParseTxResult|MintCandyReserveFee|ReserveFeeReceipts|ReceiptsFromCometBlock)' github.com/cosmos/evm/rpc/types github.com/cosmos/evm/rpc/backend |& tee "$RUNNER_TEMP/software-evidence/owned-rpc.log"
       - name: Reproduce pinned system contract artifacts

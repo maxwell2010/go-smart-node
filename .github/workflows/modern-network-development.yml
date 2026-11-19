@@ -49,7 +49,7 @@ on:
 permissions:
   contents: read
 concurrency:
-  group: mcnd-artifact-${{ github.ref }}
+  group: mcnd-artifact-${{ github.ref }}-${{ inputs.software_release_version || 'development' }}
   cancel-in-progress: true
 jobs:
   software-release:
