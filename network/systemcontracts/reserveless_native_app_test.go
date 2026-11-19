@@ -80,14 +80,21 @@ func runNativeReservelessTokens(t *testing.T, dir, phase string) {
 	// Fund the whole positive/negative lifecycle without minting new DEL.
 	funding := sdk.NewCoins(sdk.NewCoin(identity.BaseDenom, sdkmath.NewIntWithDecimal(500, 18)))
 	found := false
+	credited := false
 	for i := range bank.Balances {
 		if bank.Balances[i].Address == sdk.AccAddress(expected.Actor.Bytes()).String() {
 			bank.Balances[i].Coins = bank.Balances[i].Coins.Sub(funding...)
 			found = true
 		}
+		if bank.Balances[i].Address == sdk.AccAddress(other.Bytes()).String() {
+			bank.Balances[i].Coins = bank.Balances[i].Coins.Add(funding...)
+			credited = true
+		}
 	}
 	require.True(t, found)
-	bank.Balances = append(bank.Balances, banktypes.Balance{Address: sdk.AccAddress(other.Bytes()).String(), Coins: funding})
+	if !credited {
+		bank.Balances = append(bank.Balances, banktypes.Balance{Address: sdk.AccAddress(other.Bytes()).String(), Coins: funding})
+	}
 	state[banktypes.ModuleName], err = json.Marshal(bank)
 	require.NoError(t, err)
 	doc.AppState, err = json.Marshal(state)
