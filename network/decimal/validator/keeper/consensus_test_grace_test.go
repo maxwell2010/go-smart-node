@@ -47,12 +47,14 @@ func TestNativeGraceStillAuthenticatesAndCheckpointsCommits(t *testing.T) {
 			require.EqualValues(t, height-3, window.Samples)
 			require.EqualValues(t, height-3, window.Missed)
 		}
-		plan, err := k.PlanNativeDowntimePenalties(block)
-		require.NoError(t, err)
-		if height < 5 {
-			require.Empty(t, plan)
-		} else {
-			require.Len(t, plan, 2, "only fresh post-grace misses form a penalty window")
+		if height > 3 {
+			plan, err := k.PlanNativeDowntimePenalties(block)
+			require.NoError(t, err)
+			if height < 5 {
+				require.Empty(t, plan)
+			} else {
+				require.Len(t, plan, 2, "only fresh post-grace misses form a penalty window")
+			}
 		}
 		_, err = k.ScheduledABCIEndBlock(block, eligible)
 		require.NoError(t, err)

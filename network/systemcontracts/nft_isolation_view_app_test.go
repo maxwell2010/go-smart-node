@@ -55,7 +55,8 @@ func runIsolatedPositionReader(t *testing.T, e isolatedBackendEnv) {
 	registryImpl, gatewayImpl, factoryImpl, vaultImpl, originImpl := e.deploy(registry), e.deploy(gateway), e.deploy(factory), e.deploy(vault), e.deploy(origin)
 	wrapped := e.deploy(wrapper)
 	extraNFTImplementations := make(map[string]common.Address)
-	if os.Getenv(emptyUserAssetsPhaseEnv) == "seed" {
+	allUserNFTFamilies := os.Getenv(emptyUserAssetsPhaseEnv) == "seed" || os.Getenv("MCND_USER_NFT_NATIVE_PHASE") == "seed"
+	if allUserNFTFamilies {
 		for _, name := range []string{"NewNetworkDRC721", "DRC721Reserveless", "DRC1155Reserveless"} {
 			extraNFTImplementations[name] = e.deploy(e.load(name))
 		}
@@ -85,7 +86,7 @@ func runIsolatedPositionReader(t *testing.T, e isolatedBackendEnv) {
 	initChild, err := factory.ABI.Pack("upgradeNFT", originImpl, uint8(1), true)
 	require.NoError(t, err)
 	factoryConfig := [][]byte{initChild}
-	if os.Getenv(emptyUserAssetsPhaseEnv) == "seed" {
+	if allUserNFTFamilies {
 		for _, child := range []struct {
 			name    string
 			kind    uint8

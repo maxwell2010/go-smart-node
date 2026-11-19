@@ -160,14 +160,11 @@ func NewRootCmd() *cobra.Command {
 }
 
 func statelessCommand(cmd *cobra.Command) bool {
-	leaf := cmd.Name()
 	for cmd.Parent() != nil && cmd.Parent() != cmd.Root() {
 		cmd = cmd.Parent()
 	}
 	switch cmd.Name() {
-	case "validator-control":
-		return leaf == "prepare" || leaf == "validator-control"
-	case "version", "completion", "help", "fee-envelope", "test-grace-genesis", nativeValidatorRegistrationMetadataCommandName:
+	case "version", "completion", "help", "fee-envelope", "test-grace-genesis", "validator-control", nativeValidatorRegistrationMetadataCommandName:
 		return true
 	default:
 		return false

@@ -57,7 +57,11 @@ func (app *App) beginNativeConsensus(ctx sdk.Context) (sdk.BeginBlock, error) {
 			return sdk.BeginBlock{}, fmt.Errorf("distribute native fees for height %d: %w", commit.Height, err)
 		}
 	}
-	if app.withdrawals.profile.EnableNativeOrdinaryDELDowntime && commit.Height > 0 {
+	// The first post-grace block observes the final exempt height. Its
+	// signing window is intentionally absent; begin financial processing
+	// once the prior observation belongs to the normal enforcement period.
+	if app.withdrawals.profile.EnableNativeOrdinaryDELDowntime && commit.Height > 0 &&
+		commit.Height > app.withdrawals.profile.TestGraceUntilHeight {
 		if err := app.applyNativePenalties(child); err != nil {
 			return sdk.BeginBlock{}, err
 		}
