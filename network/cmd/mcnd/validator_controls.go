@@ -216,7 +216,7 @@ func newValidatorControlCmd() *cobra.Command {
 	f.StringVar(&master, "master", "", "Approved MasterValidator address")
 	f.StringVar(&action, "action", "", "enable, disable or metadata")
 	f.Uint64Var(&nonce, "nonce", 0, "Explicit operator EVM nonce")
-	f.Uint64Var(&gas, "gas", 250000, "Finite EVM gas limit")
+	f.Uint64Var(&gas, "gas", 24000000, "Finite gas limit including pinned-profile/native checks; at most 24 million")
 	f.StringVar(&price, "gas-price", "", "Price in native atoms per gas")
 	f.StringVar(&metaFile, "metadata-file", "", "Local JSON metadata patch; no network download")
 	f.StringVar(&output, "output-file", "", "Exclusive new output file; default stdout")

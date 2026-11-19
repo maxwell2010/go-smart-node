@@ -134,7 +134,7 @@ func runNativeValidatorSelfControls(t *testing.T, dir, phase string) {
 		private, err := crypto.ToECDSA(key.Bytes())
 		require.NoError(t, err)
 		from := crypto.PubkeyToAddress(private.PublicKey)
-		raw := ethtypes.NewTx(&ethtypes.LegacyTx{Nonce: app.EVMKeeper.GetNonce(l.snapshot(), from), To: &profile.MasterValidator, Value: new(big.Int), Gas: 2_000_000, GasPrice: big.NewInt(1_000_000_000_000), Data: data})
+		raw := ethtypes.NewTx(&ethtypes.LegacyTx{Nonce: app.EVMKeeper.GetNonce(l.snapshot(), from), To: &profile.MasterValidator, Value: new(big.Int), Gas: 24_000_000, GasPrice: big.NewInt(1_000_000_000_000), Data: data})
 		signed, err := ethtypes.SignTx(raw, ethtypes.NewEIP155Signer(big.NewInt(990001)), private)
 		require.NoError(t, err)
 		return signed
@@ -144,6 +144,7 @@ func runNativeValidatorSelfControls(t *testing.T, dir, phase string) {
 		block, response := l.finalizeSignedEthereum(tx)
 		if success {
 			require.Empty(t, response.VmError)
+			t.Logf("signed self-control method=%s operator=%d actual_gas=%d cap=%d", method, index, response.GasUsed, tx.Gas())
 		} else {
 			require.NotEmpty(t, response.VmError)
 			require.Empty(t, response.Logs)
