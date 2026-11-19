@@ -113,6 +113,49 @@ jobs:
             -run '^TestOwnedAppNativeLaunchPreview$' ./systemcontracts
           MCND_FOUNDING_LEDGER_SOURCE="$root/source" MCND_FOUNDING_LEDGER_FIXTURE="$root/replay" \
             python3 -B -m unittest discover -s tools -p 'test_founding_ledger_fixture.py' -v
+          printf 'FOUNDING_WORKDIR=%s\n' "$root" >> "$GITHUB_ENV"
+      - name: Assemble and verify an unsigned candidate with the offline command
+        run: |
+          set -euo pipefail
+          umask 077
+          root="$FOUNDING_WORKDIR"
+          mkdir -m 700 -p "$root/assembled/public"
+          go build -mod=readonly -p 2 -trimpath -o "$root/mcnd-genesis" ./cmd/mcnd-genesis
+          "$root/mcnd-genesis" addresses --chain-id mintcandy_990014-1 --evm-chain-id 990014 > "$root/roles.json"
+          python3 -B tools/test_founding_ledger_fixture.py --source "$root/source" --roles "$root/roles.json" --output "$root/assembly-ledger.json"
+          cat > "$root/parameters.json" <<'JSON'
+          {
+            "genesisTimeUtc": "2026-01-01T00:00:00Z",
+            "maxValidators": 16,
+            "minGasPriceAtoms": "1000000000",
+            "govMinDepositAtoms": "10000000000000000000",
+            "govExpeditedMinDepositAtoms": "50000000000000000000",
+            "govMinInitialDepositRatio": "0.01"
+          }
+          JSON
+          common=(--ledger "$root/assembly-ledger.json" --parameters "$root/parameters.json")
+          genesis="$root/assembled/public/genesis.json"
+          "$root/mcnd-genesis" build "${common[@]}" --genesis "$genesis"
+          "$root/mcnd-genesis" build "${common[@]}" --genesis "$root/rebuilt.json"
+          cmp "$genesis" "$root/rebuilt.json"
+          if "$root/mcnd-genesis" build "${common[@]}" --genesis "$genesis"; then
+            exit 1
+          fi
+          cmp "$genesis" "$root/rebuilt.json"
+          "$root/mcnd-genesis" verify "${common[@]}" --genesis "$genesis" > "$root/cold.json"
+          "$root/mcnd-genesis" verify "${common[@]}" --genesis "$genesis" > "$root/cold-replay.json"
+          cmp "$root/cold.json" "$root/cold-replay.json"
+          jq -e --arg sha "$(sha256sum "$genesis" | cut -d' ' -f1)" \
+            '.status == "CANDIDATE_INIT_CHAIN_VERIFIED" and .chainId == "mintcandy_990014-1" and
+            .genesisSha256 == $sha and (.firstBlockAppHash | test("^[0-9a-f]{64}$")) and
+            .validators == 4 and .votingPower == 40000 and .bankBalances == 8 and
+            .initialSupplyAtoms == "5041000000000000000000000" and .publicGenesisApproved == false' "$root/cold.json"
+          jq '.app_state.gov.params.min_deposit[0].amount = "1"' "$genesis" > "$root/changed.json"
+          if "$root/mcnd-genesis" verify "${common[@]}" --genesis "$root/changed.json"; then
+            exit 1
+          fi
+          MCND_FOUNDING_LEDGER_SOURCE="$root/source" MCND_FOUNDING_LEDGER_FIXTURE="$root/assembled" MCND_FOUNDING_LEDGER_ROLES="$root/roles.json" \
+            python3 -B -m unittest discover -s tools -p 'test_founding_ledger_fixture.py' -v
 
   modern-module:
     if: github.event_name != 'workflow_dispatch' || inputs.scope == 'module'

@@ -71,11 +71,16 @@ consensus address, уникальность операторов и P2P ID, су
 
 ### Подготовка стартового распределения
 
-После проверки заявок и выбора адресов двух релееров сформируйте
-входной файл для сборки genesis. Адреса Gateway и WDEL берутся из
-изолированного развёртывания системных контрактов.
+После проверки заявок и выбора адресов двух релееров сформируйте входной
+файл для сборки genesis. Команда организатора `mcnd-genesis` собирается
+из каталога `network` командой `go build -o mcnd-genesis ./cmd/mcnd-genesis`.
+Подготовьте бинарник через Linux CI. Команды ниже рассчитаны на запуск из
+корня репозитория. Переменная `MCND_GENESIS` содержит путь к этому бинарнику.
 
 ```sh
+"$MCND_GENESIS" addresses --chain-id mintcandy_9905401-1 --evm-chain-id 9905401 > "$SYSTEM_ROLES_JSON"
+GATEWAY_EVM=$(jq -er '.gateway' "$SYSTEM_ROLES_JSON")
+WDEL_D0=$(jq -er '.wrappedDelWallet' "$SYSTEM_ROLES_JSON")
 python3 -B network/tools/prepare_founding_ledger.py \
   --intake "$REVIEWED_INTAKE" --gateway "$GATEWAY_EVM" \
   --wrapped-del-wallet "$WDEL_D0" \
@@ -89,9 +94,36 @@ python3 -B network/tools/prepare_founding_ledger.py \
 в банк один раз. Повторный запуск на тех же входных данных формирует
 такой же файл. Укажите новый путь для каждого прохода.
 
-Дальше сборщик использует эти данные в изолированном EVM и формирует
-genesis с полным состоянием контрактов и модулей. В CI подготавливается
-сопоставимый набор с тестовыми адресами для сверки после `InitChain`.
+В отдельном JSON укажите параметры запуска. Здесь приведены значения для
+репетиции. Для публичной сборки внесите утверждённое время и параметры.
+Цены газа и депозиты указаны в минимальных единицах MSP, 10¹⁸ атомов на MSP.
+
+```json
+{
+  "genesisTimeUtc": "2030-01-01T00:00:00Z",
+  "maxValidators": 16,
+  "minGasPriceAtoms": "1000000000",
+  "govMinDepositAtoms": "10000000000000000000",
+  "govExpeditedMinDepositAtoms": "50000000000000000000",
+  "govMinInitialDepositRatio": "0.01"
+}
+```
+
+Соберите genesis в новый файл и запустите проверку отдельным процессом.
+
+```sh
+"$MCND_GENESIS" build --ledger "$FOUNDING_LEDGER_JSON" \
+  --parameters "$LAUNCH_PARAMETERS_JSON" --genesis "$CANDIDATE_GENESIS"
+"$MCND_GENESIS" verify --ledger "$FOUNDING_LEDGER_JSON" \
+  --parameters "$LAUNCH_PARAMETERS_JSON" --genesis "$CANDIDATE_GENESIS"
+```
+
+Сборка создаёт контракты и их состояние во временной базе в памяти. В
+`genesis.json` сохраняются начальная конфигурация, публичные ключи
+операторов, учёт контрактов и распределение MSP. Команда `verify`
+выполняет холодный `InitChain` и записывает в отчёт SHA256 проверенных
+байтов и AppHash первого блока. Подтверждение контроля ключей, подпись
+манифеста и согласие операторов остаются отдельными условиями публикации.
 
 ### Сверка собранного genesis
 

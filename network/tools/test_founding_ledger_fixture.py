@@ -12,7 +12,7 @@ from prepare_founding_ledger import prepare_ledger
 from verify_public_launch_genesis import verify_candidate
 
 
-def prepared_fixture(source):
+def prepared_fixture(source, deployment=None):
     expected = read_json(source / 'expectations.json')
     doc = read_json(source / 'public/genesis.json')
     if (doc['chain_id'], expected['evmChainId']) != ('mintcandy_990014-1', 990014):
@@ -47,7 +47,12 @@ def prepared_fixture(source):
             row['gas_wallet_address'], relayers[0] = relayers[0], row['gas_wallet_address']
         intake['validators'].append(row)
     applications = check_applications(intake, plan)
-    ledger = prepare_ledger(applications, plan, expected['wrappedNative'], expected['gateway'], relayers)
+    if deployment is None:
+        deployment = {'wrappedDelWallet': expected['wrappedNative'], 'gateway': expected['gateway'],
+                      'chainId': plan['chain_id'], 'evmChainId': plan['evm_chain_id']}
+    if (deployment['chainId'], deployment['evmChainId']) != (plan['chain_id'], plan['evm_chain_id']):
+        raise ValueError('deployment addresses differ from the isolated signing domain')
+    ledger = prepare_ledger(applications, plan, deployment['wrappedDelWallet'], deployment['gateway'], relayers)
     return ledger, applications, plan, relayers
 
 
@@ -56,7 +61,8 @@ class FoundingLedgerFixtureTest(unittest.TestCase):
     def test_prepared_ledger_programmed_cold_genesis(self):
         fixture = Path(os.environ['MCND_FOUNDING_LEDGER_FIXTURE'])
         source = Path(os.environ['MCND_FOUNDING_LEDGER_SOURCE'])
-        ledger, applications, plan, relayers = prepared_fixture(source)
+        roles = os.environ.get('MCND_FOUNDING_LEDGER_ROLES')
+        ledger, applications, plan, relayers = prepared_fixture(source, read_json(Path(roles)) if roles else None)
         raw = (fixture / 'public/genesis.json').read_bytes()
         doc = json.loads(raw)
         state = doc['app_state']
@@ -92,7 +98,8 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='Prepare a ledger for the isolated founding rehearsal')
     parser.add_argument('--source', required=True, type=Path)
     parser.add_argument('--output', required=True, type=Path)
+    parser.add_argument('--roles', type=Path)
     args = parser.parse_args()
-    ledger, _, _, _ = prepared_fixture(args.source)
+    ledger, _, _, _ = prepared_fixture(args.source, read_json(args.roles) if args.roles else None)
     with args.output.open('x', encoding='utf-8') as stream:
         json.dump(ledger, stream)
