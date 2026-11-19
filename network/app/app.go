@@ -329,15 +329,18 @@ func NewApp(
 	bApp.SetParamStore(app.ConsensusParamsKeeper.ParamsStore)
 
 	// add keepers
+	modulePermissions := evmconfig.GetMaccPerms()
+	modulePermissions[nativeFeeRewardEscrowModule] = nil
 	app.AccountKeeper = authkeeper.NewAccountKeeper(
 		appCodec, runtime.NewKVStoreService(keys[authtypes.StoreKey]),
-		authtypes.ProtoBaseAccount, evmconfig.GetMaccPerms(),
+		authtypes.ProtoBaseAccount, modulePermissions,
 		evmaddress.NewEvmCodec(sdk.GetConfig().GetBech32AccountAddrPrefix()),
 		sdk.GetConfig().GetBech32AccountAddrPrefix(),
 		authAddr,
 	)
 
 	blockedAddresses := evmconfig.BlockedAddresses()
+	blockedAddresses[authtypes.NewModuleAddress(nativeFeeRewardEscrowModule).String()] = true
 	blockedAddresses[sdk.AccAddress(common.HexToAddress(nativeburn.AddressString).Bytes()).String()] = true
 	app.BankKeeper = bankkeeper.NewBaseKeeper(
 		appCodec,

@@ -12,7 +12,7 @@ on:
         description: Validation scenario to run on an isolated GitHub runner
         default: module
         type: choice
-        options: [module, bridge-finality, token-features, contracts, process, held-downtime, native-upgrade-governance, nft-downtime, native-full-profile-upgrade, native-full-ibc-upgrade, native-cross-version-ibc-upgrade, native-systemd-module-upgrade, native-systemd-four-validator-recovery, native-systemd-startup-replay]
+        options: [module, bridge-finality, token-features, mass-delegation, contracts, process, held-downtime, native-upgrade-governance, nft-downtime, native-full-profile-upgrade, native-full-ibc-upgrade, native-cross-version-ibc-upgrade, native-systemd-module-upgrade, native-systemd-four-validator-recovery, native-systemd-startup-replay]
       remote_profile:
         description: Also validate the reusable remote-worker scripts
         default: 'off'
@@ -249,6 +249,46 @@ jobs:
         if: always()
         with:
           name: token-features-${{ github.sha }}-${{ github.run_attempt }}
+          path: network/validation-logs/
+          retention-days: 14
+          if-no-files-found: warn
+
+  mass-delegation:
+    if: github.event_name == 'workflow_dispatch' && inputs.scope == 'mass-delegation'
+    runs-on: ubuntu-22.04
+    timeout-minutes: 65
+    env:
+      CGO_ENABLED: '1'
+      CC: gcc
+      GOMAXPROCS: '2'
+      GOTOOLCHAIN: local
+      MCND_MASS_DELEGATION_COUNTS: '10,100,1000'
+    defaults:
+      run:
+        shell: bash
+        working-directory: network
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e
+        with:
+          go-version: '1.26.11'
+          cache: true
+          cache-dependency-path: network/go.sum
+      - name: Verify dependency graph and source revision
+        run: |
+          mkdir -p validation-logs
+          git rev-parse HEAD | tee validation-logs/revision.log
+          go mod download
+          go mod verify
+          git diff --exit-code -- go.mod go.sum
+      - name: Test mass delegation and durable penalties with actual EVM
+        run: go test -mod=readonly -p 2 -count=1 -v -timeout 55m -run '^TestOwnedAppNativeMassDelegationLifecycle$' ./systemcontracts |& tee validation-logs/mass-delegation-evm.log
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+        if: always()
+        with:
+          name: mass-delegation-${{ github.sha }}-${{ github.run_attempt }}
           path: network/validation-logs/
           retention-days: 14
           if-no-files-found: warn

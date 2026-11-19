@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"strconv"
 	"strings"
 	"time"
@@ -236,5 +237,17 @@ func (app *App) runNativeSDKMigration(ctx context.Context, plan upgradetypes.Pla
 		len(proposal.Messages) != 0 || manifest == nil || manifest.Name != plan.Name || manifest.Height != plan.Height {
 		return nil, errors.New("native SDK upgrade has no matching passed proposal")
 	}
-	return app.ModuleManager.RunMigrations(ctx, app.configurator, from)
+	versions, err := app.ModuleManager.RunMigrations(ctx, app.configurator, from)
+	if err != nil {
+		return nil, err
+	}
+	if app.withdrawals != nil && app.withdrawals.profile.EnableNativeFeeRewards {
+		if err := app.NativeValidatorKeeper.MigrateNativeFeeRewardState(s); err != nil {
+			return nil, fmt.Errorf("migrate native fee reward accounting: %w", err)
+		}
+		if err := app.checkNativeFeeRewardEscrow(s); err != nil {
+			return nil, err
+		}
+	}
+	return versions, nil
 }

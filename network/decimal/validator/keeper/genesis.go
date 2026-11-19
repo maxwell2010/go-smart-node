@@ -245,6 +245,9 @@ func (k *StateKeeper) exportGenesis(ctx sdk.Context, auditIndexes bool) (*types.
 	if e = k.auditNativeFeeRewardIndex(ctx, g.Delegations); e != nil {
 		return nil, e
 	}
+	if e = k.auditNativeFeeRewardTree(ctx); e != nil {
+		return nil, e
+	}
 	if auditIndexes {
 		if e = k.auditConsensusIndexes(ctx, g); e != nil {
 			return nil, e

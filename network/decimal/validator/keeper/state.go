@@ -82,6 +82,9 @@ func (k *StateKeeper) SetParams(ctx sdk.Context, p types.Params) error {
 		if e = g.Validate(); e != nil {
 			return e
 		}
+		if e = k.validateNativeFeeRewardParamCapacity(ctx, p.MaxDelegations); e != nil {
+			return e
+		}
 	}
 	return k.params.Set(ctx, &p)
 }
@@ -320,6 +323,11 @@ func (k *StateKeeper) SetValidator(ctx sdk.Context, v types.Validator) error {
 	}
 	if e = k.updateBondedMember(child, previous, v); e != nil {
 		return e
+	}
+	if previous == nil || previous.RewardAddress != v.RewardAddress {
+		if err := k.prepareNativeFeeRewardCommission(child, v.OperatorAddress, v.RewardAddress); err != nil {
+			return err
+		}
 	}
 	row := &types.ValidatorRS{Rewards: v.Rewards, TotalRewards: v.TotalRewards, Stake: v.Stake}
 	// Encode the full row first, then clear only serialized metadata fields.

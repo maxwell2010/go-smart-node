@@ -132,6 +132,9 @@ func (k *StateKeeper) updateNativeFeeRewardOwners(ctx sdk.Context, changes []Del
 			count--
 		}
 		counts[d.operator] = count
+		if err = k.setNativeFeeRewardTreeWeight(ctx, []byte(key)[1:21], []byte(key)[21:], old, next); err != nil {
+			return err
+		}
 		if next.Sign() == 0 {
 			err = state.Delete([]byte(key))
 		} else {
@@ -210,7 +213,7 @@ func (k *StateKeeper) initNativeFeeRewardIndex(ctx sdk.Context, validators []typ
 			return err
 		}
 	}
-	return nil
+	return k.initNativeFeeRewardTree(ctx)
 }
 
 // BuildNativeFeeRewardIndex is an explicit, all-or-nothing cold migration.

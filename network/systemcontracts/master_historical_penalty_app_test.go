@@ -206,5 +206,29 @@ func runMasterHistoricalPenalty(t *testing.T, e isolatedBackendEnv, profile owne
 	assertEntry(ctx(), 0, firstHeight)
 	assertEntry(ctx(), 1, secondHeight)
 	assertNoBurn()
+
+	// The paged entry point commits no announcement when the durable
+	// coordinator callback fails, and can resume a successfully pinned entry.
+	nextBlock := ctx().WithBlockHeight(ctx().BlockHeight() + 2)
+	var paged settlement.MasterPenaltyProof
+	announce := func(callbackErr error) error {
+		return executor.BeginPagedMasterPenalty(nextBlock, f.validator, rate, ctx().BlockHeight(), supply, func(child sdk.Context, proof settlement.MasterPenaltyProof) error {
+			paged = proof
+			assertState(child, true, 3)
+			require.Equal(t, initialSupply, supply(child))
+			return callbackErr
+		})
+	}
+	require.ErrorIs(t, announce(pageErr), pageErr)
+	assertState(ctx(), true, 2)
+	require.NoError(t, announce(nil))
+	assertState(ctx(), true, 3)
+	require.NoError(t, executor.ResumeMasterPenalty(nextBlock.WithBlockHeight(nextBlock.BlockHeight()+1), paged, func(child sdk.Context) error {
+		assertState(child, true, 3)
+		return nil
+	}))
+	require.Equal(t, initialSupply, supply(ctx()))
+	f.backing(principal)
+	f.activeReserve(principal)
 	t.Log(masterHistoricalPenaltyPassed)
 }

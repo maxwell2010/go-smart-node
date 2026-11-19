@@ -133,3 +133,16 @@ func TestNativeDuplicateVotePagedJailPreservesLiability(t *testing.T) {
 	_, err = k.GetNativeDuplicateVoteExclusion(ctx, consensus)
 	require.NoError(t, err)
 }
+
+// Cosmos cacheMergeIterator.Error reports invalid when no key exists. An
+// empty durable queue is routine BeginBlock state, including nested caches.
+func TestNativePenaltyEmptyQueueInNestedFinalizeCache(t *testing.T) {
+	ctx, _, k := bindingEnvironment(t, false)
+	ctx = ctx.WithExecMode(sdk.ExecModeFinalize)
+	outer, _ := ctx.CacheContext()
+	inner, _ := outer.CacheContext()
+	for _, read := range []sdk.Context{ctx, outer, inner} {
+		_, err := k.NextNativePenaltyProgress(read, NativePenaltyDowntime)
+		require.ErrorIs(t, err, ErrNotFound)
+	}
+}

@@ -100,7 +100,7 @@ func TestNativeFeeRewardIndexColdMigrationRequiresExplicitAudit(t *testing.T) {
 	ctx, service, k := environment(t)
 	g := genesis(t)
 	require.NoError(t, k.InitGenesis(ctx, g))
-	for _, prefix := range []byte{feeRewardOwnerPrefix, feeRewardCountPrefix, feeRewardDirtyOwnerPrefix, feeRewardDirtyCommissionPrefix} {
+	for _, prefix := range []byte{feeRewardOwnerPrefix, feeRewardCountPrefix, feeRewardDirtyOwnerPrefix, feeRewardDirtyCommissionPrefix, feeTreeRootPrefix, feeTreeNodePrefix, feeTreePayPrefix, feeTreeCommissionPrefix, feeTreeLiabilityKey, feeTreeSchedulerPrefix, feeTreeRetainedPrefix} {
 		var keys [][]byte
 		require.NoError(t, k.scan(ctx, prefix, func(key, _ []byte) error { keys = append(keys, key); return nil }))
 		for _, key := range keys {

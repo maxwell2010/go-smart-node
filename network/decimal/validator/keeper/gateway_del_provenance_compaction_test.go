@@ -93,7 +93,7 @@ func TestActiveDELProvenanceCompactsExpiredPrefixAtDepositCap(t *testing.T) {
 	}})
 	require.NoError(t, err)
 	require.Equal(t, 1, count)
-	require.ErrorContains(t, k.ApplyGatewayDELDelegation(pending, next, deposit), "provenance tranche limit")
+	require.ErrorIs(t, k.ApplyGatewayDELDelegation(pending, next, deposit), ErrNativePenaltyPending)
 	require.Equal(t, beforeLots, activeDELProvenanceForTest(t, pending, k, position))
 
 	broken, err := NewStateKeeperWithDomain(failingService{service: k.service, prefix: bindingRevisionKey}, bindingTestChain, 990001)

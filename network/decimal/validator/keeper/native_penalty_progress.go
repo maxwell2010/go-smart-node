@@ -243,11 +243,11 @@ func (k *StateKeeper) NextNativePenaltyProgress(ctx sdk.Context, reason byte) (N
 				key, err = nil, closeErr
 			}
 		}()
-		if err := it.Error(); err != nil {
-			return nil, err
-		}
 		if !it.Valid() {
 			return nil, ErrNotFound
+		}
+		if err := it.Error(); err != nil {
+			return nil, err
 		}
 		key = bytes.Clone(it.Key())
 		if len(key) != 22 || !bytes.HasPrefix(key, prefix) {
