@@ -1,0 +1,51 @@
+{
+  "date": "2026-11-19",
+  "sourceRevision": "b60080f5ad4fd314c270e1fe9e6607b0d614b48e",
+  "avatarRunUrl": "https://github.com/maxwell2010/go-smart-node/actions/runs/44512388538",
+  "avatarConclusion": "success",
+  "avatarArtifact": {
+    "name": "validator-avatar-genesis-b60080f5ad4fd314c270e1fe9e6607b0d614b48e-verify-1",
+    "sizeBytes": 100766,
+    "sha256": "b165086c4d7eb39d28d65eb6e2af436e6b551fe8eb86618cd25d304251583463"
+  },
+  "moduleRunUrl": "https://github.com/maxwell2010/go-smart-node/actions/runs/44512394002",
+  "moduleConclusion": "success",
+  "generatedProtobuf": {
+    "generationRunUrl": "https://github.com/maxwell2010/go-smart-node/actions/runs/44509290127",
+    "protoc": "3.21.12",
+    "gocosmos": "1.7.2",
+    "grpcGateway": "1.16.0",
+    "genesisPbGoSha256": "0a44dca51520f582063cd9930425de04f7e8709a3aa35355d05ef338249bcc62",
+    "reproducedInVerificationCI": true
+  },
+  "validated": {
+    "two_operator_avatar_identity_and_deterministic_module_export_import": true,
+    "sdk_json_and_binary_protobuf_roundtrip": true,
+    "legacy_genesis_without_avatars": true,
+    "duplicate_unknown_operator_bad_uri_invalid_utf8_and_corrupt_store_rejected": true,
+    "late_import_write_failure_leaves_parent_store_empty": true,
+    "cli_import_preserves_all_non_avatar_genesis_fields": true,
+    "cli_import_never_overwrites_existing_file": true,
+    "protobuf_json_aliases_and_artifact_case_aliases_checked": true,
+    "rpc_export_queries_one_fixed_height_and_checks_network_and_operator": true,
+    "rpc_errors_publish_no_partial_artifact": true,
+    "real_signed_evm_metadata_module_export_then_fresh_app_avatar_import": true,
+    "post_import_own_update_clear_foreign_rejection_invalid_metadata_rollback_nonce_replay": true,
+    "database_restart_preserves_import_and_signed_clear": true,
+    "consensus_key_reward_address_stake_rewards_and_supply_protected": true,
+    "signer_balance_changes_only_by_test_transaction_gas": true
+  },
+  "limits": {
+    "full_financial_genesis_export": "unchanged explicit rejection for an active withdrawal profile",
+    "module_import_is_not_a_whole_chain_restore": true,
+    "cli_artifact_contains_metadata_only": true,
+    "rpc_export_test": "real Cobra and SDK query client with local CometRPC stub; no external RPC server",
+    "rpc_artifact_trust": "trusted RPC snapshot, block hash is provenance and not a cryptographic state proof",
+    "cli_operator_scope": "operators listed in the supplied validated genesis only",
+    "image_bytes_in_genesis": false,
+    "image_availability": "requires separate media objects and pinning or backup",
+    "working_nodes_accessed": false,
+    "real_network_transactions_sent": false,
+    "published_v100_changed": false
+  }
+}
