@@ -43,7 +43,7 @@ func assertNativeReserveFeeQuotes(t *testing.T, l nativeHistoricalLifecycle, pro
 			case "reserveless":
 				target = free
 			case "paused":
-				l.app.EVMKeeper.SetState(ctx, profile.TokenCenter, pausedSlot, common.BigToHash(big.NewInt(1)))
+				l.app.EVMKeeper.SetState(ctx, profile.TokenCenter, pausedSlot, common.BigToHash(big.NewInt(1)).Bytes())
 			case "empty-reserve", "minimum-reserve":
 				amount := l.app.BankKeeper.GetBalance(ctx, sdk.AccAddress(token.Bytes()), identity.BaseDenom).Amount
 				if name == "minimum-reserve" {
