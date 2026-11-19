@@ -127,3 +127,44 @@ func TestValidatorAvatarCLIImportNeverOverwritesInput(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, raw, unchanged)
 }
+
+func TestValidatorAvatarCLIHandlesProtobufAliasesWithoutDuplicateFields(t *testing.T) {
+	raw, transfer := avatarTransferFixture(t)
+	doc, err := readAvatarGenesis(raw, 990001)
+	require.NoError(t, err)
+	artifact, err := json.Marshal(transfer)
+	require.NoError(t, err)
+	doc.native["validatorAvatars"] = doc.native["validator_avatars"]
+	delete(doc.native, "validator_avatars")
+	encode := func() []byte {
+		doc.state[validatortypes.ModuleName], err = json.Marshal(doc.native)
+		require.NoError(t, err)
+		doc.document["app_state"], err = json.Marshal(doc.state)
+		require.NoError(t, err)
+		data, err := json.Marshal(doc.document)
+		require.NoError(t, err)
+		return data
+	}
+	result, err := importValidatorAvatars(encode(), artifact, 990001)
+	require.NoError(t, err)
+	after, err := readAvatarGenesis(result, 990001)
+	require.NoError(t, err)
+	require.Len(t, after.module.ValidatorAvatars, 2)
+	require.NotContains(t, after.native, "validatorAvatars")
+	doc.native["validator_avatars"] = doc.native["validatorAvatars"]
+	_, err = importValidatorAvatars(encode(), artifact, 990001)
+	require.ErrorContains(t, err, "ambiguous protobuf aliases")
+	var fields map[string]json.RawMessage
+	require.NoError(t, json.Unmarshal(artifact, &fields))
+	fields["Format"] = fields["format"]
+	bad, err := json.Marshal(fields)
+	require.NoError(t, err)
+	_, err = importValidatorAvatars(raw, bad, 990001)
+	require.ErrorContains(t, err, "field names must match exactly")
+	delete(fields, "Format")
+	fields["validator_avatars"] = json.RawMessage(`[{"operator_address":"x","avatar_uri":"https://example.invalid/a","Avatar_URI":"https://example.invalid/b"}]`)
+	bad, err = json.Marshal(fields)
+	require.NoError(t, err)
+	_, err = importValidatorAvatars(raw, bad, 990001)
+	require.ErrorContains(t, err, "record field names must match exactly")
+}

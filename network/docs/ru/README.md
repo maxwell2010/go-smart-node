@@ -25,6 +25,7 @@
 [Нативная монета, мост, оплата комиссий и gas-price oracle](TOKEN_AND_FEE_MODEL.md).
 [Создание пользователями токенов/NFT, аватарки и сохранность данных](USER_ASSET_CREATION_AND_MEDIA.md).
 [CLI самоуправления валидатора: подпись, metadata, комиссия и аватарка](VALIDATOR_SELF_CONTROL.md).
+[Экспорт и импорт аватарок валидаторов через genesis](VALIDATOR_AVATAR_GENESIS.md).
 [Грейс-период штрафов для новой изолированной тестовой сети](TEST_GRACE_PERIOD.md).
 [Массовое делегирование, порционные штрафы и автоматические награды](MASS_DELEGATION_AND_REWARDS.md).
 [Разбор предложений: однократный выпуск, DEX, vesting, DePIN и арбитраж](TOKENOMICS_PROPOSAL_REVIEW.md).

@@ -123,6 +123,24 @@ func readAvatarGenesis(raw []byte, evmID uint64) (avatarGenesisDocument, error) 
 	if err := json.Unmarshal(doc.state[validatortypes.ModuleName], &doc.native); err != nil {
 		return doc, err
 	}
+	if doc.native["validator_avatars"] != nil && doc.native["validatorAvatars"] != nil {
+		return doc, errors.New("ambiguous protobuf aliases for validator avatars")
+	}
+	avatarRows := doc.native["validator_avatars"]
+	if avatarRows == nil {
+		avatarRows = doc.native["validatorAvatars"]
+	}
+	if avatarRows != nil {
+		var rows []map[string]json.RawMessage
+		if err := json.Unmarshal(avatarRows, &rows); err != nil {
+			return doc, err
+		}
+		for _, row := range rows {
+			if row["operator_address"] != nil && row["operatorAddress"] != nil || row["avatar_uri"] != nil && row["avatarUri"] != nil {
+				return doc, errors.New("ambiguous protobuf aliases inside validator avatar")
+			}
+		}
+	}
 	cdc := ownedapp.MakeEncodingConfig(evmID).Codec
 	if err := cdc.UnmarshalJSON(doc.state[validatortypes.ModuleName], &doc.module); err != nil {
 		return doc, err
@@ -188,6 +206,27 @@ func importValidatorAvatars(genesis, artifact []byte, evmID uint64) ([]byte, err
 	if err := validateAvatarTransferJSON(artifact); err != nil {
 		return nil, err
 	}
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal(artifact, &fields); err != nil {
+		return nil, err
+	}
+	allowed := map[string]bool{"format": true, "metadata_only": true, "chain_id": true, "evm_chain_id": true, "height": true, "source_block_hash": true, "operators": true, "validator_avatars": true}
+	for field := range fields {
+		if !allowed[field] {
+			return nil, errors.New("avatar artifact field names must match exactly")
+		}
+	}
+	var rows []map[string]json.RawMessage
+	if err := json.Unmarshal(fields["validator_avatars"], &rows); err != nil {
+		return nil, err
+	}
+	for _, row := range rows {
+		for field := range row {
+			if field != "operator_address" && field != "avatar_uri" {
+				return nil, errors.New("avatar artifact record field names must match exactly")
+			}
+		}
+	}
 	decoder := json.NewDecoder(bytes.NewReader(artifact))
 	decoder.DisallowUnknownFields()
 	if err := decoder.Decode(&transfer); err != nil {
@@ -230,6 +269,7 @@ func importValidatorAvatars(genesis, artifact []byte, evmID uint64) ([]byte, err
 	if err := doc.module.Validate(); err != nil {
 		return nil, err
 	}
+	delete(doc.native, "validatorAvatars")
 	doc.native["validator_avatars"], err = json.Marshal(doc.module.ValidatorAvatars)
 	if err != nil {
 		return nil, err
