@@ -1,12 +1,12 @@
 {
   "date": "2026-11-19",
-  "featureSourceRevision": "b7214f465f529eaab96cc70a8d5209bfd67ad405",
-  "featureRunUrl": "https://github.com/maxwell2010/go-smart-node/actions/runs/44505949915",
+  "featureSourceRevision": "a4208cf71f1428db055d1052de0990610d57783c",
+  "featureRunUrl": "https://github.com/maxwell2010/go-smart-node/actions/runs/44506992670",
   "featureConclusion": "success",
   "featureArtifact": {
-    "name": "token-features-b7214f465f529eaab96cc70a8d5209bfd67ad405-1",
-    "sizeBytes": 15237,
-    "sha256": "4f769b9f0a491fe4c9b4c96ae7fe2a8e0cfb51c9ac2f06a2ba803ef396e52cff"
+    "name": "token-features-a4208cf71f1428db055d1052de0990610d57783c-1",
+    "sizeBytes": 15396,
+    "sha256": "1a92373e9871f5d6d8241a79b842b6a847bf905d1a0fbbaf5ec0d87f2d4b74d1"
   },
   "moduleSourceRevision": "32e5a7c5ab91b07c586b656072b5954e291f26dc",
   "moduleRunUrl": "https://github.com/maxwell2010/go-smart-node/actions/runs/44505100914",
@@ -14,6 +14,12 @@
   "mediaSourceRevision": "1100cee21c35b71b208bf74e699281a28ceac97f",
   "mediaRunUrl": "https://github.com/maxwell2010/go-smart-node/actions/runs/44497011832",
   "mediaConclusion": "success",
+  "validatorControlGasObservation": {
+    "gasLimit": 24000000,
+    "minGasMultiplier": "0.5",
+    "receiptGasUsed": {"pauseSelf": 12000000, "updateValidatorMeta": 12000000, "unpauseSelf": 12000000},
+    "interpretation": "charged gas includes the configured floor; minimum execution gas not measured"
+  },
   "validated": {
     "real_empty_user_asset_init_chain_four_validators": true,
     "signed_first_backed_and_reserveless_drc20_and_restart": true,

@@ -119,8 +119,8 @@ Media proxy использует фиксированные доверенные
 
 ## Новые проверки feature-ветки
 
-[Прогон 44505949915](https://github.com/maxwell2010/go-smart-node/actions/runs/44505949915)
-на `b7214f4` полностью прошёл, включая пустой genesis, отдельный NFT lifecycle,
+[Прогон 44506992670](https://github.com/maxwell2010/go-smart-node/actions/runs/44506992670)
+на `a4208cf` полностью прошёл, включая пустой genesis, отдельный NFT lifecycle,
 strict event tests, грейс-период, подписанные self controls валидатора,
 SDK-keyring/CLI и прежние token/RPC/mempool проверки.
 [Полный module CI 44505100914](https://github.com/maxwell2010/go-smart-node/actions/runs/44505100914)
