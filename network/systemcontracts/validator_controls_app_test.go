@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"cosmossdk.io/log"
@@ -57,6 +58,11 @@ func TestOwnedAppNativeValidatorSelfControls(t *testing.T) {
 				delLifecycleFixtureEnv+"=", withdrawalGenesisFixtureEnv+"=")
 			output, err := child.CombinedOutput()
 			require.NoError(t, err, "%s", output)
+			for _, line := range strings.Split(string(output), "\n") {
+				if strings.Contains(line, "signed self-control method=") {
+					t.Log(strings.TrimSpace(line))
+				}
+			}
 		}) {
 			return
 		}

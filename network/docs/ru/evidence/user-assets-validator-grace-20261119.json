@@ -1,0 +1,43 @@
+{
+  "date": "2026-11-19",
+  "featureSourceRevision": "b7214f465f529eaab96cc70a8d5209bfd67ad405",
+  "featureRunUrl": "https://github.com/maxwell2010/go-smart-node/actions/runs/44505949915",
+  "featureConclusion": "success",
+  "featureArtifact": {
+    "name": "token-features-b7214f465f529eaab96cc70a8d5209bfd67ad405-1",
+    "sizeBytes": 15237,
+    "sha256": "4f769b9f0a491fe4c9b4c96ae7fe2a8e0cfb51c9ac2f06a2ba803ef396e52cff"
+  },
+  "moduleSourceRevision": "32e5a7c5ab91b07c586b656072b5954e291f26dc",
+  "moduleRunUrl": "https://github.com/maxwell2010/go-smart-node/actions/runs/44505100914",
+  "moduleConclusion": "success",
+  "mediaSourceRevision": "1100cee21c35b71b208bf74e699281a28ceac97f",
+  "mediaRunUrl": "https://github.com/maxwell2010/go-smart-node/actions/runs/44497011832",
+  "mediaConclusion": "success",
+  "validated": {
+    "real_empty_user_asset_init_chain_four_validators": true,
+    "signed_first_backed_and_reserveless_drc20_and_restart": true,
+    "signed_four_nft_families_mint_transfer_negative_authority_and_restart": true,
+    "exact_nft_constructor_mint_uri_reserve_and_supply_events": true,
+    "grace_signatures_and_quorum_still_required": true,
+    "grace_downtime_and_duplicate_vote_exemption": true,
+    "grace_restart_expiry_no_retroactive_penalty": true,
+    "post_grace_downtime_and_duplicate_vote_penalties_resume": true,
+    "validator_signed_enable_disable_metadata_commission_avatar": true,
+    "foreign_operator_rejected_invalid_metadata_rollback_nonce_replay_rejected": true,
+    "validator_metadata_survives_database_restart": true,
+    "cli_sdk_keyring_signing_and_status_consensus_any_codec": true,
+    "media_actual_decode_and_verified_local_backup_restore": true
+  },
+  "limits": {
+    "publicGenesisApprovedOrDeployed": false,
+    "workingNodesAccessed": false,
+    "realTransactionsSent": false,
+    "publishedV100Changed": false,
+    "graceAllowedEvmDomains": "990001..990099 only",
+    "blockGasCap": 24000000,
+    "validatorAvatarGenesisExportImport": "not implemented; database restart and backup are distinct",
+    "publicMediaUploadWalletProofAndProductionPinning": "service integration pending",
+    "validatorCommissionDailyChangeLimit": "not implemented; current range is 0..1"
+  }
+}

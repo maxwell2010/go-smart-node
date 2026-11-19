@@ -119,6 +119,15 @@ Media proxy использует фиксированные доверенные
 
 ## Новые проверки feature-ветки
 
+[Прогон 44505949915](https://github.com/maxwell2010/go-smart-node/actions/runs/44505949915)
+на `b7214f4` полностью прошёл, включая пустой genesis, отдельный NFT lifecycle,
+strict event tests, грейс-период, подписанные self controls валидатора,
+SDK-keyring/CLI и прежние token/RPC/mempool проверки.
+[Полный module CI 44505100914](https://github.com/maxwell2010/go-smart-node/actions/runs/44505100914)
+на `32e5a7c` также прошёл. После него изменены бюджет gas CLI и теста controls,
+проверенные указанным feature CI; системный предел 24 млн не изменён.
+[Результаты и оставшиеся ограничения](evidence/user-assets-validator-grace-20261119.json).
+
 [Прогон 44502401279](https://github.com/maxwell2010/go-smart-node/actions/runs/44502401279)
 на `2ac4d36` подтвердил настоящий пустой `InitChain` с четырьмя валидаторами,
 создание первого backed DRC20, reserveless DRC20 и всех четырёх NFT-семейств,
