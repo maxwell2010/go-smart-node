@@ -153,6 +153,13 @@ func assertNativeDRC20FeePayments(t *testing.T, l nativeHistoricalLifecycle, fre
 		}
 		outer, err := envelope.Marshal(encoded, a, sig)
 		require.NoError(t, err)
+		decoded, err := l.app.TxConfig().TxDecoder()(outer)
+		require.NoError(t, err, "application client codec must retain composite fee transport")
+		_, ok := decoded.(*envelope.Tx)
+		require.True(t, ok)
+		roundTrip, err := l.app.TxConfig().TxEncoder()(decoded)
+		require.NoError(t, err)
+		require.Equal(t, outer, roundTrip)
 		return outer
 	}
 	// Invalid ante input must neither spend tokens nor persist a fee nonce,

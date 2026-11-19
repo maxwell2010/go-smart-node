@@ -15,6 +15,7 @@ from urllib.parse import urlencode
 
 from del_delegation_smoke import GAS_LIMIT, GAS_PRICE, balance, native_positions, read_frozen, read_words, write_config
 from mcnd_process_smoke import ProcessOwner, SignalGuard, private_environment, private_namespace, run_command
+from native_reward_checkpoint import native_reward_checkpoint, reward_tree_present, compare_reward_migration
 from native_consensus_smoke import ATOMS, FOUR_UPGRADE_POWERS, INITIAL, check_signatures, committed_header, create_replica, create_replicas, decode_pubkey, effective_set, load_fixture, wait_replicas
 from withdrawal_genesis_smoke import CHAIN, EVM_CHAIN, MAX_BLOCKS, SHA256, WORD, check, ethereum, log_records, native, private_bytes, private_write, readiness_diagnostic, request, safe_diagnostic
 
@@ -300,7 +301,7 @@ def select_pending_plan(node, actions, report):
              for h in (low, height)]
     seconds = (times[1] - times[0]).total_seconds() / (height - low)
     lead = 24 if seconds >= 2 else 32
-    action = next((plan for plan in actions if plan['planHeight'] >= height + lead), None)
+    action = next((plan for plan in actions if plan['planHeight'] >= height + lead and plan['planHeight'] % 120 != 0), None)
     check(action is not None, 'Hermes handshake consumed the private fixture height budget')
     report['ibcPacket']['planSelectionHeight'] = height
     return action
@@ -655,6 +656,12 @@ def restore_validator_checkpoint(fleet, replicas, replacement, root, genesis, ex
     final_header = committed_header(participants, final + 1)
     check(final_header == primary_final, 'restored services did not replay the original signed history')
     check_schedule(replicas, action, target - 1)
+    if args.full_profile:
+        check(native_reward_checkpoint(replicas, target - 1) == report['rewardMigration']['before'],
+              'successor reopening changed the committed pre-upgrade reward checkpoint')
+        reward_after = native_reward_checkpoint(replicas, target)
+        report['rewardMigration'].update(after=reward_after,
+            coverage=compare_reward_migration(report['rewardMigration']['before'], reward_after))
     for node in replicas:
         check(applied_height(node, target) == target and current_plan(node, target) is None,
               'restored service did not reapply the exact approved migration')
@@ -668,6 +675,11 @@ def restore_validator_checkpoint(fleet, replicas, replacement, root, genesis, ex
                           'coinAfter': check_coin_module_migration(replicas, genesis, target, 2),
                           'services': fleet.evidence()}
     report['rollback']['pendingWithdrawal'] = check_pending_withdrawal(replicas, expected, final, report['withdrawal']['before']['dueAt'])
+    if 'rewardMigration' in report:
+        check(native_reward_checkpoint(replicas, target - 1) == report['rewardMigration']['before'] and
+              native_reward_checkpoint(replicas, target) == report['rewardMigration']['after'],
+              'systemd restore did not retain the exact reward checkpoint and replay')
+        report['rollback']['rewardMigrationPreserved'] = True
     check(report['rollback']['coinBefore'] == report['coinMigration']['before'] and
           report['rollback']['coinAfter'] == report['coinMigration']['after'],
           'restored module records differ before or after replaying the migration')
@@ -755,6 +767,11 @@ def run_gate(args, binary, replacement, root, expected, genesis, keys, actions, 
     report['schedule'] = {'proposalID': proposal_id, 'name': PLAN, 'scheduledAt': scheduled_at, 'targetHeight': target}
 
     if args.full_profile:
+        # Produce a genuine fee-bearing withdrawal close to the closed backup
+        # boundary. Earlier rewards may already have been paid at block120.
+        if reward_tree_present(source, tally_height):
+            check(target % 120 != 0, 'pending reward migration cannot share the automatic payout tick')
+            wait_replicas(replicas, target - 5, 125, report)
         report['phase'] = 'predecessor-signed-withdrawal'
         withdrawn_at, withdrawal_hash = withdraw_for_handoff(source, expected)
         check(tally_height < withdrawn_at and withdrawn_at + 2 <= target - 1, 'withdrawal missed the predecessor boundary')
@@ -768,6 +785,11 @@ def run_gate(args, binary, replacement, root, expected, genesis, keys, actions, 
     before = committed_header(replicas, target - 1)
     boundary = committed_header(replicas, target)
     report['predecessor'] = {'committedHeight': target - 1, 'boundaryHeight': target, 'boundary': boundary}
+    if args.full_profile:
+        reward_before = native_reward_checkpoint(replicas, target - 1)
+        if reward_before['mode'] == 'native-reward-tree':
+            check(int(reward_before['owedAtomic']) > 0, 'closed upgrade backup has no unpaid native rewards')
+        report['rewardMigration'] = {'before': reward_before}
     if fleet:
         report['coinMigration'] = {'before': check_coin_module_migration(replicas, genesis, target - 1, 1)}
         report['systemd'] = {'predecessors': fleet.evidence()}
@@ -848,6 +870,10 @@ def run_gate(args, binary, replacement, root, expected, genesis, keys, actions, 
         for node in restored_replicas:
             check(applied_height(node, target) == target and current_plan(node, target) is None,
                   'restored native copy did not replay the approved plan')
+        check(native_reward_checkpoint(restored_replicas, target - 1) == report['rewardMigration']['before'],
+              'restored closed backup changed unpaid native rewards or the old payout cursor')
+        check(native_reward_checkpoint(restored_replicas, target) == report['rewardMigration']['after'],
+              'replayed approved migration changed native reward accounting')
         restored_claim = check_pending_withdrawal(restored_replicas, expected, target, due)
         check(restored_claim['appHash'] == applied_app_hash, 'restored replay produced a different application hash')
         report['rollback'] = {**ibc.verify_restored_ledger(restored_replicas), 'predecessorHeight': target - 1,

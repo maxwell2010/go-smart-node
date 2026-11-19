@@ -56,7 +56,7 @@ func checkNativeGovernanceUpgrade(t *testing.T, app *App, ctx sdk.Context, propo
 		require.NoError(t, err)
 		return closing, proposal
 	}
-	const height = int64(50)
+	const height = int64(240)
 	valid := metadata(nativeSDKMigrationPlan, height)
 	id, err := submit(ctx, valid)
 	require.ErrorContains(t, err, "upgrade governance is disabled")
@@ -131,6 +131,11 @@ func checkNativeGovernanceUpgrade(t *testing.T, app *App, ctx sdk.Context, propo
 	require.NoError(t, err)
 	require.Equal(t, plan, preserved)
 
+	oldFeeRewards := app.withdrawals.profile.EnableNativeFeeRewards
+	app.withdrawals.profile.EnableNativeFeeRewards = true
+	defer func() { app.withdrawals.profile.EnableNativeFeeRewards = oldFeeRewards }()
+	rewardCheckpoint := prepareNativeRewardMigrationCheckpoint(t, app, ctx, proposer, voter)
+
 	from := app.ModuleManager.GetVersionMap()
 	require.NoError(t, app.UpgradeKeeper.SetModuleVersionMap(ctx, from))
 	atUpgrade := ctx.WithBlockHeight(plan.Height).WithHeaderInfo(coreheader.Info{ChainID: ctx.ChainID(), Height: plan.Height, Time: ctx.BlockTime()})
@@ -152,8 +157,18 @@ func checkNativeGovernanceUpgrade(t *testing.T, app *App, ctx sdk.Context, propo
 	app.UpgradeKeeper.SetUpgradeHandler(nativeSDKMigrationPlan, app.runNativeSDKMigration)
 	_, err = sdkupgrade.PreBlocker(early, app.UpgradeKeeper)
 	require.ErrorContains(t, err, "BINARY UPDATED BEFORE TRIGGER")
+	// A discarded upgrade-and-payment branch represents restoring the prior
+	// application checkpoint. It must not consume the original credits.
+	abandoned, _ := atUpgrade.CacheContext()
+	_, err = sdkupgrade.PreBlocker(abandoned, app.UpgradeKeeper)
+	require.NoError(t, err)
+	rewardCheckpoint.assertUnchanged(t, app, abandoned)
+	rewardCheckpoint.drainOnce(t, app, abandoned)
+	rewardCheckpoint.assertUnchanged(t, app, atUpgrade)
 	_, err = sdkupgrade.PreBlocker(atUpgrade, app.UpgradeKeeper)
 	require.NoError(t, err)
+	rewardCheckpoint.assertUnchanged(t, app, atUpgrade)
+	rewardCheckpoint.drainOnce(t, app, atUpgrade)
 	name, doneHeight, err := app.UpgradeKeeper.GetLastCompletedUpgrade(atUpgrade)
 	require.NoError(t, err)
 	require.Equal(t, plan.Name, name)

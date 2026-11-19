@@ -7,6 +7,8 @@ import re
 import shutil
 import sys
 
+from native_reward_checkpoint import native_reward_checkpoint
+
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "internal" / "ibclab"))
 from hermes_lab import (
     A_ID, B_ID, HERMES_SHA256, Lab, amount, binary, commitments, connect_transfer, escrow, field, fields,
@@ -105,9 +107,11 @@ class NativeUpgradeIBC:
         return {"ownedRelayerAtomic": str(amount(self.a["rpc"], self.a["address"], "del")),
                 "referenceRelayerAtomic": str(amount(self.b["rpc"], self.b["address"], "stake")),
                 "referenceClientHeight": self.client_height(), "referenceVoucherAtomic": "0",
-                "packets": self.pending, "escrowAtomic": str(self.value)}
+                "packets": self.pending, "escrowAtomic": str(self.value),
+                "nativeRewards": native_reward_checkpoint(self.replicas, self.reward_backup_height)}
 
     def mark_checkpoint(self):
+        self.reward_backup_height = min(int(node.rpc("abci_info")["response"]["last_block_height"]) for node in self.replicas)
         reference = self.b["rpc"]
         committed = int(rpc(reference, "abci_info")["response"]["last_block_height"])
         height = min(committed, self.lab.height(reference, B_ID)) - 1

@@ -112,6 +112,7 @@ jobs:
           python3 scripts/verify_pion_transport.py |& tee validation-logs/pion-upstream-integrity.log
           python3 -m unittest discover -s scripts -p 'test_*.py'
           python3 -m unittest discover -s tools -p 'test_native_consensus_rewards.py'
+          python3 -m unittest discover -s tools -p 'test_native_reward_checkpoint.py'
       - name: Test ordinary crypto regressions with and without CGO
         run: |
           go test -mod=readonly -p 2 -count=1 github.com/ethereum/go-ethereum/crypto github.com/ethereum/go-ethereum/crypto/secp256k1 github.com/ethereum/go-ethereum/common/math |& tee validation-logs/geth-crypto-cgo.log
@@ -256,7 +257,7 @@ jobs:
 
   token-daemon:
     if: github.event_name == 'workflow_dispatch' && inputs.scope == 'token-daemon'
-    runs-on: ubuntu-22.04
+    runs-on: ubuntu-24.04
     timeout-minutes: 30
     env:
       GOENV: 'off'

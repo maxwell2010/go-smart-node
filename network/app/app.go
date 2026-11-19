@@ -364,7 +364,9 @@ func NewApp(
 	if err != nil {
 		panic(err)
 	}
-	app.txConfig = txConfig
+	// Keep composite binary transport when enabling textual SDK signing.
+	// RPC/client callers of TxConfig must decode the same bytes as BaseApp.
+	app.txConfig = feeTxConfig{txConfig}
 
 	app.StakingKeeper = stakingkeeper.NewKeeper(
 		appCodec,

@@ -147,13 +147,16 @@ with (out/'manifest.json').open('w') as stream:
         provenanceVerified=True,
         scope='Default production builds; both source inventories checked before/after; Go VCS metadata checked'),stream,indent=2)
 PY
-if [[ "$coin_index_migration" == 0 ]]; then
+if [[ "$coin_index_migration" == 0 || "$native_ibc_v1" == native-ibc-v1 ]]; then
 curl --fail --location --proto '=https' --tlsv1.2 --retry 3 \
   'https://github.com/informalsystems/hermes/releases/download/v1.13.3/hermes-v1.13.3-x86_64-unknown-linux-gnu.tar.gz' --output "$work/hermes.tar.gz"
 printf '%s  %s\n' 3582136824ac1984c8884b310c63940a1489f091fa45faca38ed80e5dfe7d51b "$work/hermes.tar.gz" | sha256sum --check
 tar -xzf "$work/hermes.tar.gz" -C "$work"
 printf '%s  %s\n' ed8d57781f57a93e74259c12c8feee661b9633c882307f3a6236e41dbf5ffe35 "$work/hermes" | sha256sum --check
 chmod 755 "$work/hermes"
+fi
+
+if [[ "$coin_index_migration" == 0 ]]; then
 
 # Namespace creation and loopback setup affect only the new namespace.
 sudo -n unshare --net -- bash -euc 'ip link set lo up; exec "$@"' _ \
