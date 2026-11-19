@@ -290,3 +290,31 @@ func TestNativeFeeRewardTreeDeepPendingProgressUnderContinuousNewFees(t *testing
 	}
 	require.True(t, paidAny, "new fees at root must not starve earlier deep credits")
 }
+
+func TestNativeFeeRewardTreeColdAuditRequiresCurrentSlotAndCanonicalSweep(t *testing.T) {
+	ctx, k, g := rewardTreeFixture(t, 1)
+	opKey, e := operatorKey(feeTreeRootPrefix, g.Validators[0].OperatorAddress)
+	require.NoError(t, e)
+	recipient, e := feeRewardAddress(g.Validators[0].RewardAddress)
+	require.NoError(t, e)
+	branch, _ := ctx.CacheContext()
+	state := k.service.OpenKVStore(branch)
+	require.NoError(t, state.Delete(feeTreeKey(feeTreeCommissionPrefix, opKey[1:], recipient)))
+	require.NoError(t, state.Delete(append([]byte{feeTreePayPrefix, 0}, append(bytes.Clone(opKey[1:]), recipient...)...)))
+	require.NoError(t, k.changeNativeFeeRewardRetained(branch, opKey[1:], -1))
+	require.ErrorContains(t, k.auditNativeFeeRewardTree(branch), "current commission slot")
+	for _, s := range []feeRewardSweep{
+		{height: 120, end: bytes.Repeat([]byte{1}, 42)},
+		{height: 120, cursor: feeTreePayKey(opKey[1:], bytes.Repeat([]byte{2}, 20)), end: feeTreePayKey(opKey[1:], bytes.Repeat([]byte{1}, 20))},
+		{height: 120, cursor: feeTreePayKey(opKey[1:], recipient)},
+	} {
+		branch, _ := ctx.CacheContext()
+		require.NoError(t, k.writeNativeFeeRewardSweep(branch, s))
+		_, e := k.readNativeFeeRewardSweep(branch)
+		require.ErrorContains(t, e, "sweep key range")
+	}
+	branch, _ = ctx.CacheContext()
+	require.NoError(t, k.service.OpenKVStore(branch).Delete([]byte{feeRewardIndexMarker}))
+	require.ErrorIs(t, k.BuildNativeFeeRewardTree(branch), ErrNativeFeeRewardIndexUnavailable)
+	require.NoError(t, k.auditNativeFeeRewardTree(ctx))
+}

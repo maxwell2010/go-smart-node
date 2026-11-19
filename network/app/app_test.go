@@ -230,4 +230,7 @@ func TestFreshOwnApplicationSignedNativeEVMTransfer(t *testing.T) {
 	t.Run("mature_sdk_unbond_retries_without_partial_payment", func(t *testing.T) {
 		checkMatureSDKUnbondRetry(t, a, sdk.AccAddress(from.Bytes()), valSet, now)
 	})
+	t.Run("automatic_fee_reward_escrow_and_supply", func(t *testing.T) {
+		checkNativeFeeRewardEscrow(t, a)
+	})
 }

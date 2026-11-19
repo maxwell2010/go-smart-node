@@ -18,12 +18,14 @@ import (
 	dbm "github.com/cosmos/cosmos-db"
 	"github.com/cosmos/cosmos-sdk/client/flags"
 	sdk "github.com/cosmos/cosmos-sdk/types"
+	banktypes "github.com/cosmos/cosmos-sdk/x/bank/types"
 	srvflags "github.com/cosmos/evm/server/flags"
 	"github.com/ethereum/go-ethereum/common"
 	ethtypes "github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/crypto"
 	ownedapp "github.com/maxwell2010/go-smart-node/network/app"
 	validatorkeeper "github.com/maxwell2010/go-smart-node/network/decimal/validator/keeper"
+	"github.com/maxwell2010/go-smart-node/network/identity"
 	contracts "github.com/maxwell2010/go-smart-node/network/systemcontracts"
 	"github.com/stretchr/testify/require"
 )
@@ -111,6 +113,7 @@ func runNativeMassDelegationLifecycle(t *testing.T, dir, phase string, n int) {
 	var checkpoint nativeMassCheckpoint
 	operator := common.HexToAddress(l.target.EVM)
 	one := sdkmath.NewIntWithDecimal(1, 18)
+	newOwners := n - 1 // The exported target already has one real genesis position.
 	if phase == "run" {
 		require.Zero(t, app.LastBlockHeight())
 		params := doc.ConsensusParams.ToProto()
@@ -121,6 +124,7 @@ func runNativeMassDelegationLifecycle(t *testing.T, dir, phase string, n int) {
 		require.NoError(t, err)
 		l.set = cmttypes.NewValidatorSet(updates)
 		l.commit(l.finalize(nil, nil))
+		nativeMassAssertCensus(t, l, operator, 1)
 		before := l.supply()
 		actorKey, err := registryFixtureKey(3, true)
 		require.NoError(t, err)
@@ -130,17 +134,21 @@ func runNativeMassDelegationLifecycle(t *testing.T, dir, phase string, n int) {
 		require.NoError(t, err)
 		data, err := gateway.Pack("delegateDEL", operator)
 		require.NoError(t, err)
-		for i := 0; i < n; i++ {
+		for i := 0; i < newOwners; i++ {
 			ownerKey := nativeMassOwnerKey(t, i)
 			owner := crypto.PubkeyToAddress(ownerKey.PublicKey)
 			// Existing actor funds finance both principal and gas. No genesis
 			// balance rewrites, synthetic native mint, or mocked stake rows.
-			l.submitSignedEthereum(nativeMassSignedCall(t, l, actor, owner, one.MulRaw(2), nil))
+			// The isolated native profile admits SDK MsgSend, while an arbitrary
+			// EVM value CALL is intentionally outside its Gateway allowlist.
+			l.signedGovernance(actorKey, banktypes.NewMsgSend(sdk.AccAddress(expected.Actor[:]), sdk.AccAddress(owner[:]),
+				sdk.NewCoins(sdk.NewCoin(identity.BaseDenom, one.MulRaw(2)))))
 			l.submitSignedEthereum(nativeMassSignedCall(t, l, ownerKey, expected.Gateway, one, data))
 			if (i+1)%100 == 0 {
-				t.Logf("actual signed gateway positions: %d/%d", i+1, n)
+				t.Logf("actual signed new gateway positions: %d/%d (target total=%d)", i+1, newOwners, n)
 			}
 		}
+		nativeMassAssertCensus(t, l, operator, n)
 		require.True(t, before.Equal(l.supply()), "funding and wrapping must not issue native DEL")
 		// H is after every real deposit, while a later deposit must escape
 		// this historical liability even when it merges into an existing row.
@@ -161,9 +169,9 @@ func runNativeMassDelegationLifecycle(t *testing.T, dir, phase string, n int) {
 		checkpoint.Announcement = app.LastBlockHeight()
 		checkpoint.Count = n
 		checkpoint.BeforeSupply = before.String()
-		// The genesis target has 2 DEL. All n new positions are exactly
+		// The genesis target has 2 DEL. All new positions are exactly
 		// 1 DEL; the actor's additional 1 DEL was funded after H.
-		checkpoint.Burned = one.MulRaw(int64(n + 2)).QuoRaw(20).String()
+		checkpoint.Burned = one.MulRaw(int64(newOwners + 2)).QuoRaw(20).String()
 		require.True(t, before.Equal(l.supply()), "announcement must jail before paged financial work")
 		progress, err := app.NativeValidatorKeeper.GetNativePenaltyProgress(l.snapshot(), operator[:])
 		require.NoError(t, err)
@@ -220,7 +228,7 @@ func runNativeMassDelegationLifecycle(t *testing.T, dir, phase string, n int) {
 	require.True(t, before.Sub(burned).Equal(l.supply()), "5%% excludes the deposit funded after the infraction")
 	reserve, err := app.NativeValidatorKeeper.GetActiveDELReserve(l.snapshot(), l.target.Operator)
 	require.NoError(t, err)
-	require.True(t, one.MulRaw(int64(n+3)).Sub(burned).Equal(reserve))
+	require.True(t, one.MulRaw(int64(newOwners+3)).Sub(burned).Equal(reserve))
 	require.NoError(t, app.NativeValidatorKeeper.RequireNoPendingNativePenalty(l.snapshot(), operator[:]))
 	exclusion, err := app.NativeValidatorKeeper.GetNativeDuplicateVoteExclusion(l.snapshot(), sdk.ConsAddress(common.FromHex(l.target.Consensus)))
 	require.NoError(t, err)
@@ -234,6 +242,19 @@ func runNativeMassDelegationLifecycle(t *testing.T, dir, phase string, n int) {
 		require.True(t, settled.Equal(l.supply()), "completed job cannot burn again")
 	}
 	t.Logf("actual EVM mass penalty lifecycle passed: positions=%d, burned=%s, height=%d", n, burned, app.LastBlockHeight())
+}
+
+func nativeMassAssertCensus(t *testing.T, l nativeHistoricalLifecycle, operator common.Address, count int) {
+	t.Helper()
+	genesis, err := l.app.NativeValidatorKeeper.ExportGenesis(l.snapshot())
+	require.NoError(t, err)
+	actual := 0
+	for _, row := range genesis.EVMStakeBindings {
+		if common.BytesToAddress(row.Validator) == operator && row.Active {
+			actual++
+		}
+	}
+	require.Equal(t, count, actual, "count includes the existing genesis position and cannot exceed MaxDelegations")
 }
 
 func nativeMassOwnerKey(t *testing.T, index int) *ecdsa.PrivateKey {

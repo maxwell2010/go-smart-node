@@ -44,7 +44,29 @@ func (k *StateKeeper) EnqueueNativeDuplicateVotePenalties(ctx sdk.Context) (int,
 	if err != nil {
 		return 0, err
 	}
-	return k.enqueueNativeDuplicateVoteCandidates(ctx, candidates)
+	child, commit := ctx.CacheContext()
+	added, err := k.enqueueNativeDuplicateVoteCandidates(child, candidates)
+	if err != nil {
+		return 0, err
+	}
+	// Comet bounds authenticated evidence by the incoming block parameters.
+	// Native key exclusion is constant work per admitted proof and never
+	// waits for the one-financial-page-per-block scheduler or an EVM call.
+	for _, candidate := range candidates {
+		primary, err := nativeDuplicateVoteRecordKey(candidate.ConsensusAddress, candidate.InfractionHeight)
+		if err != nil {
+			return 0, err
+		}
+		job, _, err := k.readNativeDuplicateVoteJob(k.service.OpenKVStore(child), primary)
+		if err != nil {
+			return 0, err
+		}
+		if err := k.JailNativeDuplicateVotePenalty(child, job); err != nil {
+			return 0, err
+		}
+	}
+	commit()
+	return added, nil
 }
 
 func (k *StateKeeper) enqueueNativeDuplicateVoteCandidates(ctx sdk.Context, candidates []NativeDuplicateVoteCandidate) (int, error) {

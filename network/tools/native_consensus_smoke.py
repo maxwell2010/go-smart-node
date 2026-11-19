@@ -30,6 +30,8 @@ DOWNTIME_WINDOW = 3
 JAIL_RECOVERED = (3, 3, 1)
 UNJAILED = 'decimal_native_downtime_unjailed'
 NFT_DELEGATED = 'decimal_nft_delegated'
+FEE_REWARD_PERIOD = 120
+FEE_REWARD_DRAIN_BLOCKS = FEE_REWARD_PERIOD + 32
 
 
 @dataclass
@@ -289,7 +291,8 @@ def wait_replicas(replicas, minimum, seconds, report):
     heights = [wait_height(node.child, minimum, deadline, node.log, report, read_comet=node.rpc,
                            chain_id=node.chain_id) for node in replicas]
     height = min(heights)
-    check(height - report['initialHeight'] < MAX_BLOCKS, 'native consensus exceeded the disposable block budget')
+    budget = MAX_BLOCKS + 2 * FEE_REWARD_DRAIN_BLOCKS if report.get('feeRewards') else MAX_BLOCKS
+    check(height - report['initialHeight'] < budget, 'native consensus exceeded the disposable block budget')
     return height
 
 
@@ -490,22 +493,89 @@ def check_ledger(replicas, expected, height, c_reserve, *, wallet=None, collecto
     return result
 
 
-def settle_fees(replicas, expected, collected, powers, c_reserve, fee):
+def exact_fee_shares(expected, powers, fee):
+    """Reference largest-remainder allocation, with raw operator address ties.
+
+    This fixture has exactly one delegator (the actor) per operator. Thus the
+    owner tree has one leaf and introduces no additional split rounding.
+    """
+    weighted = [(row, power) for row, power in zip(expected['validators'], powers, strict=True) if power]
+    total = sum(power for _, power in weighted)
+    check(total > 0 and fee >= 0, 'invalid fee allocation reference input')
+    shares, remainders = {}, []
+    for row, power in weighted:
+        quotient, remainder = divmod(fee * power, total)
+        shares[row['name']] = quotient
+        remainders.append((remainder, bytes.fromhex(row['evm'][2:]), row['name']))
+    remainders.sort(key=lambda value: (-value[0], value[1]))
+    for _, _, name in remainders[:fee - sum(shares.values())]:
+        shares[name] += 1
+    commissions = {row['name']: shares.get(row['name'], 0) // 4 for row in expected['validators']}
+    owner = fee - sum(commissions.values())
+    check(owner + sum(commissions.values()) == fee, 'reference fee allocation lost DEL atoms')
+    return commissions, owner
+
+
+def reward_escrow_balance(node, height):
+    account = native('/cosmos/auth/v1beta1/module_accounts/native_fee_rewards', height, base=node.rest)['account']
+    check(account['name'] == 'native_fee_rewards', 'unexpected native reward escrow module')
+    address = account['base_account']['address']
+    evm_address = bech32_payload(address)
+    return balance(evm_address, address, height, node.evm, node.rest)
+
+
+def settle_fees(replicas, expected, collected, powers, c_reserve, fee, report):
     check(int(collected['feeCollectorAtomic']) == fee, 'fee collector must contain exactly one transaction fee')
-    total_power = sum(powers)
-    commissions = {}
-    balances = {}
-    for validator, power in zip(expected['validators'], powers, strict=True):
-        share, remainder = divmod(fee * power, total_power)
-        check(remainder == 0, 'fixture fee must divide exactly across the effective signer powers')
-        name = validator['name']
-        commissions[name] = share // 4
-        balances[name] = int(collected['rewardAtomic'][name]) + commissions[name]
-    owner_reward = fee - sum(commissions.values())
-    ledger = check_ledger(replicas, expected, collected['height'] + 1, c_reserve,
-                          wallet=int(collected['walletAtomic']) + owner_reward, collector=0, previous=collected, rewards=balances)
-    return {**ledger, 'commissionPaidAtomic': {name: str(value) for name, value in commissions.items()},
-            'ownerRewardAtomic': str(owner_reward)}
+    commissions, owner_reward = exact_fee_shares(expected, powers, fee)
+    balances = {name: int(collected['rewardAtomic'][name]) + value for name, value in commissions.items()}
+    expected_events = {expected['actorNative']: owner_reward}
+    expected_events.update({row['rewardNative']: commissions[row['name']] for row in expected['validators']})
+    observed = {recipient: 0 for recipient in expected_events}
+    first, cursor = collected['height'] + 1, collected['height'] + 1
+    last = collected['height'] + FEE_REWARD_DRAIN_BLOCKS
+    deadline = time.monotonic() + 100
+    while cursor <= last and time.monotonic() < deadline:
+        tip = wait_replicas(replicas, cursor, max(0, deadline - time.monotonic()), report)
+        for height in range(cursor, min(tip, last) + 1):
+            result = replicas[0].rpc(f'block_results?height={height}')
+            check(not result.get('txs_results'), 'untracked transaction during the isolated fee drain')
+            block_payments = []
+            for event in result.get('finalize_block_events') or []:
+                if event['type'] != 'decimal_native_fee_reward':
+                    continue
+                fields = {attribute['key']: attribute['value'] for attribute in event['attributes']}
+                check(len(event['attributes']) == len(fields) == 3 and set(fields) == {'height', 'recipient', 'amount'},
+                      'unexpected automatic fee reward event attributes')
+                check(int(fields['height']) == height and re.fullmatch(r'[1-9][0-9]*del', fields['amount']),
+                      'invalid automatic fee reward event height or amount')
+                recipient, amount = fields['recipient'], int(fields['amount'][:-3])
+                check(recipient in observed, 'unexpected automatic fee reward recipient')
+                observed[recipient] += amount
+                check(observed[recipient] <= expected_events[recipient], 'automatic fee rewards overpaid a recipient')
+                block_payments.append(fields)
+            wallet = int(collected['walletAtomic']) + observed[expected['actorNative']]
+            rewards = {row['name']: int(collected['rewardAtomic'][row['name']]) + observed[row['rewardNative']]
+                       for row in expected['validators']}
+            for node in replicas:
+                peer = node.rpc(f'block_results?height={height}')
+                peer_events = [{attribute['key']: attribute['value'] for attribute in event['attributes']}
+                               for event in peer.get('finalize_block_events') or []
+                               if event['type'] == 'decimal_native_fee_reward']
+                check(peer_events == block_payments, 'replicas disagree on automatic fee reward events')
+                collector = balance(expected['feeCollector'], expected['feeCollectorNative'], height, node.evm, node.rest)
+                escrow = reward_escrow_balance(node, height)
+                paid = sum(observed.values())
+                check(collector + escrow + paid == fee, 'fee collector, escrow and exact payouts do not conserve DEL')
+            ledger = check_ledger(replicas, expected, height, c_reserve, wallet=wallet, collector=collector,
+                                  previous=collected, rewards=rewards)
+            if observed == expected_events:
+                check(collector == escrow == 0 and wallet == int(collected['walletAtomic']) + owner_reward and rewards == balances,
+                      'automatic fee drain did not settle its exact liabilities')
+                return {**ledger, 'commissionPaidAtomic': {name: str(value) for name, value in commissions.items()},
+                        'ownerRewardAtomic': str(owner_reward), 'rewardEscrowAtomic': '0',
+                        'automaticPeriodBlocks': FEE_REWARD_PERIOD, 'drainBlocks': height - first + 1}
+        cursor = tip + 1
+    raise ValueError('automatic fee liabilities did not drain within the 120-block period and bounded pages')
 
 
 def check_downtime_state(replicas, expected, height, jailed, *, penalty_count=None):
@@ -958,6 +1028,11 @@ def run_gate(args, binary, root, expected, genesis, keys, env, owner, report):
     report['phase'] = 'create-replicas'
     replicas = create_replicas(binary, root, genesis, keys, env, full_mesh=args.downtime)
     source = replicas[0]
+    if args.fee_rewards:
+        # This changes only disposable CI homes. Two automatic 120-block
+        # sweeps must fit the gate; production node configuration is untouched.
+        for node in replicas:
+            write_config(node.home, 'config.toml', {('consensus', 'timeout_commit'): '"500ms"'})
     if args.nft_downtime:
         write_config(source.home, 'app.toml', {
             ('state-sync', 'snapshot-interval'): '12',
@@ -1035,10 +1110,11 @@ def run_gate(args, binary, root, expected, genesis, keys, env, owner, report):
     collected = check_ledger(replicas, expected, height, deposit, wallet=wallet, collector=collector, previous=before)
     report['firstFeeCollected'] = collected
     if args.fee_rewards:
-        paid = settle_fees(replicas, expected, collected, INITIAL, deposit, fee)
+        paid = settle_fees(replicas, expected, collected, INITIAL, deposit, fee, report)
         report['firstFeeSettlement'] = paid
         wallet, collector, collected = int(paid['walletAtomic']), 0, paid
-    report['funded'] = check_ledger(replicas, expected, height + 2, deposit, wallet=wallet, collector=collector, previous=collected)
+    funded_height = max(height + 2, collected['height'])
+    report['funded'] = check_ledger(replicas, expected, funded_height, deposit, wallet=wallet, collector=collector, previous=collected)
 
     report['phase'] = 'post-transition-top-up'
     top_up = submit(source.child, source.log, report, expected, 'topUp', True, expected['nonce'] + 1, DELEGATED,
@@ -1072,7 +1148,7 @@ def run_gate(args, binary, root, expected, genesis, keys, env, owner, report):
     topped_up = check_ledger(replicas, expected, top_up_height, c_reserve, wallet=wallet, collector=collector, previous=report['funded'])
     report['toppedUp'] = topped_up
     if args.fee_rewards:
-        paid = settle_fees(replicas, expected, topped_up, AFTER, c_reserve, top_up_fee)
+        paid = settle_fees(replicas, expected, topped_up, AFTER, c_reserve, top_up_fee, report)
         report['topUpFeeSettlement'] = paid
         wallet, collector, topped_up = int(paid['walletAtomic']), 0, paid
 

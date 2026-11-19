@@ -9,9 +9,7 @@ import (
 	sdkmath "cosmossdk.io/math"
 	storetypes "cosmossdk.io/store/types"
 	cmttypes "github.com/cometbft/cometbft/types"
-	"github.com/cosmos/cosmos-sdk/codec/address"
 	sdk "github.com/cosmos/cosmos-sdk/types"
-	"github.com/maxwell2010/go-smart-node/network/identity"
 )
 
 const (
@@ -510,6 +508,13 @@ func (k *StateKeeper) initNativeFeeRewardTree(ctx sdk.Context) error {
 // BuildNativeFeeRewardTree initializes an older owner-index store atomically.
 func (k *StateKeeper) BuildNativeFeeRewardTree(ctx sdk.Context) error {
 	child, commit := ctx.CacheContext()
+	owners, err := k.hasNativeFeeRewardIndex(child)
+	if err != nil {
+		return err
+	}
+	if !owners {
+		return ErrNativeFeeRewardIndexUnavailable
+	}
 	ok, e := k.hasNativeFeeRewardTree(child)
 	if e != nil {
 		return e
@@ -746,6 +751,12 @@ func (k *StateKeeper) readNativeFeeRewardSweep(ctx sdk.Context) (feeRewardSweep,
 		return s, errors.New("invalid native fee reward sweep boundary")
 	}
 	s.end = bytes.Clone(b[12+size:])
+	valid := func(key []byte) bool {
+		return len(key) == 42 && key[0] == feeTreePayPrefix && (key[1] == 0 || key[1] == 1)
+	}
+	if len(s.end) == 0 && len(s.cursor) != 0 || len(s.end) > 0 && (!valid(s.end) || s.height < NativeFeeRewardPeriod) || len(s.cursor) > 0 && (!valid(s.cursor) || bytes.Compare(s.cursor, s.end) > 0) {
+		return feeRewardSweep{}, errors.New("invalid native fee reward sweep key range")
+	}
 	return s, nil
 }
 func (k *StateKeeper) writeNativeFeeRewardSweep(ctx sdk.Context, s feeRewardSweep) error {
@@ -951,11 +962,7 @@ func (k *StateKeeper) payNativeFeeRewardOne(ctx sdk.Context, key []byte, pay fun
 		paid = true
 	}
 	if creditKey != nil {
-		operator, e := address.NewBech32Codec(identity.Bech32PrefixValAddr).BytesToString(op)
-		if e != nil {
-			return false, amount, false, e
-		}
-		v, e := k.GetValidator(child, operator)
+		v, e := k.nativeFeeRewardValidatorByRaw(child, op)
 		if e != nil {
 			return false, amount, false, e
 		}
@@ -1087,11 +1094,7 @@ func (k *StateKeeper) auditNativeFeeRewardTree(ctx sdk.Context) error {
 		sum.Add(sum, new(big.Int).SetBytes(b))
 		retained[string(key[1:21])]++
 		if new(big.Int).SetBytes(b).Sign() == 0 {
-			operator, e := address.NewBech32Codec(identity.Bech32PrefixValAddr).BytesToString(key[1:21])
-			if e != nil {
-				return e
-			}
-			v, e := k.GetValidator(ctx, operator)
+			v, e := k.nativeFeeRewardValidatorByRaw(ctx, key[1:21])
 			if e != nil {
 				return e
 			}
@@ -1119,6 +1122,46 @@ func (k *StateKeeper) auditNativeFeeRewardTree(ctx sdk.Context) error {
 	}
 	if len(leaves) > 0 {
 		return errors.New("missing native fee reward payout index")
+	}
+	validators, e := k.GetValidators(ctx)
+	if e != nil {
+		return e
+	}
+	for _, v := range validators {
+		key, e := operatorKey(feeTreeRootPrefix, v.OperatorAddress)
+		if e != nil {
+			return e
+		}
+		recipient, e := feeRewardAddress(v.RewardAddress)
+		if e != nil {
+			return e
+		}
+		slot, e := k.service.OpenKVStore(ctx).Get(feeTreeKey(feeTreeCommissionPrefix, key[1:], recipient))
+		if e != nil {
+			return e
+		}
+		if len(slot) != 32 {
+			return errors.New("missing native fee reward current commission slot")
+		}
+		payKey := append([]byte{feeTreePayPrefix, 0}, append(bytes.Clone(key[1:]), recipient...)...)
+		value, e := k.service.OpenKVStore(ctx).Get(payKey)
+		if e != nil {
+			return e
+		}
+		if !bytes.Equal(value, []byte{1}) {
+			return errors.New("missing native fee reward current commission payout index")
+		}
+	}
+	if _, e = k.readNativeFeeRewardSweep(ctx); e != nil {
+		return e
+	}
+	if e = k.scan(ctx, feeTreeSchedulerPrefix, func(key, _ []byte) error {
+		if !bytes.Equal(key, feeTreeMarkerKey) && !bytes.Equal(key, feeTreeSweepKey) {
+			return errors.New("unknown native fee reward scheduler state")
+		}
+		return nil
+	}); e != nil {
+		return e
 	}
 	params, e := k.GetParams(ctx)
 	if e != nil {

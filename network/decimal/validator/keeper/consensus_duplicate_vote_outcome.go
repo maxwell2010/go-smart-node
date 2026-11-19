@@ -12,8 +12,9 @@ const nativeDuplicateVoteExclusionPrefix byte = 0x66
 
 var ErrNativeConsensusKeyPermanentlyExcluded = errors.New("native consensus key permanently excluded for duplicate voting")
 
-// NativeDuplicateVoteExclusion records the first settled infraction for one
-// permanently excluded consensus key. It survives later financial outcomes.
+// NativeDuplicateVoteExclusion records the first admitted infraction for a
+// permanently excluded consensus key. The legacy field name SettledHeight
+// denotes the native key-exclusion block, not completion of financial pages.
 type NativeDuplicateVoteExclusion struct {
 	InfractionHeight int64
 	SettledHeight    int64

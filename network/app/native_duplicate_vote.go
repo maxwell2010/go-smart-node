@@ -45,6 +45,8 @@ func (app *App) preBlockNativeDuplicateVote(ctx sdk.Context) (*sdk.ResponsePreBl
 	if err := keeper.VerifyNativeEvidenceLimits(child, child.ConsensusParams().Evidence); err != nil {
 		return nil, err
 	}
+	// Authenticated evidence excludes every admitted old key now. Financial
+	// pages may retry later; EndBlock retains the ordinary H+2 set transition.
 	if _, err := keeper.EnqueueNativeDuplicateVotePenalties(child); err != nil {
 		return nil, fmt.Errorf("enqueue native duplicate-vote liabilities: %w", err)
 	}

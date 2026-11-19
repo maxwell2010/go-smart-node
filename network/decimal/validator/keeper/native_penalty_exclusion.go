@@ -3,12 +3,13 @@ package keeper
 import (
 	"encoding/binary"
 	"errors"
+	"strconv"
 
 	sdk "github.com/cosmos/cosmos-sdk/types"
 )
 
-// JailNativeDuplicateVotePenalty excludes the authenticated queue head before
-// a large financial realization begins. It does NOT complete its liability.
+// JailNativeDuplicateVotePenalty excludes an exactly authenticated admitted
+// liability before any financial realization begins. It does NOT complete it.
 // FinalizeNativeDuplicateVotePenalty still owns completion after all pages.
 func (k *StateKeeper) JailNativeDuplicateVotePenalty(ctx sdk.Context, job NativeDuplicateVoteJob) error {
 	if ctx.ExecMode() != sdk.ExecModeFinalize {
@@ -16,12 +17,21 @@ func (k *StateKeeper) JailNativeDuplicateVotePenalty(ctx sdk.Context, job Native
 	}
 	child, write := ctx.CacheContext()
 	state := k.service.OpenKVStore(child)
-	queued, _, err := k.nativeDuplicateVoteOperatorHead(state, job.Operator)
+	primary, err := nativeDuplicateVoteRecordKey(job.ConsensusAddress, job.InfractionHeight)
 	if err != nil {
 		return err
 	}
-	if queued.AdmittedHeight != job.AdmittedHeight || !sameNativeDuplicateVoteCandidate(queued.NativeDuplicateVoteCandidate, job.NativeDuplicateVoteCandidate) {
+	queued, status, err := k.readNativeDuplicateVoteJob(state, primary)
+	if err != nil {
+		return err
+	}
+	if queued.AdmittedHeight != job.AdmittedHeight || queued.AdmittedHeight > ctx.BlockHeight() || !sameNativeDuplicateVoteCandidate(queued.NativeDuplicateVoteCandidate, job.NativeDuplicateVoteCandidate) {
 		return errors.New("duplicate-vote jail differs from queued liability")
+	}
+	if status == nativeDuplicateVotePending {
+		if err := k.verifyNativeDuplicateVotePendingKeys(state, queued, primary); err != nil {
+			return err
+		}
 	}
 	validator, err := k.GetValidatorByConsAddr(child, job.ConsensusAddress)
 	if err != nil {
@@ -39,6 +49,9 @@ func (k *StateKeeper) JailNativeDuplicateVotePenalty(ctx sdk.Context, job Native
 	}
 	if !errors.Is(err, ErrNotFound) {
 		return err
+	}
+	if status != nativeDuplicateVotePending {
+		return errors.New("completed duplicate-vote liability has no permanent exclusion")
 	}
 	validator.Jailed = true
 	if err := k.SetValidator(child, validator); err != nil {
@@ -60,6 +73,10 @@ func (k *StateKeeper) JailNativeDuplicateVotePenalty(ctx sdk.Context, job Native
 			return err
 		}
 	}
+	child.EventManager().EmitEvent(sdk.NewEvent("decimal_native_duplicate_vote_excluded",
+		sdk.NewAttribute("operator", job.Operator),
+		sdk.NewAttribute("infraction_height", strconv.FormatInt(job.InfractionHeight, 10)),
+		sdk.NewAttribute("financial_pending", "true")))
 	write()
 	return nil
 }

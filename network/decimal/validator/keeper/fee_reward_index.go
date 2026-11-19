@@ -5,8 +5,8 @@ import (
 	"encoding/binary"
 	"errors"
 	"math/big"
+	"sort"
 
-	"github.com/cosmos/cosmos-sdk/codec/address"
 	sdk "github.com/cosmos/cosmos-sdk/types"
 	"github.com/maxwell2010/go-smart-node/network/decimal/validator/types"
 	"github.com/maxwell2010/go-smart-node/network/identity"
@@ -21,6 +21,24 @@ const (
 )
 
 var ErrNativeFeeRewardIndexUnavailable = errors.New("native fee reward owner index requires initialization or explicit migration")
+
+// Stored metadata preserves accepted operator text, including uppercase Bech32.
+// Re-encoding the same raw identity as lowercase changes GetValidator's prestate.
+func (k *StateKeeper) nativeFeeRewardValidatorByRaw(ctx sdk.Context, raw []byte) (types.Validator, error) {
+	if len(raw) != 20 {
+		return types.Validator{}, errors.New("invalid native fee reward operator identity")
+	}
+	key := append([]byte{validatorPrefix}, raw...)
+	var v types.Validator
+	if err := k.read(ctx, key, &v); err != nil {
+		return v, err
+	}
+	expected, err := operatorKey(validatorPrefix, v.OperatorAddress)
+	if err != nil || !bytes.Equal(expected, key) {
+		return types.Validator{}, errors.New("native fee reward validator identity mismatch")
+	}
+	return k.GetValidator(ctx, v.OperatorAddress)
+}
 
 func (k *StateKeeper) hasNativeFeeRewardIndex(ctx sdk.Context) (bool, error) {
 	b, err := k.service.OpenKVStore(ctx).Get([]byte{feeRewardIndexMarker})
@@ -95,7 +113,13 @@ func (k *StateKeeper) updateNativeFeeRewardOwners(ctx sdk.Context, changes []Del
 		}
 	}
 	counts := map[string]uint32{}
-	for _, key := range sortedDelegationKeys(deltas) {
+	keys := sortedDelegationKeys(deltas)
+	// Release zero-pending removed leaves before admitting replacement owners.
+	// The encompassing batch cache makes this a final-state capacity check.
+	sort.SliceStable(keys, func(i, j int) bool {
+		return deltas[keys[i]].removed.Cmp(&deltas[keys[i]].added) > 0 && deltas[keys[j]].removed.Cmp(&deltas[keys[j]].added) <= 0
+	})
+	for _, key := range keys {
 		d := deltas[key]
 		b, err := state.Get([]byte(key))
 		if err != nil {
@@ -387,11 +411,7 @@ func (k *StateKeeper) ValidateNativeFeeRewardChanges(ctx sdk.Context, allowed fu
 		if len(key) != 21 || !bytes.Equal(b, []byte{1}) {
 			return errors.New("invalid native fee reward dirty commission")
 		}
-		operator, err := address.NewBech32Codec(identity.Bech32PrefixValAddr).BytesToString(key[1:])
-		if err != nil {
-			return err
-		}
-		v, err := k.GetValidator(child, operator)
+		v, err := k.nativeFeeRewardValidatorByRaw(child, key[1:])
 		if err != nil {
 			return err
 		}

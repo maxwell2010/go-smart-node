@@ -134,6 +134,10 @@ func runNativeHistoricalConsensusLifecycle(t *testing.T, dir, phase string) {
 		writeNativeHistoricalJSON(t, checkpointPath, checkpoint)
 		l.assertNativePenaltyState(false)
 		l.assertMasterPenaltyState(false)
+		if os.Getenv(deferredDuplicateAdmissionEnv) == "1" {
+			runNativeDeferredDuplicateAdmission(l)
+			return
+		}
 		l.finalizePenalty()
 		require.Equal(t, int64(4), app.LastBlockHeight(), "FinalizeBlock alone cannot persist historical settlement")
 		require.Equal(t, checkpoint.BeforeHash, app.LastCommitID().Hash)
