@@ -15,7 +15,7 @@ from urllib.parse import urlencode
 
 from del_delegation_smoke import GAS_LIMIT, GAS_PRICE, balance, native_positions, read_frozen, read_words, write_config
 from mcnd_process_smoke import ProcessOwner, SignalGuard, private_environment, private_namespace, run_command
-from native_reward_checkpoint import native_reward_checkpoint, reward_tree_present, compare_reward_migration
+from native_reward_checkpoint import native_reward_checkpoint, reward_tree_present, verify_reward_handoff
 from native_consensus_smoke import ATOMS, FOUR_UPGRADE_POWERS, INITIAL, check_signatures, committed_header, create_replica, create_replicas, decode_pubkey, effective_set, load_fixture, wait_replicas
 from withdrawal_genesis_smoke import CHAIN, EVM_CHAIN, MAX_BLOCKS, SHA256, WORD, check, ethereum, log_records, native, private_bytes, private_write, readiness_diagnostic, request, safe_diagnostic
 
@@ -656,12 +656,6 @@ def restore_validator_checkpoint(fleet, replicas, replacement, root, genesis, ex
     final_header = committed_header(participants, final + 1)
     check(final_header == primary_final, 'restored services did not replay the original signed history')
     check_schedule(replicas, action, target - 1)
-    if args.full_profile:
-        check(native_reward_checkpoint(replicas, target - 1) == report['rewardMigration']['before'],
-              'successor reopening changed the committed pre-upgrade reward checkpoint')
-        reward_after = native_reward_checkpoint(replicas, target)
-        report['rewardMigration'].update(after=reward_after,
-            coverage=compare_reward_migration(report['rewardMigration']['before'], reward_after))
     for node in replicas:
         check(applied_height(node, target) == target and current_plan(node, target) is None,
               'restored service did not reapply the exact approved migration')
@@ -676,9 +670,7 @@ def restore_validator_checkpoint(fleet, replicas, replacement, root, genesis, ex
                           'services': fleet.evidence()}
     report['rollback']['pendingWithdrawal'] = check_pending_withdrawal(replicas, expected, final, report['withdrawal']['before']['dueAt'])
     if 'rewardMigration' in report:
-        check(native_reward_checkpoint(replicas, target - 1) == report['rewardMigration']['before'] and
-              native_reward_checkpoint(replicas, target) == report['rewardMigration']['after'],
-              'systemd restore did not retain the exact reward checkpoint and replay')
+        verify_reward_handoff(replicas, target, report, restored=True)
         report['rollback']['rewardMigrationPreserved'] = True
     check(report['rollback']['coinBefore'] == report['coinMigration']['before'] and
           report['rollback']['coinAfter'] == report['coinMigration']['after'],
@@ -821,6 +813,7 @@ def run_gate(args, binary, replacement, root, expected, genesis, keys, actions, 
     check(committed_header(replicas, target - 1) == before and committed_header(replicas, target) == boundary,
           'successor changed the predecessor checkpoint or signed boundary block')
     check_schedule(replicas, action, target - 1)
+    verify_reward_handoff(replicas, target, report)
     for node in replicas:
         check(applied_height(node, target) == target and current_plan(node, target) is None and
               applied_height(node, final) == target and current_plan(node, final) is None,
@@ -870,10 +863,7 @@ def run_gate(args, binary, replacement, root, expected, genesis, keys, actions, 
         for node in restored_replicas:
             check(applied_height(node, target) == target and current_plan(node, target) is None,
                   'restored native copy did not replay the approved plan')
-        check(native_reward_checkpoint(restored_replicas, target - 1) == report['rewardMigration']['before'],
-              'restored closed backup changed unpaid native rewards or the old payout cursor')
-        check(native_reward_checkpoint(restored_replicas, target) == report['rewardMigration']['after'],
-              'replayed approved migration changed native reward accounting')
+        verify_reward_handoff(restored_replicas, target, report, restored=True)
         restored_claim = check_pending_withdrawal(restored_replicas, expected, target, due)
         check(restored_claim['appHash'] == applied_app_hash, 'restored replay produced a different application hash')
         report['rollback'] = {**ibc.verify_restored_ledger(restored_replicas), 'predecessorHeight': target - 1,

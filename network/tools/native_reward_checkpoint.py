@@ -101,3 +101,19 @@ def compare_reward_migration(before, after):
           before['sweepSha256'] == after['sweepSha256'],
           'module migration changed pending rewards, escrow or the payout cursor')
     return 'pending-reward-tree-preserved'
+
+
+def verify_reward_handoff(replicas, target, report, *, restored=False, read_native=native):
+    """Capture once on the primary branch; compare exact records after restore."""
+    if 'rewardMigration' not in report:
+        return
+    checkpoints = report['rewardMigration']
+    check(native_reward_checkpoint(replicas, target - 1, read_native=read_native) == checkpoints['before'],
+          'reopening changed the committed pre-upgrade reward checkpoint')
+    after = native_reward_checkpoint(replicas, target, read_native=read_native)
+    if restored:
+        check('after' in checkpoints and after == checkpoints['after'],
+              'restored approved migration changed the committed reward accounting')
+    else:
+        check('after' not in checkpoints, 'primary reward checkpoint was already captured')
+        checkpoints.update(after=after, coverage=compare_reward_migration(checkpoints['before'], after))

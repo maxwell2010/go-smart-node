@@ -2,7 +2,7 @@ import base64
 import unittest
 from urllib.parse import parse_qs
 
-from native_reward_checkpoint import compare_reward_migration, decode_reward_sweep, native_reward_checkpoint
+from native_reward_checkpoint import compare_reward_migration, decode_reward_sweep, native_reward_checkpoint, verify_reward_handoff
 
 
 class Node:
@@ -93,6 +93,25 @@ class NativeRewardCheckpointTests(unittest.TestCase):
         for field, value in [('owedAtomic', '0'), ('sweepSha256', 'f' * 64), ('escrowAtomic', '49')]:
             with self.assertRaises(ValueError):
                 compare_reward_migration(before, dict(after, **{field: value}))
+
+    def test_primary_capture_and_both_restores_use_explicit_checkpoint_arguments(self):
+        nodes = [Node(), Node()]
+        before = native_reward_checkpoint(nodes, 123, read_native=bank(50))
+        report = {'rewardMigration': {'before': before}}
+        # The same helper is used by the normal process handoff, systemd
+        # restore and pending-IBC restore. None depends on a caller's args.
+        verify_reward_handoff(nodes, 124, report, read_native=bank(50))
+        self.assertEqual(report['rewardMigration']['coverage'], 'pending-reward-tree-preserved')
+        primary = dict(report['rewardMigration']['after'])
+        verify_reward_handoff(nodes, 124, report, restored=True, read_native=bank(50))
+        verify_reward_handoff(nodes, 124, report, restored=True, read_native=bank(50))
+        self.assertEqual(report['rewardMigration']['after'], primary)
+        with self.assertRaises(ValueError):
+            verify_reward_handoff(nodes, 124, report, read_native=bank(50))
+        report['rewardMigration']['after'] = dict(primary, owedAtomic='51')
+        with self.assertRaises(ValueError):
+            verify_reward_handoff(nodes, 124, report, restored=True, read_native=bank(50))
+        verify_reward_handoff(nodes, 124, {}, read_native=bank(50))
 
     def test_malformed_sweep_prefix_and_future_cursor(self):
         with self.assertRaises(ValueError):
