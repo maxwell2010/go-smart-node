@@ -38,13 +38,35 @@
         }
       ],
       "params": null,
-      "denom_metadata": null,
+      "denom_metadata": [
+        {
+          "description": "Native MintCandy coin of the separate MintCandy Network; distinct from Decimal DEL.",
+          "denom_units": [
+            {
+              "denom": "del",
+              "exponent": 0,
+              "aliases": []
+            },
+            {
+              "denom": "MSP",
+              "exponent": 18,
+              "aliases": []
+            }
+          ],
+          "base": "del",
+          "display": "MSP",
+          "name": "MintCandy",
+          "symbol": "MSP",
+          "uri": "",
+          "uri_hash": ""
+        }
+      ],
       "send_enabled": []
     },
     "coin": {
       "params": {
         "base_denom": "del",
-        "base_title": "MintCandy native coin",
+        "base_title": "MintCandy",
         "base_volume": null
       },
       "coins": null,

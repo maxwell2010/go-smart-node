@@ -1,5 +1,8 @@
 # MintCandy Network - отдельная сеть `mcnd`
 
+Нативная монета: **MintCandy (MSP)**, 18 знаков, внутренний denom `del`.
+[Название, metadata и техническая совместимость](docs/ru/NATIVE_TOKEN_IDENTITY.md).
+
 [Русская инструкция: установка, зависимости, сервер, синхронизация, пиры и хранение истории](docs/ru/README.md).
 
 Этот вложенный Go-модуль собирает приложение новой сети с собственными
@@ -9,7 +12,7 @@ genesis и chain IDs. Версионный пакет и подпись его �
 Тег `experimental_ibc` относится к ней; в обычную сборку `mcnd` входят
 IBC/transfer, а нативные функции активирует проверенный профиль сети.
 
-В нативном профиле подключены набор валидаторов по активному DEL-обеспечению,
+В нативном профиле подключены набор валидаторов по активному MSP-обеспечению,
 hold и изолированные NFT, ручной/автоматический complete, конвертация DRC20
 с `minOut`, порционные штрафы, голосование и начисление комиссий без эмиссии.
 Награды начисляются в BeginBlock H по комиссиям H-1 и позициям на конец H-1.
@@ -127,7 +130,7 @@ The owned application mounts native `coin` and `nft` stores and their read-only
 protobuf/gRPC/AutoCLI queries. Direct native coin/NFT Cosmos financial message
 routes remain disabled; supported signed Gateway/token/NFT routes project
 their attested EVM execution into native keepers under the enabled profile.
-The native coin `Params.BaseVolume` declares genesis allocation; base DEL
+The native coin `Params.BaseVolume` declares genesis allocation; base MSP (`del` in bank records)
 balances and current monetary supply remain the SDK bank ledger. Custom coin
 queries currently return validated stored metadata, not an authoritative live
 EVM reserve quote. The separate bounded `coin/evmview` is required for monetary
@@ -136,7 +139,7 @@ silent fallback from a failed monetary view to stale metadata.
 
 After all genesis account allocations, explicitly run
 `mcnd genesis reconcile-native-allocation --home ...` before validation/start.
-This fresh-home builder sums actual genesis bank DEL balances and writes the
+This fresh-home builder sums actual genesis bank MSP balances (internal denom `del`) and writes the
 same amount into declared native allocation, with an exclusive backup. Startup
 rejects mismatches rather than inventing or minting supply. Changing genesis
 accounts again requires rebuilding/reviewing that declaration and its backup.

@@ -143,5 +143,9 @@
   "isolated_position_vault_atoms": "0",
   "reward_source": "collected_del_transaction_fees",
   "reward_emission": false,
-  "allocation_is_additional_to_delegations": false
+  "allocation_is_additional_to_delegations": false,
+  "native_token_name": "MintCandy",
+  "native_token_symbol": "MSP",
+  "display_denom": "MSP",
+  "atoms_per_native_token": "1000000000000000000"
 }

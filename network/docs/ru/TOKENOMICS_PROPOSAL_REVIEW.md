@@ -1,11 +1,14 @@
 # Предложения по экономике MintCandy Network
 
+Нативная монета MintCandy Network - **MintCandy (MSP)**. Внутренний denom
+`del` и идентификаторы текущих контрактов сохраняются. [Metadata](NATIVE_TOKEN_IDENTITY.md).
+
 Дата проверки: 19 ноября 2026 года, Барнаул.
 База экономического аудита - исходники `9f94c70`. Подпись для оплаты DRC20,
 котировки и безрезервный lifecycle впоследствии прошли отдельный
 [CI на ee0d1d3](https://github.com/maxwell2010/go-smart-node/actions/runs/44455065325).
 Это историческая база сравнения, а не текущая граница реализации. В более
-позднем исходнике подключены ante-конвертация DRC20 в DEL, fee authorization,
+позднем исходнике подключены ante-конвертация DRC20 в MSP, fee authorization,
 nonce и transport envelope с отдельной mempool-обработкой. Готовность
 конечной версии подтверждается её `token-features` CI, а не этим ранним
 прогоном. [Текущие результаты и условия выпуска](../../../docs/RELEASE_STATUS.md).

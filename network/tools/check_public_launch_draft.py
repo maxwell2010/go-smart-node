@@ -87,6 +87,14 @@ def check_draft(doc):
     require(state['coin']['params']['base_denom'] == state['evm']['params']['evm_denom'] ==
             state['staking']['params']['bond_denom'] == state['bank']['supply'][0]['denom'] == 'del',
             'native denomination differs')
+    metadata = state['bank']['denom_metadata']
+    require(len(metadata) == 1 and state['coin']['params']['base_title'] == 'MintCandy' and
+            metadata[0]['name'] == 'MintCandy' and metadata[0]['symbol'] == 'MSP' and
+            metadata[0]['base'] == 'del' and metadata[0]['display'] == 'MSP' and
+            metadata[0]['denom_units'] == [
+                {'denom': 'del', 'exponent': 0, 'aliases': []},
+                {'denom': 'MSP', 'exponent': 18, 'aliases': []}],
+            'MintCandy MSP metadata or denomination scale differs')
     mint = state['mint']
     require(mint['params']['mint_denom'] == 'del' and all(value == '0.000000000000000000' for value in (
         mint['minter']['inflation'], mint['minter']['annual_provisions'],
@@ -94,7 +102,8 @@ def check_draft(doc):
     require(state['withdrawal_settlement']['enable_native_consensus'] is True and
             state['withdrawal_settlement']['enable_native_fee_rewards'] is True,
             'draft requires the native consensus and fee reward profile')
-    return {'status': 'DRAFT_NOT_RUNNABLE', 'chainIdProposal': doc['chain_id'],
+    return {'status': 'DRAFT_NOT_RUNNABLE', 'nativeName': 'MintCandy', 'nativeSymbol': 'MSP',
+            'baseDenom': 'del', 'displayExponent': 18, 'chainIdProposal': doc['chain_id'],
             'blockGasProposal': '24000000', 'unresolvedInputs': len(UNRESOLVED_PATHS),
             'checks': ['unapproved inputs remain null', 'no concrete keys or addresses',
                        'no declared supply or validator count', 'zero inflation',
@@ -109,6 +118,9 @@ def atomic(value):
 
 def check_plan(plan, draft):
     check_contents(plan, forbid_public_material=False)
+    require(plan['native_token_name'] == 'MintCandy' and plan['native_token_symbol'] == 'MSP' and
+            plan['display_denom'] == 'MSP' and atomic(plan['atoms_per_native_token']) == ATOMS_PER_DEL,
+            'allocation MintCandy MSP identity differs')
     require(plan['status'] == 'draft_unapproved' and plan['approved_validator_count'] is None,
             'allocation must remain unapproved with unresolved validator count')
     decisions = plan['decisions']
@@ -122,9 +134,9 @@ def check_plan(plan, draft):
             plan['evm_chain_id'] == draft['app_state']['validator']['binding_domain']['evm_chain_id'],
             'plan signing domains differ from the genesis proposal')
     require(plan['denom'] == 'del' and type(plan['decimals']) is int and plan['decimals'] == 18 and
-            atomic(plan['atoms_per_del']) == ATOMS_PER_DEL, 'invalid DEL denomination scale')
+            atomic(plan['atoms_per_del']) == ATOMS_PER_DEL, 'invalid MSP denomination scale')
     total = atomic(plan['initial_supply_atoms'])
-    require(total == 100_000 * ATOMS_PER_DEL, 'supply proposal must total exactly 100000 DEL')
+    require(total == 100_000 * ATOMS_PER_DEL, 'supply proposal must total exactly 100000 MSP')
     allocations = plan['bank_allocation']
     require(sum(atomic(row['amount_atoms']) for row in allocations) == total,
             'bank allocation total differs from proposed supply')
@@ -143,7 +155,7 @@ def check_plan(plan, draft):
                 row['proposed_owner_evm_address'] == founder,
                 'initial delegation recipient or proposed owner differs')
         require(atomic(row['expected_voting_power']) == amount // ATOMS_PER_DEL,
-                'delegation voting power differs from whole DEL principal')
+                'delegation voting power differs from whole MSP principal')
     backing = [row for row in allocations if row['purpose'] == 'initial_wdel_backing']
     require(len(backing) == 1 and atomic(backing[0]['amount_atoms']) ==
             sum(atomic(row['amount_atoms']) for row in delegations),
@@ -176,6 +188,11 @@ def check_plan(plan, draft):
 
 def check_intake(intake):
     check_contents(intake, forbid_public_material=False)
+    asset = intake['allocation']
+    require(asset['native_token_name'] == 'MintCandy' and asset['native_token_symbol'] == 'MSP' and
+            asset['display_denom'] == 'MSP' and asset['denom'] == 'del' and asset['decimals'] == 18 and
+            atomic(asset['atoms_per_native_token']) == ATOMS_PER_DEL,
+            'validator intake MintCandy MSP identity differs')
     require(intake['status'] == 'draft_unapproved' and intake['schema_version'] == 2,
             'intake must remain an unapproved version two template')
     network = intake['network']

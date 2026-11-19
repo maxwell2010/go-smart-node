@@ -14,6 +14,20 @@ class PublicLaunchDraftTests(unittest.TestCase):
     def test_current_template_is_unresolved(self):
         self.assertEqual(check_draft(self.draft)['status'], 'DRAFT_NOT_RUNNABLE')
 
+    def test_display_rename_preserves_internal_units_and_scaling(self):
+        result = check_draft(self.draft)
+        self.assertEqual((result['nativeName'], result['nativeSymbol'], result['baseDenom']),
+                         ('MintCandy', 'MSP', 'del'))
+        for field, value in (('symbol', 'DEL'), ('base', 'msp'), ('display', 'del')):
+            with self.subTest(field=field):
+                draft = copy.deepcopy(self.draft)
+                draft['app_state']['bank']['denom_metadata'][0][field] = value
+                with self.assertRaisesRegex(ValueError, 'MSP metadata'):
+                    check_draft(draft)
+        self.draft['app_state']['bank']['denom_metadata'][0]['denom_units'][1]['exponent'] = 6
+        with self.assertRaisesRegex(ValueError, 'denomination scale'):
+            check_draft(self.draft)
+
     def test_supplied_identity_or_bank_state_fails_draft_check(self):
         for path, value in (
             (('withdrawal_settlement', 'registry'), '0x' + '12' * 20),
@@ -61,6 +75,14 @@ class PublicLaunchPlanTests(unittest.TestCase):
     def test_current_plan_and_intake_are_unapproved(self):
         self.assertEqual(check_plan(self.plan, self.draft)['status'], 'PLAN_DRAFT_UNAPPROVED')
         self.assertEqual(check_intake(self.intake)['status'], 'INTAKE_DRAFT_UNAPPROVED')
+
+    def test_asset_identity_cannot_diverge_between_launch_documents(self):
+        self.plan['native_token_symbol'] = 'DEL'
+        with self.assertRaisesRegex(ValueError, 'MSP identity'):
+            check_plan(self.plan, self.draft)
+        self.intake['allocation']['atoms_per_native_token'] = '1000000'
+        with self.assertRaisesRegex(ValueError, 'MSP identity'):
+            check_intake(self.intake)
 
     def test_allocation_cannot_add_an_atom_to_supply(self):
         self.plan['bank_allocation'][0]['amount_atoms'] = str(

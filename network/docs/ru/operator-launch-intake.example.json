@@ -41,7 +41,11 @@
         "beneficiary_address": null,
         "amount_atoms": null
       }
-    ]
+    ],
+    "native_token_name": "MintCandy",
+    "native_token_symbol": "MSP",
+    "display_denom": "MSP",
+    "atoms_per_native_token": "1000000000000000000"
   },
   "contracts": {
     "registry": null,
