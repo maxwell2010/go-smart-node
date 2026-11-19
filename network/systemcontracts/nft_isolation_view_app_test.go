@@ -40,6 +40,36 @@ func (m isolationReaderMetadata) GetCollectionByDRC(_ sdk.Context, address strin
 func runIsolatedPositionReader(t *testing.T, e isolatedBackendEnv) {
 	t.Helper()
 	owner := crypto.PubkeyToAddress(e.keys[0].PublicKey)
+	govSetup := func(artifact contracts.Artifact, target common.Address, method string, args ...interface{}) {
+		data, err := artifact.ABI.Pack(method, args...)
+		require.NoError(t, err)
+		child, commit := e.ctx().CacheContext()
+		child = child.WithGasMeter(storetypes.NewGasMeter(3_000_000))
+		message := core.Message{From: e.govOwner, To: &target, Value: new(big.Int), GasLimit: 500000, GasPrice: new(big.Int), GasFeeCap: new(big.Int), GasTipCap: new(big.Int), Data: data, SkipNonceChecks: true, SkipFromEOACheck: true}
+		response, err := e.app.EVMKeeper.ApplyMessage(child, statedb.New(child, e.app.EVMKeeper, statedb.NewEmptyTxConfig()), message, nil, true, false, true)
+		require.NoError(t, err)
+		require.Empty(t, response.VmError)
+		commit()
+	}
+	if launch, _ := nativeLaunchSpecForMode(os.Getenv(nativeLaunchRehearsalEnv)); launch.sponsoredFounder() {
+		roles, err := contracts.DeployEmptyLaunchContracts(owner, e.govOwner, e.app.EVMKeeper.GetNonce(e.ctx(), owner),
+			func(artifact contracts.Artifact, args ...any) (common.Address, error) {
+				return e.deploy(artifact, args...), nil
+			})
+		require.NoError(t, err)
+		profile := ownedapp.WithdrawalProfile{
+			Registry: roles.Registry, Gateway: roles.Gateway, Library: roles.Library, NFTCenter: roles.NFTCenter,
+			PositionVault: roles.PositionVault, MasterValidator: roles.MasterValidator, WrappedDEL: roles.WrappedDEL,
+			TokenCenter: roles.TokenCenter, CurveConverter: roles.CurveConverter,
+			SettlementOnly: true, EnableDELDelegation: true,
+		}
+		gateway, err := contracts.LoadLinked("MintCandyIsolatedDelegation",
+			map[string]common.Address{"owned/DecimalDelegation.sol:DelegationNFTLib": roles.Library})
+		require.NoError(t, err)
+		exportNativeConsensusDaemonFixture(t, e, os.Getenv(nativeConsensusDaemonFixtureEnv), profile, gateway,
+			e.load("NewNetworkMasterValidator"), e.load("MintCandyWrappedDEL"), e.load("MintCandyNFTPositionVault"), nil, govSetup)
+		return
+	}
 	library := e.load("MintCandyDelegationNFTLib")
 	libraryAddress := crypto.CreateAddress(owner, e.app.EVMKeeper.GetNonce(e.ctx(), owner))
 	creation, err := library.Deployment()
@@ -112,17 +142,6 @@ func runIsolatedPositionReader(t *testing.T, e isolatedBackendEnv) {
 		values, err := artifact.ABI.Unpack(method, response.Ret)
 		require.NoError(t, err)
 		return values[0].(*big.Int)
-	}
-	govSetup := func(artifact contracts.Artifact, target common.Address, method string, args ...interface{}) {
-		data, err := artifact.ABI.Pack(method, args...)
-		require.NoError(t, err)
-		child, commit := e.ctx().CacheContext()
-		child = child.WithGasMeter(storetypes.NewGasMeter(3_000_000))
-		message := core.Message{From: e.govOwner, To: &target, Value: new(big.Int), GasLimit: 500000, GasPrice: new(big.Int), GasFeeCap: new(big.Int), GasTipCap: new(big.Int), Data: data, SkipNonceChecks: true, SkipFromEOACheck: true}
-		response, err := e.app.EVMKeeper.ApplyMessage(child, statedb.New(child, e.app.EVMKeeper, statedb.NewEmptyTxConfig()), message, nil, true, false, true)
-		require.NoError(t, err)
-		require.Empty(t, response.VmError)
-		commit()
 	}
 	type meta struct {
 		Creator                   common.Address

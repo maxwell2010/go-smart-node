@@ -23,6 +23,7 @@ func PackConstructorConfiguration(contract string, calls ...ConstructorCall) ([]
 	}
 	allowed["NewNetworkTokenCenter"] = allowed["DecimalTokenCenter"]
 	allowed["NewNetworkNFTCenter"] = allowed["DecimalNFTCenter"]
+	allowed["MintCandyIsolatedDelegation"] = allowed["DecimalDelegation"]
 	methods, ok := allowed[contract]
 	if !ok {
 		return nil, fmt.Errorf("contract %q has no reviewed constructor configuration", contract)

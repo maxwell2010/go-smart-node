@@ -170,7 +170,13 @@ func exportNativeConsensusDaemonFixture(t *testing.T, e isolatedBackendEnv, dir 
 		if launch.fourValidators() {
 			fixtureVolume = launch.drc20Reserve
 		}
-		custom = seedNativeCustomCollateralGenesis(t, e, profile, gov, fixtureVolume)
+		if launch.sponsoredFounder() {
+			require.NotEmpty(t, profile.TokenCenter)
+			require.NotEmpty(t, profile.CurveConverter)
+			custom = &nativeCustomCollateralGenesisFixture{center: profile.TokenCenter, converter: profile.CurveConverter}
+		} else {
+			custom = seedNativeCustomCollateralGenesis(t, e, profile, gov, fixtureVolume)
+		}
 		if (launchRehearsal && !launch.fourValidators()) || os.Getenv(nativeCustomNFTPhaseEnv) == "seed" {
 			require.NotNil(t, nft)
 			nft.mintCustom(t, e, custom, actor)

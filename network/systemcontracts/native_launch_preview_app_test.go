@@ -5,6 +5,7 @@ import (
 	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
+	"math/big"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -14,6 +15,7 @@ import (
 
 	"cosmossdk.io/log"
 	sdkmath "cosmossdk.io/math"
+	storetypes "cosmossdk.io/store/types"
 	abci "github.com/cometbft/cometbft/abci/types"
 	cmted25519 "github.com/cometbft/cometbft/crypto/ed25519"
 	cmttypes "github.com/cometbft/cometbft/types"
@@ -25,15 +27,19 @@ import (
 	sdk "github.com/cosmos/cosmos-sdk/types"
 	authtypes "github.com/cosmos/cosmos-sdk/x/auth/types"
 	banktypes "github.com/cosmos/cosmos-sdk/x/bank/types"
+	govtypes "github.com/cosmos/cosmos-sdk/x/gov/types"
 	ethsecp "github.com/cosmos/evm/crypto/ethsecp256k1"
 	srvflags "github.com/cosmos/evm/server/flags"
+	"github.com/cosmos/evm/x/vm/statedb"
 	"github.com/ethereum/go-ethereum/common"
+	"github.com/ethereum/go-ethereum/core"
 	"github.com/ethereum/go-ethereum/crypto"
 	ownedapp "github.com/maxwell2010/go-smart-node/network/app"
 	cointypes "github.com/maxwell2010/go-smart-node/network/decimal/coin/types"
 	nfttypes "github.com/maxwell2010/go-smart-node/network/decimal/nft/types"
 	validatortypes "github.com/maxwell2010/go-smart-node/network/decimal/validator/types"
 	"github.com/maxwell2010/go-smart-node/network/identity"
+	contracts "github.com/maxwell2010/go-smart-node/network/systemcontracts"
 	"github.com/stretchr/testify/require"
 )
 
@@ -394,6 +400,7 @@ func verifyNativeLaunchPreview(t *testing.T, dir string, spec nativeLaunchSpec) 
 			require.Equal(t, sdk.AccAddress(expect.Actor.Bytes()).String(), d.Delegator)
 		}
 		if spec.sponsoredFounder() {
+			verifyEmptyLaunchContractConfiguration(l, profile)
 			founder := nativeSponsoredFounderAddress()
 			require.Equal(t, founder, expect.Actor)
 			sponsor := sdk.AccAddress(nativeLaunchAccountKey(3, spec).PubKey().Address())
@@ -444,5 +451,62 @@ func verifyNativeLaunchPreview(t *testing.T, dir string, spec nativeLaunchSpec) 
 		require.True(t, treasury.Equals(account.GetPubKey()))
 		require.True(t, app.BankKeeper.GetBalance(ctx, authtypes.NewModuleAddress(authtypes.FeeCollectorName), identity.BaseDenom).IsZero())
 		verifyNativeLaunchTreasurySpend(l, dir, treasury)
+	}
+}
+
+func verifyEmptyLaunchContractConfiguration(l nativeHistoricalLifecycle, profile ownedapp.WithdrawalProfile) {
+	t := l.t
+	t.Helper()
+	address := func(contract string, to common.Address, method string, args ...any) common.Address {
+		t.Helper()
+		abi, err := contracts.CompiledABI(contract)
+		require.NoError(t, err)
+		data, err := abi.Pack(method, args...)
+		require.NoError(t, err)
+		ctx, _ := l.snapshot().CacheContext()
+		ctx = ctx.WithGasMeter(storetypes.NewGasMeter(3_000_000))
+		msg := core.Message{From: l.expect.Actor, To: &to, Value: new(big.Int), Data: data, GasLimit: 500_000,
+			GasPrice: new(big.Int), GasFeeCap: new(big.Int), GasTipCap: new(big.Int), SkipNonceChecks: true, SkipFromEOACheck: true}
+		response, err := l.app.EVMKeeper.ApplyMessage(ctx, statedb.New(ctx, l.app.EVMKeeper, statedb.NewEmptyTxConfig()),
+			msg, nil, false, false, true)
+		require.NoError(t, err)
+		require.Empty(t, response.VmError)
+		result, err := abi.Unpack(method, response.Ret)
+		require.NoError(t, err)
+		require.Len(t, result, 1)
+		return result[0].(common.Address)
+	}
+
+	const registry = "DecimalContractCenter"
+	governance := common.BytesToAddress(authtypes.NewModuleAddress(govtypes.ModuleName))
+	for _, proxy := range []struct {
+		contract string
+		addr     common.Address
+	}{
+		{registry, profile.Registry}, {"MintCandyIsolatedDelegation", profile.Gateway},
+		{"NewNetworkNFTCenter", profile.NFTCenter}, {"MintCandyNFTPositionVault", profile.PositionVault},
+		{"NewNetworkMasterValidator", profile.MasterValidator}, {"NewNetworkTokenCenter", profile.TokenCenter},
+	} {
+		require.Equal(t, governance, address(proxy.contract, proxy.addr, "owner"), proxy.contract)
+	}
+	for _, binding := range []struct {
+		name string
+		addr common.Address
+	}{
+		{"delegation", profile.Gateway}, {"delegation-nft", profile.Gateway}, {"wdel", profile.WrappedDEL},
+		{"nft-center", profile.NFTCenter}, {"nft-position-vault", profile.PositionVault},
+		{"master-validator", profile.MasterValidator}, {"token-center", profile.TokenCenter}, {"curve-converter", profile.CurveConverter},
+	} {
+		require.Equal(t, binding.addr, address(registry, profile.Registry, "getContractAddress", binding.name), binding.name)
+	}
+	for index, name := range []string{"DRC20", "DRC20Reserveless", "NewNetworkDRC721", "MintCandyIsolatedDRC1155", "DRC721Reserveless", "DRC1155Reserveless"} {
+		factoryName, factory := "NewNetworkNFTCenter", profile.NFTCenter
+		if index < 2 {
+			factoryName, factory = "NewNetworkTokenCenter", profile.TokenCenter
+		}
+		target := address(factoryName, factory, "readImplementation", uint8(index))
+		artifact, err := contracts.Load(name)
+		require.NoError(t, err)
+		require.Equal(t, crypto.Keccak256Hash(artifact.Runtime), l.app.EVMKeeper.GetCodeHash(l.snapshot(), target), name)
 	}
 }
