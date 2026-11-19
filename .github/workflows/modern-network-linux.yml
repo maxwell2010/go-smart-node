@@ -12,7 +12,7 @@ on:
         description: Validation scenario to run on an isolated GitHub runner
         default: module
         type: choice
-        options: [module, bridge-finality, token-features, mass-delegation, contracts, process, held-downtime, native-upgrade-governance, nft-downtime, native-full-profile-upgrade, native-full-ibc-upgrade, native-cross-version-ibc-upgrade, native-systemd-module-upgrade, native-systemd-four-validator-recovery, native-systemd-startup-replay]
+        options: [module, bridge-finality, token-features, token-daemon, mass-delegation, contracts, process, held-downtime, native-upgrade-governance, nft-downtime, native-full-profile-upgrade, native-full-ibc-upgrade, native-cross-version-ibc-upgrade, native-systemd-module-upgrade, native-systemd-four-validator-recovery, native-systemd-startup-replay]
       remote_profile:
         description: Also validate the reusable remote-worker scripts
         default: 'off'
@@ -111,6 +111,7 @@ jobs:
           python3 scripts/verify_owned_sdk.py --compiled |& tee validation-logs/owned-sdk-integrity.log
           python3 scripts/verify_pion_transport.py |& tee validation-logs/pion-upstream-integrity.log
           python3 -m unittest discover -s scripts -p 'test_*.py'
+          python3 -m unittest discover -s tools -p 'test_native_consensus_rewards.py'
       - name: Test ordinary crypto regressions with and without CGO
         run: |
           go test -mod=readonly -p 2 -count=1 github.com/ethereum/go-ethereum/crypto github.com/ethereum/go-ethereum/crypto/secp256k1 github.com/ethereum/go-ethereum/common/math |& tee validation-logs/geth-crypto-cgo.log
@@ -249,6 +250,62 @@ jobs:
         if: always()
         with:
           name: token-features-${{ github.sha }}-${{ github.run_attempt }}
+          path: network/validation-logs/
+          retention-days: 14
+          if-no-files-found: warn
+
+  token-daemon:
+    if: github.event_name == 'workflow_dispatch' && inputs.scope == 'token-daemon'
+    runs-on: ubuntu-22.04
+    timeout-minutes: 30
+    env:
+      GOENV: 'off'
+      GOWORK: 'off'
+      GOFLAGS: ''
+      GOTOOLCHAIN: local
+      GOAMD64: 'v1'
+      CGO_ENABLED: '1'
+      CC: gcc
+      GOMAXPROCS: '2'
+    defaults:
+      run:
+        shell: bash
+        working-directory: network
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e
+        with:
+          go-version: '1.26.11'
+          cache: true
+          cache-dependency-path: network/go.sum
+      - name: Build default daemon before creating disposable fixtures
+        run: |
+          mkdir -p validation-logs
+          go mod download
+          go mod verify
+          git diff --exit-code -- go.mod go.sum
+          go build -mod=readonly -tags= -buildvcs=true -p 2 -trimpath -ldflags "-X main.buildCommit=$GITHUB_SHA" -o "$RUNNER_TEMP/mcnd-fee" ./cmd/mcnd
+          go version -m "$RUNNER_TEMP/mcnd-fee" > validation-logs/fee-daemon-build.log
+          sha256sum "$RUNNER_TEMP/mcnd-fee" >> validation-logs/fee-daemon-build.log
+      - name: Export canonical custom-token and zero-native-balance payer fixtures
+        run: |
+          install -d -m 700 "$RUNNER_TEMP/fee-fixture" "$RUNNER_TEMP/fee-homes"
+          MCND_NATIVE_CONSENSUS_FIXTURE_DIR="$RUNNER_TEMP/fee-fixture" MCND_NATIVE_HISTORICAL_CONSENSUS_PHASE=seed MCND_NATIVE_DRC20_GENESIS_PHASE=seed go test -mod=readonly -p 2 -count=1 -v -timeout 8m -tags appstate -run '^TestOwnedAppSignedRegistryBootstrap$/^authenticated_isolated_position_reader$' ./systemcontracts |& tee validation-logs/fee-daemon-seed.log
+          MCND_DRC20_FEE_DAEMON_FIXTURE="$RUNNER_TEMP/fee-fixture" go test -mod=readonly -p 2 -count=1 -v -timeout 5m -tags appstate -run '^TestExportDRC20FeeDaemonFixture$' ./systemcontracts |& tee validation-logs/fee-daemon-fixture.log
+      - name: Test live API, envelope broadcast, EVM revert and restart in isolated loopback network
+        run: |
+          binary_sha="$(sha256sum "$RUNNER_TEMP/mcnd-fee" | awk '{print $1}')"
+          sudo -n unshare --net -- bash -euc 'ip link set lo up; exec "$@"' _ \
+            python3 "$GITHUB_WORKSPACE/network/tools/reserve_fee_smoke.py" \
+            --binary "$RUNNER_TEMP/mcnd-fee" --binary-sha256 "$binary_sha" --source-commit "$GITHUB_SHA" \
+            --fixture "$RUNNER_TEMP/fee-fixture" --home-parent "$RUNNER_TEMP/fee-homes" \
+            --report "$GITHUB_WORKSPACE/network/validation-logs/fee-daemon.json" |& tee validation-logs/fee-daemon.log
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+        if: always()
+        with:
+          name: token-daemon-${{ github.sha }}-${{ github.run_attempt }}
           path: network/validation-logs/
           retention-days: 14
           if-no-files-found: warn

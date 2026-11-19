@@ -40,7 +40,7 @@ func checkNativeFeeRewardEscrow(t *testing.T, original *App) {
 	}}}))
 	app.withdrawals = &withdrawalController{keeper: app.NativeValidatorKeeper, delRecipientAllowed: func(a sdk.AccAddress) bool { return !app.BankKeeper.BlockedAddr(a) }}
 	amount := sdk.NewCoins(sdk.NewInt64Coin(identity.BaseDenom, 1000))
-	require.NoError(t, app.BankKeeper.MintCoins(ctx, minttypes.ModuleName, amount))
+	require.NoError(t, app.BankKeeper.MintCoins(ctx, minttypes.ModuleName, sdk.NewCoins(sdk.NewInt64Coin(identity.BaseDenom, 2000))))
 	require.NoError(t, app.BankKeeper.SendCoinsFromModuleToModule(ctx, minttypes.ModuleName, authtypes.FeeCollectorName, amount))
 	collector := authtypes.NewModuleAddress(authtypes.FeeCollectorName)
 	escrow := authtypes.NewModuleAddress(nativeFeeRewardEscrowModule)
@@ -63,10 +63,10 @@ func checkNativeFeeRewardEscrow(t *testing.T, original *App) {
 	require.NoError(t, app.distributeNativeFees(ctx, commit))
 	require.True(t, app.BankKeeper.GetBalance(ctx, owner, identity.BaseDenom).Amount.Equal(before.Add(fees)), "repeated page must not pay twice")
 	// Surplus cannot manufacture a liability or make the next block fail.
-	require.NoError(t, app.BankKeeper.MintCoins(ctx, minttypes.ModuleName, amount))
 	require.NoError(t, app.BankKeeper.SendCoinsFromModuleToModule(ctx, minttypes.ModuleName, nativeFeeRewardEscrowModule, amount))
 	require.NoError(t, app.checkNativeFeeRewardEscrow(ctx))
 	liability, err = app.NativeValidatorKeeper.AggregateNativeFeeRewardLiability(ctx)
 	require.NoError(t, err)
 	require.True(t, liability.IsZero())
+	require.True(t, app.BankKeeper.GetSupply(ctx, identity.BaseDenom).Amount.Equal(supply))
 }

@@ -1,17 +1,16 @@
 package systemcontracts_test
 
 import (
-	"errors"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"testing"
 
 	abci "github.com/cometbft/cometbft/abci/types"
-	sdk "github.com/cosmos/cosmos-sdk/types"
+	authtypes "github.com/cosmos/cosmos-sdk/x/auth/types"
+	govtypes "github.com/cosmos/cosmos-sdk/x/gov/types"
 	"github.com/ethereum/go-ethereum/common"
-	"github.com/ethereum/go-ethereum/core"
-	ethtypes "github.com/ethereum/go-ethereum/core/types"
+	"github.com/ethereum/go-ethereum/crypto"
 	validatorkeeper "github.com/maxwell2010/go-smart-node/network/decimal/validator/keeper"
 	validatortypes "github.com/maxwell2010/go-smart-node/network/decimal/validator/types"
 	"github.com/stretchr/testify/require"
@@ -56,11 +55,15 @@ func runNativeDeferredDuplicateAdmission(l nativeHistoricalLifecycle) {
 	consensus := common.FromHex(l.target.Consensus)
 	_, offender := set.GetByAddress(consensus)
 	require.NotNil(t, offender)
-	// A real internal EVM append is rejected before it can commit. Native
-	// admission has already consumed authenticated FinalizeBlock evidence.
-	l.app.EVMKeeper.SetInternalCommitGuard(func(sdk.Context, core.Message, []*ethtypes.Log) error {
-		return errors.New("injected financial append rejection")
-	})
+	// The production guard is installed exactly once. In this isolated
+	// fixture, executable code on the privileged module sender makes the
+	// executor's ordinary inert-sender check reject the real financial call.
+	sender := authtypes.NewModuleAddress(govtypes.ModuleName)
+	code := []byte{0x00}
+	codeHash := crypto.Keccak256Hash(code)
+	l.app.EVMKeeper.SetCode(l.snapshot(), codeHash.Bytes(), code)
+	l.app.EVMKeeper.SetCodeHash(l.snapshot(), sender, codeHash.Bytes())
+
 	block := l.finalize(nil, []abci.Misbehavior{{Type: abci.MisbehaviorType_DUPLICATE_VOTE, Validator: abci.Validator{Address: consensus, Power: offender.VotingPower}, Height: 2, Time: history.Header.Time, TotalVotingPower: set.TotalVotingPower()}})
 	excluded, deferred := false, false
 	for _, event := range block.Events {
