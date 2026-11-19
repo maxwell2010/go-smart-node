@@ -270,10 +270,13 @@ func (c *withdrawalController) admitUserNFTCreation(ctx sdk.Context, msg core.Me
 			return errors.New("NFT deployed metadata differs")
 		}
 	}
-	for _, log := range receipt.Logs {
-		if log.Address != target && log.Address != c.profile.NFTCenter {
-			return errors.New("NFT creation includes foreign events")
-		}
+	beacon := common.BytesToAddress(c.customCollateral.evm.GetState(ctx, target, customBeaconSlot).Bytes())
+	expected, err := userNFTCreationLogs(factory, c.profile.NFTCenter, target, beacon, kind, *meta)
+	if err != nil {
+		return err
+	}
+	if err := requireUserNFTLogs(receipt.Logs, expected); err != nil {
+		return err
 	}
 	owner := sdk.AccAddress(meta.Creator[:]).String()
 	typ := nfttypes.NftType_NFT721
@@ -392,22 +395,13 @@ func (c *withdrawalController) admitUserNFTMint(ctx sdk.Context, msg core.Messag
 			}
 			id = log.Topics[3]
 			transfers++
-		} else {
-			known := false
-			for _, name := range []string{"URI", "MetadataUpdate", "ReserveUpdated"} {
-				if event, ok := asset.Events[name]; ok && event.ID == log.Topics[0] {
-					known = true
-				}
-			}
-			if !known {
-				return errors.New("unexpected NFT mint event")
-			}
 		}
 	}
 	if transfers != 1 {
 		return errors.New("NFT mint must emit exactly one direct movement")
 	}
 	methodURI := "tokenURI"
+	fresh := true
 	if is1155 {
 		methodURI = "uri"
 	}
@@ -433,6 +427,7 @@ func (c *withdrawalController) admitUserNFTMint(ctx sdk.Context, msg core.Messag
 		expected := uint64(quantity)
 		binding, lookupErr := c.nft.ResolveExternalNFT(ctx, target[:], id[:])
 		if lookupErr == nil {
+			fresh = false
 			count, countErr := c.nft.GetActiveSubTokenCount(ctx, binding.NativeTokenID, sdk.AccAddress(recipient[:]).String())
 			if countErr != nil {
 				return countErr
@@ -461,19 +456,36 @@ func (c *withdrawalController) admitUserNFTMint(ctx sdk.Context, msg core.Messag
 		if err != nil {
 			return err
 		}
-		r := abi.ConvertType(values[0], new(struct {
-			Token       common.Address
-			Amount      *big.Int
-			ReserveType uint8
-		})).(*struct {
-			Token       common.Address
-			Amount      *big.Int
-			ReserveType uint8
-		})
+		r := abi.ConvertType(values[0], new(userNFTReserve)).(*userNFTReserve)
 		if r.Token != (common.Address{}) || r.ReserveType != 1 || r.Amount.Cmp(unit) != 0 {
 			return errors.New("NFT final reserve differs from native payment")
 		}
 		reserve = sdk.NewCoin(identity.BaseDenom, sdkmath.NewIntFromBigInt(unit))
+	}
+	var postSupply *big.Int
+	if reserved && is1155 {
+		supplyMethod := ""
+		for name, method := range asset.Methods {
+			if method.Sig == "totalSupply(uint256)" {
+				supplyMethod = name
+				break
+			}
+		}
+		if supplyMethod == "" {
+			return errors.New("missing pinned ERC1155 supply getter")
+		}
+		values, err := c.userNFTRead(ctx, target, asset, supplyMethod, id.Big())
+		if err != nil {
+			return err
+		}
+		postSupply = values[0].(*big.Int)
+	}
+	expectedLogs, err := userNFTMintLogs(asset, target, msg.From, recipient, family, id, quantity, uri, msg.Value, fresh, postSupply)
+	if err != nil {
+		return err
+	}
+	if err := requireUserNFTLogs(receipt.Logs, expectedLogs); err != nil {
+		return err
 	}
 	return c.nft.AdmitUserMint(ctx, target, id, uri, sdk.AccAddress(recipient[:]).String(), quantity, reserve)
 }

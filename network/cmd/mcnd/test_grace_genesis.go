@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
 	"io"
@@ -41,14 +42,21 @@ func prepareTestGraceGenesis(raw []byte, evmID uint64, until int64) ([]byte, err
 		return nil, err
 	}
 	var profile ownedapp.WithdrawalProfile
-	if err := json.Unmarshal(state[ownedapp.WithdrawalGenesisKey], &profile); err != nil {
+	profileRaw := state[ownedapp.WithdrawalGenesisKey]
+	decoder := json.NewDecoder(bytes.NewReader(profileRaw))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(&profile); err != nil {
 		return nil, err
 	}
 	if !profile.EnableNativeConsensus || !profile.EnableNativeOrdinaryDELDowntime || !profile.EnableNativeDuplicateVote {
 		return nil, errors.New("native consensus and normal penalty profiles must remain enabled for resumption")
 	}
-	profile.TestGraceUntilHeight = until
-	state[ownedapp.WithdrawalGenesisKey], err = json.Marshal(profile)
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal(profileRaw, &fields); err != nil {
+		return nil, err
+	}
+	fields["test_grace_until_height"] = json.RawMessage(strconv.FormatInt(until, 10))
+	state[ownedapp.WithdrawalGenesisKey], err = json.Marshal(fields)
 	if err != nil {
 		return nil, err
 	}

@@ -25,6 +25,7 @@ func TestOwnedAppNativeUserNFTLifecycle(t *testing.T) {
 	binary, err := os.Executable()
 	require.NoError(t, err)
 	dir := t.TempDir()
+	require.NoError(t, os.Chmod(dir, 0700))
 	for _, phase := range []string{"seed", "run", "restart"} {
 		filter, historical, custom := "^TestOwnedAppNativeReservelessTokenLifecycle$", "", ""
 		if phase == "seed" {

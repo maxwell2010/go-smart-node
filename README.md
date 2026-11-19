@@ -72,6 +72,7 @@ DePIN и торговый MEV-сервис не входят в первый с�
 - [Проверка подписанного пакета и установка без локальной Go-сборки](network/docs/ru/OPERATOR_LAUNCH.md).
 - [Синхронизация, snapshots, pruning и журналы](network/docs/ru/SYNCHRONIZATION_AND_STORAGE.md).
 - [Массовое делегирование, штрафы и автоматические награды](network/docs/ru/MASS_DELEGATION_AND_REWARDS.md).
+- [CLI самоуправления валидатора](network/docs/ru/VALIDATOR_SELF_CONTROL.md) и [тестовый грейс-период](network/docs/ru/TEST_GRACE_PERIOD.md) - новые возможности feature-ветки, отсутствуют в опубликованном v1.0.0.
 - [Проверки и ограничения](network/docs/ru/VERIFICATION_LIMITS.md).
 - [Legacy-установка RU](docs/INSTALL.ru.md) / [EN](docs/INSTALL.en.md),
   [история интеграции и replay](docs/integration-progress.md),
