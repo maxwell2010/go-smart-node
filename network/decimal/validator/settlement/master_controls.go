@@ -88,9 +88,15 @@ func (e *Executor) VerifySignedValidatorControl(ctx sdk.Context, msg core.Messag
 			return proof, errors.New("Master pause state differs from selected control")
 		}
 	}
-	entry := receipt.Logs[0]
-	if entry.Address != e.roles.MasterValidator || len(entry.Topics) != 2 || entry.Topics[0] != e.master.Events[event].ID || entry.Topics[1] != common.BytesToHash(msg.From[:]) || !bytes.Equal(entry.Data, expected) {
-		return proof, errors.New("validator control event differs from authenticated caller/state")
+	if err := exactValidatorControlLog(receipt.Logs[0], e.roles.MasterValidator, msg.From, e.master.Events[event].ID, expected); err != nil {
+		return proof, err
 	}
 	return proof, nil
+}
+
+func exactValidatorControlLog(entry *ethtypes.Log, master, operator common.Address, topic common.Hash, expected []byte) error {
+	if entry == nil || entry.Removed || entry.Address != master || len(entry.Topics) != 2 || entry.Topics[0] != topic || entry.Topics[1] != common.BytesToHash(operator[:]) || !bytes.Equal(entry.Data, expected) {
+		return errors.New("validator control event differs from authenticated caller/state")
+	}
+	return nil
 }

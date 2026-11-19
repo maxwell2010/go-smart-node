@@ -375,7 +375,11 @@ func emitValidatorControlSigned(cmd *cobra.Command, path string, intent validato
 	if err != nil {
 		return err
 	}
-	result := map[string]string{"operator": intent.Operator, "ethereum_tx_hash": tx.Hash().Hex(), "raw_ethereum_tx": "0x" + hex.EncodeToString(raw), "cosmos_tx_base64": base64.StdEncoding.EncodeToString(encoded), "notice": validatorControlNotice}
+	encodedJSON, err := encoding.TxConfig.TxJSONEncoder()(cosmos)
+	if err != nil {
+		return err
+	}
+	result := map[string]interface{}{"operator": intent.Operator, "ethereum_tx_hash": tx.Hash().Hex(), "raw_ethereum_tx": "0x" + hex.EncodeToString(raw), "cosmos_tx_base64": base64.StdEncoding.EncodeToString(encoded), "cosmos_tx_json": json.RawMessage(encodedJSON), "notice": validatorControlNotice}
 	payload, err := json.MarshalIndent(result, "", "  ")
 	if err != nil {
 		return fmt.Errorf("encode signed control: %w", err)

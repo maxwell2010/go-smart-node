@@ -38,9 +38,13 @@ func TestValidatorControlCommandUsesLocalEthereumKeyring(t *testing.T) {
 	require.NoError(t, client.SetCmdClientContext(cmd, ctx))
 	cmd.SetArgs([]string{"sign", "--intent-file", path, "--from", "operator"})
 	require.NoError(t, cmd.Execute())
-	var result map[string]string
+	var result struct {
+		RawEthereumTx  string          `json:"raw_ethereum_tx"`
+		CosmosTxBase64 string          `json:"cosmos_tx_base64"`
+		CosmosTxJSON   json.RawMessage `json:"cosmos_tx_json"`
+	}
 	require.NoError(t, json.Unmarshal(output.Bytes(), &result))
-	encoded, err := hex.DecodeString(result["raw_ethereum_tx"][2:])
+	encoded, err := hex.DecodeString(result.RawEthereumTx[2:])
 	require.NoError(t, err)
 	var signed ethtypes.Transaction
 	require.NoError(t, signed.UnmarshalBinary(encoded))
@@ -49,7 +53,11 @@ func TestValidatorControlCommandUsesLocalEthereumKeyring(t *testing.T) {
 	require.Equal(t, crypto.PubkeyToAddress(key.PublicKey), sender)
 	require.Equal(t, uint64(9), signed.Nonce())
 	require.NotContains(t, output.String(), hex.EncodeToString(crypto.FromECDSA(key)))
-	require.NotEmpty(t, result["cosmos_tx_base64"])
+	require.NotEmpty(t, result.CosmosTxBase64)
+	require.NotEmpty(t, result.CosmosTxJSON)
+	decodedCosmos, err := enc.TxConfig.TxJSONDecoder()(result.CosmosTxJSON)
+	require.NoError(t, err)
+	require.Len(t, decodedCosmos.GetMsgs(), 1)
 }
 
 func TestOfflineValidatorControlSigningAndReplayDomain(t *testing.T) {

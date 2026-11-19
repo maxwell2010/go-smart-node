@@ -155,7 +155,9 @@ func runNativeValidatorSelfControls(t *testing.T, dir, phase string) {
 		require.NoError(t, err)
 		avatar, err := app.NativeValidatorKeeper.GetNativeValidatorAvatar(l.snapshot(), operator)
 		require.NoError(t, err)
-		data, err := json.Marshal([]interface{}{validator, avatar})
+		// Fees and H+2 consensus status can legitimately change at BeginBlock.
+		// Compare the fields these controls are authorized to mutate/protect.
+		data, err := json.Marshal([]interface{}{validator.OperatorAddress, validator.RewardAddress, validator.ConsensusPubkey, validator.Description, validator.Commission.String(), validator.Online, validator.Jailed, avatar})
 		require.NoError(t, err)
 		return string(data)
 	}

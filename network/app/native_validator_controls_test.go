@@ -6,6 +6,10 @@ import (
 )
 
 func TestValidatorControlMetadataBoundaries(t *testing.T) {
+	for _, input := range []string{`{"name":"A","name":"B"}`, `{"name":"A","\u006eame":"B"}`, `{"description":null}`, `[]`, `null`} {
+		_, err := CanonicalValidatorControlMetadata([]byte(input))
+		require.Error(t, err, input)
+	}
 	value, err := CanonicalValidatorControlMetadata([]byte(`{"commission":"0.05","avatar_uri":"ipfs://bafyfixture/image.png","name":"Operator A","description":"Public description"}`))
 	require.NoError(t, err)
 	require.Contains(t, string(value), `"commission":"0.050000000000000000"`)
