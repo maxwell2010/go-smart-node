@@ -109,6 +109,99 @@ python3 -B network/tools/verify_software_package.py \
 состава сама по себе не подтверждает издателя - для этого нужен предыдущий
 шаг GitHub OIDC.
 
+## Быстрая установка без Go и Git
+
+`network/tools/install_software.py` устанавливает только проверенный Linux
+amd64 бинарник под **новым абсолютным именем**. Нужны Python >=3.11, GitHub CLI
+с указанными выше параметрами, curl и CA certificates. Go, GCC и Git для
+этого пути не нужны. Сам установщик выполняйте обычным пользователем.
+
+Зависимости для Ubuntu 24.04 устанавливаются отдельно:
+
+```sh
+sudo apt-get update
+sudo apt-get install --yes python3 curl ca-certificates
+```
+
+GitHub CLI установите по [официальной инструкции для Linux](https://github.com/cli/cli/blob/trunk/docs/install_linux.md).
+Не рассчитывайте, что версия `gh` из стандартного Ubuntu repository поддерживает
+все необходимые параметры. Проверьте установленную версию и справку:
+
+```sh
+gh --version
+gh attestation verify --help
+```
+
+Нужны `--signer-workflow`, `--source-ref`, `--source-digest`,
+`--signer-digest`, `--deny-self-hosted-runners` и `--bundle`. Если их нет,
+обновите CLI по официальной инструкции, не удаляйте проверки из команды.
+GPG для software-only не требуется; `gpgv` относится только к старому
+подписанному test launch формату.
+
+Дождитесь успешного publisher CI и получите из доверенного сообщения о выпуске
+`SOURCE_SHA`, `SOURCE_REF`, `RELEASE_VERSION`, `ARCHIVE_SHA256` и прямой HTTPS
+`ARCHIVE_URL` файла `.tar.gz`. Не берите ожидаемые SHA/ref только из архива.
+`SOURCE_SHA` должен указывать на выпуск, в котором уже есть этот установщик.
+Например, новый путь можно задать так:
+
+```sh
+MCND_BINARY="$HOME/.local/opt/mcnd/$RELEASE_VERSION-$SOURCE_SHA/mcnd"
+```
+
+Страница Actions, HTML-страница релиза и ZIP-контейнер Actions artifact не
+являются `ARCHIVE_URL`. Пока постоянный Release asset не опубликован,
+скачайте software package из успешного Actions run, откройте ZIP и используйте
+абсолютный локальный `ARCHIVE` вместо URL. Подписанный test launch archive
+имеет другой формат и не подходит этому установщику.
+
+Установщик проверяет SHA256 полного архива, затем GitHub OIDC с точными
+repo, reusable workflow, source ref, source digest и signer digest; self-hosted
+runner запрещён. После успеха он скачивает только четыре Python-файла
+проверки и `go.mod` того же полного `SOURCE_SHA`, запускает ограниченную
+проверку manifest/provenance/SBOM в изолированном Python и копирует ровно
+`bin/mcnd`. Прикладной бинарник он **не исполняет**.
+
+Загрузки ограничены: архив - 512 MiB, каждый файл проверки - 2 MiB;
+редиректы допускаются только на HTTPS. Временный каталог удаляется.
+Целевой файл создаётся с `O_EXCL`; существующий файл или ссылка не
+перезаписываются. До успешной проверки хеша копии файл не получает права
+исполнения. Проверка не меняет PATH, home, ключи, genesis, службы и процессы
+работающих нод, не запускает `mcnd init`. Бинарник и архив временно занимают
+место одновременно, но Go toolchain и сборочные кэши не создаются.
+
+Читаемый вариант команды после задания перечисленных переменных:
+
+```sh
+(
+  set -eu
+  : "${SOURCE_SHA:?}" "${SOURCE_REF:?}" "${RELEASE_VERSION:?}" "${ARCHIVE_SHA256:?}" "${ARCHIVE_URL:?}" "${MCND_BINARY:?}"
+  python3 -I -c 'import re,sys; sys.exit(0 if re.fullmatch("[0-9a-f]{40}",sys.argv[1]) else "Нужен полный SOURCE_SHA")' "$SOURCE_SHA"
+  work=$(mktemp -d)
+  trap 'rm -rf -- "$work"' EXIT
+  curl --fail --location --proto '=https' --proto-redir '=https' --tlsv1.2 --max-filesize 2097152 \
+    "https://raw.githubusercontent.com/maxwell2010/go-smart-node/$SOURCE_SHA/network/tools/install_software.py" \
+    --output "$work/install_software.py"
+  python3 -I -B "$work/install_software.py" \
+    --source-sha "$SOURCE_SHA" --source-ref "$SOURCE_REF" \
+    --release-version "$RELEASE_VERSION" --archive-sha "$ARCHIVE_SHA256" \
+    --archive-url "$ARCHIVE_URL" --destination "$MCND_BINARY"
+)
+```
+
+Тот же вариант одной строкой:
+
+```sh
+( set -eu; : "${SOURCE_SHA:?}" "${SOURCE_REF:?}" "${RELEASE_VERSION:?}" "${ARCHIVE_SHA256:?}" "${ARCHIVE_URL:?}" "${MCND_BINARY:?}"; python3 -I -c 'import re,sys; sys.exit(0 if re.fullmatch("[0-9a-f]{40}",sys.argv[1]) else "Нужен полный SOURCE_SHA")' "$SOURCE_SHA"; work=$(mktemp -d); trap 'rm -rf -- "$work"' EXIT; curl --fail --location --proto '=https' --proto-redir '=https' --tlsv1.2 --max-filesize 2097152 "https://raw.githubusercontent.com/maxwell2010/go-smart-node/$SOURCE_SHA/network/tools/install_software.py" --output "$work/install_software.py"; python3 -I -B "$work/install_software.py" --source-sha "$SOURCE_SHA" --source-ref "$SOURCE_REF" --release-version "$RELEASE_VERSION" --archive-sha "$ARCHIVE_SHA256" --archive-url "$ARCHIVE_URL" --destination "$MCND_BINARY" )
+```
+
+Для локального архива замените требование `ARCHIVE_URL` на `ARCHIVE` и
+`--archive-url "$ARCHIVE_URL"` на `--archive "$ARCHIVE"`. Для сохранённого
+bundle добавьте `--bundle /absolute/path/provenance.sigstore.json` к команде
+Python; ожидаемые SHA/ref/workflow при этом остаются обязательными.
+Первоначальная загрузка установщика использует GitHub HTTPS и независимо
+полученный полный source SHA. Далее издатель самого software-архива проверяется
+GitHub OIDC. Не подменяйте полный SHA плавающей веткой или тегом.
+
 После проверки ставьте бинарник под новым версионным именем и сохраняйте
 старый. Установка не должна создавать или менять home действующих нод.
 Для новой сети всё равно нужен отдельно утверждённый genesis и параметры

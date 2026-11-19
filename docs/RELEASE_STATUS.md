@@ -1,8 +1,10 @@
 # Software release verification
 
 The separate-network functional, EVM, migration and operational gates below
-have passed. The versioned software archive and its GitHub OIDC publisher
-attestation are being prepared. No stable software tag has yet been published.
+have passed. The versioned software archive and strict GitHub OIDC publisher
+attestation passed in [44477103491](https://github.com/maxwell2010/go-smart-node/actions/runs/44477103491).
+Available published assets and their exact source revision are listed in
+[GitHub Releases](https://github.com/maxwell2010/go-smart-node/releases).
 The public network launch remains separate: genesis, supply/allocation,
 operator keys and bootstrap/RPC endpoints have not been approved.
 

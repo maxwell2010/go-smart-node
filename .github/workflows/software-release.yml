@@ -180,6 +180,27 @@ jobs:
           mkdir -p "$RUNNER_TEMP/software-attestation"
           cp -- "$ATTESTATION_BUNDLE" "$RUNNER_TEMP/software-attestation/provenance.sigstore.json"
           cp -- "$RUNNER_TEMP/software-verified.json" "$RUNNER_TEMP/software-attestation-verification.json" "$RUNNER_TEMP/software-attestation/"
+      - name: Install attested software at a new path without starting a node
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          archive_sha=$(python3 -c 'import json,os; print(json.load(open(os.environ["RUNNER_TEMP"]+"/software-verified.json"))["archiveSha256"])')
+          destination="$RUNNER_TEMP/software-installed/$RELEASE_VERSION/mcnd"
+          bundle="$RUNNER_TEMP/software-attestation/provenance.sigstore.json"
+          python3 -B network/tools/install_software.py --source-sha "$GITHUB_SHA" --source-ref "$GITHUB_REF" --release-version "$RELEASE_VERSION" --archive-sha "$archive_sha" --archive "$SOFTWARE_ARCHIVE" --bundle "$bundle" --destination "$destination" > "$RUNNER_TEMP/software-attestation/install-result.json"
+          python3 -c 'import json,os; p=os.environ["RUNNER_TEMP"]+"/software-attestation/install-result.json"; r=json.load(open(p)); assert r["sourceRevision"]==os.environ["GITHUB_SHA"] and r["releaseVersion"]==os.environ["RELEASE_VERSION"] and r["includesGenesis"] is False and r["networkLaunchApproved"] is False'
+          before=$(sha256sum "$destination" | cut -d ' ' -f 1)
+          expected=$(python3 -c 'import json,os; print(json.load(open(os.environ["RUNNER_TEMP"]+"/software-verified.json"))["binarySha256"])')
+          test "$before" = "$expected"
+          if python3 -B network/tools/install_software.py --source-sha "$GITHUB_SHA" --source-ref "$GITHUB_REF" --release-version "$RELEASE_VERSION" --archive-sha "$archive_sha" --archive "$SOFTWARE_ARCHIVE" --bundle "$bundle" --destination "$destination" > "$RUNNER_TEMP/software-attestation/reinstall-result.txt" 2>&1; then
+            echo 'Existing software binary was unexpectedly accepted for overwrite.' >&2
+            exit 1
+          fi
+          after=$(sha256sum "$destination" | cut -d ' ' -f 1)
+          test "$after" = "$before"
+          printf '{"overwriteRejected":true,"binarySha256":"%s"}\n' "$after" > "$RUNNER_TEMP/software-attestation/no-overwrite.json"
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
         with:
           name: mcnd-software-attestation-${{ github.sha }}-${{ github.run_attempt }}
