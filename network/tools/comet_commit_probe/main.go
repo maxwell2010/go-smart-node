@@ -24,7 +24,7 @@ type request struct {
 }
 
 func verify(input request) ([]string, error) {
-	if (input.ChainID != "mintcandy_990001-1" && input.ChainID != "mintcandy_990012-1") || len(input.Keys) != 4 {
+	if (input.ChainID != "mintcandy_990001-1" && input.ChainID != "mintcandy_990012-1" && input.ChainID != "mintcandy_990013-1") || len(input.Keys) != 4 {
 		return nil, errors.New("expected four public keys and the isolated consensus fixture chain ID")
 	}
 	if len(input.VotingPowers) != 0 && len(input.VotingPowers) != len(input.Keys) {

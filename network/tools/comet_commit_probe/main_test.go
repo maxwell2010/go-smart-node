@@ -75,13 +75,17 @@ func marshalCommit(t *testing.T, input *request, commit *types.Commit) {
 }
 
 func TestVerifiedQuorum(t *testing.T) {
-	for _, absent := range [][]int{nil, {3}} {
-		input, _ := fixture(t, absent...)
-		input.VotingPowers = []int64{10000, 10000, 10000, 10000}
-		got, err := verify(input)
-		if err != nil || len(got) != 4-len(absent) {
-			t.Fatalf("valid fixture quorum failed: %v, %v", got, err)
-		}
+	for _, domain := range []string{"mintcandy_990012-1", "mintcandy_990013-1"} {
+		t.Run(domain, func(t *testing.T) {
+			for _, absent := range [][]int{nil, {3}} {
+				input, _ := fixtureChain(t, domain, absent...)
+				input.VotingPowers = []int64{10000, 10000, 10000, 10000}
+				got, err := verify(input)
+				if err != nil || len(got) != 4-len(absent) {
+					t.Fatalf("valid fixture quorum failed: %v, %v", got, err)
+				}
+			}
+		})
 	}
 }
 
