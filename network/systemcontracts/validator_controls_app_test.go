@@ -122,6 +122,7 @@ func runNativeValidatorSelfControls(t *testing.T, dir, phase string) {
 		require.NoError(t, err)
 		require.True(t, validator.Online)
 		require.Equal(t, "Self operator A", validator.Description.Moniker)
+		require.Equal(t, "0.050000000000000000", validator.Commission.String())
 		avatar, err := app.NativeValidatorKeeper.GetNativeValidatorAvatar(l.snapshot(), first.Operator)
 		require.NoError(t, err)
 		require.Equal(t, "ipfs://bafyfixture/avatar.png", avatar)
