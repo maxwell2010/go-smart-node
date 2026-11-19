@@ -1,0 +1,71 @@
+{
+  "status": "ISOLATED_DRC20_TARIFF_PASS",
+  "releaseVersion": "1.1.1",
+  "releasedSourceRevision": "3880898bf95fe701b9d6f28d6e029a63f88a16ae",
+  "testedRevision": "17eedd1643a124193305a8cb1ff66ae96408a953",
+  "ci": "https://github.com/maxwell2010/go-smart-node/actions/runs/44544920917",
+  "artifactId": 14540032378,
+  "artifactSha256": "94a5b70678fcc668fc7423e777af8f090d4b90fbe64fc790b70cd50a04446721",
+  "testLogSha256": "2c5d8f713658295e5ea0817d02608997dcbff63b6545aacfde6f441c70af467c",
+  "signingDomain": "mintcandy_990001-1",
+  "gasLimit": 24000000,
+  "testGasPriceAtomic": "1000000000000",
+  "backed": [
+    {
+      "tickerLength": 3,
+      "tariffAtomic": "2500000000000000000000",
+      "reserveAtomic": "1000000000000000000",
+      "chargedGas": 12000000
+    },
+    {
+      "tickerLength": 4,
+      "tariffAtomic": "250000000000000000000",
+      "reserveAtomic": "1000000000000000000",
+      "chargedGas": 12000000
+    },
+    {
+      "tickerLength": 5,
+      "tariffAtomic": "25000000000000000000",
+      "reserveAtomic": "1000000000000000000",
+      "chargedGas": 12000000
+    },
+    {
+      "tickerLength": 6,
+      "tariffAtomic": "2500000000000000000",
+      "reserveAtomic": "1000000000000000000",
+      "chargedGas": 12000000
+    },
+    {
+      "tickerLength": 7,
+      "tariffAtomic": "250000000000000000",
+      "reserveAtomic": "1000000000000000000",
+      "chargedGas": 12000000
+    },
+    {
+      "tickerLength": 8,
+      "tariffAtomic": "250000000000000000",
+      "reserveAtomic": "1000000000000000000",
+      "chargedGas": 12000000
+    },
+    {
+      "tickerLength": 9,
+      "tariffAtomic": "250000000000000000",
+      "reserveAtomic": "1000000000000000000",
+      "chargedGas": 12000000
+    },
+    {
+      "tickerLength": 10,
+      "tariffAtomic": "250000000000000000",
+      "reserveAtomic": "1000000000000000000",
+      "chargedGas": 12000000
+    }
+  ],
+  "reserveless": {
+    "callValueAtomic": "0",
+    "reserveAtomic": "0",
+    "chargedGas": 12000000
+  },
+  "underpaymentRolledBack": true,
+  "tariffCreditedToZeroAddress": true,
+  "bankSupplyPreserved": true
+}
