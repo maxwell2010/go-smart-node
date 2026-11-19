@@ -4,6 +4,7 @@ import (
 	"math/big"
 	"testing"
 
+	"github.com/ethereum/go-ethereum/accounts/abi"
 	"github.com/ethereum/go-ethereum/common"
 	ethtypes "github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/crypto"
@@ -89,6 +90,26 @@ func TestUserNFTMintEventsAuthenticateAuxiliaryValues(t *testing.T) {
 					actual[i].Data = data
 					require.Error(t, requireUserNFTLogs(actual, expected))
 				}
+				if event.Topics[0] == crypto.Keccak256Hash([]byte("MetadataUpdate(uint256)")) {
+					data, err := asset.Events["MetadataUpdate"].Inputs.NonIndexed().Pack(big.NewInt(124))
+					require.NoError(t, err)
+					actual = copyUserNFTLogs(expected)
+					actual[i].Data = data
+					require.Error(t, requireUserNFTLogs(actual, expected))
+				}
+				if reserveEvent, ok := asset.Events["ReserveUpdated"]; ok && event.Topics[0] == reserveEvent.ID {
+					values, err := reserveEvent.Inputs.NonIndexed().Unpack(event.Data)
+					require.NoError(t, err)
+					last := len(values) - 1
+					reserve := abi.ConvertType(values[last], new(userNFTReserve)).(*userNFTReserve)
+					reserve.Amount = new(big.Int).Add(reserve.Amount, big.NewInt(1))
+					values[last] = *reserve
+					data, err := reserveEvent.Inputs.NonIndexed().Pack(values...)
+					require.NoError(t, err)
+					actual = copyUserNFTLogs(expected)
+					actual[i].Data = data
+					require.Error(t, requireUserNFTLogs(actual, expected))
+				}
 			}
 			if tc.family == 3 {
 				for _, index := range []int{tc.count - 3, tc.count - 1} {
@@ -100,7 +121,7 @@ func TestUserNFTMintEventsAuthenticateAuxiliaryValues(t *testing.T) {
 					if index == tc.count-3 {
 						wantSupply -= int64(tc.quantity)
 					}
-					require.Equal(t, big.NewInt(wantSupply), snapshot)
+					require.Zero(t, big.NewInt(wantSupply).Cmp(snapshot))
 					// Canonical ABI, wrong supply: no malformed encoding is needed
 					// to exercise strict financial event rejection.
 					values[1] = new(big.Int).Add(snapshot, big.NewInt(1))

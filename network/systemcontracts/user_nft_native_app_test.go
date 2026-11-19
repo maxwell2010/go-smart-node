@@ -27,14 +27,20 @@ func TestOwnedAppNativeUserNFTLifecycle(t *testing.T) {
 	dir := t.TempDir()
 	require.NoError(t, os.Chmod(dir, 0700))
 	for _, phase := range []string{"seed", "run", "restart"} {
-		filter, historical, custom := "^TestOwnedAppNativeReservelessTokenLifecycle$", "", ""
+		filter := "^TestOwnedAppEmptyUserAssetsLifecycle$"
 		if phase == "seed" {
 			filter = "^TestOwnedAppSignedRegistryBootstrap$/^authenticated_isolated_position_reader$"
-			historical = "seed"
-			custom = "seed"
 		}
 		child := exec.CommandContext(t.Context(), binary, "-test.v", "-test.timeout=4m", "-test.run="+filter)
-		child.Env = append(os.Environ(), reservelessNativePhaseEnv+"="+phase, userNFTNativePhaseEnv+"="+phase, nativeConsensusDaemonFixtureEnv+"="+dir, nativeHistoricalConsensusPhaseEnv+"="+historical, nativeCustomCollateralGenesisPhaseEnv+"="+custom)
+		// Reuse the system-only InitChain fixture. The historical DRC20 seed
+		// deliberately has no NFT admission profile and cannot test this route.
+		child.Env = append(os.Environ(), emptyUserAssetsPhaseEnv+"="+phase, userNFTNativePhaseEnv+"="+phase,
+			nativeConsensusDaemonFixtureEnv+"="+dir, reservelessNativePhaseEnv+"=", nativeHistoricalConsensusPhaseEnv+"=",
+			nativeCustomCollateralGenesisPhaseEnv+"=", nativeLaunchRehearsalEnv+"=", nativeHistoricalMaxNFTPhaseEnv+"=",
+			nativeCustomNFTPhaseEnv+"=", nativeConsensusFeeRewardsEnv+"=", nativeConsensusIBCV1Env+"=",
+			nativeConsensusDowntimeEnv+"=", nativeConsensusUpgradeGovernanceEnv+"=", nativeConsensusJailRecoveryEnv+"=",
+			nativeConsensusHeldDowntimeEnv+"=", nativeConsensusNFTDowntimeEnv+"=", nativeConsensusFullUpgradeEnv+"=",
+			signedNFTAdmissionPhaseEnv+"=", delLifecycleFixtureEnv+"=", withdrawalGenesisFixtureEnv+"=")
 		output, err := child.CombinedOutput()
 		require.NoError(t, err, "phase %s: %s", phase, output)
 		t.Logf("%s: %s", phase, output)

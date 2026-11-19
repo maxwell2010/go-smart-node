@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"github.com/cosmos/cosmos-sdk/client"
 	"github.com/cosmos/cosmos-sdk/client/flags"
+	"github.com/cosmos/cosmos-sdk/codec"
 	"github.com/cosmos/cosmos-sdk/codec/address"
 	"github.com/cosmos/cosmos-sdk/types/tx/signing"
 	authtypes "github.com/cosmos/cosmos-sdk/x/auth/types"
@@ -298,11 +299,10 @@ func newValidatorControlCmd() *cobra.Command {
 		if err != nil {
 			return err
 		}
-		payload, err := json.MarshalIndent(struct {
-			Height    int64       `json:"height"`
-			Validator interface{} `json:"validator"`
-			Avatar    string      `json:"avatar_uri"`
-		}{height, response.Validator, string(avatar)}, "", "  ")
+		if response == nil {
+			return errors.New("empty validator query response")
+		}
+		payload, err := marshalValidatorControlStatus(ctx.Codec, height, response.Validator, string(avatar))
 		if err != nil {
 			return err
 		}
@@ -312,6 +312,21 @@ func newValidatorControlCmd() *cobra.Command {
 	flags.AddQueryFlagsToCmd(status)
 	parent.AddCommand(prepare, sign, status)
 	return parent
+}
+
+func marshalValidatorControlStatus(cdc codec.Codec, height int64, validator validatortypes.Validator, avatar string) ([]byte, error) {
+	if cdc == nil || len(avatar) > 512 {
+		return nil, errors.New("invalid validator status codec or avatar bound")
+	}
+	encoded, err := cdc.MarshalJSON(&validator)
+	if err != nil {
+		return nil, err
+	}
+	return json.MarshalIndent(struct {
+		Height    int64           `json:"height"`
+		Validator json.RawMessage `json:"validator"`
+		Avatar    string          `json:"avatar_uri"`
+	}{height, encoded, avatar}, "", "  ")
 }
 
 // Only client flags/keyring are loaded. This command never intercepts server

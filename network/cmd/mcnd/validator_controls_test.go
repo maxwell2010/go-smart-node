@@ -3,20 +3,49 @@ package main
 import (
 	"bytes"
 	"context"
+	sdkmath "cosmossdk.io/math"
 	"encoding/hex"
 	"encoding/json"
 	"github.com/cosmos/cosmos-sdk/client"
+	"github.com/cosmos/cosmos-sdk/codec/address"
 	"github.com/cosmos/cosmos-sdk/crypto/keyring"
+	"github.com/cosmos/cosmos-sdk/crypto/keys/ed25519"
 	"github.com/cosmos/evm/crypto/hd"
 	ethtypes "github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/crypto"
 	ownedapp "github.com/maxwell2010/go-smart-node/network/app"
+	validatortypes "github.com/maxwell2010/go-smart-node/network/decimal/validator/types"
+	"github.com/maxwell2010/go-smart-node/network/identity"
 	"github.com/stretchr/testify/require"
 	"math/big"
 	"os"
 	"path/filepath"
 	"testing"
 )
+
+func TestValidatorControlStatusUsesSDKCodecForConsensusAny(t *testing.T) {
+	enc := ownedapp.MakeEncodingConfig(9905401)
+	op, err := address.NewBech32Codec(identity.Bech32PrefixValAddr).BytesToString(bytes.Repeat([]byte{1}, 20))
+	require.NoError(t, err)
+	reward, err := address.NewBech32Codec(identity.Bech32PrefixAccAddr).BytesToString(bytes.Repeat([]byte{2}, 20))
+	require.NoError(t, err)
+	row, err := validatortypes.NewValidator(op, reward, ed25519.GenPrivKeyFromSecret([]byte("disposable status fixture")).PubKey(), validatortypes.Description{Moniker: "Status fixture"}, sdkmath.LegacyZeroDec())
+	require.NoError(t, err)
+	raw, err := marshalValidatorControlStatus(enc.Codec, 42, row, "ipfs://fixture/avatar.png")
+	require.NoError(t, err)
+	var result struct {
+		Height    int64           `json:"height"`
+		Validator json.RawMessage `json:"validator"`
+		Avatar    string          `json:"avatar_uri"`
+	}
+	require.NoError(t, json.Unmarshal(raw, &result))
+	require.EqualValues(t, 42, result.Height)
+	var decoded validatortypes.Validator
+	require.NoError(t, enc.Codec.UnmarshalJSON(result.Validator, &decoded))
+	require.Equal(t, row.OperatorAddress, decoded.OperatorAddress)
+	require.Equal(t, row.ConsensusPubkey.TypeUrl, decoded.ConsensusPubkey.TypeUrl)
+	require.Equal(t, row.ConsensusPubkey.Value, decoded.ConsensusPubkey.Value)
+}
 
 func TestValidatorControlCommandUsesLocalEthereumKeyring(t *testing.T) {
 	enc := ownedapp.MakeEncodingConfig(9905401)

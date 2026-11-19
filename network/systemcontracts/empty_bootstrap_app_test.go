@@ -103,9 +103,16 @@ func runEmptyUserAssetsLifecycle(t *testing.T, dir, phase string) {
 		require.Len(t, validators, 4)
 		l.set = cmttypes.NewValidatorSet(validators)
 		l.commit(l.finalize(nil, nil))
-		assertNativeBackedTokenLifecycle(t, l, profile, dir)
 	} else {
 		require.Equal(t, "restart", phase)
+	}
+	if os.Getenv(userNFTNativePhaseEnv) != "" {
+		runNativeUserNFTLifecycle(t, l, dir, phase)
+		return
+	}
+	if phase == "run" {
+		assertNativeBackedTokenLifecycle(t, l, profile, dir)
+	} else {
 		assertNativeBackedTokenRestart(t, l, dir)
 	}
 	assertEmptySeedReservelessLifecycle(t, l, profile, dir, phase)
