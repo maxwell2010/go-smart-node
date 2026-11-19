@@ -12,6 +12,9 @@ follower replay, systemd restart and snapshot restore in the isolated rehearsal.
 A separate process test built from the same daemon source exercised ICS-20
 over Hermes, including packet delivery after restart and refunds. See the
 [validation record and run links](../network/docs/ru/evidence/software-release-1.1.1.json).
+The [public-release rehearsal](https://github.com/maxwell2010/go-smart-node/actions/runs/44539903038)
+downloaded the published package, repeated the daemon checks and captured the
+[validated fresh defaults](../network/docs/ru/evidence/default-launch-parameters-1.1.1.json).
 
 ## 1.1.0 software release
 
