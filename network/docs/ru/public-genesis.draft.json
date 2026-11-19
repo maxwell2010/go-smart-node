@@ -28,42 +28,71 @@
   "app_hash": "",
   "app_state": {
     "auth": null,
+    "authz": null,
     "bank": {
       "balances": null,
       "supply": [
         {
           "denom": "del",
-          "amount": "100000000000000000000000"
+          "amount": null
         }
-      ]
+      ],
+      "params": null,
+      "denom_metadata": null,
+      "send_enabled": []
     },
     "coin": {
       "params": {
         "base_denom": "del",
         "base_title": "MintCandy native coin",
-        "base_volume": "100000000000000000000000"
+        "base_volume": null
       },
       "coins": null,
       "checks": []
     },
+    "distribution": null,
+    "erc20": null,
+    "evidence": null,
     "evm": {
       "accounts": null,
       "params": {
-        "evm_denom": "del"
+        "evm_denom": "del",
+        "extended_denom_options": {
+          "extended_denom": "del"
+        },
+        "active_static_precompiles": null
       },
       "preinstalls": null
     },
+    "feegrant": null,
+    "feemarket": null,
     "genutil": {
       "gen_txs": []
     },
     "gov": null,
     "ibc": null,
+    "mint": {
+      "minter": {
+        "inflation": "0.000000000000000000",
+        "annual_provisions": "0.000000000000000000"
+      },
+      "params": {
+        "mint_denom": "del",
+        "inflation_rate_change": "0.130000000000000000",
+        "inflation_max": "0.000000000000000000",
+        "inflation_min": "0.000000000000000000",
+        "goal_bonded": "0.670000000000000000",
+        "blocks_per_year": "6311520"
+      }
+    },
     "nft": {
       "collections": null,
       "external_bindings": null,
       "isolated_vaults": null,
-      "isolated_positions": []
+      "isolated_positions": [],
+      "params": null
     },
+    "slashing": null,
     "staking": {
       "params": {
         "bond_denom": "del"
@@ -77,165 +106,16 @@
       "exported": false
     },
     "transfer": null,
+    "upgrade": null,
     "validator": {
-      "validators": [
-        {
-          "operator_address": null,
-          "reward_address": null,
-          "consensus_pubkey": {
-            "@type": "/cosmos.crypto.ed25519.PubKey",
-            "key": null
-          },
-          "description": {
-            "moniker": null,
-            "identity": "",
-            "website": "",
-            "security_contact": "",
-            "details": ""
-          },
-          "commission": "0.050000000000000000",
-          "status": "BOND_STATUS_UNBONDED",
-          "online": true,
-          "jailed": false,
-          "unbonding_height": "0",
-          "unbonding_time": "1970-01-01T00:00:00Z",
-          "rewards": "0",
-          "total_rewards": "0",
-          "stake": "0",
-          "drc20_address": ""
-        },
-        {
-          "operator_address": null,
-          "reward_address": null,
-          "consensus_pubkey": {
-            "@type": "/cosmos.crypto.ed25519.PubKey",
-            "key": null
-          },
-          "description": {
-            "moniker": null,
-            "identity": "",
-            "website": "",
-            "security_contact": "",
-            "details": ""
-          },
-          "commission": "0.050000000000000000",
-          "status": "BOND_STATUS_UNBONDED",
-          "online": true,
-          "jailed": false,
-          "unbonding_height": "0",
-          "unbonding_time": "1970-01-01T00:00:00Z",
-          "rewards": "0",
-          "total_rewards": "0",
-          "stake": "0",
-          "drc20_address": ""
-        },
-        {
-          "operator_address": null,
-          "reward_address": null,
-          "consensus_pubkey": {
-            "@type": "/cosmos.crypto.ed25519.PubKey",
-            "key": null
-          },
-          "description": {
-            "moniker": null,
-            "identity": "",
-            "website": "",
-            "security_contact": "",
-            "details": ""
-          },
-          "commission": "0.050000000000000000",
-          "status": "BOND_STATUS_UNBONDED",
-          "online": true,
-          "jailed": false,
-          "unbonding_height": "0",
-          "unbonding_time": "1970-01-01T00:00:00Z",
-          "rewards": "0",
-          "total_rewards": "0",
-          "stake": "0",
-          "drc20_address": ""
-        },
-        {
-          "operator_address": null,
-          "reward_address": null,
-          "consensus_pubkey": {
-            "@type": "/cosmos.crypto.ed25519.PubKey",
-            "key": null
-          },
-          "description": {
-            "moniker": null,
-            "identity": "",
-            "website": "",
-            "security_contact": "",
-            "details": ""
-          },
-          "commission": "0.050000000000000000",
-          "status": "BOND_STATUS_UNBONDED",
-          "online": true,
-          "jailed": false,
-          "unbonding_height": "0",
-          "unbonding_time": "1970-01-01T00:00:00Z",
-          "rewards": "0",
-          "total_rewards": "0",
-          "stake": "0",
-          "drc20_address": ""
-        }
-      ],
-      "delegations": [
-        {
-          "delegator": null,
-          "validator": null,
-          "stake": {
-            "type": "STAKE_TYPE_COIN",
-            "id": "del",
-            "stake": {
-              "denom": "del",
-              "amount": "10000000000000000000000"
-            }
-          }
-        },
-        {
-          "delegator": null,
-          "validator": null,
-          "stake": {
-            "type": "STAKE_TYPE_COIN",
-            "id": "del",
-            "stake": {
-              "denom": "del",
-              "amount": "10000000000000000000000"
-            }
-          }
-        },
-        {
-          "delegator": null,
-          "validator": null,
-          "stake": {
-            "type": "STAKE_TYPE_COIN",
-            "id": "del",
-            "stake": {
-              "denom": "del",
-              "amount": "10000000000000000000000"
-            }
-          }
-        },
-        {
-          "delegator": null,
-          "validator": null,
-          "stake": {
-            "type": "STAKE_TYPE_COIN",
-            "id": "del",
-            "stake": {
-              "denom": "del",
-              "amount": "10000000000000000000000"
-            }
-          }
-        }
-      ],
+      "validators": null,
+      "delegations": null,
       "undelegations": [],
       "redelegations": [],
       "last_validator_powers": [],
       "last_total_power": "0",
       "params": {
-        "max_validators": 16,
+        "max_validators": null,
         "max_delegations": 1000,
         "max_entries": 30,
         "historical_entries": 10000,
@@ -260,6 +140,7 @@
       "evm_frozen_bindings": [],
       "binding_revision": null
     },
+    "vesting": null,
     "withdrawal_settlement": {
       "registry": null,
       "gateway": null,

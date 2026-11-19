@@ -170,7 +170,8 @@ jobs:
           if [[ "$LAUNCH_FOUR_VALIDATORS" == true || "$LAUNCH_TREASURY" == true || "$LAUNCH_SIGNED_PACKAGE" == true || -n "$SYSTEMD_PACKAGE_RUN" ]]; then
             export MCND_NATIVE_LAUNCH_REHEARSAL=4
             launch_options+=(--four-validators)
-            allocation_options+=(--allocation-plan network/docs/ru/public-launch-allocation.draft.json)
+            # Historical CI fixture has its own allocation; public proposals remain unapproved.
+            allocation_options+=(--allocation-plan network/tools/fixtures/launch-four-validator-ci-allocation.json)
           fi
           if [[ "$LAUNCH_FOUR_VALIDATORS" == true && "$LAUNCH_TREASURY" != true && "$LAUNCH_SIGNED_PACKAGE" != true && -z "$SYSTEMD_PACKAGE_RUN" ]]; then
             (

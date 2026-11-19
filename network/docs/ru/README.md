@@ -16,6 +16,8 @@
 [проверка зависимостей отдельной сборки](../security/mcnd-sdkarmor-264303b-20261103/README.md).
 [Подробно о синхронизации и хранении](SYNCHRONIZATION_AND_STORAGE.md).
 [Черновик запуска и сбор публичных данных операторов](OPERATOR_LAUNCH.md).
+[Публичный запуск: решения на утверждение](LAUNCH_APPROVAL.md) и
+[единый проект genesis и распределения](PUBLIC_LAUNCH_DRAFT.md).
 [Начальное распределение и баланс основателя: параметры для согласования](FOUNDER_BOOTSTRAP_DRAFT.md).
 [Нативная монета, мост, оплата комиссий и gas-price oracle](TOKEN_AND_FEE_MODEL.md).
 [Массовое делегирование, порционные штрафы и автоматические награды](MASS_DELEGATION_AND_REWARDS.md).
