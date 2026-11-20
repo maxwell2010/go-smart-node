@@ -83,6 +83,7 @@ consensus address, уникальность операторов и P2P ID, су
 `secp256k1` и путём деривации `m/44'/60'/0'/0/0`. Оператор хранит ключ
 самостоятельно и передаёт только открытый адрес. На каждый из двух адресов
 выделено по 100 MSP на комиссии.
+[Установка и конфигурация Hermes](HERMES_RELAYER.md).
 
 ```sh
 "$MCND_GENESIS" addresses --chain-id mintcandy_9905401-1 --evm-chain-id 9905401 > "$SYSTEM_ROLES_JSON"

@@ -18,6 +18,7 @@
 [газ нативной обработки](NATIVE_WORK_GAS.md),
 [проверка зависимостей отдельной сборки](../security/mcnd-sdkarmor-264303b-20261103/README.md).
 [Подробно о синхронизации и хранении](SYNCHRONIZATION_AND_STORAGE.md).
+[Установка и конфигурация релеера Hermes](HERMES_RELAYER.md).
 [Черновик запуска и сбор публичных данных операторов](OPERATOR_LAUNCH.md).
 [Публичный запуск: решения на утверждение](LAUNCH_APPROVAL.md) и
 [единый проект genesis и распределения](PUBLIC_LAUNCH_DRAFT.md).
