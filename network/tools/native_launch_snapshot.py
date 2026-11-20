@@ -28,7 +28,7 @@ def wait_for_snapshot(source, minimum_height):
 
 
 def rehearse_snapshot(binary, root, genesis, expected, env, owner, report, *,
-                      source, witness, replicas, minimum_height):
+                      source, witness, replicas, minimum_height, measure_resources=False):
     report["phase"] = "snapshot-source"
     check(source.node_id != witness.node_id and source.p2p != witness.p2p,
           "state sync requires two distinct trust RPC peers")
@@ -105,3 +105,7 @@ def rehearse_snapshot(binary, root, genesis, expected, env, owner, report, *,
                       earliestBlockHeight=earliest_height, observerNodeId=observer.node_id,
                       observerVotingPower=0, catchingUp=False, verifiedHeight=height,
                       appHash=header["app_hash"], delAtomic=str(next(iter(balances))))
+    if measure_resources:
+        from node_resource_usage import replica_usage
+
+        report['resourceUsage'] = {'height': height, 'snapshotObserver': replica_usage(observer)}

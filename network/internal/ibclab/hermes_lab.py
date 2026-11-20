@@ -486,11 +486,13 @@ def prepare_native_owned(lab, mcnd, fixture, *, assembly_report=None, donor_file
 
     if assembly_report is not None:
         from native_launch_rehearsal import GENESIS_LIMIT, load_fixture as load_launch_fixture
+        from node_resource_usage import replica_usage, runner_resources
         from withdrawal_genesis_smoke import private_bytes
 
         genesis, expected, keys = load_launch_fixture(
             fixture, four_validators=True, empty_user_assets=True, assembly_report=assembly_report)
         height, powers = 1, tuple(row["initialPower"] for row in expected["validators"])
+        lab.report["resourceUsage"] = {"runner": runner_resources(), "runtimeGoMaxProcs": int(lab.env["GOMAXPROCS"])}
     else:
         expected, genesis, keys, height = load_fixture(
             fixture, fee_rewards=True, downtime=False, jail_recovery=False, held_downtime=False, nft_downtime=False)
@@ -516,9 +518,14 @@ def prepare_native_owned(lab, mcnd, fixture, *, assembly_report=None, donor_file
             replica.start(mcnd, lab.env, lab, label)
 
     def restart_all():
+        if assembly_report is not None:
+            lab.report["resourceUsage"]["validatorsBeforeRestart"] = measure_validators()
         for replica in reversed(replicas):
             lab.stop(replica.child)
         start_all("ibc-restarted")
+
+    def measure_validators():
+        return {replica.label: replica_usage(replica) for replica in replicas}
 
     readiness = {"initialHeight": height, "phase": "native_hermes_start"}
 
@@ -560,7 +567,8 @@ def prepare_native_owned(lab, mcnd, fixture, *, assembly_report=None, donor_file
                                  "genesis_sha256": hashlib.sha256(funded_genesis).hexdigest()}
     print(f"{len(replicas)} native consensus daemons with matching app hashes: PASS", flush=True)
     return {**owned, "chain": chain_id, "restart": restart_all, "verify_replicas": verify_replicas,
-            "verify_pending": verify_pending, "verify_checkpoint": verify_checkpoint}
+            "verify_pending": verify_pending, "verify_checkpoint": verify_checkpoint,
+            "measure_validators": measure_validators if assembly_report is not None else None}
 
 
 def receipts(chain):
@@ -640,6 +648,8 @@ def connect_transfer(lab, mcnd, reference, hermes, upgrade=False, native_fixture
 
 
 def verify_background_relay(lab, hermes, a, b, a_channel, b_channel, voucher, transfer):
+    from node_resource_usage import process_usage
+
     config = lab.root / "hermes.toml"
     chain_id, value = a["chain"], 10**18
     keys = lab.root / "hermes-keys"
@@ -705,6 +715,7 @@ clear_on_start = true
         "running Hermes did not relay and acknowledge the packet", 60)
     phase_after(lab, "daemon_live_relay", a, b, before, -value)
     lab.report["phases"]["daemon_live_relay"]["sequence"] = live_sequence
+    lab.report["resourceUsage"]["hermesBeforeRestart"] = process_usage(worker.pid)
     lab.stop(worker)
 
     before = phase_before(a, b)
@@ -720,6 +731,7 @@ clear_on_start = true
         "restarted Hermes did not relay and acknowledge the pending return", 60)
     require(str(pending["sequence"]) == recovered_sequence, "Hermes did not recover the same on-chain packet")
     phase_after(lab, "daemon_restart_backlog", a, b, before, value)
+    lab.report["resourceUsage"]["hermesAfterRestart"] = process_usage(restarted.pid)
     lab.stop(restarted)
     lab.report["phases"]["daemon_restart_backlog"].update(sequence=recovered_sequence, commitment_before_restart=pending)
 
@@ -840,6 +852,13 @@ def full_suite(lab, mcnd, reference, hermes, native_fixture=None, *, assembly_re
     require(len(lab.report.get("phases", {})) == expected_phases, "all real IBC phases are mandatory")
     if native_fixture:
         lab.report["native_final_consensus"] = a["verify_replicas"](lab.height(a["rpc"], chain_id))
+        if assembly_report is not None:
+            results = [receipt["tx_result"] for receipt in receipts(a).values()]
+            lab.report["resourceUsage"].update({
+                "validatorsAfterRestart": a["measure_validators"](),
+                "mintcandyCommittedTransactions": len(results),
+                "mintcandyGasUsed": sum(int(result["gas_used"]) for result in results),
+            })
         lab.report["status"] = "NATIVE_CONSENSUS_HERMES_PASS"
         lab.report["scope"] = "Native consensus and fee profile against an independent chain using Hermes and bank ICS-20 v1."
     else:

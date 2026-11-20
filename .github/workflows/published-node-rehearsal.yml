@@ -308,7 +308,10 @@ jobs:
             .fourSignerRecovery.verifiedEd25519Signatures == 4' "$RELEASE_WORK/evidence/quorum.json"
           jq -e --arg sha "$genesis_sha" '.status == "PASS" and .loopbackOnlyNamespace and .offlineAssembledGenesis and
             .genesisSha256 == $sha and .systemdFollower.genesisSha256 == $sha and
-            .systemdRestart.sameHome and (.stateSync.restoredHeight > 1)' "$RELEASE_WORK/evidence/systemd.json"
+            .systemdRestart.sameHome and (.stateSync.restoredHeight > 1) and
+            (.resourceUsage | (.signingValidators | length == 3) and
+              ([.systemdFollower, .snapshotObserver, .signingValidators[]] |
+                all(.peakResidentBytes > 0 and .dataAllocatedBytes > 0)))' "$RELEASE_WORK/evidence/systemd.json"
       - name: Verify Hermes interoperability on the same assembled genesis
         if: inputs.scenario != 'node' && inputs.scenario != 'tools'
         shell: bash
@@ -356,7 +359,11 @@ jobs:
             (.phases.daemon_restart_backlog | .sequence == (.commitment_before_restart.sequence | tostring)) and
             (.phases | keys == ["client_connection_channel_handshake","daemon_live_relay","daemon_restart_backlog","error_ack_refund","foreign_bank_voucher",
             "foreign_bank_voucher_return","native_send","pending_packet_restart","timeout_refund","voucher_return"]) and
-            all(.phases[]; .status == "PASS")' "$report"
+            all(.phases[]; .status == "PASS") and
+            (.resourceUsage | (.validatorsBeforeRestart | length == 4) and (.validatorsAfterRestart | length == 4) and
+              ([.validatorsBeforeRestart[], .validatorsAfterRestart[]] | all(.peakResidentBytes > 0 and .dataAllocatedBytes > 0)) and
+              .hermesBeforeRestart.peakResidentBytes > 0 and .hermesAfterRestart.peakResidentBytes > 0 and
+              .mintcandyCommittedTransactions > 0 and .mintcandyGasUsed > 0)' "$report"
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
         if: inputs.scenario == 'tools'
         with:

@@ -628,10 +628,18 @@ def run_launch(binary, root, genesis, expected, keys, env, owner, report, *, fou
     if restart_snapshot:
         restarted_height = verify_systemd_restart(systemd, follower, live_validators, expected, report)
         rehearse_snapshot(follower_binary, root, genesis, expected, env, owner, report,
-                          source=live_validators[0], witness=follower, replicas=nodes, minimum_height=restarted_height)
+                          source=live_validators[0], witness=follower, replicas=nodes, minimum_height=restarted_height,
+                          measure_resources=verify_history)
     if verify_history:
         from native_launch_history import rehearse_history
+        from node_resource_usage import process_usage, replica_usage, runner_resources
 
+        report['resourceUsage'].update({
+            'runner': runner_resources(),
+            'systemdFollower': process_usage(systemd.evidence()['mainPid'], follower.home / 'data'),
+            'signingValidators': {node.label: replica_usage(node) for node in live_validators},
+            'runtimeGoMaxProcs': int(env['GOMAXPROCS']),
+        })
         rehearse_history(binary, root, genesis, expected, env, owner, report, replicas=nodes, archive=follower)
     if upgrade_binary is not None:
         verify_systemd_upgrade(systemd, follower, live_validators, expected, genesis, upgrade_binary, report)
