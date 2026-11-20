@@ -153,8 +153,24 @@ class MediaStore:
             self.db.execute('INSERT INTO records VALUES(?,?,?,?,?)',(key,version,actor,metadata_cid,image_cid))
             self.db.commit()
         except BaseException:
-            self.db.rollback()
-            for path in created: path.unlink(missing_ok=True)
+            try:
+                if self.db.in_transaction:
+                    # Keep the writer lock until the staged files are gone.
+                    for path in created:
+                        path.unlink(missing_ok=True)
+                elif created:
+                    # SQLite may already have ended the transaction. A second
+                    # writer can have reused these files while the lock was free.
+                    self.db.execute('BEGIN IMMEDIATE')
+                    for path in created:
+                        referenced = self.db.execute(
+                            'SELECT 1 FROM records WHERE metadata=? OR image=? LIMIT 1',
+                            (path.name, path.name),
+                        ).fetchone()
+                        if referenced is None:
+                            path.unlink(missing_ok=True)
+            finally:
+                self.db.rollback()
             raise
         return {'asset':key,'version':version,'owner':actor,'metadata_uri':'ipfs://'+metadata_cid,'image_uri':'ipfs://'+image_cid}
     def records(self):

@@ -102,6 +102,11 @@ PYTHONPATH="$PWD/network/media" python3 -B -m mcnd_media.gateway_export \
 проверки при восстановлении используйте `EXPORT.json` с путями, SHA256 и
 длинами объектов. Он хранится рядом с `public`, за пределами HTTP-каталога.
 
+В GitHub CI после имитации потери основного хранилища и шлюза Nginx выдал
+аватар DRC20, изображение ERC1155 и оба JSON по прежним CID. Тест сверил байты,
+SHA256, MIME и отсутствие HTTP-доступа к служебным файлам.
+[Прогон Linux CI](https://github.com/maxwell2010/go-smart-node/actions/runs/44702433627).
+
 Раздача через этот URL сохраняет CID и байты. Публичный pinning в сети IPFS
 и интеграцию media-домена в кошельки нужно подключить отдельно.
 [Семантика путей и MIME в Nginx](https://nginx.org/en/docs/http/ngx_http_core_module.html#try_files).

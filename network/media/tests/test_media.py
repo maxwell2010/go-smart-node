@@ -13,9 +13,11 @@ CLEAN=b'normalized-image-fixture'
 class StoreTests(unittest.TestCase):
  def setUp(self):
   self.tmp=tempfile.TemporaryDirectory();self.root=Path(self.tmp.name)
+  self.addCleanup(self.tmp.cleanup)
   self.store=MediaStore(self.root/'primary',lambda asset,actor,action: asset==ASSET and actor==OWNER)
+  self.addCleanup(lambda: self.store.close())
   self.decoder=patch('mcnd_media.store.decode_image',return_value=CLEAN);self.decoder.start()
- def tearDown(self): self.decoder.stop();self.store.close();self.tmp.cleanup()
+  self.addCleanup(self.decoder.stop)
  def publish(self,**kw):
   return self.store.publish(ASSET,kw.get('actor',OWNER),kw.get('metadata',{'name':'Avatar'}),b'input','image/png')
  def test_ownership_boundary_and_unknown_fields(self):
@@ -43,6 +45,61 @@ class StoreTests(unittest.TestCase):
   with patch.object(self.store,'_put',side_effect=[(cid(CLEAN),False),OSError('fixture disk failure')]):
    with self.assertRaises(OSError):self.publish()
   self.assertFalse(self.store.records())
+ def test_failed_publish_holds_writer_lock_during_blob_cleanup(self):
+  peer = MediaStore(self.store.root, self.store.authorizer)
+  self.addCleanup(peer.close)
+  peer.db.execute('PRAGMA busy_timeout=0')
+  put = self.store._put
+  unlink = Path.unlink
+  observed_peer_writes = []
+
+  def fail_after_image(data):
+   if data == CLEAN:
+    return put(data)
+   raise OSError('failed writing metadata')
+
+  def attempt_peer_publish(path, *args, **kwargs):
+   try:
+    peer.publish(ASSET, OWNER, {'name': 'Second avatar'}, b'input', 'image/png')
+   except sqlite3.OperationalError as error:
+    self.assertIn('locked', str(error))
+    observed_peer_writes.append('locked')
+   else:
+    observed_peer_writes.append('committed')
+   return unlink(path, *args, **kwargs)
+
+  with patch.object(self.store, '_put', side_effect=fail_after_image):
+   with patch.object(Path, 'unlink', autospec=True, side_effect=attempt_peer_publish):
+    with self.assertRaisesRegex(OSError, 'failed writing metadata'):
+     self.publish()
+
+  self.assertEqual(observed_peer_writes, ['locked'])
+  self.assertEqual(self.store.verify(), ([], set()))
+  peer.publish(ASSET, OWNER, {'name': 'Second avatar'}, b'input', 'image/png')
+  rows, blobs = self.store.verify()
+  self.assertEqual([row['version'] for row in rows], [1])
+  self.assertIn(cid(CLEAN), blobs)
+
+ def test_cleanup_preserves_blobs_reused_after_sqlite_aborts(self):
+  peer = MediaStore(self.store.root, self.store.authorizer)
+  self.addCleanup(peer.close)
+  put = self.store._put
+
+  def abort_and_allow_peer(data):
+   if data == CLEAN:
+    return put(data)
+   self.store.db.rollback()  # Models an error that already ended the transaction.
+   peer.publish(ASSET, OWNER, {'name': 'Second avatar'}, b'input', 'image/png')
+   raise sqlite3.OperationalError('transaction already rolled back')
+
+  with patch.object(self.store, '_put', side_effect=abort_and_allow_peer):
+   with self.assertRaisesRegex(sqlite3.OperationalError, 'already rolled back'):
+    self.publish()
+
+  rows, blobs = self.store.verify()
+  self.assertEqual([row['version'] for row in rows], [1])
+  self.assertIn(cid(CLEAN), blobs)
+
  def test_backup_restore_and_loss_recovery(self):
   original=self.publish();backup=self.root/'backup.zip';digest=self.store.backup(backup)
   restored=restore(backup,self.root/'restored',digest,lambda *a:False)
