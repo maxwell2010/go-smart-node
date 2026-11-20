@@ -68,6 +68,21 @@
       "appHash": "CED85E6FC1C99BD28F617B13F219357FBCE1C2C0605696954E14A6570A97015C"
     }
   },
+  "assembledGenesisHermes": {
+    "run": "https://github.com/maxwell2010/go-smart-node/actions/runs/44681169004",
+    "workflowRevision": "ff1fdabd35031acbd745eedf3e719141d9434f69",
+    "artifactId": 14604443941,
+    "artifactSha256": "b030030c4815a1c7d3a572f68681e0da5d4443587407a62ab66a41afdd8d73c0",
+    "reportSha256": "c029bc5727620b195e4ee7449c4628bb5b49d59ff029f46995394591e01254cd",
+    "testChainId": "mintcandy_990014-1",
+    "testGenesisSha256": "8a584e9688adc821f5561f8efd27f6cf85d39ff50bb2dccd79fada0f4a65dc87",
+    "validators": 4,
+    "passedPhases": 10,
+    "backgroundRelaySequence": "6",
+    "backgroundRestartRecoveredSequence": "3",
+    "finalHeight": 58,
+    "finalAppHash": "F69668613035365ED6B9809E7AE7B4FD76AD6B614B7BE1A9E314A80A2C49DF8C"
+  },
   "nativeHermes": {
     "runtimeSourceRevision": "a6f30eb28182513b484e990c5d6991e4541c57a6",
     "runtimeChangesFromArchiveSource": false,

@@ -8,10 +8,13 @@ It enforces a 5% minimum native validator commission at genesis,
 registration and signed updates.
 
 The exact attested archive passed the four-validator launch, quorum recovery,
-follower replay, systemd restart and snapshot restore in the isolated rehearsal.
-A separate process test built from the same daemon source exercised ICS-20
-over Hermes, including packet delivery after restart and refunds. See the
-[validation record and run links](../network/docs/ru/evidence/software-release-1.1.1.json).
+follower replay, systemd restart, snapshot restore and ten ICS-20 scenarios
+on the same assembled test genesis. The background Hermes process delivered a
+new packet and recovered a queued packet after restart. The rehearsal checked
+acknowledgements, balances, fees and the four-validator AppHash at height 58.
+[Isolated rehearsal](https://github.com/maxwell2010/go-smart-node/actions/runs/44681169004) ·
+[Release evidence](../network/docs/ru/evidence/software-release-1.1.1.json) ·
+[Hermes operator guide in Russian](../network/docs/ru/HERMES_RELAYER.md).
 The [public-release rehearsal](https://github.com/maxwell2010/go-smart-node/actions/runs/44539903038)
 downloaded the published package, repeated the daemon checks and captured the
 [validated fresh defaults](../network/docs/ru/evidence/default-launch-parameters-1.1.1.json).
