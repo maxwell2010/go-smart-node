@@ -19,6 +19,8 @@ on:
       - 'network/tools/verify_public_launch_genesis.py'
       - 'network/tools/test_verify_public_launch_genesis.py'
       - 'network/tools/*genesis_manifest.py'
+      - 'network/tools/*install_validator_genesis.py'
+      - 'network/tools/configure_history.py'
       - 'network/tools/*native_launch_package.py'
       - 'network/docs/ru/evidence/software-release-1.1.1.json'
       - 'network/tools/withdrawal_genesis_smoke.py'
@@ -37,6 +39,8 @@ on:
       - 'network/tools/verify_public_launch_genesis.py'
       - 'network/tools/test_verify_public_launch_genesis.py'
       - 'network/tools/*genesis_manifest.py'
+      - 'network/tools/*install_validator_genesis.py'
+      - 'network/tools/configure_history.py'
       - 'network/tools/*native_launch_package.py'
       - 'network/docs/ru/evidence/software-release-1.1.1.json'
       - 'network/tools/withdrawal_genesis_smoke.py'
@@ -75,6 +79,7 @@ jobs:
           set -euo pipefail
           command -v gpg gpgv gpgconf
           python3 -B -m unittest discover -s network/tools -p 'test_public_genesis_manifest.py' -v
+          python3 -B -m unittest discover -s network/tools -p 'test_install_validator_genesis.py' -v
           python3 -B -m unittest discover -s network/tools -p 'test_native_launch_package.py' -v
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
         with:

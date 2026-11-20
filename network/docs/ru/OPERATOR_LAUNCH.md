@@ -360,47 +360,41 @@ python3 network/tools/native_launch_package.py verify --archive "$LAUNCH_ARCHIVE
   --output-dir "$work_dir/verified"
 ```
 
-Реализованный формат тестового пакета - отдельная OpenPGP-подпись файла
-`launch-SHA256SUMS`. Внутренний `provenance.json` содержит статус
-`test-launch-rehearsal`; одноразовый ключ CI не является утверждённым
-production-ключом.
-Организаторы могут утвердить другой формат и опубликовать соответствующую
-команду проверки. Манифест привязывает итоговый `genesis.json`, описание сети
-и параметров подключения, архив бинарника и его provenance к их точным SHA256.
-Передайте отпечаток открытого ключа по заранее согласованному независимому
-каналу. SHA256 сверяет байты файла. Подпись связывает манифест с ключом выпуска.
+У тестового пакета собственный `launch-SHA256SUMS` и одноразовый OpenPGP-ключ.
+В `provenance.json` указан статус `test-launch-rehearsal`.
 
-Если принят предложенный формат, оператор помещает проверенный открытый ключ
-в отдельный keyring. Укажите его абсолютный путь в `RELEASE_KEYRING` и выполняйте
-проверку из каталога официального пакета.
+## Применение подписанного публичного genesis
 
-```sh
-set -eu
-gpgv --keyring "$RELEASE_KEYRING" launch-SHA256SUMS.asc launch-SHA256SUMS
-sha256sum -c --strict launch-SHA256SUMS
-```
+Получите у организатора манифест, подпись, открытый ключ и точные байты
+genesis. Сверьте отпечаток подписанта и SHA256 манифеста по согласованному
+каналу. Бинарник скачивается отдельно из аттестованного выпуска 1.1.1.
+[Процедура проверки манифеста](VALIDATOR_LAUNCH_INTAKE.md#подготовка-и-проверка-подписанного-манифеста).
 
-Убедитесь, что в проверенном списке есть именно `genesis.json` и выбранный
-архив `mcnd`. Сверьте Cosmos/EVM chain IDs и бинарник с описанием сети.
-Для новой наблюдающей ноды `MCND_HOME` указывает на новый каталог.
+Начальный валидатор использует подготовленный при регистрации `MCND_HOME`
+с локальным ключом CometBFT и типовыми путями `mcnd init`. Укажите свой
+`d0valoper...` в `OPERATOR_ADDRESS`. Запустите проверку от владельца home на
+остановленной и ни разу не запускавшейся ноде. Понадобятся Python 3.11+
+и `gpgv`.
 
 ```sh
-set -eu
-test ! -e "$MCND_HOME"
-mcnd init "$MONIKER" --home "$MCND_HOME" --chain-id "$CHAIN_ID" \
-  --evm.evm-chain-id "$EVM_CHAIN_ID"
+python3 -B network/tools/public_genesis_manifest.py install \
+  --genesis "$DOWNLOADED_GENESIS" --binary "$MCND_BINARY" \
+  --manifest public-genesis-manifest.json \
+  --signature public-genesis-manifest.json.asc --trusted-keyring genesis-signer.gpg \
+  --signer-fingerprint "$GENESIS_SIGNER_FINGERPRINT" \
+  --approved-manifest-sha256 "$APPROVED_MANIFEST_SHA256" \
+  --home "$MCND_HOME" --operator "$OPERATOR_ADDRESS"
 ```
 
-Начальный валидатор продолжает в том же подготовленном каталоге, из которого
-он передал публичный ключ при регистрации. Скопируйте официальный genesis и
-проверьте, что байты в подготовленном каталоге совпадают с пакетом.
+Команда сверяет подпись, хеши, chain ID, запись оператора и локальный открытый
+ключ. `mcnd` проверяет genesis во временном каталоге. При успехе команда
+заменяет только исходный шаблон `config/genesis.json`. Повторная проверка с
+теми же байтами возвращает `changed: false`. Каталог с блоками или использованным
+signing-state, чужой ключ и вручную изменённый стартовый genesis отклоняются.
 
-```sh
-set -eu
-install -m 0644 genesis.json "$MCND_HOME/config/genesis.json"
-cmp -s genesis.json "$MCND_HOME/config/genesis.json"
-mcnd genesis validate --home "$MCND_HOME"
-```
+Для новой наблюдающей ноды используйте `verify` из инструкции к манифесту.
+В её отдельном новом home выполните `mcnd init` с утверждёнными chain ID,
+поместите туда байты проверенного genesis и запустите `mcnd genesis validate`.
 
 Примените согласованный P2P и, если выбран state sync, параметры доверия.
 Перед началом подписи проверьте публичный ключ своей ноды и начальную мощность

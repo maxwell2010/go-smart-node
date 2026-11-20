@@ -196,6 +196,23 @@ jobs:
           python3 -B tools/native_launch_allocation.py --genesis "$genesis" \
             --output "$RELEASE_WORK/evidence/allocation.json" \
             --allocation-plan docs/ru/public-launch-allocation.draft.json
+      - name: Prepare a disposable validator home with the published daemon
+        shell: bash
+        working-directory: launch-assembly/network
+        run: |
+          set -euo pipefail
+          root="$RELEASE_WORK"
+          report="$root/evidence/validator-install.json"
+          sudo -n unshare --net -- bash -euc 'ip link set lo up; exec "$@"' _ \
+            env TMPDIR="$root" MCND_VALIDATOR_INSTALL_BINARY="$root/bin/mcnd" \
+            MCND_VALIDATOR_INSTALL_FIXTURE="$root/assembled" MCND_VALIDATOR_INSTALL_REPORT="$report" \
+            "$(command -v python3)" -B -m unittest discover -s tools -p test_install_validator_genesis.py -v
+          sudo -n chown "$(id -u):$(id -g)" "$report"
+          sha=$(sha256sum "$root/assembled/public/genesis.json" | cut -d' ' -f1)
+          jq -e --arg sha "$sha" --arg binary "$RELEASE_BINARY_SHA" \
+            '.status == "VALIDATOR_GENESIS_INSTALLED" and .genesisSha256 == $sha and .binarySha256 == $binary and
+            .chainId == "mintcandy_990014-1" and .idempotent and .rejectsForeignKey and .rejectsExistingState and
+            (.preservedHomeFiles >= 5) and (.networkLaunchAuthorized | not)' "$report"
       - name: Verify quorum recovery, follower replay and systemd snapshot sync
         if: inputs.scenario != 'ibc'
         shell: bash
