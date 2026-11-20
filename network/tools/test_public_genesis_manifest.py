@@ -1,4 +1,5 @@
 import copy
+from contextlib import contextmanager
 import hashlib
 from pathlib import Path
 import shutil
@@ -11,6 +12,30 @@ from unittest.mock import patch
 
 from public_genesis_manifest import encode, prepare_manifest, release_for, verify_manifest
 import test_verify_public_launch_genesis as ledger_fixture
+
+
+@contextmanager
+def signed_fixture(root, manifest):
+    home = root / 'gpg'
+    home.mkdir(mode=0o700)
+    gpg = ['gpg', '--no-options', '--batch', '--homedir', str(home)]
+    try:
+        subprocess.run([*gpg, '--pinentry-mode', 'loopback', '--passphrase', '', '--quick-generate-key',
+                        'CI fixture <public-genesis@example.invalid>', 'ed25519', 'sign', '1d'],
+                       check=True, capture_output=True, timeout=30)
+        keys = subprocess.check_output([*gpg, '--with-colons', '--fingerprint'], text=True, timeout=30)
+        signer = next(line.split(':')[9] for line in keys.splitlines() if line.startswith('fpr:'))
+        signed = encode(manifest)
+        args = SimpleNamespace(manifest=root / 'manifest.json', signature=root / 'manifest.asc',
+                               trusted_keyring=root / 'trusted.gpg', signer_fingerprint=signer,
+                               approved_manifest_sha256=hashlib.sha256(signed).hexdigest())
+        args.trusted_keyring.write_bytes(subprocess.check_output([*gpg, '--export', signer], timeout=30))
+        args.manifest.write_bytes(signed)
+        subprocess.run([*gpg, '--local-user', signer + '!', '--armor', '--detach-sign', '--output',
+                        str(args.signature), str(args.manifest)], check=True, capture_output=True, timeout=30)
+        yield args
+    finally:
+        subprocess.run(['gpgconf', '--homedir', str(home), '--kill', 'gpg-agent'], capture_output=True, timeout=10)
 
 
 class PublicGenesisManifestTest(unittest.TestCase):
@@ -62,26 +87,9 @@ class PublicGenesisManifestTest(unittest.TestCase):
 
     @unittest.skipUnless(sys.platform == 'linux' and shutil.which('gpg') and shutil.which('gpgv'), 'requires Linux and OpenPGP')
     def test_openpgp_requires_exact_signer_approval_genesis_and_release(self):
+        expected = self.prepare()
         with tempfile.TemporaryDirectory(prefix='mcnd-public-manifest-test-') as directory:
-            root = Path(directory)
-            home = root / 'gpg'
-            home.mkdir(mode=0o700)
-            gpg = ['gpg', '--no-options', '--batch', '--homedir', str(home)]
-            try:
-                subprocess.run([*gpg, '--pinentry-mode', 'loopback', '--passphrase', '', '--quick-generate-key',
-                                'CI fixture <public-genesis@example.invalid>', 'ed25519', 'sign', '1d'],
-                               check=True, capture_output=True, timeout=30)
-                keys = subprocess.check_output([*gpg, '--with-colons', '--fingerprint'], text=True, timeout=30)
-                signer = next(line.split(':')[9] for line in keys.splitlines() if line.startswith('fpr:'))
-                args = SimpleNamespace(manifest=root / 'manifest.json', signature=root / 'manifest.asc',
-                                       trusted_keyring=root / 'trusted.gpg', signer_fingerprint=signer)
-                args.trusted_keyring.write_bytes(subprocess.check_output([*gpg, '--export', signer], timeout=30))
-                expected = self.prepare()
-                args.manifest.write_bytes(encode(expected))
-                args.approved_manifest_sha256 = hashlib.sha256(args.manifest.read_bytes()).hexdigest()
-                subprocess.run([*gpg, '--local-user', signer + '!', '--armor', '--detach-sign', '--output',
-                                str(args.signature), str(args.manifest)], check=True, capture_output=True, timeout=30)
-
+            with signed_fixture(Path(directory), expected) as args:
                 fixture = self.fixture
                 result = verify_manifest(args, self.genesis, fixture.plan, fixture.draft, self.software)
                 self.assertEqual(result['status'], 'PUBLIC_GENESIS_SIGNATURE_VERIFIED')
@@ -103,8 +111,6 @@ class PublicGenesisManifestTest(unittest.TestCase):
                 args.approved_manifest_sha256 = hashlib.sha256(args.manifest.read_bytes()).hexdigest()
                 with self.assertRaisesRegex(ValueError, 'OpenPGP signature'):
                     verify_manifest(args, self.genesis, fixture.plan, fixture.draft, self.software)
-            finally:
-                subprocess.run(['gpgconf', '--homedir', str(home), '--kill', 'gpg-agent'], capture_output=True, timeout=10)
 
 
 if __name__ == '__main__':

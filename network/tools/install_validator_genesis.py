@@ -59,6 +59,7 @@ def run_offline(binary, home, scratch, *args):
 
 
 def install_operator_genesis(binary, home, operator, genesis, verified):
+    require(verified.get('status') == 'PUBLIC_GENESIS_SIGNATURE_VERIFIED', 'a verified genesis manifest is required')
     allocation = allocation_report(genesis)
     require(all(verified[key] == allocation[key] for key in ('chainId', 'evmChainId', 'genesisSha256')),
             'verified genesis bytes or signing domain differ')
@@ -121,4 +122,5 @@ def install_operator_genesis(binary, home, operator, genesis, verified):
     return {'status': 'VALIDATOR_GENESIS_INSTALLED', 'changed': original != genesis,
             'operatorAddress': operator, 'consensusAddressHex': validator['consensusAddressHex'],
             'genesisSha256': allocation['genesisSha256'], 'binarySha256': verified['software']['binarySha256'],
+            'manifestSha256': verified['manifestSha256'], 'signerFingerprint': verified['signerFingerprint'],
             'networkLaunchAuthorized': False}

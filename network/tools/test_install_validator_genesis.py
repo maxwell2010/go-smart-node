@@ -44,8 +44,11 @@ class PreparedHomeTest(unittest.TestCase):
 @unittest.skipUnless(os.environ.get('MCND_VALIDATOR_INSTALL_BINARY'), 'requires the published Linux binary and disposable fixture')
 class PublishedValidatorInstallTest(unittest.TestCase):
     def test_exact_install_preserves_signer_and_rejects_used_or_unrelated_home(self):
+        from check_public_launch_draft import DEFAULT_DRAFT, read_json
         from mcnd_process_smoke import private_namespace
-        from public_genesis_manifest import release_for
+        from public_genesis_manifest import prepare_manifest, release_for, verify_manifest
+        from test_founding_ledger_fixture import prepared_fixture
+        from test_public_genesis_manifest import signed_fixture
 
         private_namespace()
         binary = Path(os.environ['MCND_VALIDATOR_INSTALL_BINARY'])
@@ -56,13 +59,21 @@ class PublishedValidatorInstallTest(unittest.TestCase):
         self.assertEqual(chain_id, 'mintcandy_990014-1')
         validator = body['validators'][0]
         operator = validator['operatorAddress']
-        verified = {key: body[key] for key in ('chainId', 'evmChainId', 'genesisSha256')}
-        verified['software'] = release_for(binary)
+        software = release_for(binary)
+        artifacts = fixture.parent
+        _, applications, plan, relayers = prepared_fixture(artifacts / 'fixture', read_json(artifacts / 'roles.json'))
+        draft = read_json(DEFAULT_DRAFT)
+        cold = read_json(artifacts / 'evidence/assembly.json')
+        manifest = prepare_manifest(genesis, applications, plan, draft, relayers, software, cold)
         key = next(path.read_bytes() for path in fixture.glob('priv_validator_key_*.json')
                    if json.loads(path.read_bytes())['pub_key']['value'] == validator['consensusPublicKeyBase64'])
 
         with tempfile.TemporaryDirectory(prefix='validator-install-ci-') as directory:
             root = Path(directory)
+            with signed_fixture(root, manifest) as args:
+                with self.assertRaisesRegex(ValueError, 'genesis SHA256 differs'):
+                    verify_manifest(args, genesis + b'\n', plan, draft, software)
+                verified = verify_manifest(args, genesis, plan, draft, software)
             home = root / 'validator'
             run_offline(binary, home, root, 'init', 'validator-install-ci', '--chain-id', chain_id, '--evm.evm-chain-id', evm_id)
             path = home / 'config/genesis.json'
@@ -99,6 +110,8 @@ class PublishedValidatorInstallTest(unittest.TestCase):
             report = install_operator_genesis(binary, home, operator, genesis, verified)
             self.assertTrue(report['changed'])
             self.assertFalse(report['networkLaunchAuthorized'])
+            self.assertEqual(report['manifestSha256'], verified['manifestSha256'])
+            self.assertEqual(report['signerFingerprint'], verified['signerFingerprint'])
             self.assertEqual(path.read_bytes(), genesis)
             self.assertFalse(install_operator_genesis(binary, home, operator, genesis, verified)['changed'])
             self.assertEqual(preserved, {file: sha256(file) for file in home.rglob('*') if file.is_file() and file != path})
@@ -106,7 +119,8 @@ class PublishedValidatorInstallTest(unittest.TestCase):
             if output:
                 with Path(output).open('x', encoding='utf8') as stream:
                     json.dump({**report, 'chainId': chain_id, 'preservedHomeFiles': len(preserved),
-                               'idempotent': True, 'rejectsForeignKey': True, 'rejectsExistingState': True}, stream)
+                               'signatureVerified': True, 'idempotent': True, 'rejectsForeignKey': True,
+                               'rejectsExistingState': True}, stream)
 
 
 if __name__ == '__main__':
