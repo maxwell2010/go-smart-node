@@ -108,7 +108,8 @@ def rpc_context(url, payload=None, headers=None):
 def rpc_reason(text):
     phrases = ('cannot query with height in the future', 'version does not exist', 'could not load state',
                'could not find results', 'block results are not available', 'height is not available',
-               'header not found', 'please wait for first block', 'context did not contain latest block height')
+               'header not found', 'please wait for first block', 'context did not contain latest block height',
+               'node is not persisting finalize block responses', 'transaction indexing is disabled')
     sample = text[:4096].lower()
     return ', '.join(phrase for phrase in phrases if phrase in sample) or 'no allowlisted upstream reason'
 

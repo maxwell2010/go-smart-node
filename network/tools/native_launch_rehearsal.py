@@ -518,7 +518,8 @@ def verify_systemd_upgrade(systemd, follower, validators, expected, genesis, upg
 
 
 def run_launch(binary, root, genesis, expected, keys, env, owner, report, *, four_validators=False, treasury=None,
-               systemd=None, restart_snapshot=False, upgrade_binary=None, quorum_loss_recovery=False, commit_probe=None):
+               systemd=None, restart_snapshot=False, upgrade_binary=None, quorum_loss_recovery=False, commit_probe=None,
+               verify_history=False):
     rows = expected["validators"]
     powers = tuple(row["initialPower"] for row in rows)
     options = {"chain_id": expected["chainId"], "evm_chain_id": expected["evmChainId"]}
@@ -628,6 +629,10 @@ def run_launch(binary, root, genesis, expected, keys, env, owner, report, *, fou
         restarted_height = verify_systemd_restart(systemd, follower, live_validators, expected, report)
         rehearse_snapshot(follower_binary, root, genesis, expected, env, owner, report,
                           source=live_validators[0], witness=follower, replicas=nodes, minimum_height=restarted_height)
+    if verify_history:
+        from native_launch_history import rehearse_history
+
+        rehearse_history(binary, root, genesis, expected, env, owner, report, replicas=nodes, archive=follower)
     if upgrade_binary is not None:
         verify_systemd_upgrade(systemd, follower, live_validators, expected, genesis, upgrade_binary, report)
 
@@ -723,7 +728,8 @@ def main(argv=None, signals=None):
                         run_launch(binary, root, genesis, expected, keys, env, owner, report,
                                    four_validators=args.four_validators, treasury=treasury, systemd=systemd,
                                    restart_snapshot=args.restart_and_snapshot, upgrade_binary=upgrade_binary,
-                                   quorum_loss_recovery=args.quorum_loss_recovery, commit_probe=args.commit_probe)
+                                   quorum_loss_recovery=args.quorum_loss_recovery, commit_probe=args.commit_probe,
+                                   verify_history=bool(args.assembly_report and args.restart_and_snapshot and not upgrade_binary))
                 finally:
                     owner.close()
             report.update(status="PASS", phase="complete")
