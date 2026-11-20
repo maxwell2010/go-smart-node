@@ -155,6 +155,12 @@ Tendermint. Результат `IBC_ROUTE_STATE_MATCH` означает, что 
 сверьте данные с оператором другой стороны.
 [Команды чтения состояния канала Hermes](https://hermes.informal.systems/documentation/commands/queries/channel.html).
 
+На изолированном стенде проверка подтвердила маршрут `mintcandy_990014-1` ↔
+`ibc-reference-1` с двумя активными клиентами. Список транзакций в обеих
+сетях остался прежним. После проверки Hermes на той же конфигурации с
+фильтрами доставил новый пакет и восстановил доставку после перезапуска.
+[GitHub CI](https://github.com/maxwell2010/go-smart-node/actions/runs/44699409744).
+
 ## Фоновый процесс
 
 Пример `~/.config/systemd/user/mintcandy-hermes.service` запускает Hermes под
