@@ -392,6 +392,11 @@ python3 -B network/tools/public_genesis_manifest.py install \
 теми же байтами возвращает `changed: false`. Каталог с блоками или использованным
 signing-state, чужой ключ и вручную изменённый стартовый genesis отклоняются.
 
+В Linux CI одноразовым ключом подписали манифест собранного тестового genesis
+`mintcandy_990014-1`. Проверка подписи и установка опубликованным `mcnd` 1.1.1
+прошли. Тест сравнил байты всех остальных файлов home до и после установки.
+[Прогон GitHub CI](https://github.com/maxwell2010/go-smart-node/actions/runs/44684773902).
+
 Для новой наблюдающей ноды используйте `verify` из инструкции к манифесту.
 В её отдельном новом home выполните `mcnd init` с утверждёнными chain ID,
 поместите туда байты проверенного genesis и запустите `mcnd genesis validate`.
