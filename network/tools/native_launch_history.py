@@ -28,7 +28,7 @@ def supply_proof(response, height):
           'bank proof query did not use the requested height')
     check(base64.b64decode(response['key'], validate=True) == SUPPLY_KEY and
           int(base64.b64decode(response['value'], validate=True)) > 0, 'missing positive MSP supply proof value')
-    proof = response['proofOps']['ops']
+    proof = (response.get('proof_ops') or response.get('proofOps') or {}).get('ops', [])
     check(len(proof) == 2 and all(op['data'] for op in proof), 'missing IAVL or multistore proof')
     return response['value'], proof
 
@@ -65,6 +65,7 @@ def rehearse_history(binary, root, genesis, expected, env, owner, report, *, rep
     })
     write_config(observer.home, 'config.toml', {
         ('p2p', 'persistent_peers'): json.dumps(f'{archive.node_id}@127.0.0.1:{archive.p2p}'),
+        ('p2p', 'allow_duplicate_ip'): 'true',
         ('p2p', 'pex'): 'false',
     })
 
@@ -79,7 +80,7 @@ def rehearse_history(binary, root, genesis, expected, env, owner, report, *, rep
     require_rpc_error(observer, 'block_results?height=1', 'node is not persisting finalize block responses')
     require_rpc_error(observer, query, 'transaction indexing is disabled')
     old = supply_query(observer, historical_height)
-    check(int(old.get('code', 0)) != 0 and not old.get('proofOps') and not old.get('value') and
+    check(int(old.get('code', 0)) != 0 and not old.get('proof_ops') and not old.get('proofOps') and not old.get('value') and
           'ensure height has not been pruned' in old.get('log', ''),
           'retention profile did not prune the historical IAVL version: ' + str(old.get('log', ''))[:180])
 
@@ -97,8 +98,8 @@ def rehearse_history(binary, root, genesis, expected, env, owner, report, *, rep
     current = supply_proof(supply_query(observer, height), height)
     check(current == supply_proof(supply_query(archive, height), height), 'fresh bank proof differs from archive witness')
     old_after = supply_query(observer, historical_height)
-    check(int(old_after.get('code', 0)) == int(old['code']) and not old_after.get('proofOps') and
-          not old_after.get('value'), 'old state reappeared after restart')
+    check(int(old_after.get('code', 0)) == int(old['code']) and not old_after.get('proof_ops') and
+          not old_after.get('proofOps') and not old_after.get('value'), 'old state reappeared after restart')
     del_atomic = balance(expected['actor'], expected['actorNative'], height, observer.evm, observer.rest)
     check(del_atomic == balance(expected['actor'], expected['actorNative'], height, archive.evm, archive.rest),
           'archive and retention observer disagree on recent balance')
