@@ -267,7 +267,9 @@ class Lab:
         deadline, last = time.monotonic() + timeout, None
         while time.monotonic() < deadline:
             try:
-                if condition(): return
+                result = condition()
+                if result:
+                    return result
             except (RuntimeError, OSError, ValueError) as error:
                 last = str(error)
             time.sleep(0.25)
@@ -634,6 +636,78 @@ def connect_transfer(lab, mcnd, reference, hermes, upgrade=False, native_fixture
     return a, b, run, a_channel, b_channel
 
 
+def verify_background_relay(lab, hermes, a, b, a_channel, b_channel, voucher, transfer):
+    config = lab.root / "hermes.toml"
+    config.write_text(config.read_text().replace("log_level = 'warn'", "log_level = 'info'", 1) + """
+[mode.clients]
+enabled = true
+refresh = true
+misbehaviour = true
+
+[mode.connections]
+enabled = false
+
+[mode.channels]
+enabled = false
+
+[mode.packets]
+enabled = true
+clear_interval = 0
+clear_on_start = true
+""")
+    chain_id, value = a["chain"], 10**18
+
+    def start(label):
+        log = lab.root / (label + ".log")
+        child = lab.spawn([hermes, "--config", config, "--json", "start"], log)
+        lab.wait(lambda: child.poll() is None and "Hermes has started" in log.read_text(encoding="utf8"),
+                 "background Hermes failed to start", 45)
+        return child
+
+    def witnessed(child, source, channel, before, target_balance, target_escrow):
+        if child.poll() is not None:
+            return False
+        sent = new_events(source, before, "send_packet")
+        if len(sent) != 1 or sent[0].get("packet_src_channel") != channel:
+            return False
+        sequences = [event.get("packet_sequence") for event in new_events(source, before, "acknowledge_packet")
+                     if event.get("packet_src_channel") == channel]
+        sequence = sent[0].get("packet_sequence")
+        if (not sequence or sequences != [sequence] or commitments(source["rpc"], channel) or
+                amount(b["rpc"], b["address"], voucher) != target_balance or escrow(a["rpc"], "del") != target_escrow):
+            return False
+        return sequence
+
+    initial_voucher = amount(b["rpc"], b["address"], voucher)
+    initial_escrow = escrow(a["rpc"], "del")
+    require(initial_escrow == initial_voucher and initial_voucher > 0, "missing prior native transfer")
+    before = phase_before(a, b)
+    worker = start("hermes-background")
+    transfer(chain_id, B_ID, a_channel, "del", value, b["address"])
+    live_sequence = lab.wait(
+        lambda: witnessed(worker, a, a_channel, before["a_tx"], initial_voucher + value, initial_escrow + value),
+        "running Hermes did not relay and acknowledge the packet", 60)
+    phase_after(lab, "daemon_live_relay", a, b, before, -value)
+    lab.report["phases"]["daemon_live_relay"]["sequence"] = live_sequence
+    lab.stop(worker)
+
+    before = phase_before(a, b)
+    transfer(B_ID, chain_id, b_channel, voucher, value, a["address"])
+    lab.wait(lambda: len(commitments(b["rpc"], b_channel)) == 1, "return commitment must exist while Hermes is stopped")
+    pending = commitments(b["rpc"], b_channel)[0]
+    require(worker.poll() is not None and escrow(a["rpc"], "del") == initial_escrow + value,
+            "return packet must still be pending before restart")
+    restarted = start("hermes-background-restarted")
+    require(restarted.pid != worker.pid, "Hermes must start a new process")
+    recovered_sequence = lab.wait(
+        lambda: witnessed(restarted, b, b_channel, before["b_tx"], initial_voucher, initial_escrow),
+        "restarted Hermes did not relay and acknowledge the pending return", 60)
+    require(str(pending["sequence"]) == recovered_sequence, "Hermes did not recover the same on-chain packet")
+    phase_after(lab, "daemon_restart_backlog", a, b, before, value)
+    lab.stop(restarted)
+    lab.report["phases"]["daemon_restart_backlog"].update(sequence=recovered_sequence, commitment_before_restart=pending)
+
+
 def full_suite(lab, mcnd, reference, hermes, native_fixture=None, *, assembly_report=None, donor_file=None):
     a, b, run, a_channel, b_channel = connect_transfer(lab, mcnd, reference, hermes, native_fixture=native_fixture,
                                                        assembly_report=assembly_report, donor_file=donor_file)
@@ -743,7 +817,11 @@ def full_suite(lab, mcnd, reference, hermes, native_fixture=None, *, assembly_re
     require(len(timeouts) == 1, "actual timeout receipt event required")
     lab.report["phases"]["timeout_refund"]["timeout_sequence"] = timeout_sequence
     lab.report["phases"]["timeout_refund"]["packet_timeout_timestamp"] = timeout_timestamp
-    require(len(lab.report.get("phases", {})) == (8 if native_fixture else 6), "all real IBC phases are mandatory")
+    expected_phases = 8 if native_fixture else 6
+    if assembly_report is not None:
+        verify_background_relay(lab, hermes, a, b, a_channel, b_channel, voucher, transfer)
+        expected_phases += 2
+    require(len(lab.report.get("phases", {})) == expected_phases, "all real IBC phases are mandatory")
     if native_fixture:
         lab.report["native_final_consensus"] = a["verify_replicas"](lab.height(a["rpc"], chain_id))
         lab.report["status"] = "NATIVE_CONSENSUS_HERMES_PASS"

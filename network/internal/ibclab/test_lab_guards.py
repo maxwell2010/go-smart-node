@@ -237,7 +237,7 @@ class ProcessLifecycleGuards(unittest.TestCase):
             self.assertNotIn(marker, str(failure.exception))
 
     def test_hermes_cleanup_failure_cannot_preserve_success_or_release_flag(self):
-        def completed_fake_suite(owner, *_):
+        def completed_fake_suite(owner, *_, **_options):
             owner.report.update(status="TWO_PROCESS_HERMES_PASS", release_gate=True)
         with tempfile.TemporaryDirectory() as directory:
             report = Path(directory) / "report.json"
@@ -277,7 +277,7 @@ class ProcessLifecycleGuards(unittest.TestCase):
     def test_signal_between_cleanup_iterations_after_success_fails_report_and_closes_all(self):
         child, second, unrelated = FakeChild(), FakeChild(), FakeChild()
         guard = lab.SignalGuard()
-        def interrupted_fake_suite(owner, *_, native_fixture=None):
+        def interrupted_fake_suite(owner, *_, native_fixture=None, **_options):
             self.assertIsNone(native_fixture)
             owner.children = SignalBetweenChildren([child, second], lambda: guard.handle(lab.signal.SIGTERM, None))
             owner.report.update(status="TWO_PROCESS_HERMES_PASS", release_gate=True)
