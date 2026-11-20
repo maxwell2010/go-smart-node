@@ -12,7 +12,7 @@ on:
         description: Validation scenario to run on an isolated GitHub runner
         default: module
         type: choice
-        options: [module, founding-genesis, bridge-finality, token-features, token-daemon, mass-delegation, contracts, process, held-downtime, native-upgrade-governance, nft-downtime, native-full-profile-upgrade, native-full-ibc-upgrade, native-cross-version-ibc-upgrade, native-systemd-module-upgrade, native-systemd-four-validator-recovery, native-systemd-startup-replay]
+        options: [module, founding-genesis, bridge-finality, token-features, token-daemon, mass-delegation, mass-delegation-release, contracts, process, held-downtime, native-upgrade-governance, nft-downtime, native-full-profile-upgrade, native-full-ibc-upgrade, native-cross-version-ibc-upgrade, native-systemd-module-upgrade, native-systemd-four-validator-recovery, native-systemd-startup-replay]
       remote_profile:
         description: Also validate the reusable remote-worker scripts
         default: 'off'
@@ -417,8 +417,8 @@ jobs:
           if-no-files-found: warn
 
   mass-delegation:
-    if: github.event_name == 'workflow_dispatch' && inputs.scope == 'mass-delegation'
-    runs-on: ubuntu-22.04
+    if: github.event_name == 'workflow_dispatch' && (inputs.scope == 'mass-delegation' || inputs.scope == 'mass-delegation-release')
+    runs-on: ${{ inputs.scope == 'mass-delegation-release' && 'ubuntu-24.04' || 'ubuntu-22.04' }}
     timeout-minutes: 65
     env:
       CGO_ENABLED: '1'
@@ -426,6 +426,7 @@ jobs:
       GOMAXPROCS: '2'
       GOTOOLCHAIN: local
       MCND_MASS_DELEGATION_COUNTS: '10,100,1000'
+      MASS_TEST_SOURCE: ${{ inputs.scope == 'mass-delegation-release' && '3880898bf95fe701b9d6f28d6e029a63f88a16ae' || github.sha }}
     defaults:
       run:
         shell: bash
@@ -433,6 +434,7 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
+          ref: ${{ env.MASS_TEST_SOURCE }}
           persist-credentials: false
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e
         with:
@@ -442,12 +444,45 @@ jobs:
       - name: Verify dependency graph and source revision
         run: |
           mkdir -p validation-logs
+          test "$(git rev-parse HEAD)" = "$MASS_TEST_SOURCE"
           git rev-parse HEAD | tee validation-logs/revision.log
           go mod download
           go mod verify
           git diff --exit-code -- go.mod go.sum
       - name: Test mass delegation and durable penalties with actual EVM
+        if: inputs.scope == 'mass-delegation'
         run: go test -mod=readonly -p 2 -count=1 -v -timeout 55m -run '^TestOwnedAppNativeMassDelegationLifecycle$' ./systemcontracts |& tee validation-logs/mass-delegation-evm.log
+      - name: Measure the release-source App and EVM under fixed runner limits
+        if: inputs.scope == 'mass-delegation-release'
+        run: |
+          set -euo pipefail
+          work=$(mktemp -d "$RUNNER_TEMP/mcnd-mass-resource.XXXXXXXX")
+          mkdir -m 700 "$work/tmp"
+          go test -mod=readonly -p 2 -c -o "$work/systemcontracts.test" ./systemcontracts
+          printf 'source=%s\nworkflow=%s\n' "$MASS_TEST_SOURCE" "$GITHUB_SHA" > validation-logs/mass-resource-runner.txt
+          uname -r >> validation-logs/mass-resource-runner.txt
+          for count in 10 100 1000; do
+            sudo -n systemd-run --quiet --wait --collect --pipe --service-type=exec --expand-environment=no \
+              --uid="$(id -u)" --gid="$(id -g)" --working-directory="$PWD/systemcontracts" \
+              --property=PrivateNetwork=yes --property=MemoryMax=2G --property=MemorySwapMax=0 --property=CPUQuota=200% \
+              --setenv=GOMAXPROCS=2 --setenv="TMPDIR=$work/tmp" --setenv="MCND_MASS_DELEGATION_COUNTS=$count" \
+              /bin/bash -euc '
+                cgroup=$(sed -n "s/^0:://p" /proc/self/cgroup)
+                test -n "$cgroup"
+                group=/sys/fs/cgroup"$cgroup"
+                test "$(cat "$group/memory.max")" = 2147483648
+                test "$(cat "$group/memory.swap.max")" = 0
+                read -r quota period < "$group/cpu.max"
+                test "$quota" -eq "$((2 * period))"
+                printf "positions=%s\nmemoryMaxBytes=2147483648\nmaxCpuCores=2\n" "$MCND_MASS_DELEGATION_COUNTS"
+                /usr/bin/time -f "elapsedSeconds=%e\nuserCpuSeconds=%U\nsystemCpuSeconds=%S\nmaxProcessRssKiB=%M" \
+                  "$1" -test.count=1 -test.v -test.timeout=20m -test.run="^TestOwnedAppNativeMassDelegationLifecycle\$"
+                printf "cgroupMemoryPeakBytes=%s\n" "$(cat "$group/memory.peak")"
+                cat "$group/memory.events"
+                grep -qx "oom_kill 0" "$group/memory.events"
+              ' _ "$work/systemcontracts.test" |& tee "validation-logs/mass-resource-$count.log"
+            grep -Fq "actual EVM mass penalty lifecycle passed: positions=$count," "validation-logs/mass-resource-$count.log"
+          done
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
         if: always()
         with:
