@@ -294,6 +294,7 @@ SDK53 учитывает также evidence.max_age_num_blocks и snapshot rete
 задаёт `indexer="null"`, `discard_abci_responses=true` ценой исторических
 запросов. Такую ноду нельзя обещать как полноценный Explorer/Hermes backend;
 нужны отдельные RPC/архивные службы.
+[Проверка истории и AppHash после pruning на v1.1.1](SYNCHRONIZATION_AND_STORAGE.md#проверка-pruning-на-v111).
 
 Жёсткого безопасного лимита N GiB эти настройки не дают: живое состояние
 и активные IBC commitments могут расти. Не удаляйте отдельные DB/SST/WAL
