@@ -297,3 +297,50 @@ python3 -B network/tools/public_genesis_manifest.py verify \
 Для установки в подготовленный home начального валидатора используйте
 `install`. Эта команда повторяет проверку манифеста и сверяет ключ ноды
 с указанной записью оператора. [Команда и условия установки](OPERATOR_LAUNCH.md#применение-подписанного-публичного-genesis).
+
+### Подтверждения операторов перед стартом
+
+После установки оператор может подтвердить готовность сообщением `personal_sign`
+из своего EVM-кошелька. Утилита `mcnd-genesis` связывает сообщение с адресом
+`d0valoper...`, публичным ключом консенсуса, обоими chain ID, временем UTC и
+точными SHA256 genesis и манифеста. Приватный ключ консенсуса остаётся у ноды.
+Подпись сообщения выполняется офлайн и не тратит MSP. [Стандарт EIP-191](https://eips.ethereum.org/EIPS/eip-191).
+
+Возьмите те же `DOWNLOADED_GENESIS` и `APPROVED_MANIFEST_SHA256`, которые прошли
+проверку OpenPGP выше. `MCND_GENESIS` указывает на собранную через Linux CI
+утилиту. Создайте сообщение для своей строки в составе.
+
+```sh
+"$MCND_GENESIS" launch-consent payload \
+  --manifest public-genesis-manifest.json --genesis "$DOWNLOADED_GENESIS" \
+  --approved-manifest-sha256 "$APPROVED_MANIFEST_SHA256" \
+  --operator "$OPERATOR_ADDRESS" --output operator-message.txt
+```
+
+Прочитайте сообщение и сверьте его с манифестом. Подпишите точные байты
+своим кошельком. Например, для существующего зашифрованного хранилища Foundry
+задайте имя аккаунта в `OPERATOR_KEYSTORE`. Можно использовать и другой
+подписант, который поддерживает `personal_sign` без изменения текста.
+[Команда подписи Foundry](https://www.getfoundry.sh/reference/cast/wallet/sign).
+
+```sh
+signature=$(cast wallet sign --account "$OPERATOR_KEYSTORE" "$(cat operator-message.txt)")
+jq -n --arg operator "$OPERATOR_ADDRESS" --arg signature "$signature" \
+  '{operatorAddress: $operator, signature: $signature}' > operator-consent.json
+```
+
+Передайте организатору `operator-consent.json`. Он объединяет четыре объекта в
+один JSON-массив, например `jq -s . operator-{1,2,3,4}.json > operator-consents.json`
+в Bash. Организатор сверяет подписи по тому же манифесту.
+
+```sh
+"$MCND_GENESIS" launch-consent verify \
+  --manifest public-genesis-manifest.json --genesis "$DOWNLOADED_GENESIS" \
+  --approved-manifest-sha256 "$APPROVED_MANIFEST_SHA256" \
+  --signatures operator-consents.json
+```
+
+`FOUR_OPERATOR_ACKNOWLEDGMENTS_VERIFIED` означает, что четыре разных оператора
+подписали подтверждения для этих байтов и времени. При изменении genesis или
+манифеста получите подписи заново. Полномочия владельцев отдельных кошельков
+наград и газа, доступность endpoint и решение о старте проверяются отдельно.
