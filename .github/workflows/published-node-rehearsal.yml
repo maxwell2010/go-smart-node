@@ -5,7 +5,7 @@ on:
     inputs:
       scenario:
         type: choice
-        options: [all, node, ibc, tools]
+        options: [all, node, ibc, tools, media]
         default: all
   push:
     branches: ['feat/native-duplicate-vote-master-20261112']
@@ -278,7 +278,7 @@ jobs:
             .chainId == "mintcandy_990014-1" and .idempotent and .rejectsForeignKey and .rejectsExistingState and .consentPayloadVerified and
             (.preservedHomeFiles >= 5) and (.networkLaunchAuthorized | not)' "$report"
       - name: Verify quorum recovery, follower replay and systemd snapshot sync
-        if: inputs.scenario != 'ibc' && inputs.scenario != 'tools'
+        if: inputs.scenario != 'ibc' && inputs.scenario != 'tools' && inputs.scenario != 'media'
         shell: bash
         run: |
           set -euo pipefail
@@ -312,8 +312,49 @@ jobs:
             (.resourceUsage | (.signingValidators | length == 3) and
               ([.systemdFollower, .snapshotObserver, .signingValidators[]] |
                 all(.peakResidentBytes > 0 and .dataAllocatedBytes > 0)))' "$RELEASE_WORK/evidence/systemd.json"
+      - name: Verify media publication after a signed user token creation
+        if: inputs.scenario == 'media'
+        shell: bash
+        working-directory: launch-assembly/network
+        run: |
+          set -euo pipefail
+          umask 077
+          root="$RELEASE_WORK"
+          fixture="$root/media"
+          genesis="$root/assembled/public/genesis.json"
+          mkdir -m 700 "$fixture"
+          python3 -m venv "$root/media-venv"
+          py="$root/media-venv/bin/python"
+          "$py" -m pip install --only-binary=:all: --require-hashes -r media/requirements-linux-cp312.lock
+          "$py" -B - "$fixture" <<'PY'
+          from pathlib import Path
+          from sys import argv
+          from PIL import Image
+
+          root = Path(argv[1])
+          (root / 'metadata.json').write_text('{"name":"Launch avatar fixture"}')
+          Image.new('RGB', (6, 6), '#12ccaa').save(root / 'avatar.png')
+          PY
+          PYTHONPATH="$PWD/media" "$py" -B -m mcnd_media.commitment prepare \
+            --chain-id mintcandy_990014-1 --kind erc20 --mime image/png \
+            --metadata "$fixture/metadata.json" --image "$fixture/avatar.png" > "$fixture/prepare.json"
+          MCND_MEDIA_URI="$(jq -er '.metadata_uri' "$fixture/prepare.json")" MCND_MEDIA_GENESIS="$genesis" \
+            MCND_MEDIA_FIXTURE="$fixture/signed.json" \
+            go test -mod=readonly -p 2 -count=1 -timeout 3m -run '^TestExportLaunchMediaCreation$' ./systemcontracts
+          report="$root/evidence/media.json"
+          status=0
+          sudo -n unshare --net -- bash -euc 'ip link set lo up; exec "$@"' _ \
+            env TMPDIR="$root" "$py" -B tools/native_launch_rehearsal.py \
+            --binary "$root/bin/mcnd" --binary-sha256 "$RELEASE_BINARY_SHA" \
+            --archive-sha256 "$RELEASE_ARCHIVE_SHA" --source-commit "$RELEASE_SOURCE" \
+            --fixture "$root/assembled" --home-parent "$root" --assembly-report "$root/evidence/assembly.json" \
+            --four-validators --empty-user-assets --media-fixture "$fixture/signed.json" --report "$report" || status=$?
+          if [[ -f "$report" ]]; then sudo -n chown "$(id -u):$(id -g)" "$report"; fi
+          test "$status" = 0
+          jq -e '.status == "PASS" and .loopbackOnlyNamespace and .chainId == "mintcandy_990014-1" and
+            (.committedMedia | .status == "PASS" and .version == 1 and .kind == "erc20-reserveless" and .alteredMetadataRejected)' "$report"
       - name: Verify Hermes interoperability on the same assembled genesis
-        if: inputs.scenario != 'node' && inputs.scenario != 'tools'
+        if: inputs.scenario != 'node' && inputs.scenario != 'tools' && inputs.scenario != 'media'
         shell: bash
         working-directory: launch-assembly/network
         run: |

@@ -519,7 +519,7 @@ def verify_systemd_upgrade(systemd, follower, validators, expected, genesis, upg
 
 def run_launch(binary, root, genesis, expected, keys, env, owner, report, *, four_validators=False, treasury=None,
                systemd=None, restart_snapshot=False, upgrade_binary=None, quorum_loss_recovery=False, commit_probe=None,
-               verify_history=False):
+               verify_history=False, media_fixture=None):
     rows = expected["validators"]
     powers = tuple(row["initialPower"] for row in rows)
     options = {"chain_id": expected["chainId"], "evm_chain_id": expected["evmChainId"]}
@@ -625,6 +625,10 @@ def run_launch(binary, root, genesis, expected, keys, env, owner, report, *, fou
                                      "catchingUp": False, "syncedFromHeight": 1, "verifiedHeight": height}
     if treasury is not None:
         rehearse_treasury(nodes, treasury, height, report)
+    if media_fixture is not None:
+        from native_launch_media import rehearse_media
+
+        rehearse_media(root, expected, nodes, media_fixture, report)
     if restart_snapshot:
         restarted_height = verify_systemd_restart(systemd, follower, live_validators, expected, report)
         rehearse_snapshot(follower_binary, root, genesis, expected, env, owner, report,
@@ -654,6 +658,7 @@ def main(argv=None, signals=None):
     parser.add_argument("--assembly-report", type=Path, help="cold verification report for the offline-assembled isolated genesis")
     parser.add_argument("--quorum-loss-recovery", action="store_true", help="halt safely with two of four validators and recover original signers")
     parser.add_argument("--commit-probe", type=Path, help="owned Comet Ed25519 commit verifier")
+    parser.add_argument("--media-fixture", type=Path, help="private test-only signed avatar fixture")
     parser.add_argument("--treasury-transfer", action="store_true", help="check the signed transfer pair on the four-validator fixture")
     parser.add_argument("--package-genesis", type=Path, help="use genesis extracted from the verified launch package")
     parser.add_argument("--systemd-follower", action="store_true", help="start the clean installed follower as a systemd service")
@@ -666,6 +671,8 @@ def main(argv=None, signals=None):
         parser.error("--empty-user-assets requires four validators and no treasury transfer fixture")
     if args.assembly_report and not args.empty_user_assets:
         parser.error("--assembly-report requires --empty-user-assets")
+    if args.media_fixture and not args.assembly_report:
+        parser.error("--media-fixture requires the offline-assembled isolated genesis")
     if args.quorum_loss_recovery and (not args.four_validators or args.commit_probe is None):
         parser.error("--quorum-loss-recovery requires --four-validators and --commit-probe")
     if args.commit_probe is not None and not args.quorum_loss_recovery:
@@ -737,7 +744,8 @@ def main(argv=None, signals=None):
                                    four_validators=args.four_validators, treasury=treasury, systemd=systemd,
                                    restart_snapshot=args.restart_and_snapshot, upgrade_binary=upgrade_binary,
                                    quorum_loss_recovery=args.quorum_loss_recovery, commit_probe=args.commit_probe,
-                                   verify_history=bool(args.assembly_report and args.restart_and_snapshot and not upgrade_binary))
+                                   verify_history=bool(args.assembly_report and args.restart_and_snapshot and not upgrade_binary),
+                                   media_fixture=args.media_fixture)
                 finally:
                     owner.close()
             report.update(status="PASS", phase="complete")
