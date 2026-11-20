@@ -360,8 +360,8 @@ def patch_toml(path, changes):
     path.write_text("\n".join(lines) + "\n")
 
 
-def prepare_owned_relayer(lab, mcnd, home):
-    common = ["--home", home, "--chain-id", A_ID, "--evm.evm-chain-id", EVM_ID]
+def create_relayer_key(lab, mcnd, home, chain_id, evm_id):
+    common = ["--home", home, "--chain-id", chain_id, "--evm.evm-chain-id", evm_id]
     # No stdout/stderr from a key-generating command is ever logged or persisted.
     key = json.loads(command([mcnd, "keys", "add", "lab", "--key-type", "secp256k1", "--coin-type", 60, "--keyring-backend", "test", "--output", "json", *common], lab.env, secret=True))
     require(key.get("mnemonic") and key.get("address", "").startswith("d01"), "native Cosmos secp256k1 fixture key required")
@@ -370,7 +370,12 @@ def prepare_owned_relayer(lab, mcnd, home):
     mnemonic_file = home / "ephemeral-relayer-mnemonic.txt"
     with open(mnemonic_file, "x", encoding="utf8") as output:
         os.chmod(mnemonic_file, 0o600); output.write(key["mnemonic"] + "\n")
-    address = key["address"]
+    return key["address"], mnemonic_file
+
+
+def prepare_owned_relayer(lab, mcnd, home):
+    common = ["--home", home, "--chain-id", A_ID, "--evm.evm-chain-id", EVM_ID]
+    address, mnemonic_file = create_relayer_key(lab, mcnd, home, A_ID, EVM_ID)
     command([mcnd, "genesis", "add-genesis-account", address, str(10**24) + "del", *common], lab.env)
     command([mcnd, "genesis", "reconcile-native-allocation", *common], lab.env)
     return address, mnemonic_file
@@ -439,19 +444,70 @@ def fund_native_relayer(lab, mcnd, replicas, expected, genesis, height):
     return {"rpc": source.p2p + 1, "grpc": source.grpc, "address": address, "mnemonic": mnemonic_file}, funded_genesis
 
 
-def prepare_native_owned(lab, mcnd, fixture):
+def fund_assembled_relayer(lab, mcnd, source, donor_file):
+    from withdrawal_genesis_smoke import private_bytes
+
+    common = ["--home", source.home, "--chain-id", source.chain_id, "--evm.evm-chain-id", source.evm_chain_id]
+    address, mnemonic = create_relayer_key(lab, mcnd, source.home, source.chain_id, source.evm_chain_id)
+    donor = private_bytes(donor_file, 64).decode("ascii")
+    require(re.fullmatch("[0-9a-f]{64}", donor), "invalid disposable fixture donor key")
+    command([mcnd, "keys", "import-hex", "fixture-donor", donor, "--key-type", "eth_secp256k1",
+             "--keyring-backend", "test", *common], lab.env, secret=True)
+    donor_address = command([mcnd, "keys", "show", "fixture-donor", "-a", "--keyring-backend", "test", *common],
+                            lab.env, secret=True).strip()
+    port = source.p2p + 1
+    donor_funds = 200 * 10**18
+    require(amount(port, donor_address, "del") == donor_funds, "donor must be the funded isolated gas wallet")
+    require(amount(port, address, "del") == 0, "unexpected balance on the disposable relayer account")
+    funding, fee = 50 * 10**18, 10**15
+    sent = json.loads(command([mcnd, "tx", "bank", "send", "fixture-donor", address, str(funding) + "del",
+        "--node", f"tcp://127.0.0.1:{port}", "--keyring-backend", "test", "--fees", str(fee) + "del",
+        "--gas", "200000", "--broadcast-mode", "sync", "--output", "json", "--yes", *common], lab.env))
+    require(int(sent["code"]) == 0 and re.fullmatch(r"[0-9A-Fa-f]{64}", sent["txhash"]),
+            "isolated relayer funding was rejected")
+    lab.wait(lambda: amount(port, address, "del") == funding, "relayer funding must commit")
+    lab.wait(lambda: sent["txhash"].upper() in receipts({"rpc": port}), "relayer funding receipt must be indexed")
+    result = receipts({"rpc": port})[sent["txhash"].upper()]
+    require(int(result["tx_result"].get("code", 0)) == 0 and
+            amount(port, donor_address, "del") == donor_funds - funding - fee, "isolated funding receipt differs")
+    lab.report["relayer_funding"] = {"receipt": sent["txhash"], "height": int(result["height"]),
+                                     "amount": str(funding), "fee": str(fee), "genesis_unchanged": True}
+    return {"rpc": port, "grpc": source.grpc, "address": address, "mnemonic": mnemonic}, funding
+
+
+def prepare_native_owned(lab, mcnd, fixture, *, assembly_report=None, donor_file=None):
     sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "tools"))
     from native_consensus_smoke import INITIAL, check_signatures, committed_header, create_replicas, effective_set, load_fixture, wait_replicas
 
-    expected, genesis, keys, height = load_fixture(
-        fixture, fee_rewards=True, downtime=False, jail_recovery=False, held_downtime=False, nft_downtime=False)
+    if assembly_report is not None:
+        from native_launch_rehearsal import GENESIS_LIMIT, load_fixture as load_launch_fixture
+        from withdrawal_genesis_smoke import private_bytes
+
+        genesis, expected, keys = load_launch_fixture(
+            fixture, four_validators=True, empty_user_assets=True, assembly_report=assembly_report)
+        height, powers = 1, tuple(row["initialPower"] for row in expected["validators"])
+    else:
+        expected, genesis, keys, height = load_fixture(
+            fixture, fee_rewards=True, downtime=False, jail_recovery=False, held_downtime=False, nft_downtime=False)
+        powers = INITIAL
+    chain_id = expected["chainId"]
     root = lab.root / "native-owned"
     root.mkdir(mode=0o700)
-    replicas = create_replicas(mcnd, root, genesis, keys, lab.env)
-    owned, funded_genesis = fund_native_relayer(lab, mcnd, replicas, expected, genesis, height)
+    replicas = create_replicas(mcnd, root, genesis, keys, lab.env, full_mesh=assembly_report is not None,
+                               chain_id=chain_id, evm_chain_id=expected["evmChainId"])
+    if assembly_report is None:
+        owned, funded_genesis = fund_native_relayer(lab, mcnd, replicas, expected, genesis, height)
+        funding = 10**24
+    else:
+        funded_genesis = genesis
+        for replica in replicas:
+            patch_toml(replica.home / "config/app.toml", {("", "minimum-gas-prices"): "1000000000del"})
 
     def start_all(label):
         for replica in replicas:
+            if assembly_report is not None:
+                require(private_bytes(replica.home / "config/genesis.json", GENESIS_LIMIT) == genesis,
+                        "an assembled replica has different genesis bytes")
             replica.start(mcnd, lab.env, lab, label)
 
     def restart_all():
@@ -463,8 +519,16 @@ def prepare_native_owned(lab, mcnd, fixture):
 
     def verify_replicas(minimum):
         committed = wait_replicas(replicas, minimum + 1, 85, readiness) - 1
-        return {"height": committed, "signers": check_signatures(replicas, expected["validators"], committed, INITIAL),
-                "power": effective_set(replicas, expected["validators"], committed, INITIAL),
+        if assembly_report is not None:
+            # The first block after starting a quorum may precede the fourth
+            # validator catching up. Find a full commit on all four nodes.
+            for _ in range(12):
+                signed = replicas[0].rpc(f"commit?height={committed}")["signed_header"]["commit"]
+                if all(int(sig["block_id_flag"]) == 2 for sig in signed["signatures"]):
+                    break
+                committed = wait_replicas(replicas, committed + 2, 30, readiness) - 1
+        return {"height": committed, "signers": check_signatures(replicas, expected["validators"], committed, powers),
+                "power": effective_set(replicas, expected["validators"], committed, powers),
                 **committed_header(replicas, committed)}
 
     def verify_pending(channel, pending, value):
@@ -479,16 +543,18 @@ def prepare_native_owned(lab, mcnd, fixture):
 
     start_all("ibc-initial")
     snapshot = verify_replicas(height + 1)
+    if assembly_report is not None:
+        owned, funding = fund_assembled_relayer(lab, mcnd, replicas[0], donor_file)
     rpc_port, address = owned["rpc"], owned["address"]
-    require(amount(rpc_port, address, "del") == 10**24, "unexpected isolated native relayer account funding")
+    require(amount(rpc_port, address, "del") == funding, "unexpected isolated native relayer account funding")
     require(escrow(rpc_port, "del") == 0, "new native escrow must be zero")
     for replica in replicas:
         verify_native_unbonding(replica.p2p + 1)
-    lab.report["owned_probe"] = {"chain": A_ID, "funded_address": address, "replicas": len(replicas),
+    lab.report["owned_probe"] = {"chain": chain_id, "funded_address": address, "replicas": len(replicas),
                                  "unbonding_seconds": NATIVE_UNBONDING_SECONDS, "consensus": snapshot,
                                  "genesis_sha256": hashlib.sha256(funded_genesis).hexdigest()}
-    print("Three native consensus daemons with matching app hashes: PASS", flush=True)
-    return {**owned, "restart": restart_all, "verify_replicas": verify_replicas,
+    print(f"{len(replicas)} native consensus daemons with matching app hashes: PASS", flush=True)
+    return {**owned, "chain": chain_id, "restart": restart_all, "verify_replicas": verify_replicas,
             "verify_pending": verify_pending, "verify_checkpoint": verify_checkpoint}
 
 
@@ -533,8 +599,9 @@ def phase_before(a, b):
 
 def phase_after(lab, label, a, b, before, native_a_delta=0, native_b_delta=0):
     # Let the independent Comet indexers catch up before checking receipt fees.
-    heights = [lab.height(a["rpc"], A_ID), lab.height(b["rpc"], B_ID)]
-    lab.wait(lambda: lab.height(a["rpc"], A_ID) > heights[0] and lab.height(b["rpc"], B_ID) > heights[1], "post-transaction indexing block")
+    chain_id = a.get("chain", A_ID)
+    heights = [lab.height(a["rpc"], chain_id), lab.height(b["rpc"], B_ID)]
+    lab.wait(lambda: lab.height(a["rpc"], chain_id) > heights[0] and lab.height(b["rpc"], B_ID) > heights[1], "post-transaction indexing block")
     a_fee, a_records = fees(a, before["a_tx"], "del")
     b_fee, b_records = fees(b, before["b_tx"], "stake")
     require(a_records or b_records, "phase must contain real committed relayer transactions")
@@ -544,19 +611,21 @@ def phase_after(lab, label, a, b, before, native_a_delta=0, native_b_delta=0):
     print(label + ": PASS", flush=True)
 
 
-def connect_transfer(lab, mcnd, reference, hermes, upgrade=False, native_fixture=None, *, owned=None):
+def connect_transfer(lab, mcnd, reference, hermes, upgrade=False, native_fixture=None, *, owned=None,
+                     assembly_report=None, donor_file=None):
     # Start the native group's fixed ports first so dynamically allocated
     # reference ports cannot reuse any of them.
-    a = prepare_native_owned(lab, mcnd, native_fixture) if native_fixture else owned
+    a = prepare_native_owned(lab, mcnd, native_fixture, assembly_report=assembly_report, donor_file=donor_file) if native_fixture else owned
     b, config = reference_probe(lab, reference, hermes)
     if a is None:
         a = prepare_owned(lab, mcnd, upgrade=upgrade)
-    config.write_text("[global]\nlog_level = 'warn'\n" + chain_config(A_ID, a["rpc"], a["grpc"], "d0", "del", lab.root / "hermes-keys") + chain_config(B_ID, b["rpc"], b["grpc"], "cosmos", "stake", lab.root / "hermes-keys"))
+    chain_id = a.get("chain", A_ID)
+    config.write_text("[global]\nlog_level = 'warn'\n" + chain_config(chain_id, a["rpc"], a["grpc"], "d0", "del", lab.root / "hermes-keys") + chain_config(B_ID, b["rpc"], b["grpc"], "cosmos", "stake", lab.root / "hermes-keys"))
     run = lambda *args: command([hermes, "--config", config, "--json", *args], lab.env, timeout=120)
-    import_hermes_key(hermes, config, A_ID, a["mnemonic"], "m/44'/60'/0'/0/0", lab.env)
+    import_hermes_key(hermes, config, chain_id, a["mnemonic"], "m/44'/60'/0'/0/0", lab.env)
     health_check(run)
     before = phase_before(a, b)
-    run("create", "channel", "--a-chain", A_ID, "--b-chain", B_ID, "--a-port", "transfer", "--b-port", "transfer", "--new-client-connection", "--channel-version", "ics20-1", "--yes")
+    run("create", "channel", "--a-chain", chain_id, "--b-chain", B_ID, "--a-port", "transfer", "--b-port", "transfer", "--new-client-connection", "--channel-version", "ics20-1", "--yes")
     a_channel, a_counterparty = open_channel(a["rpc"])
     b_channel, b_counterparty = open_channel(b["rpc"])
     require(a_counterparty == b_channel and b_counterparty == a_channel, "actual channel counterparties differ")
@@ -565,8 +634,10 @@ def connect_transfer(lab, mcnd, reference, hermes, upgrade=False, native_fixture
     return a, b, run, a_channel, b_channel
 
 
-def full_suite(lab, mcnd, reference, hermes, native_fixture=None):
-    a, b, run, a_channel, b_channel = connect_transfer(lab, mcnd, reference, hermes, native_fixture=native_fixture)
+def full_suite(lab, mcnd, reference, hermes, native_fixture=None, *, assembly_report=None, donor_file=None):
+    a, b, run, a_channel, b_channel = connect_transfer(lab, mcnd, reference, hermes, native_fixture=native_fixture,
+                                                       assembly_report=assembly_report, donor_file=donor_file)
+    chain_id = a.get("chain", A_ID)
     voucher = "ibc/" + hashlib.sha256(("transfer/" + b_channel + "/del").encode()).hexdigest().upper()
     value = 10**18
 
@@ -574,11 +645,11 @@ def full_suite(lab, mcnd, reference, hermes, native_fixture=None):
         run("tx", "ft-transfer", "--src-chain", source, "--dst-chain", dest, "--src-port", "transfer", "--src-channel", channel, "--denom", denom, "--amount", count, "--receiver", receiver, "--timeout-seconds", seconds)
 
     def clear():
-        run("clear", "packets", "--chain", A_ID, "--port", "transfer", "--channel", a_channel)
+        run("clear", "packets", "--chain", chain_id, "--port", "transfer", "--channel", a_channel)
         lab.wait(lambda: not commitments(a["rpc"], a_channel) and not commitments(b["rpc"], b_channel), "all actual packet commitments must clear", 60)
 
     before = phase_before(a, b)
-    transfer(A_ID, B_ID, a_channel, "del", value, b["address"])
+    transfer(chain_id, B_ID, a_channel, "del", value, b["address"])
     lab.wait(lambda: len(commitments(a["rpc"], a_channel)) == 1, "genuine outbound commitment")
     require(escrow(a["rpc"], "del") == value, "outbound native escrow mismatch")
     clear()
@@ -586,7 +657,7 @@ def full_suite(lab, mcnd, reference, hermes, native_fixture=None):
     phase_after(lab, "native_send", a, b, before, -value)
 
     before = phase_before(a, b)
-    transfer(B_ID, A_ID, b_channel, voucher, value, a["address"])
+    transfer(B_ID, chain_id, b_channel, voucher, value, a["address"])
     lab.wait(lambda: len(commitments(b["rpc"], b_channel)) == 1, "genuine return commitment")
     clear()
     require(amount(b["rpc"], b["address"], voucher) == 0 and escrow(a["rpc"], "del") == 0, "voucher return/unescrow mismatch")
@@ -598,14 +669,14 @@ def full_suite(lab, mcnd, reference, hermes, native_fixture=None):
         foreign = 10**6
         bank_voucher = "ibc/" + hashlib.sha256(("transfer/" + a_channel + "/stake").encode()).hexdigest().upper()
         before = phase_before(a, b)
-        transfer(B_ID, A_ID, b_channel, "stake", foreign, a["address"])
+        transfer(B_ID, chain_id, b_channel, "stake", foreign, a["address"])
         lab.wait(lambda: len(commitments(b["rpc"], b_channel)) == 1, "reference outbound commitment")
         clear()
         require(amount(a["rpc"], a["address"], bank_voucher) == foreign and escrow(b["rpc"], "stake") == foreign,
                 "foreign voucher must be credited to the native bank account")
         phase_after(lab, "foreign_bank_voucher", a, b, before, native_b_delta=-foreign)
         before = phase_before(a, b)
-        transfer(A_ID, B_ID, a_channel, bank_voucher, foreign, b["address"])
+        transfer(chain_id, B_ID, a_channel, bank_voucher, foreign, b["address"])
         lab.wait(lambda: len(commitments(a["rpc"], a_channel)) == 1, "native bank voucher return commitment")
         clear()
         require(amount(a["rpc"], a["address"], bank_voucher) == 0 and escrow(b["rpc"], "stake") == 0,
@@ -613,10 +684,10 @@ def full_suite(lab, mcnd, reference, hermes, native_fixture=None):
         phase_after(lab, "foreign_bank_voucher_return", a, b, before, native_b_delta=foreign)
 
     before = phase_before(a, b)
-    transfer(A_ID, B_ID, a_channel, "del", value, b["address"])
+    transfer(chain_id, B_ID, a_channel, "del", value, b["address"])
     lab.wait(lambda: len(commitments(a["rpc"], a_channel)) == 1, "pending packet before restart")
     pending = commitments(a["rpc"], a_channel)
-    heights = [lab.height(a["rpc"], A_ID), lab.height(b["rpc"], B_ID)]
+    heights = [lab.height(a["rpc"], chain_id), lab.height(b["rpc"], B_ID)]
     if native_fixture:
         a["verify_pending"](a_channel, pending, value)
         before_restart = a["verify_replicas"](heights[0])
@@ -627,7 +698,7 @@ def full_suite(lab, mcnd, reference, hermes, native_fixture=None):
         lab.stop(a["process"])
         a["process"] = lab.spawn(a["start"], "owned-restarted")
     b["process"] = lab.spawn(b["start"], "reference-restarted")
-    lab.wait(lambda: lab.height(a["rpc"], A_ID) > heights[0] and lab.height(b["rpc"], B_ID) > heights[1], "both actual chains must reopen and advance", 60)
+    lab.wait(lambda: lab.height(a["rpc"], chain_id) > heights[0] and lab.height(b["rpc"], B_ID) > heights[1], "both actual chains must reopen and advance", 60)
     require(commitments(a["rpc"], a_channel) == pending and escrow(a["rpc"], "del") == value, "exact in-flight sequence/commitment hash/escrow did not survive restart")
     if native_fixture:
         a["verify_pending"](a_channel, pending, value)
@@ -642,7 +713,7 @@ def full_suite(lab, mcnd, reference, hermes, native_fixture=None):
             native_before_restart=before_restart, native_after_restart=after_restart)
 
     before = phase_before(a, b)
-    transfer(A_ID, B_ID, a_channel, "del", value, "not-a-valid-bech32-address")
+    transfer(chain_id, B_ID, a_channel, "del", value, "not-a-valid-bech32-address")
     lab.wait(lambda: len(commitments(a["rpc"], a_channel)) == 1, "error-ACK source commitment")
     error_sequence = commitments(a["rpc"], a_channel)[0]["sequence"]
     clear()
@@ -655,7 +726,7 @@ def full_suite(lab, mcnd, reference, hermes, native_fixture=None):
     lab.report["phases"]["error_ack_refund"]["error_ack_sequence"] = error_sequence
 
     before = phase_before(a, b)
-    transfer(A_ID, B_ID, a_channel, "del", value, b["address"], seconds=3)
+    transfer(chain_id, B_ID, a_channel, "del", value, b["address"], seconds=3)
     lab.wait(lambda: len(commitments(a["rpc"], a_channel)) == 1, "timeout source commitment")
     timeout_sequence = commitments(a["rpc"], a_channel)[0]["sequence"]
     sends = [event for event in new_events(a, before["a_tx"], "send_packet") if event.get("packet_sequence") == str(timeout_sequence)]
@@ -674,7 +745,7 @@ def full_suite(lab, mcnd, reference, hermes, native_fixture=None):
     lab.report["phases"]["timeout_refund"]["packet_timeout_timestamp"] = timeout_timestamp
     require(len(lab.report.get("phases", {})) == (8 if native_fixture else 6), "all real IBC phases are mandatory")
     if native_fixture:
-        lab.report["native_final_consensus"] = a["verify_replicas"](lab.height(a["rpc"], A_ID))
+        lab.report["native_final_consensus"] = a["verify_replicas"](lab.height(a["rpc"], chain_id))
         lab.report["status"] = "NATIVE_CONSENSUS_HERMES_PASS"
         lab.report["scope"] = "Native consensus and fee profile against an independent chain using Hermes and bank ICS-20 v1."
     else:
@@ -861,12 +932,17 @@ def main(argv=None, signals=None):
     parser.add_argument("--replacement-binary")
     parser.add_argument("--replacement-sha256")
     parser.add_argument("--native-fixture", type=Path)
+    parser.add_argument("--assembly-report", type=Path)
+    parser.add_argument("--fixture-donor-key", type=Path)
     args = parser.parse_args(argv)
     report = {"status": "FAIL", "mode": args.mode, "release_gate": False}
     try:
         private_namespace()
         require((args.mode == "native-full") == (args.native_fixture is not None),
                 "native-full requires its private native fixture directory")
+        require((args.assembly_report is None) == (args.fixture_donor_key is None) and
+                (args.assembly_report is None or args.mode == "native-full"),
+                "assembled genesis verification and its disposable gas wallet require native-full")
         require(re.fullmatch(r"[0-9a-f]{40}", args.reference_source_commit), "full reference source commit required")
         reference, ref_hash = binary(args.reference_binary, args.reference_sha256)
         hermes, hermes_hash = binary(args.hermes_binary, HERMES_SHA256)
@@ -890,7 +966,8 @@ def main(argv=None, signals=None):
             try:
                 report["hermes_version"] = command([hermes, "version"], env).strip()
                 if args.mode in ("full", "native-full"):
-                    full_suite(lab, mcnd, reference, hermes, native_fixture=args.native_fixture)
+                    full_suite(lab, mcnd, reference, hermes, native_fixture=args.native_fixture,
+                               assembly_report=args.assembly_report, donor_file=args.fixture_donor_key)
                 elif args.mode == "client-upgrade":
                     client_upgrade_suite(lab, mcnd, replacement, reference, hermes)
                 else:

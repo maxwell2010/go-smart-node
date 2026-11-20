@@ -117,6 +117,26 @@ func nativeLaunchAccountKey(index int, spec nativeLaunchSpec) *ethsecp.PrivKey {
 	return &ethsecp.PrivKey{Key: crypto.Keccak256([]byte("MintCandy isolated launch rehearsal account fixture"), []byte{byte(index)})}
 }
 
+func TestExportSponsoredLaunchIBCDonor(t *testing.T) {
+	path := os.Getenv("MCND_SPONSORED_IBC_DONOR_FILE")
+	if path == "" {
+		t.Skip("requires a private CI donor file")
+	}
+	spec, ok := nativeLaunchSpecForMode("4-empty-sponsored")
+	require.True(t, ok)
+	require.True(t, filepath.IsAbs(path))
+	dir, err := os.Lstat(filepath.Dir(path))
+	require.NoError(t, err)
+	require.True(t, dir.IsDir())
+	require.Zero(t, dir.Mode().Perm()&0077)
+	file, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0600)
+	require.NoError(t, err)
+	_, writeErr := file.WriteString(hex.EncodeToString(nativeLaunchAccountKey(1, spec).Bytes()))
+	closeErr := file.Close()
+	require.NoError(t, writeErr)
+	require.NoError(t, closeErr)
+}
+
 func nativeFourLaunchTreasuryKey(index int) *secp256k1.PrivKey {
 	return &secp256k1.PrivKey{Key: crypto.Keccak256([]byte(nativeFourLaunchKeyScope+"treasury"), []byte{byte(index)})}
 }

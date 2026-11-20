@@ -246,10 +246,10 @@ def create_replica(binary, root, label, index, genesis, key, env, *, chain_id=CH
     return replica
 
 
-def create_replicas(binary, root, genesis, keys, env, *, full_mesh=False):
+def create_replicas(binary, root, genesis, keys, env, *, full_mesh=False, chain_id=CHAIN, evm_chain_id=EVM_CHAIN):
     check(len(keys) in (3, 4), 'fixture requires three or four validator keys')
     labels = 'abcd'[:len(keys)]
-    replicas = [create_replica(binary, root, label, index, genesis, key, env)
+    replicas = [create_replica(binary, root, label, index, genesis, key, env, chain_id=chain_id, evm_chain_id=evm_chain_id)
                 for index, (label, key) in enumerate(zip(labels, keys, strict=True))]
     check(len({node.node_id for node in replicas}) == len(keys), 'P2P node identities must be unique')
     source = replicas[0]

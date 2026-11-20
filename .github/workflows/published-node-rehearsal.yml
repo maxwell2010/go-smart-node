@@ -2,6 +2,11 @@ name: Attested MintCandy node rehearsal
 
 on:
   workflow_dispatch:
+    inputs:
+      scenario:
+        type: choice
+        options: [all, node, ibc]
+        default: all
   push:
     branches: ['feat/native-duplicate-vote-master-20261112']
     paths: ['.github/workflows/published-node-rehearsal.yml']
@@ -192,6 +197,7 @@ jobs:
             --output "$RELEASE_WORK/evidence/allocation.json" \
             --allocation-plan docs/ru/public-launch-allocation.draft.json
       - name: Verify quorum recovery, follower replay and systemd snapshot sync
+        if: inputs.scenario != 'ibc'
         shell: bash
         run: |
           set -euo pipefail
@@ -222,6 +228,49 @@ jobs:
           jq -e --arg sha "$genesis_sha" '.status == "PASS" and .loopbackOnlyNamespace and .offlineAssembledGenesis and
             .genesisSha256 == $sha and .systemdFollower.genesisSha256 == $sha and
             .systemdRestart.sameHome and (.stateSync.restoredHeight > 1)' "$RELEASE_WORK/evidence/systemd.json"
+      - name: Verify Hermes interoperability on the same assembled genesis
+        if: inputs.scenario != 'node'
+        shell: bash
+        working-directory: launch-assembly/network
+        run: |
+          set -euo pipefail
+          umask 077
+          root="$RELEASE_WORK"
+          curl --fail --silent --show-error --location --retry 3 \
+            'https://github.com/informalsystems/hermes/releases/download/v1.13.3/hermes-v1.13.3-x86_64-unknown-linux-gnu.tar.gz' \
+            --output "$root/hermes.tar.gz"
+          printf '%s  %s\n' 3582136824ac1984c8884b310c63940a1489f091fa45faca38ed80e5dfe7d51b "$root/hermes.tar.gz" | sha256sum --check --strict
+          tar -xzf "$root/hermes.tar.gz" -C "$root" hermes
+          printf '%s  %s\n' ed8d57781f57a93e74259c12c8feee661b9633c882307f3a6236e41dbf5ffe35 "$root/hermes" | sha256sum --check --strict
+          chmod 755 "$root/hermes"
+          go build -mod=readonly -p 2 -trimpath -o "$root/ibcreference" ./internal/ibcreference
+          reference_sha=$(sha256sum "$root/ibcreference" | cut -d' ' -f1)
+          MCND_SPONSORED_IBC_DONOR_FILE="$root/fixture-donor.hex" \
+            go test -mod=readonly -p 2 -count=1 -timeout 4m -run '^TestExportSponsoredLaunchIBCDonor$' ./systemcontracts
+          report="$root/evidence/ibc.json"
+          status=0
+          sudo -n unshare --net -- bash -euc 'ip link set lo up; exec "$@"' _ \
+            env TMPDIR="$root" "$(command -v python3)" -B "$GITHUB_WORKSPACE/launch-assembly/network/internal/ibclab/hermes_lab.py" \
+            --mode native-full --mcnd-binary "$root/bin/mcnd" --mcnd-sha256 "$RELEASE_BINARY_SHA" --mcnd-source-commit "$RELEASE_SOURCE" \
+            --reference-binary "$root/ibcreference" --reference-sha256 "$reference_sha" --reference-source-commit "$GITHUB_SHA" \
+            --hermes-binary "$root/hermes" --native-fixture "$root/assembled" --assembly-report "$root/evidence/assembly.json" \
+            --fixture-donor-key "$root/fixture-donor.hex" --report "$report" || status=$?
+          if [[ -f "$report" ]]; then
+            sudo -n chown "$(id -u):$(id -g)" "$report"
+            chmod 600 "$report"
+          fi
+          if [[ "$status" != 0 ]]; then
+            jq -r '.error // .status' "$report" >&2
+            exit "$status"
+          fi
+          genesis_sha=$(sha256sum "$root/assembled/public/genesis.json" | cut -d' ' -f1)
+          jq -e --arg sha "$genesis_sha" --arg binary "$RELEASE_BINARY_SHA" \
+            '.status == "NATIVE_CONSENSUS_HERMES_PASS" and .release_gate and .binaries.mcnd.sha256 == $binary and
+            .owned_probe.genesis_sha256 == $sha and .owned_probe.replicas == 4 and .owned_probe.chain == "mintcandy_990014-1" and
+            .relayer_funding.genesis_unchanged and .native_final_consensus.signers == ["a","b","c","d"] and
+            (.phases | keys == ["client_connection_channel_handshake","error_ack_refund","foreign_bank_voucher",
+            "foreign_bank_voucher_return","native_send","pending_packet_restart","timeout_refund","voucher_return"]) and
+            all(.phases[]; .status == "PASS")' "$report"
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
         if: always() && env.RELEASE_WORK != ''
         with:
