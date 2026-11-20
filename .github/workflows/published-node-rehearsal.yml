@@ -135,7 +135,7 @@ jobs:
         with:
           go-version: '1.26.11'
           cache-dependency-path: network/go.sum
-      - name: Generate the disposable operator fixture and signature checker
+      - name: Generate the disposable operator fixture
         shell: bash
         working-directory: network
         run: |
@@ -156,7 +156,6 @@ jobs:
             sed -nE 's/.*([ /])(native_(consensus|launch)[[:alnum:]_]*\.go:[0-9]+).*/\2/p' "$RELEASE_WORK/fixture.log" | sort -u
             exit 1
           fi
-          go build -mod=readonly -p 2 -trimpath -o "$RELEASE_WORK/comet-commit-probe" ./tools/comet_commit_probe
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           ref: ${{ github.sha }}
@@ -173,6 +172,8 @@ jobs:
           git diff --exit-code -- go.mod go.sum
           root="$RELEASE_WORK"
           mkdir -m 700 -p "$root/assembled/public"
+          go test -mod=readonly -p 2 -count=1 -timeout 2m ./tools/comet_commit_probe
+          go build -mod=readonly -p 2 -trimpath -o "$root/comet-commit-probe" ./tools/comet_commit_probe
           go build -mod=readonly -p 2 -trimpath -o "$root/mcnd-genesis" ./cmd/mcnd-genesis
           "$root/mcnd-genesis" addresses --chain-id mintcandy_990014-1 --evm-chain-id 990014 > "$root/roles.json"
           python3 -B tools/test_founding_ledger_fixture.py --source "$root/fixture" --roles "$root/roles.json" --output "$root/ledger.json"

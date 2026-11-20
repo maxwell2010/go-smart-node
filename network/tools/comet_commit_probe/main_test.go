@@ -75,7 +75,7 @@ func marshalCommit(t *testing.T, input *request, commit *types.Commit) {
 }
 
 func TestVerifiedQuorum(t *testing.T) {
-	for _, domain := range []string{"mintcandy_990012-1", "mintcandy_990013-1"} {
+	for _, domain := range []string{"mintcandy_990012-1", "mintcandy_990013-1", "mintcandy_990014-1"} {
 		t.Run(domain, func(t *testing.T) {
 			for _, absent := range [][]int{nil, {3}} {
 				input, _ := fixtureChain(t, domain, absent...)
@@ -123,7 +123,8 @@ func TestRejectTamperedCommit(t *testing.T) {
 		}},
 		{"repeated_signer", func(_ *request, c *types.Commit) { c.Signatures[1] = c.Signatures[0] }},
 		{"nil_vote", func(_ *request, c *types.Commit) { c.Signatures[0].BlockIDFlag = types.BlockIDFlagNil }},
-		{"different_signing_domain", func(r *request, _ *types.Commit) { r.ChainID = "mintcandy_990001-1" }},
+		{"different_signing_domain", func(r *request, _ *types.Commit) { r.ChainID = "mintcandy_990014-1" }},
+		{"mintcandy_production_domain", func(r *request, _ *types.Commit) { r.ChainID = "mintcandy_9905401-1" }},
 		{"production_domain", func(r *request, _ *types.Commit) { r.ChainID = "decimal_75-1" }},
 	} {
 		t.Run(test.name, func(t *testing.T) {
