@@ -87,6 +87,13 @@ def decode_image(data,mime,avatar):
     require(info['mime']=='image/png' and 0<info['width']<=4096 and 0<info['height']<=4096,'decoder dimensions differ')
     return encoded
 
+def prepare_media(asset, metadata, image, mime):
+    asset.key()
+    doc = metadata_record(metadata)
+    clean = decode_image(image, mime, asset.kind == 'erc20')
+    doc['image'] = 'ipfs://' + cid(clean)
+    return clean, canonical(doc)
+
 def regular_read(path,limit):
     path=Path(path)
     require(not path.is_symlink(),'symlink input rejected')
@@ -96,7 +103,7 @@ def regular_read(path,limit):
     return data
 
 class MediaStore:
-    def __init__(self,root,authorizer=None,quota=MAX_TOTAL):
+    def __init__(self,root,authorizer=None,quota=MAX_TOTAL,*,commitment_reader=None):
         self.root=Path(root)
         require(self.root.is_absolute() and not self.root.is_symlink(),'absolute non-symlink root required')
         require('..' not in self.root.parts and all(not p.is_symlink() for p in self.root.parents),'symlink parent rejected')
@@ -104,6 +111,7 @@ class MediaStore:
         require(not (self.root/'objects').is_symlink() and not (self.root/'index.sqlite3').is_symlink(),'symlink store rejected')
         (self.root/'objects').mkdir(exist_ok=True)
         self.authorizer=authorizer
+        self.commitment_reader = commitment_reader
         require(type(quota) is int and 0<quota<=MAX_TOTAL,'invalid store quota')
         self.quota=quota
         self.db=sqlite3.connect(self.root/'index.sqlite3')
@@ -130,14 +138,37 @@ class MediaStore:
         key=asset.key()
         require(ADDRESS.fullmatch(actor) is not None,'invalid actor')
         require(self.authorizer is not None and self.authorizer(asset,actor,'publish') is True,'verified ownership authorization required')
-        # All attacker-controlled inputs are validated before any persistent write.
-        doc=metadata_record(metadata)
-        clean=decode_image(image,mime,asset.kind=='erc20')
-        image_cid=cid(clean);doc['image']='ipfs://'+image_cid
-        payload=canonical(doc);metadata_cid=cid(payload)
+        clean, payload = prepare_media(asset, metadata, image, mime)
+        return self._publish(key, actor, clean, payload)
+
+    def publish_committed(self, asset, metadata, image, mime):
+        require(self.commitment_reader is not None, 'verified chain commitment reader required')
+        clean, payload = prepare_media(asset, metadata, image, mime)
+        return self._publish(asset.key(), None, clean, payload, asset=asset)
+
+    def _publish(self, key, actor, clean, payload, *, asset=None):
+        image_cid, metadata_cid = cid(clean), cid(payload)
         created=[]
         try:
             self.db.execute('BEGIN IMMEDIATE')
+            previous = None
+            if asset is not None:
+                actor = self.commitment_reader(asset, 'ipfs://' + metadata_cid)
+                require(isinstance(actor, str) and ADDRESS.fullmatch(actor) and int(actor, 16),
+                        'chain commitment did not identify an asset authority')
+                previous = self.db.execute(
+                    'SELECT version,owner,metadata,image FROM records WHERE asset=? ORDER BY version DESC LIMIT 1',
+                    (key,),
+                ).fetchone()
+            if previous is not None and previous[1:] == (actor, metadata_cid, image_cid):
+                # Check the already published objects before acknowledging a retry.
+                objects = self.root / 'objects'
+                require(regular_read(objects / image_cid, MAX_BLOB) == clean and
+                        regular_read(objects / metadata_cid, 64 << 10) == payload,
+                        'committed publication is missing stored objects')
+                version = previous[0]
+                self.db.commit()
+                return {'asset':key,'version':version,'owner':actor,'metadata_uri':'ipfs://'+metadata_cid,'image_uri':'ipfs://'+image_cid}
             records=self.db.execute('SELECT COUNT(*) FROM records').fetchone()[0]
             version=self.db.execute('SELECT COALESCE(MAX(version),0)+1 FROM records WHERE asset=?',(key,)).fetchone()[0]
             require(records<MAX_RECORDS and version<=16,'record/version quota')
