@@ -288,8 +288,8 @@ class Lab:
         return seconds * 10**9 + int((match.group(2) or "0").ljust(9, "0"))
 
 
-def chain_config(chain, rpc_port, grpc_port, prefix, denom, keys):
-    return f'''[[chains]]
+def chain_config(chain, rpc_port, grpc_port, prefix, denom, keys, channel=None):
+    settings = f'''[[chains]]
 id = '{chain}'
 rpc_addr = 'http://127.0.0.1:{rpc_port}'
 grpc_addr = 'http://127.0.0.1:{grpc_port}'
@@ -312,6 +312,9 @@ trusting_period = '14days'
 trust_threshold = '1/3'
 address_type = {{ derivation = 'cosmos' }}
 '''
+    if channel is not None:
+        settings += f'packet_filter = {{ policy = "allow", list = [["transfer", {json.dumps(channel)}]] }}\n'
+    return settings
 
 
 def health_check(run):
@@ -638,7 +641,11 @@ def connect_transfer(lab, mcnd, reference, hermes, upgrade=False, native_fixture
 
 def verify_background_relay(lab, hermes, a, b, a_channel, b_channel, voucher, transfer):
     config = lab.root / "hermes.toml"
-    config.write_text(config.read_text().replace("log_level = 'warn'", "log_level = 'info'", 1) + """
+    chain_id, value = a["chain"], 10**18
+    keys = lab.root / "hermes-keys"
+    config.write_text("""[global]
+log_level = 'info'
+
 [mode.clients]
 enabled = true
 refresh = true
@@ -654,8 +661,17 @@ enabled = false
 enabled = true
 clear_interval = 0
 clear_on_start = true
-""")
-    chain_id, value = a["chain"], 10**18
+
+""" + chain_config(chain_id, a["rpc"], a["grpc"], "d0", "del", keys, a_channel)
+        + chain_config(B_ID, b["rpc"], b["grpc"], "cosmos", "stake", keys, b_channel))
+    before_queries = (receipts(a), receipts(b))
+    verifier = Path(__file__).resolve().parents[2] / "tools/verify_hermes_route.py"
+    route = json.loads(command([sys.executable, "-B", verifier, "--hermes", hermes, "--hermes-sha256", HERMES_SHA256,
+                                "--config", config, "--left", chain_id, a_channel, "--right", B_ID, b_channel],
+                               lab.env, timeout=150))
+    require(route["status"] == "IBC_ROUTE_STATE_MATCH" and before_queries == (receipts(a), receipts(b)),
+            "route verification must succeed without new transactions on either chain")
+    lab.report["routePreflight"] = {**route, "receiptsUnchanged": True}
 
     def start(label):
         log = lab.root / (label + ".log")

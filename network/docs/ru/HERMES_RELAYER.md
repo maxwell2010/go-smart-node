@@ -128,6 +128,33 @@ printf '%s\n' "$health" | jq -es \
 соединения, баланс кошельков и доступность proof-запросов. Настройки клиента
 сверяются с другой стороной до открытия маршрута.
 
+## Сверка открытого канала перед запуском Hermes
+
+Для первого маршрута используйте отдельную конфигурацию Hermes с двумя
+сетями. В каждом `packet_filter` укажите только локальную пару `transfer` и
+`channel-N`, согласованную с оператором второй сети. Перед запуском фонового
+процесса сверяйте уже открытый канал. Передайте в `MINTCANDY_CHANNEL` и
+`PARTNER_CHANNEL` идентификаторы соответствующих концов, которые подтвердили
+обе стороны.
+
+```sh
+python3 -B network/tools/verify_hermes_route.py \
+  --hermes "$HOME/.local/bin/hermes" \
+  --hermes-sha256 ed8d57781f57a93e74259c12c8feee661b9633c882307f3a6236e41dbf5ffe35 \
+  --config "$HOME/.hermes/config.toml" \
+  --left mintcandy_9905401-1 "$MINTCANDY_CHANNEL" \
+  --right "$PARTNER_CHAIN_ID" "$PARTNER_CHANNEL"
+```
+
+Команда сверяет SHA256 Hermes и фильтры в конфигурации. Затем через RPC
+читаются два конца канала, обе стороны соединения и статусы клиентов
+Tendermint. Результат `IBC_ROUTE_STATE_MATCH` означает, что указанные концы
+открыты, ссылаются друг на друга по ICS-20 v1 и оба клиента активны. Команда
+выполняет запросы на чтение. Состояние зависит от выбранных RPC и времени
+проверки. Для решения о запуске используйте подтверждённые endpoint и
+сверьте данные с оператором другой стороны.
+[Команды чтения состояния канала Hermes](https://hermes.informal.systems/documentation/commands/queries/channel.html).
+
 ## Фоновый процесс
 
 Пример `~/.config/systemd/user/mintcandy-hermes.service` запускает Hermes под

@@ -317,6 +317,7 @@ jobs:
           set -euo pipefail
           umask 077
           python3 -B -m unittest discover -s internal/ibclab -p test_lab_guards.py -v
+          python3 -B -m unittest discover -s tools -p test_verify_hermes_route.py -v
           root="$RELEASE_WORK"
           curl --fail --silent --show-error --location --retry 3 \
             'https://github.com/informalsystems/hermes/releases/download/v1.13.3/hermes-v1.13.3-x86_64-unknown-linux-gnu.tar.gz' \
@@ -349,6 +350,8 @@ jobs:
           jq -e --arg sha "$genesis_sha" --arg binary "$RELEASE_BINARY_SHA" \
             '.status == "NATIVE_CONSENSUS_HERMES_PASS" and .release_gate and .binaries.mcnd.sha256 == $binary and
             .owned_probe.genesis_sha256 == $sha and .owned_probe.replicas == 4 and .owned_probe.chain == "mintcandy_990014-1" and
+            .routePreflight.status == "IBC_ROUTE_STATE_MATCH" and .routePreflight.receiptsUnchanged and
+            (.routePreflight.chains | length == 2 and all(.clientStatus == "Active")) and
             .relayer_funding.genesis_unchanged and .native_final_consensus.signers == ["a","b","c","d"] and
             (.phases.daemon_restart_backlog | .sequence == (.commitment_before_restart.sequence | tostring)) and
             (.phases | keys == ["client_connection_channel_handshake","daemon_live_relay","daemon_restart_backlog","error_ack_refund","foreign_bank_voucher",
