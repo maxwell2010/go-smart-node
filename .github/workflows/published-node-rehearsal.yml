@@ -178,6 +178,7 @@ jobs:
           root="$RELEASE_WORK"
           mkdir -m 700 -p "$root/assembled/public"
           go test -mod=readonly -p 2 -count=1 -timeout 2m ./tools/comet_commit_probe
+          go test -mod=readonly -p 2 -count=1 -timeout 2m -run '^TestLaunchConsent' ./launchgenesis
           go build -mod=readonly -p 2 -trimpath -o "$root/comet-commit-probe" ./tools/comet_commit_probe
           go build -mod=readonly -p 2 -trimpath -o "$root/mcnd-genesis" ./cmd/mcnd-genesis
           "$root/mcnd-genesis" addresses --chain-id mintcandy_990014-1 --evm-chain-id 990014 > "$root/roles.json"
@@ -205,13 +206,14 @@ jobs:
           report="$root/evidence/validator-install.json"
           sudo -n unshare --net -- bash -euc 'ip link set lo up; exec "$@"' _ \
             env TMPDIR="$root" MCND_VALIDATOR_INSTALL_BINARY="$root/bin/mcnd" \
+            MCND_VALIDATOR_INSTALL_ASSEMBLER="$root/mcnd-genesis" \
             MCND_VALIDATOR_INSTALL_FIXTURE="$root/assembled" MCND_VALIDATOR_INSTALL_REPORT="$report" \
             "$(command -v python3)" -B -m unittest discover -s tools -p test_install_validator_genesis.py -v
           sudo -n chown "$(id -u):$(id -g)" "$report"
           sha=$(sha256sum "$root/assembled/public/genesis.json" | cut -d' ' -f1)
           jq -e --arg sha "$sha" --arg binary "$RELEASE_BINARY_SHA" \
             '.status == "VALIDATOR_GENESIS_INSTALLED" and .genesisSha256 == $sha and .binarySha256 == $binary and
-            .chainId == "mintcandy_990014-1" and .idempotent and .rejectsForeignKey and .rejectsExistingState and
+            .chainId == "mintcandy_990014-1" and .idempotent and .rejectsForeignKey and .rejectsExistingState and .consentPayloadVerified and
             (.preservedHomeFiles >= 5) and (.networkLaunchAuthorized | not)' "$report"
       - name: Verify quorum recovery, follower replay and systemd snapshot sync
         if: inputs.scenario != 'ibc'

@@ -1,6 +1,7 @@
 import json
 import os
 from pathlib import Path
+import subprocess
 import tempfile
 import unittest
 
@@ -74,6 +75,16 @@ class PublishedValidatorInstallTest(unittest.TestCase):
                 with self.assertRaisesRegex(ValueError, 'genesis SHA256 differs'):
                     verify_manifest(args, genesis + b'\n', plan, draft, software)
                 verified = verify_manifest(args, genesis, plan, draft, software)
+                assembler = os.environ['MCND_VALIDATOR_INSTALL_ASSEMBLER']
+                output_file = root / 'operator-message.txt'
+                commonly = ['--manifest', str(args.manifest), '--genesis', str(fixture / 'genesis.json'),
+                            '--approved-manifest-sha256', args.approved_manifest_sha256]
+                subprocess.run([assembler, 'launch-consent', 'payload', *commonly,
+                                '--operator', operator, '--output', str(output_file)], check=True, timeout=30)
+                message = output_file.read_text(encoding='utf8')
+                self.assertIn(f'Manifest SHA256: {args.approved_manifest_sha256}\n', message)
+                self.assertIn(f'Operator: {operator}\n', message)
+                self.assertTrue(message.endswith(validator['consensusPublicKeyBase64']))
             home = root / 'validator'
             run_offline(binary, home, root, 'init', 'validator-install-ci', '--chain-id', chain_id, '--evm.evm-chain-id', evm_id)
             path = home / 'config/genesis.json'
@@ -119,7 +130,7 @@ class PublishedValidatorInstallTest(unittest.TestCase):
             if output:
                 with Path(output).open('x', encoding='utf8') as stream:
                     json.dump({**report, 'chainId': chain_id, 'preservedHomeFiles': len(preserved),
-                               'signatureVerified': True, 'idempotent': True, 'rejectsForeignKey': True,
+                               'signatureVerified': True, 'consentPayloadVerified': True, 'idempotent': True, 'rejectsForeignKey': True,
                                'rejectsExistingState': True}, stream)
 
 

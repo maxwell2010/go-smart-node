@@ -15,7 +15,7 @@ import (
 
 func main() {
 	root := &cobra.Command{Use: "mcnd-genesis", Short: "Work with unsigned MintCandy launch candidates offline", SilenceUsage: true}
-	root.AddCommand(addressesCommand(), candidateCommand(false), candidateCommand(true))
+	root.AddCommand(addressesCommand(), candidateCommand(false), candidateCommand(true), launchConsentCommand())
 	if err := root.Execute(); err != nil {
 		os.Exit(1)
 	}
