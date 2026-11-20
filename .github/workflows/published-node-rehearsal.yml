@@ -5,7 +5,7 @@ on:
     inputs:
       scenario:
         type: choice
-        options: [all, node, ibc]
+        options: [all, node, ibc, tools]
         default: all
   push:
     branches: ['feat/native-duplicate-vote-master-20261112']
@@ -17,7 +17,7 @@ permissions:
   attestations: read
 
 concurrency:
-  group: published-node-rehearsal-${{ github.ref }}
+  group: published-node-rehearsal-${{ github.ref }}-${{ inputs.scenario || 'all' }}
   cancel-in-progress: false
 
 jobs:
@@ -40,6 +40,7 @@ jobs:
       GOMAXPROCS: '2'
       CGO_ENABLED: '1'
       PYTHONDONTWRITEBYTECODE: '1'
+      REHEARSAL_SCENARIO: ${{ inputs.scenario }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
@@ -197,6 +198,65 @@ jobs:
           python3 -B tools/native_launch_allocation.py --genesis "$genesis" \
             --output "$RELEASE_WORK/evidence/allocation.json" \
             --allocation-plan docs/ru/public-launch-allocation.draft.json
+      - name: Package the verified build and offline operator tools
+        if: inputs.scenario == 'tools'
+        working-directory: launch-assembly
+        shell: bash
+        run: |
+          set -euo pipefail
+          umask 077
+          root="$RELEASE_WORK"
+          kit="$root/launch-kit"
+          output="$RUNNER_TEMP/launch-tools-package"
+          name=mintcandy-launch-tools-linux-amd64.tar.gz
+          mkdir -m 700 -- "$kit" "$output"
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          test -z "$(git status --porcelain)"
+          inputs=(LICENSE network/docs/ru/{INSTALL_LAUNCH_TOOLS.md,public-genesis.draft.json,public-launch-allocation.draft.json,operator-launch-intake.example.json,evidence/software-release-1.1.1.json})
+          for script in check_operator_applications check_public_launch_draft configure_history install_validator_genesis \
+                        mcnd_process_smoke native_launch_allocation native_launch_package prepare_founding_ledger \
+                        public_genesis_manifest verify_public_launch_genesis withdrawal_genesis_smoke; do
+            inputs+=("network/tools/$script.py")
+          done
+          mapfile -d '' notices < <(git ls-files -z -- network/LICENSE ':(glob)network/systemcontracts/LICENSE*' \
+            ':(glob)network/third_party/**/LICENSE*' ':(glob)network/third_party/**/COPYING*' ':(glob)network/third_party/**/NOTICE*')
+          git archive --format=tar "$GITHUB_SHA" -- "${inputs[@]}" "${notices[@]}" | tar -xf - -C "$kit"
+          install -D -m 0755 -- "$root/mcnd-genesis" "$kit/bin/mcnd-genesis"
+          go version -m "$kit/bin/mcnd-genesis" > "$kit/BUILD_INFO.txt"
+          grep -Fq $'\tpath\tgithub.com/maxwell2010/go-smart-node/network/cmd/mcnd-genesis' "$kit/BUILD_INFO.txt"
+          grep -Fq "vcs.revision=$GITHUB_SHA" "$kit/BUILD_INFO.txt"
+          grep -Fq 'vcs.modified=false' "$kit/BUILD_INFO.txt"
+          grep -Fq 'GOOS=linux' "$kit/BUILD_INFO.txt"
+          grep -Fq 'GOARCH=amd64' "$kit/BUILD_INFO.txt"
+          binary_sha=$(sha256sum "$kit/bin/mcnd-genesis" | cut -d' ' -f1)
+          jq -n --arg source "$GITHUB_SHA" --arg binary "$binary_sha" --arg release "$RELEASE_VERSION" \
+            --arg daemon "$RELEASE_BINARY_SHA" \
+            '{schemaVersion: 1, scope: "offline-launch-tools", platform: "linux/amd64", sourceRevision: $source,
+              assemblerSha256: $binary, compatibleMcndVersion: $release, compatibleMcndSha256: $daemon,
+              includesRunnableGenesis: false, includesValidatorKeys: false, networkLaunchAuthorized: false}' > "$kit/PACKAGE.json"
+          (
+            cd "$kit"
+            find . -type f ! -name SHA256SUMS -print0 | LC_ALL=C sort -z | xargs -0 sha256sum > SHA256SUMS
+            tar --sort=name --mtime='@0' --owner=0 --group=0 --numeric-owner -cf - . | gzip -n > "$output/$name"
+          )
+          (cd "$output" && sha256sum "$name" > "$name.sha256")
+          fresh="$root/launch-kit-unpacked"
+          mkdir -m 700 -- "$fresh"
+          tar --no-same-owner --no-same-permissions -xzf "$output/$name" -C "$fresh"
+          (
+            cd "$fresh"
+            sha256sum --check --strict SHA256SUMS >/dev/null
+            python3 -B network/tools/check_public_launch_draft.py > "$root/evidence/packaged-tools-draft.json"
+            python3 -B network/tools/check_operator_applications.py network/docs/ru/operator-launch-intake.example.json \
+              | jq -e '.status == "APPLICATIONS_PENDING" and .checkedOperators == 0 and .missingSlots == 4'
+            for script in prepare_founding_ledger verify_public_launch_genesis public_genesis_manifest; do
+              python3 -B "network/tools/$script.py" --help >/dev/null
+            done
+            cmp bin/mcnd-genesis "$root/mcnd-genesis"
+            bin/mcnd-genesis verify --ledger "$root/ledger.json" \
+              --parameters "$GITHUB_WORKSPACE/launch-assembly/network/tools/fixtures/founding-genesis-ci-parameters.json" \
+              --genesis "$root/assembled/public/genesis.json" | cmp - "$root/evidence/assembly.json"
+          )
       - name: Prepare a disposable validator home with the published daemon
         shell: bash
         working-directory: launch-assembly/network
@@ -204,9 +264,11 @@ jobs:
           set -euo pipefail
           root="$RELEASE_WORK"
           report="$root/evidence/validator-install.json"
+          assembler="$root/mcnd-genesis"
+          if [[ "$REHEARSAL_SCENARIO" == tools ]]; then assembler="$root/launch-kit-unpacked/bin/mcnd-genesis"; fi
           sudo -n unshare --net -- bash -euc 'ip link set lo up; exec "$@"' _ \
             env TMPDIR="$root" MCND_VALIDATOR_INSTALL_BINARY="$root/bin/mcnd" \
-            MCND_VALIDATOR_INSTALL_ASSEMBLER="$root/mcnd-genesis" \
+            MCND_VALIDATOR_INSTALL_ASSEMBLER="$assembler" \
             MCND_VALIDATOR_INSTALL_FIXTURE="$root/assembled" MCND_VALIDATOR_INSTALL_REPORT="$report" \
             "$(command -v python3)" -B -m unittest discover -s tools -p test_install_validator_genesis.py -v
           sudo -n chown "$(id -u):$(id -g)" "$report"
@@ -216,7 +278,7 @@ jobs:
             .chainId == "mintcandy_990014-1" and .idempotent and .rejectsForeignKey and .rejectsExistingState and .consentPayloadVerified and
             (.preservedHomeFiles >= 5) and (.networkLaunchAuthorized | not)' "$report"
       - name: Verify quorum recovery, follower replay and systemd snapshot sync
-        if: inputs.scenario != 'ibc'
+        if: inputs.scenario != 'ibc' && inputs.scenario != 'tools'
         shell: bash
         run: |
           set -euo pipefail
@@ -248,7 +310,7 @@ jobs:
             .genesisSha256 == $sha and .systemdFollower.genesisSha256 == $sha and
             .systemdRestart.sameHome and (.stateSync.restoredHeight > 1)' "$RELEASE_WORK/evidence/systemd.json"
       - name: Verify Hermes interoperability on the same assembled genesis
-        if: inputs.scenario != 'node'
+        if: inputs.scenario != 'node' && inputs.scenario != 'tools'
         shell: bash
         working-directory: launch-assembly/network
         run: |
@@ -293,9 +355,63 @@ jobs:
             "foreign_bank_voucher_return","native_send","pending_packet_restart","timeout_refund","voucher_return"]) and
             all(.phases[]; .status == "PASS")' "$report"
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+        if: inputs.scenario == 'tools'
+        with:
+          name: launch-tools-package-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/launch-tools-package/
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 7
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
         if: always() && env.RELEASE_WORK != ''
         with:
           name: attested-mcnd-${{ env.RELEASE_VERSION }}-rehearsal-${{ github.run_id }}-${{ github.run_attempt }}
           path: ${{ env.RELEASE_WORK }}/evidence/*.json
           if-no-files-found: warn
           retention-days: 30
+  attest-launch-tools:
+    needs: linux-amd64
+    if: inputs.scenario == 'tools' && github.repository == 'maxwell2010/go-smart-node' && github.ref == 'refs/heads/feat/native-duplicate-vote-master-20261112'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      actions: read
+      id-token: write
+      attestations: write
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333
+        with:
+          name: launch-tools-package-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/launch-tools/
+      - name: Check exact archive before attesting
+        working-directory: ${{ runner.temp }}/launch-tools
+        run: sha256sum --check --strict mintcandy-launch-tools-linux-amd64.tar.gz.sha256
+      - uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6
+        id: provenance
+        with:
+          subject-path: ${{ runner.temp }}/launch-tools/mintcandy-launch-tools-linux-amd64.tar.gz
+          push-to-registry: false
+          create-storage-record: false
+      - name: Verify the archive against pinned GitHub provenance
+        working-directory: ${{ runner.temp }}/launch-tools
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ATTESTATION_BUNDLE: ${{ steps.provenance.outputs.bundle-path }}
+        run: |
+          set -euo pipefail
+          cp -- "$ATTESTATION_BUNDLE" launch-tools.sigstore.json
+          gh attestation verify mintcandy-launch-tools-linux-amd64.tar.gz --bundle launch-tools.sigstore.json \
+            --repo "$GITHUB_REPOSITORY" --signer-workflow "$GITHUB_REPOSITORY/.github/workflows/published-node-rehearsal.yml" \
+            --source-ref "$GITHUB_REF" --source-digest "$GITHUB_SHA" --signer-digest "$GITHUB_SHA" \
+            --deny-self-hosted-runners --format json > attestation-verification.json
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+        with:
+          name: attested-mintcandy-launch-tools-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/launch-tools/
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 90
