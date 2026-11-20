@@ -122,7 +122,8 @@ python3 -B network/tools/prepare_founding_ledger.py \
 "$MCND_GENESIS" build --ledger "$FOUNDING_LEDGER_JSON" \
   --parameters "$LAUNCH_PARAMETERS_JSON" --genesis "$CANDIDATE_GENESIS"
 "$MCND_GENESIS" verify --ledger "$FOUNDING_LEDGER_JSON" \
-  --parameters "$LAUNCH_PARAMETERS_JSON" --genesis "$CANDIDATE_GENESIS"
+  --parameters "$LAUNCH_PARAMETERS_JSON" --genesis "$CANDIDATE_GENESIS" \
+  > "$INIT_CHAIN_REPORT"
 ```
 
 Сборка создаёт контракты и их состояние во временной базе в памяти. В
@@ -239,9 +240,55 @@ P2P-подключений. Для sentry берите ID из его собст
 [строгая проверка GitHub-аттестации](SOFTWARE_RELEASE_VERIFICATION.md).
 Постоянный личный GPG-ключ не требуется для этой software-аттестации.
 
-Архив программы не содержит genesis. Его аттестация **не подписывает будущий
-публичный genesis** и не означает согласия операторов на запуск. Для
-`release.genesis` организатору ещё нужно определить способ подписи манифеста,
-личность подписанта и независимый канал подтверждения, опубликовать точные
-SHA256 и собрать подтверждения операторов. Одноразовый GPG-ключ тестового
-CI-пакета не становится доверенным ключом публичного genesis.
+Архив программы не содержит genesis. Для отдельной публикации genesis
+подготовлена процедура с отсоединённой OpenPGP-подписью. До её применения
+организатор утверждает подписанта, полный отпечаток его ключа и независимый
+канал, по которому операторы получат отпечаток и SHA256 одобренного манифеста.
+
+### Подготовка и проверка подписанного манифеста
+
+На Linux из проверенной копии репозитория организатор собирает манифест после
+сверки заявок и холодного `InitChain`. `MCND_BINARY` указывает на файл `mcnd`
+из аттестованного выпуска 1.1.1. `CANDIDATE_GENESIS` и `INIT_CHAIN_REPORT`
+берутся из одной проверки. Команда повторно сверяет каждую запись с реестром,
+проверяет SHA256 бинарника и создаёт новый JSON со временем UTC, двумя chain ID,
+SHA256 genesis и программного выпуска, суммой MSP и числом валидаторов.
+
+```sh
+python3 -B network/tools/public_genesis_manifest.py prepare \
+  --genesis "$CANDIDATE_GENESIS" --binary "$MCND_BINARY" \
+  --intake "$REVIEWED_INTAKE" --init-chain-report "$INIT_CHAIN_REPORT" \
+  --relayer-wallet "$RELAYER_1_D0" --relayer-wallet "$RELAYER_2_D0" \
+  --output public-genesis-manifest.json
+```
+
+После утверждения файла уполномоченный подписант создаёт подпись в своей
+офлайн-среде. Публичный ключ экспортируется в бинарный keyring, пригодный
+для `gpgv`. Организатор публикует genesis, манифест, подпись и публичный ключ.
+
+```sh
+gpg --local-user "${GENESIS_SIGNER_FINGERPRINT}!" --armor --detach-sign \
+  --output public-genesis-manifest.json.asc public-genesis-manifest.json
+gpg --export "$GENESIS_SIGNER_FINGERPRINT" > genesis-signer.gpg
+sha256sum public-genesis-manifest.json
+```
+
+Каждый оператор получает `APPROVED_MANIFEST_SHA256` и полный отпечаток
+**ключа, которым поставлена подпись**, по заранее подтверждённому каналу.
+Если подписывает subkey, для `--signer-fingerprint` нужен отпечаток subkey.
+Команда ниже работает офлайн и завершается с ошибкой при расхождении
+хеша или подписи. Операторам не нужны чужие заявки для этой проверки.
+
+```sh
+python3 -B network/tools/public_genesis_manifest.py verify \
+  --genesis "$DOWNLOADED_GENESIS" --binary "$MCND_BINARY" \
+  --manifest public-genesis-manifest.json \
+  --signature public-genesis-manifest.json.asc --trusted-keyring genesis-signer.gpg \
+  --signer-fingerprint "$GENESIS_SIGNER_FINGERPRINT" \
+  --approved-manifest-sha256 "$APPROVED_MANIFEST_SHA256"
+```
+
+Результат `PUBLIC_GENESIS_SIGNATURE_VERIFIED` относится к указанным байтам,
+бинарнику и подписанту. Поле `coldTestFirstBlockAppHash` получено с тестовым
+заголовком первого блока. Разрешение на запуск организатор оформляет отдельно
+после подтверждения всеми операторами того же манифеста и времени UTC.

@@ -128,9 +128,9 @@ def extract(archive, directory):
             raise ValueError("unexpected content after launch archive members")
 
 
-def verify_signature(directory, keyring, signer, verification_home):
+def verify_detached_signature(manifest, signature, keyring, signer, verification_home):
     checked = subprocess.run(["gpgv", "--homedir", str(verification_home), "--keyring", str(keyring),
-                              "--status-fd", "1", str(directory / SIGNATURE), str(directory / MANIFEST)],
+                              "--status-fd", "1", str(signature), str(manifest)],
                              capture_output=True, text=True, timeout=30)
     valid = re.findall(r"^\[GNUPG:\] VALIDSIG (\S+) ", checked.stdout, re.MULTILINE)
     if checked.returncode or valid != [signer]:
@@ -149,10 +149,11 @@ def verify(archive, trusted_keyring, signer_fingerprint, output_dir):
         verification_home = Path(work)
         directory = verification_home / "package"
         extract(archive, directory)
-        verify_signature(directory, trusted_keyring, signer, verification_home)
+        manifest, signature = directory / MANIFEST, directory / SIGNATURE
+        verify_detached_signature(manifest, signature, trusted_keyring, signer, verification_home)
         if (directory / MANIFEST).read_bytes() != manifest_bytes(directory):
             raise ValueError("launch package SHA256 payload checksum differs")
-        verify_signature(directory, directory / PUBLIC_KEY, signer, verification_home)
+        verify_detached_signature(manifest, signature, directory / PUBLIC_KEY, signer, verification_home)
         info = json.loads((directory / PROVENANCE).read_bytes())
         if not isinstance(info, dict) or info != provenance(directory, info.get("sourceCommit", ""), signer):
             raise ValueError("launch package provenance differs")
