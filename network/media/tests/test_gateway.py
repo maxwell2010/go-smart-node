@@ -1,0 +1,174 @@
+from contextlib import contextmanager
+import hashlib
+import http.client
+import io
+import json
+import os
+from pathlib import Path
+import socket
+import subprocess
+import sys
+import tempfile
+import time
+import unittest
+
+from mcnd_media.gateway_export import export_backup
+from mcnd_media.store import Asset, MediaStore, cid
+
+
+NGINX = os.environ.get('MCND_MEDIA_NGINX')
+NGINX_RULES = Path(__file__).resolve().parents[1] / 'nginx-ipfs.conf'
+OWNER = '0x' + '11' * 20
+AVATAR = Asset('mintcandy_9905401-1', '0x' + '22' * 20, 'erc20')
+NFT = Asset('mintcandy_9905401-1', '0x' + '33' * 20, 'erc1155', '1024')
+
+
+def request(port, path, method='GET'):
+    conn = http.client.HTTPConnection('127.0.0.1', port, timeout=2)
+    try:
+        conn.request(method, path)
+        response = conn.getresponse()
+        return response.status, response.headers, response.read()
+    finally:
+        conn.close()
+
+
+@contextmanager
+def gateway(root, public):
+    root.mkdir()
+    with socket.socket() as listener:
+        listener.bind(('127.0.0.1', 0))
+        port = listener.getsockname()[1]
+    config = root / 'nginx.conf'
+    config.write_text(f'''daemon off;
+master_process off;
+pid "{root}/nginx.pid";
+lock_file "{root}/nginx.lock";
+error_log stderr;
+events {{ worker_connections 32; }}
+http {{
+    access_log off;
+    client_body_temp_path client-body;
+    proxy_temp_path proxy;
+    fastcgi_temp_path fastcgi;
+    uwsgi_temp_path uwsgi;
+    scgi_temp_path scgi;
+    server {{
+        listen 127.0.0.1:{port};
+        root "{public}";
+        include "{NGINX_RULES}";
+    }}
+}}
+''', encoding='utf8')
+    argv = [NGINX, '-p', str(root) + '/', '-c', str(config)]
+    subprocess.run([*argv, '-t'], check=True, capture_output=True, timeout=10)
+    with subprocess.Popen(argv, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE) as process:
+        try:
+            for _ in range(40):
+                if process.poll() is not None:
+                    raise RuntimeError(process.stderr.read().decode(errors='replace'))
+                try:
+                    request(port, '/')
+                    break
+                except OSError:
+                    time.sleep(0.1)
+            else:
+                raise RuntimeError('isolated Nginx listener did not start')
+            yield port
+        finally:
+            if process.poll() is None:
+                process.terminate()
+            try:
+                process.communicate(timeout=5)
+            except subprocess.TimeoutExpired:
+                process.kill()
+                process.communicate(timeout=5)
+
+
+class ExportChecks(unittest.TestCase):
+    def test_requires_trusted_hash_and_fresh_destination(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            store = MediaStore(root / 'primary')
+            backup = root / 'backup.zip'
+            try:
+                checksum = store.backup(backup)
+            finally:
+                store.close()
+            target = root / 'gateway'
+            with self.assertRaisesRegex(ValueError, 'backup SHA256 mismatch'):
+                export_backup(backup, '0' * 64, target)
+            self.assertFalse(target.exists())
+            report = export_backup(backup, checksum, target)
+            self.assertEqual(report['objectCount'], 0)
+            self.assertEqual(list((target / 'public/ipfs').iterdir()), [])
+            manifest = (target / 'EXPORT.json').read_bytes()
+            with self.assertRaisesRegex(ValueError, 'destination must be new'):
+                export_backup(backup, checksum, target)
+            self.assertEqual((target / 'EXPORT.json').read_bytes(), manifest)
+
+
+@unittest.skipUnless(NGINX and os.environ.get('MCND_MEDIA_TEST_FULL') == '1', 'requires Nginx and pinned decoder')
+class GatewayChecks(unittest.TestCase):
+    def test_http_roundtrip_after_loss_of_primary_store_and_gateway(self):
+        from PIL import Image
+
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            backup = root / 'backup.zip'
+            original = root / 'original'
+            recovered = root / 'recovered'
+            source = root / 'primary'
+            store = MediaStore(source, lambda asset, actor, action: actor == OWNER)
+            try:
+                for asset, label, color in ((AVATAR, 'Token avatar', 'blue'), (NFT, 'NFT metadata', 'red')):
+                    image = io.BytesIO()
+                    Image.new('RGB', (7, 6), color).save(image, format='JPEG')
+                    store.publish(asset, OWNER, {'name': label}, image.getvalue(), 'image/jpeg')
+                checksum = store.backup(backup)
+            finally:
+                store.close()
+
+            report = export_backup(backup, checksum, original)
+            with gateway(root / 'nginx-original', original / 'public') as port:
+                published = self.assert_export(port, report)
+
+            # Make the primary store and first export unavailable at their old paths.
+            source.rename(root / 'offline-store')
+            original.rename(root / 'offline-export')
+            output = subprocess.run([sys.executable, '-B', '-m', 'mcnd_media.gateway_export',
+                                     '--backup', str(backup), '--backup-sha256', checksum,
+                                     '--destination', str(recovered)], check=True, capture_output=True, text=True, timeout=30)
+            self.assertEqual(json.loads(output.stdout)['objects'], 4)
+            self.assertEqual(json.loads((recovered / 'EXPORT.json').read_bytes()), report)
+            with gateway(root / 'nginx-restored', recovered / 'public') as port:
+                self.assertEqual(self.assert_export(port, report), published)
+
+    def assert_export(self, port, report):
+        objects = {}
+        for row in report['objects']:
+            status, headers, body = request(port, row['path'])
+            self.assertEqual(status, 200)
+            self.assertEqual(headers.get_content_type(), row['contentType'])
+            self.assertEqual(headers['X-Content-Type-Options'], 'nosniff')
+            self.assertEqual(headers['Access-Control-Allow-Origin'], '*')
+            self.assertIn('immutable', headers['Cache-Control'])
+            self.assertEqual(cid(body), row['cid'])
+            self.assertEqual(hashlib.sha256(body).hexdigest(), row['sha256'])
+            self.assertEqual(len(body), row['sizeBytes'])
+            head, head_headers, empty = request(port, row['path'], 'HEAD')
+            self.assertEqual((head, empty), (200, b''))
+            self.assertEqual(int(head_headers['Content-Length']), len(body))
+            self.assertEqual(request(port, row['path'], 'POST')[0], 403)
+            objects[row['cid']] = (row['contentType'], body)
+        for path in ('/', '/EXPORT.json', '/index.sqlite3', f'/ipfs/{cid(b"missing")}', report['objects'][0]['path'] + '.png'):
+            self.assertEqual(request(port, path)[0], 404)
+        metadata = [json.loads(body) for mime, body in objects.values() if mime == 'application/json']
+        self.assertEqual({record['name'] for record in metadata}, {'Token avatar', 'NFT metadata'})
+        for record in metadata:
+            self.assertEqual(objects[record['image'].removeprefix('ipfs://')][0], 'image/png')
+        return objects
+
+
+if __name__ == '__main__':
+    unittest.main()

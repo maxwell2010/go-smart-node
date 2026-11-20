@@ -24,7 +24,17 @@ jobs:
           set -euo pipefail
           python3 -m venv "$RUNNER_TEMP/media-venv"
           "$RUNNER_TEMP/media-venv/bin/pip" install --only-binary=:all: --require-hashes -r network/media/requirements-linux-cp312.lock
-      - name: Test decoding, ownership boundaries, quotas and exact backup restore
+      - name: Unpack Nginx for the isolated localhost test
+        run: |
+          set -euo pipefail
+          directory=$(mktemp -d "$RUNNER_TEMP/media-nginx.XXXXXXXX")
+          cd "$directory"
+          sudo apt-get update -qq
+          apt-get download nginx
+          dpkg-deb -x nginx_*.deb "$directory/extracted"
+          "$directory/extracted/usr/sbin/nginx" -v
+          echo "MCND_MEDIA_NGINX=$directory/extracted/usr/sbin/nginx" >> "$GITHUB_ENV"
+      - name: Test decoding, quotas and HTTP delivery from restored media
         run: |
           set -euo pipefail
           export PYTHONPATH="$GITHUB_WORKSPACE/network/media"
