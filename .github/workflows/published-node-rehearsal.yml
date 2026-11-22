@@ -7,6 +7,24 @@ on:
         type: choice
         options: [all, node, ibc, tools, media]
         default: all
+      candidate_run:
+        description: Successful software packaging run ID (empty uses the pinned release)
+        type: string
+      candidate_attempt:
+        description: Software packaging run attempt
+        type: string
+      candidate_version:
+        description: Candidate version without the v prefix
+        type: string
+      candidate_source:
+        description: Candidate source commit (40 lowercase hex digits)
+        type: string
+      candidate_archive_sha:
+        description: Candidate archive SHA256
+        type: string
+      candidate_binary_sha:
+        description: Candidate installed binary SHA256
+        type: string
   push:
     branches: ['feat/native-duplicate-vote-master-20261112']
     paths: ['.github/workflows/published-node-rehearsal.yml']
@@ -27,13 +45,13 @@ jobs:
     timeout-minutes: 35
     env:
       RELEASE_TAG: v1.1.1
-      RELEASE_VERSION: 1.1.1
-      RELEASE_SOURCE: 3880898bf95fe701b9d6f28d6e029a63f88a16ae
+      RELEASE_VERSION: ${{ inputs.candidate_version || '1.1.1' }}
+      RELEASE_SOURCE: ${{ inputs.candidate_source || '3880898bf95fe701b9d6f28d6e029a63f88a16ae' }}
       RELEASE_REF: refs/heads/feat/native-duplicate-vote-master-20261112
-      RELEASE_ARCHIVE_SHA: 5e2081b86197f24fcec1a0e1421edb387de06f49a520f420734ae649158eeeda
-      RELEASE_BINARY_SHA: a0c0b9b08fc40bc875f289c3c8499a1fcdc1b9396113aed7cf6003554e26467d
-      RELEASE_PACKAGE_RUN: ''
-      RELEASE_PACKAGE_ATTEMPT: '1'
+      RELEASE_ARCHIVE_SHA: ${{ inputs.candidate_archive_sha || '5e2081b86197f24fcec1a0e1421edb387de06f49a520f420734ae649158eeeda' }}
+      RELEASE_BINARY_SHA: ${{ inputs.candidate_binary_sha || 'a0c0b9b08fc40bc875f289c3c8499a1fcdc1b9396113aed7cf6003554e26467d' }}
+      RELEASE_PACKAGE_RUN: ${{ inputs.candidate_run }}
+      RELEASE_PACKAGE_ATTEMPT: ${{ inputs.candidate_attempt }}
       GOENV: 'off'
       GOWORK: 'off'
       GOTOOLCHAIN: local
@@ -42,6 +60,32 @@ jobs:
       PYTHONDONTWRITEBYTECODE: '1'
       REHEARSAL_SCENARIO: ${{ inputs.scenario }}
     steps:
+      - name: Validate candidate coordinates before checkout
+        if: github.event_name == 'workflow_dispatch'
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 -B - "$GITHUB_EVENT_PATH" <<'PY'
+          import json
+          from pathlib import Path
+          import re
+          import sys
+
+          inputs = json.loads(Path(sys.argv[1]).read_text())['inputs']
+          patterns = {
+              'candidate_run': r'[1-9][0-9]{0,19}',
+              'candidate_attempt': r'[1-9][0-9]{0,5}',
+              'candidate_version': r'(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)',
+              'candidate_source': r'[0-9a-f]{40}',
+              'candidate_archive_sha': r'[0-9a-f]{64}',
+              'candidate_binary_sha': r'[0-9a-f]{64}',
+          }
+          values = {name: inputs.get(name, '') for name in patterns}
+          if any(values.values()):
+              for name, value in values.items():
+                  if not re.fullmatch(patterns[name], value):
+                      sys.exit(f'Missing or invalid {name}')
+          PY
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           ref: ${{ env.RELEASE_SOURCE }}
