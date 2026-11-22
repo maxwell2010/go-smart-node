@@ -1319,60 +1319,28 @@ func (app *BaseApp) CreateQueryContextWithCheckHeader(height int64, prove, check
 // be a need to vary retention for other nodes, e.g. sentry nodes which do not
 // need historical blocks.
 func (app *BaseApp) GetBlockRetentionHeight(commitHeight int64) int64 {
-	// If minRetainBlocks is zero, pruning is disabled and we return 0
-	// If commitHeight is less than or equal to minRetainBlocks, return 0 since there are not enough
-	// blocks to trigger pruning yet. This ensures we keep all blocks until we have at least minRetainBlocks.
-	retentionBlockWindow := commitHeight - int64(app.minRetainBlocks)
-	if app.minRetainBlocks == 0 || retentionBlockWindow <= 0 {
+	if app.minRetainBlocks == 0 || commitHeight <= 0 || uint64(commitHeight) <= app.minRetainBlocks {
 		return 0
 	}
 
-	minNonZero := func(x, y int64) int64 {
-		switch {
-		case x == 0:
-			return y
-
-		case y == 0:
-			return x
-
-		case x < y:
-			return x
-
-		default:
-			return y
-		}
-	}
-
-	// Define retentionHeight as the minimum value that satisfies all non-zero
-	// constraints. All blocks below (commitHeight-retentionHeight) are pruned
-	// from CometBFT.
-	var retentionHeight int64
-
-	// Define the number of blocks needed to protect against misbehaving validators
-	// which allows light clients to operate safely. Note, we piggy back of the
-	// evidence parameters instead of computing an estimated number of blocks based
-	// on the unbonding period and block commitment time as the two should be
-	// equivalent.
+	// Compare window lengths before converting them into absolute heights. A
+	// height of zero at the boundary means the window still protects all blocks.
+	window := app.minRetainBlocks
 	cp := app.GetConsensusParams(app.finalizeBlockState.Context())
 	if cp.Evidence != nil && cp.Evidence.MaxAgeNumBlocks > 0 {
-		retentionHeight = commitHeight - cp.Evidence.MaxAgeNumBlocks
+		window = max(window, uint64(cp.Evidence.MaxAgeNumBlocks))
 	}
 
 	if app.snapshotManager != nil {
-		snapshotRetentionHeights := app.snapshotManager.GetSnapshotBlockRetentionHeights()
-		if snapshotRetentionHeights > 0 {
-			retentionHeight = minNonZero(retentionHeight, commitHeight-snapshotRetentionHeights)
+		if snapshotWindow := app.snapshotManager.GetSnapshotBlockRetentionHeights(); snapshotWindow > 0 {
+			window = max(window, uint64(snapshotWindow))
 		}
 	}
 
-	retentionHeight = minNonZero(retentionHeight, retentionBlockWindow)
-
-	if retentionHeight <= 0 {
-		// prune nothing in the case of a non-positive height
+	if uint64(commitHeight) <= window {
 		return 0
 	}
-
-	return retentionHeight
+	return commitHeight - int64(window)
 }
 
 // toVoteInfo converts the new ExtendedVoteInfo to VoteInfo.

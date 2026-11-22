@@ -2146,12 +2146,14 @@
   },
   "canonicalFilesSha256": "8e432107ce7936500b5e2098525ccef0daa98e7325d4beeed0d8c253d9a24b85",
   "modifiedFiles": {
+    "baseapp/abci.go": "5162df4c004d224be3ca8729c7cb7a29263df3225c2c17d9fe6d26b6d96ebef8",
+    "baseapp/abci_test.go": "116382cccb7d1d1b5738e30d47598ec40627baef4c5ffb8be1a442b4d1402c02",
     "crypto/armor.go": "74868016ad52264acf5588d385d9a1fd89f45bd82f99c42141e94ca8987fcb1c",
     "go.mod": "6e6d6412e58aa8e85de84f8b6dbacdd31e2fff95eb0f272db576a6f3ae17903b",
     "go.sum": "f07226f63d0f575d713ac9686c369b660fd05f54bef1768f4c765a7305337808",
     "x/staking/keeper/val_state_change.go": "31341009037acb774300a65238d7566e5cb4c61c5e2a8a4285b90fd9a74bfb77"
   },
-  "patchLabel": "v0.53.8-mintcandy.2",
+  "patchLabel": "v0.53.8-mintcandy.3",
   "schemaVersion": 1,
   "upstreamCommit": "102db7cd8c9ade54b770e0f2eea1ca597fa97ed3",
   "upstreamGoModSum": "h1:b/De6uhCfooGEy4kE5G4C0A+MxK9aPr0nZNMyR+PmY0=",

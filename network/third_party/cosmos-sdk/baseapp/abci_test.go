@@ -1270,6 +1270,25 @@ func TestABCI_GetBlockRetentionHeight(t *testing.T) {
 			commitHeight: 499000,
 			expected:     136120,
 		},
+		"no pruning at the evidence window boundary": {
+			bapp:         baseapp.NewBaseApp(name, logger, db, nil, baseapp.SetMinRetainBlocks(10)),
+			maxAgeBlocks: 24,
+			commitHeight: 24,
+			expected:     0,
+		},
+		"keep the evidence window after the boundary": {
+			bapp:         baseapp.NewBaseApp(name, logger, db, nil, baseapp.SetMinRetainBlocks(10)),
+			maxAgeBlocks: 24,
+			commitHeight: 32,
+			expected:     8,
+		},
+		"no pruning at the snapshot window boundary": {
+			bapp: baseapp.NewBaseApp(name, logger, db, nil, baseapp.SetMinRetainBlocks(1),
+				baseapp.SetSnapshot(snapshotStore, snapshottypes.NewSnapshotOptions(10000, 2))),
+			maxAgeBlocks: 10,
+			commitHeight: 20000,
+			expected:     0,
+		},
 		"pruning iavl snapshot only": {
 			bapp: baseapp.NewBaseApp(
 				name, logger, db, nil,

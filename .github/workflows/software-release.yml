@@ -72,6 +72,7 @@ jobs:
       - name: Test complete module and signed native EVM paths
         run: |
           set -euo pipefail
+          go test -mod=readonly -p 2 -count=1 -v -timeout 5m -run '^TestABCI_GetBlockRetentionHeight$' github.com/cosmos/cosmos-sdk/baseapp |& tee "$RUNNER_TEMP/software-evidence/block-retention.log"
           go test -mod=readonly -p 2 -count=1 -v -timeout 15m ./... |& tee "$RUNNER_TEMP/software-evidence/module.log"
           go test -mod=readonly -p 2 -count=1 -v -timeout 12m -tags appstate -run '^TestOwnedAppNativeReservelessTokenLifecycle$' ./systemcontracts |& tee "$RUNNER_TEMP/software-evidence/token-appstate.log"
           go test -mod=readonly -p 2 -count=1 -v -timeout 12m -tags appstate -run '^TestOwnedApp(EmptyUserAssetsLifecycle|NativeUserNFTLifecycle|NativeTestGrace(Lifecycle|DowntimeLifecycle)|NativeValidator(SelfControls|AvatarGenesisLifecycle))$' ./systemcontracts |& tee "$RUNNER_TEMP/software-evidence/launch-assets-validator-appstate.log"
