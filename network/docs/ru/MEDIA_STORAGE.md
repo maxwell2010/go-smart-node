@@ -233,6 +233,10 @@ PYTHONPATH="$PWD/network/media" python3 -B -m mcnd_media.pin_backup \
 сети IPFS зависит от запуска и связности отдельного узла с закреплёнными данными.
 [Режимы Kubo](https://docs.ipfs.tech/reference/kubo/cli/).
 
+В изолированном Linux CI два узла Kubo обменялись JSON и крупным NFT-изображением
+по исходным CID. В том же прогоне Nginx выдал изображение после восстановления
+из резервной копии. [Прогон Linux CI](https://github.com/maxwell2010/go-smart-node/actions/runs/45004941490).
+
 ## Команды Linux CI
 
 Из корня репозитория:
