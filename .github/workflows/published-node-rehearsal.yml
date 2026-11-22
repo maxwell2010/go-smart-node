@@ -35,7 +35,7 @@ permissions:
   attestations: read
 
 concurrency:
-  group: published-node-rehearsal-${{ github.ref }}-${{ inputs.scenario || 'all' }}
+  group: published-node-rehearsal-${{ github.ref }}-${{ inputs.scenario || 'all' }}-${{ inputs.candidate_run || 'published' }}
   cancel-in-progress: false
 
 jobs:
@@ -310,10 +310,18 @@ jobs:
           report="$root/evidence/validator-install.json"
           assembler="$root/mcnd-genesis"
           if [[ "$REHEARSAL_SCENARIO" == tools ]]; then assembler="$root/launch-kit-unpacked/bin/mcnd-genesis"; fi
+          candidate_record=""
+          if [[ -n "$RELEASE_PACKAGE_RUN" ]]; then
+            candidate_record="$root/installed-candidate.json"
+            jq -e --arg archive "$RELEASE_ARCHIVE_SHA" \
+              '{releaseVersion,sourceRevision,binarySha256,archiveSha256:$archive}' \
+              "$root/evidence/install.json" > "$candidate_record"
+          fi
           sudo -n unshare --net -- bash -euc 'ip link set lo up; exec "$@"' _ \
             env TMPDIR="$root" MCND_VALIDATOR_INSTALL_BINARY="$root/bin/mcnd" \
             MCND_VALIDATOR_INSTALL_ASSEMBLER="$assembler" \
             MCND_VALIDATOR_INSTALL_FIXTURE="$root/assembled" MCND_VALIDATOR_INSTALL_REPORT="$report" \
+            MCND_VALIDATOR_INSTALL_CANDIDATE_RECORD="$candidate_record" \
             "$(command -v python3)" -B -m unittest discover -s tools -p test_install_validator_genesis.py -v
           sudo -n chown "$(id -u):$(id -g)" "$report"
           sha=$(sha256sum "$root/assembled/public/genesis.json" | cut -d' ' -f1)

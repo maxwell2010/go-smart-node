@@ -4,6 +4,7 @@ from pathlib import Path
 import subprocess
 import tempfile
 import unittest
+from unittest.mock import patch
 
 from configure_history import validate_fresh_home
 from install_validator_genesis import COMET_PATHS, install_operator_genesis, run_offline, validate_prepared_home
@@ -60,7 +61,14 @@ class PublishedValidatorInstallTest(unittest.TestCase):
         self.assertEqual(chain_id, 'mintcandy_990014-1')
         validator = body['validators'][0]
         operator = validator['operatorAddress']
-        software = release_for(binary)
+        verified_release = os.environ.get('MCND_VALIDATOR_INSTALL_CANDIDATE_RECORD')
+        if verified_release:
+            # The isolated rehearsal already verified the exact archive and
+            # signer before supplying this record. The public CLI stays pinned.
+            with patch('public_genesis_manifest.RELEASE', Path(verified_release)):
+                software = release_for(binary)
+        else:
+            software = release_for(binary)
         artifacts = fixture.parent
         _, applications, plan, relayers = prepared_fixture(artifacts / 'fixture', read_json(artifacts / 'roles.json'))
         draft = read_json(DEFAULT_DRAFT)
