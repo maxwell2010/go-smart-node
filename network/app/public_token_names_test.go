@@ -21,9 +21,9 @@ func TestPublicTokenNameAlphabetAndLimits(t *testing.T) {
 	}
 }
 
-func TestPublicTokenNamesBackfillLegacyStorageWithoutRenaming(t *testing.T) {
-	app := testApp(t, "mintcandy_990001-1", 990001)
-	ctx := app.NewUncachedContext(false, cmtproto.Header{ChainID: "mintcandy_990001-1", Height: 2})
+func checkPublicTokenNamesBackfillLegacyStorage(t *testing.T, app *App) {
+	t.Helper()
+	ctx, _ := app.NewUncachedContext(false, cmtproto.Header{ChainID: app.chainID, Height: 2}).CacheContext()
 	registry := &customCollateralRegistry{evm: app.EVMKeeper, store: app.keys[validatortypes.StoreKey]}
 	store := ctx.KVStore(registry.store)
 	store.Set([]byte{customCollateralManifestKey}, []byte{customCollateralManifestVersion})

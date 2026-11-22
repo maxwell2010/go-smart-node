@@ -140,6 +140,9 @@ func TestFreshOwnApplicationSignedNativeEVMTransfer(t *testing.T) {
 	t.Run("native_governance_signal_routes_and_tally", func(t *testing.T) {
 		checkNativeGovernanceSignalRoutesAndTally(t, a)
 	})
+	t.Run("public_token_names_backfill_legacy_storage", func(t *testing.T) {
+		checkPublicTokenNamesBackfillLegacyStorage(t, a)
+	})
 	key, err := ethsecp.GenerateKey()
 	require.NoError(t, err)
 	account := authtypes.NewBaseAccount(key.PubKey().Address().Bytes(), key.PubKey(), 0, 0)
