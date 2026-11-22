@@ -14,11 +14,19 @@ GitHub CLI. Go для установки не требуется.
 
 ## Загрузка и проверка
 
-Откройте страницу нужного релиза и сверьте по отчёту `LAUNCH_TOOLS_VALIDATION.json`
-полный SHA исходников утилит и SHA256 архива. Задайте их в `TOOLS_SOURCE_SHA` и
-`TOOLS_ARCHIVE_SHA256`, тег релиза - в `RELEASE_TAG`.
-[Выпуски MintCandy Node](https://github.com/maxwell2010/go-smart-node/releases) ·
+[Пакет для MintCandy Node v1.1.2](https://github.com/maxwell2010/go-smart-node/releases/download/v1.1.2/mintcandy-launch-tools-linux-amd64.tar.gz)
+уже доступен в файлах релиза.
+[Отчёт с хешами](https://github.com/maxwell2010/go-smart-node/releases/download/v1.1.2/LAUNCH_TOOLS_VALIDATION.json) ·
+[CI сборки и репетиции установки](https://github.com/maxwell2010/go-smart-node/actions/runs/45007662799) ·
 [Проверка аттестаций GitHub CLI](https://cli.github.com/manual/gh_attestation_verify).
+
+Для v1.1.2 используйте следующие координаты.
+
+```sh
+RELEASE_TAG=v1.1.2
+TOOLS_SOURCE_SHA=d227ce0a55a9a99ff16c323f82bf60a453c1c198
+TOOLS_ARCHIVE_SHA256=bf66745eab6131b18a760665825e930ba0dbc5f21893217ab5266ab93125c90c
+```
 
 ```sh
 set -eu

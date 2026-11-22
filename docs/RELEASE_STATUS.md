@@ -16,6 +16,12 @@ signed reserve-free token creation.
 [Signed media rehearsal](https://github.com/maxwell2010/go-smart-node/actions/runs/45005487421) ·
 [Release evidence](../network/docs/ru/evidence/software-release-1.1.2.json).
 
+The release also includes separately attested offline launch tools for this
+binary. CI unpacked them, checked the draft, assembled an isolated genesis
+and installed the signed test genesis in a disposable validator home.
+[Download and verification guide](../network/docs/ru/INSTALL_LAUNCH_TOOLS.md) ·
+[Tools rehearsal](https://github.com/maxwell2010/go-smart-node/actions/runs/45007662799).
+
 ## 1.1.1 software release
 
 [MintCandy Node 1.1.1](https://github.com/maxwell2010/go-smart-node/releases/tag/v1.1.1)
