@@ -5,7 +5,7 @@ on:
     inputs:
       scenario:
         type: choice
-        options: [all, node, ibc, tools, media]
+        options: [all, node, ibc, tools, media, retention]
         default: all
       candidate_run:
         description: Successful software packaging run ID (empty uses the pinned release)
@@ -330,7 +330,7 @@ jobs:
             .chainId == "mintcandy_990014-1" and .idempotent and .rejectsForeignKey and .rejectsExistingState and .consentPayloadVerified and
             (.preservedHomeFiles >= 5) and (.networkLaunchAuthorized | not)' "$report"
       - name: Verify quorum recovery, follower replay and systemd snapshot sync
-        if: inputs.scenario != 'ibc' && inputs.scenario != 'tools' && inputs.scenario != 'media'
+        if: github.event_name == 'push' || inputs.scenario == 'all' || inputs.scenario == 'node'
         shell: bash
         run: |
           set -euo pipefail
@@ -361,9 +361,36 @@ jobs:
           jq -e --arg sha "$genesis_sha" '.status == "PASS" and .loopbackOnlyNamespace and .offlineAssembledGenesis and
             .genesisSha256 == $sha and .systemdFollower.genesisSha256 == $sha and
             .systemdRestart.sameHome and (.stateSync.restoredHeight > 1) and
+            (.historyRetention | .retainedBlockHeight == 1 and .archivedSupplyProofAvailable and
+              .prunedSupplyProofUnavailable and .historicalABCIResponsesDisabled and .transactionSearchDisabled and
+              .freshProofMatchesArchive and (.verifiedHeight > .loadedHeightAfterRestart)) and
             (.resourceUsage | (.signingValidators | length == 3) and
               ([.systemdFollower, .snapshotObserver, .signingValidators[]] |
                 all(.peakResidentBytes > 0 and .dataAllocatedBytes > 0)))' "$RELEASE_WORK/evidence/systemd.json"
+      - name: Verify Comet block pruning and restart while preserving the evidence window
+        if: github.event_name == 'push' || inputs.scenario == 'all' || inputs.scenario == 'retention'
+        shell: bash
+        run: |
+          set -euo pipefail
+          root="$RELEASE_WORK"
+          report="$root/evidence/blockstore.json"
+          status=0
+          sudo -n unshare --net -- bash -euc 'ip link set lo up; exec "$@"' _ \
+            env TMPDIR="$root" "$(command -v python3)" -B "$GITHUB_WORKSPACE/launch-assembly/network/tools/native_launch_rehearsal.py" \
+            --binary "$root/bin/mcnd" --binary-sha256 "$RELEASE_BINARY_SHA" \
+            --archive-sha256 "$RELEASE_ARCHIVE_SHA" --source-commit "$RELEASE_SOURCE" \
+            --fixture "$root/assembled" --home-parent "$root" --assembly-report "$root/evidence/assembly.json" \
+            --report "$report" --four-validators --empty-user-assets --block-retention || status=$?
+          if [[ -f "$report" ]]; then sudo -n chown "$(id -u):$(id -g)" "$report"; fi
+          test "$status" = 0
+          genesis_sha=$(sha256sum "$root/assembled/public/genesis.json" | cut -d' ' -f1)
+          jq -e --arg sha "$genesis_sha" --arg binary "$RELEASE_BINARY_SHA" \
+            '.status == "PASS" and .loopbackOnlyNamespace and .binarySha256 == $binary and .genesisSha256 == $sha and
+            (.blockstoreGenesisSha256 | test("^[a-f0-9]{64}$")) and .blockstoreGenesisSha256 != $sha and
+            (.blockstoreRetention | .evidenceWindowBlocks == 24 and .minRetainBlocks == 10 and
+              .earliestBeforeRestart > 1 and .earliestAfterRestart >= .earliestBeforeRestart and
+              .verifiedHeight > .loadedHeightAfterRestart and .historicalBlockStillAvailableOnArchive and
+              .sameAppHashOnFiveReplicas and (.appHash | test("^[A-Fa-f0-9]{64}$")))' "$report"
       - name: Verify media publication after a signed user token creation
         if: inputs.scenario == 'media'
         shell: bash
@@ -406,7 +433,7 @@ jobs:
           jq -e '.status == "PASS" and .loopbackOnlyNamespace and .chainId == "mintcandy_990014-1" and
             (.committedMedia | .status == "PASS" and .version == 1 and .kind == "erc20-reserveless" and .alteredMetadataRejected)' "$report"
       - name: Verify Hermes interoperability on the same assembled genesis
-        if: inputs.scenario != 'node' && inputs.scenario != 'tools' && inputs.scenario != 'media'
+        if: github.event_name == 'push' || inputs.scenario == 'all' || inputs.scenario == 'ibc'
         shell: bash
         working-directory: launch-assembly/network
         run: |

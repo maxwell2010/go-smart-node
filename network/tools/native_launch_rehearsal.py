@@ -663,6 +663,7 @@ def main(argv=None, signals=None):
     parser.add_argument("--package-genesis", type=Path, help="use genesis extracted from the verified launch package")
     parser.add_argument("--systemd-follower", action="store_true", help="start the clean installed follower as a systemd service")
     parser.add_argument("--restart-and-snapshot", action="store_true", help="verify systemd restart and a fresh state-sync peer")
+    parser.add_argument("--block-retention", action="store_true", help="test blockstore pruning on a modified disposable genesis")
     parser.add_argument("--upgrade-package", type=Path, help="verified replacement package directory")
     parser.add_argument("--upgrade-package-report", type=Path, help="signature and checksum report for the replacement package")
     parser.add_argument("--iavl-schema-probe", type=Path, help="inspect the IAVL storage upgrade with the node stopped")
@@ -685,6 +686,9 @@ def main(argv=None, signals=None):
         parser.error("--systemd-follower requires --package-genesis")
     if args.restart_and_snapshot and not args.systemd_follower:
         parser.error("--restart-and-snapshot requires --systemd-follower")
+    if args.block_retention and (not args.assembly_report or args.package_genesis or args.systemd_follower or
+                                 args.quorum_loss_recovery or args.treasury_transfer or args.media_fixture):
+        parser.error("--block-retention requires its own offline-assembled fixture run")
     if (args.upgrade_package is None) != (args.upgrade_package_report is None) or (args.upgrade_package and not args.systemd_follower):
         parser.error("--upgrade-package and --upgrade-package-report require each other and --systemd-follower")
     if args.iavl_schema_probe and not args.upgrade_package:
@@ -702,7 +706,7 @@ def main(argv=None, signals=None):
             genesis, expected, keys = load_fixture(Path(args.fixture), four_validators=args.four_validators,
                                                    empty_user_assets=args.empty_user_assets, assembly_report=args.assembly_report)
             report["emptyUserAssetGenesis"] = args.empty_user_assets
-            if args.assembly_report:
+            if args.assembly_report and not args.block_retention:
                 report["offlineAssembledGenesis"] = True
             if args.package_genesis:
                 packaged_genesis = private_bytes(args.package_genesis, GENESIS_LIMIT)
@@ -732,20 +736,25 @@ def main(argv=None, signals=None):
                     report["upgradePackage"] = package
                 owner = ProcessOwner(signals)
                 try:
-                    service = nullcontext()
-                    if args.systemd_follower:
-                        from native_launch_systemd import SystemdFollower
+                    if args.block_retention:
+                        from native_launch_history import rehearse_blockstore
 
-                        report["phase"] = "systemd-follower-install"
-                        service = SystemdFollower(binary, args.binary_sha256, signals=signals,
-                                                  iavl_schema_probe=args.iavl_schema_probe)
-                    with service as systemd:
-                        run_launch(binary, root, genesis, expected, keys, env, owner, report,
-                                   four_validators=args.four_validators, treasury=treasury, systemd=systemd,
-                                   restart_snapshot=args.restart_and_snapshot, upgrade_binary=upgrade_binary,
-                                   quorum_loss_recovery=args.quorum_loss_recovery, commit_probe=args.commit_probe,
-                                   verify_history=bool(args.assembly_report and args.restart_and_snapshot and not upgrade_binary),
-                                   media_fixture=args.media_fixture)
+                        rehearse_blockstore(binary, root, genesis, expected, keys, env, owner, report)
+                    else:
+                        service = nullcontext()
+                        if args.systemd_follower:
+                            from native_launch_systemd import SystemdFollower
+
+                            report["phase"] = "systemd-follower-install"
+                            service = SystemdFollower(binary, args.binary_sha256, signals=signals,
+                                                      iavl_schema_probe=args.iavl_schema_probe)
+                        with service as systemd:
+                            run_launch(binary, root, genesis, expected, keys, env, owner, report,
+                                       four_validators=args.four_validators, treasury=treasury, systemd=systemd,
+                                       restart_snapshot=args.restart_and_snapshot, upgrade_binary=upgrade_binary,
+                                       quorum_loss_recovery=args.quorum_loss_recovery, commit_probe=args.commit_probe,
+                                       verify_history=bool(args.assembly_report and args.restart_and_snapshot and not upgrade_binary),
+                                       media_fixture=args.media_fixture)
                 finally:
                     owner.close()
             report.update(status="PASS", phase="complete")
