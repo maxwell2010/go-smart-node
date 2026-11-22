@@ -141,6 +141,11 @@ sudo journalctl -u mcnd-media.service -n 50
 резервную копию по инструкции ниже.
 [Настройки службы в systemd](https://www.freedesktop.org/software/systemd/man/latest/systemd.exec.html).
 
+В изолированном Linux CI служба запустилась от отдельного пользователя и
+сохранила версию публикации, JSON и PNG после перезапуска. Повтор публикации
+вернул прежнюю версию. Тест также сверил права каталога и SQLite.
+[Прогон systemd](https://github.com/maxwell2010/go-smart-node/actions/runs/45009462939).
+
 ### Подключение Nginx
 
 Подключите [настройки лимитов](../../media/nginx-media-limits.conf) один раз в
