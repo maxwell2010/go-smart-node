@@ -3,27 +3,21 @@
 Архив `mintcandy-launch-tools-linux-amd64.tar.gz` содержит готовый
 `mcnd-genesis`, скрипты сверки заявок и манифеста, русскую инструкцию и
 черновики параметров. Утилиты рассчитаны на Linux x86_64. CI проверяет их
-на Ubuntu 24.04 с опубликованным `mcnd` 1.1.1. Для обычной работы нужны
-Python 3.11+, `gpgv`, `tar` и `sha256sum`. Для получения и проверки
-аттестации нужен GitHub CLI. Go для установки не требуется.
+на Ubuntu 24.04 с опубликованным `mcnd`. Для обычной работы нужны Python
+3.11+, `gpgv`, `tar` и `sha256sum`. Для загрузки и проверки аттестации нужен
+GitHub CLI. Go для установки не требуется.
 
 `mcnd-genesis` собирает genesis и проверяет холодный `InitChain` в памяти.
-Пакет совместим с отдельным [выпуском ноды 1.1.1](https://github.com/maxwell2010/go-smart-node/releases/tag/v1.1.1).
+В `PACKAGE.json` указаны совместимая версия `mcnd` и SHA256 её бинарника.
 Публичный genesis подписывается организатором после подтверждения параметров
 и состава валидаторов. У архива утилит собственная аттестация сборки GitHub.
 
 ## Загрузка и проверка
 
-**Проверенная поставка** собрана в прогоне `44696558797`, попытка `1`, из
-коммита `70aacc495006edbc3ac7fcc5fd54d7b0089b3944`. SHA256 архива
-`04b4eb516347f57d35b43542d32f2ed8054d26b8c177a3dcf6da2ab1e6075696`.
-Артефакт доступен до 18 февраля 2027 года.
-[Скачать архив с аттестацией](https://github.com/maxwell2010/go-smart-node/actions/runs/44696558797/artifacts/14611131895).
-
-Выберите успешный прогон `Attested MintCandy node rehearsal` со сценарием
-`tools`. Запишите его `RUN_ID`, номер попытки `ATTEMPT` и полный SHA коммита
-`SOURCE_SHA` из объявления о поставке. Скачайте итоговый артефакт
-`attested-mintcandy-launch-tools-N`, где `N` - номер попытки.
+Откройте страницу нужного релиза и сверьте по отчёту `LAUNCH_TOOLS_VALIDATION.json`
+полный SHA исходников утилит и SHA256 архива. Задайте их в `TOOLS_SOURCE_SHA` и
+`TOOLS_ARCHIVE_SHA256`, тег релиза - в `RELEASE_TAG`.
+[Выпуски MintCandy Node](https://github.com/maxwell2010/go-smart-node/releases) ·
 [Проверка аттестаций GitHub CLI](https://cli.github.com/manual/gh_attestation_verify).
 
 ```sh
@@ -32,15 +26,18 @@ umask 077
 work=$(mktemp -d)
 repo=maxwell2010/go-smart-node
 archive=mintcandy-launch-tools-linux-amd64.tar.gz
-gh run download "$RUN_ID" --repo "$repo" \
-  --name "attested-mintcandy-launch-tools-$ATTEMPT" --dir "$work"
+: "${RELEASE_TAG:?Укажите тег релиза}" "${TOOLS_SOURCE_SHA:?Укажите SHA исходников утилит}" \
+  "${TOOLS_ARCHIVE_SHA256:?Укажите SHA256 архива утилит}"
+gh release download "$RELEASE_TAG" --repo "$repo" --dir "$work" \
+  --pattern "$archive" --pattern "$archive.sha256" --pattern launch-tools.sigstore.json
 (
   cd "$work"
   sha256sum --check --strict "$archive.sha256"
+  printf '%s  %s\n' "$TOOLS_ARCHIVE_SHA256" "$archive" | sha256sum --check --strict
   gh attestation verify "$archive" --bundle launch-tools.sigstore.json \
     --repo "$repo" --signer-workflow "$repo/.github/workflows/published-node-rehearsal.yml" \
     --source-ref refs/heads/feat/native-duplicate-vote-master-20261112 \
-    --source-digest "$SOURCE_SHA" --signer-digest "$SOURCE_SHA" \
+    --source-digest "$TOOLS_SOURCE_SHA" --signer-digest "$TOOLS_SOURCE_SHA" \
     --deny-self-hosted-runners
   mkdir -m 700 tools
   tar --no-same-owner --no-same-permissions -xzf "$archive" -C tools
@@ -71,4 +68,5 @@ python3 -B network/tools/check_operator_applications.py "$REVIEWED_INTAKE" --req
 Дальнейшие команды подготовки реестра, сборки, подписи, установки genesis и
 подтверждения оператора выполняются из того же каталога. Для проверки или
 установки подписанного genesis `MCND_BINARY` должен указывать на экземпляр
-аттестованного `mcnd` 1.1.1. [Порядок работы с genesis и подтверждениями](https://github.com/maxwell2010/go-smart-node/blob/feat/native-duplicate-vote-master-20261112/network/docs/ru/VALIDATOR_LAUNCH_INTAKE.md).
+аттестованного `mcnd` с версией и SHA256 из `PACKAGE.json`.
+[Порядок работы с genesis и подтверждениями](https://github.com/maxwell2010/go-smart-node/blob/feat/native-duplicate-vote-master-20261112/network/docs/ru/VALIDATOR_LAUNCH_INTAKE.md).
