@@ -99,6 +99,50 @@ PYTHONPATH="$PWD/network/media" "$MEDIA_VENV/bin/python" -B -m gunicorn \
   --no-control-socket 'mcnd_media.api:from_environment()'
 ```
 
+### Постоянный запуск через systemd
+
+На выделенном Ubuntu 24.04 media-хосте установите `python3.12-venv` и `nginx`.
+Из корня проверенной копии проекта разместите код и зависимости в `/opt/mcnd-media`.
+
+```sh
+sudo apt-get update
+sudo apt-get install -y python3.12-venv nginx
+getent passwd mcnd-media >/dev/null || \
+  sudo useradd --system --user-group --no-create-home --shell /usr/sbin/nologin mcnd-media
+sudo install -d -m 0755 /opt/mcnd-media/mcnd_media
+sudo install -m 0644 network/media/mcnd_media/*.py /opt/mcnd-media/mcnd_media/
+sudo python3.12 -m venv /opt/mcnd-media/venv
+sudo /opt/mcnd-media/venv/bin/python -m pip install --only-binary=:all: --require-hashes \
+  -r network/media/requirements-linux-cp312.lock -r network/media/requirements-api.lock
+sudo install -m 0644 network/media/mcnd-media.service /etc/systemd/system/mcnd-media.service
+```
+
+Создайте `/etc/mcnd-media.env` под владельцем root с режимом `0600`. Укажите
+chain ID проверенной сети и RPC на loopback. Если RPC размещены на другом
+сервере, укажите порты локальных туннелей.
+
+```ini
+MCND_MEDIA_CHAIN_ID=mintcandy_9905401-1
+MCND_MEDIA_COMET_RPC=http://127.0.0.1:26657
+MCND_MEDIA_EVM_RPC=http://127.0.0.1:8545
+```
+
+```sh
+sudo systemd-analyze verify /etc/systemd/system/mcnd-media.service
+sudo systemctl daemon-reload
+sudo systemctl enable --now mcnd-media.service
+sudo systemctl status mcnd-media.service
+sudo journalctl -u mcnd-media.service -n 50
+```
+
+Служба слушает `127.0.0.1:8910`. systemd создаёт для пользователя `mcnd-media`
+закрытый каталог `/var/lib/mcnd-media` с режимом `0700`. SQLite и файлы
+остаются там после перезапуска. Перед обновлением сделайте проверенную
+резервную копию по инструкции ниже.
+[Настройки службы в systemd](https://www.freedesktop.org/software/systemd/man/latest/systemd.exec.html).
+
+### Подключение Nginx
+
 Подключите [настройки лимитов](../../media/nginx-media-limits.conf) один раз в
 блоке `http` и [маршруты API](../../media/nginx-live.conf) в блоке `server`
 выделенного HTTPS-домена. Используйте абсолютные пути в `include`. Проверьте
@@ -127,9 +171,9 @@ Base64 - 14 MiB. Ограничения исходного файла - 1 MiB д
 
 В CI проверили Nginx и Gunicorn, ответы 413/429, отказ при подмене данных и
 выдачу после публикации. Проверку CID по подписанной транзакции отдельно
-прошёл опубликованный бинарник v1.1.1.
+прошёл опубликованный бинарник v1.1.2.
 [HTTP CI](https://github.com/maxwell2010/go-smart-node/actions/runs/44999820840),
-[проверка подтверждённой транзакции](https://github.com/maxwell2010/go-smart-node/actions/runs/44712565899).
+[проверка подтверждённой транзакции](https://github.com/maxwell2010/go-smart-node/actions/runs/45005487421).
 
 ## Формат и целостность
 

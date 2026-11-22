@@ -1,0 +1,27 @@
+[Unit]
+Description=MintCandy committed media API
+After=network.target
+
+[Service]
+Type=exec
+User=mcnd-media
+Group=mcnd-media
+WorkingDirectory=/opt/mcnd-media
+Environment=PYTHONPATH=/opt/mcnd-media
+Environment=MCND_MEDIA_STORE=/var/lib/mcnd-media
+EnvironmentFile=/etc/mcnd-media.env
+ExecStart=/opt/mcnd-media/venv/bin/python -B -m gunicorn --bind 127.0.0.1:8910 --workers 2 --worker-class sync --timeout 60 --no-control-socket mcnd_media.api:from_environment()
+Restart=on-failure
+RestartSec=3s
+StateDirectory=mcnd-media
+StateDirectoryMode=0700
+UMask=0077
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectHome=yes
+ProtectSystem=strict
+CapabilityBoundingSet=
+RestrictAddressFamilies=AF_UNIX AF_INET
+
+[Install]
+WantedBy=multi-user.target

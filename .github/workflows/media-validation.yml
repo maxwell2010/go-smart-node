@@ -56,10 +56,37 @@ jobs:
               "$RUNNER_TEMP/media-venv/bin/python" -B -m unittest discover -v -s network/media/tests -p 'test_*.py' \
             2>&1 | tee "$RUNNER_TEMP/media-validation.log"
           git diff --exit-code
+      - name: Install and restart the media service under systemd in a loopback namespace
+        run: |
+          set -euo pipefail
+          sudo -n useradd --system --user-group --no-create-home --shell /usr/sbin/nologin mcnd-media
+          sudo -n install -d -m 0755 /opt/mcnd-media/mcnd_media /etc/systemd/system/mcnd-media.service.d
+          sudo -n install -m 0644 network/media/mcnd_media/*.py /opt/mcnd-media/mcnd_media/
+          sudo -n python3 -m venv /opt/mcnd-media/venv
+          sudo -n /opt/mcnd-media/venv/bin/python -m pip install --only-binary=:all: --require-hashes \
+            -r network/media/requirements-linux-cp312.lock -r network/media/requirements-api.lock
+          sudo -n install -m 0644 network/media/mcnd-media.service /etc/systemd/system/mcnd-media.service
+          sudo -n ip netns add mcnd-media-ci
+          trap 'sudo -n systemctl stop mcnd-media.service; sudo -n ip netns delete mcnd-media-ci' EXIT
+          sudo -n ip -n mcnd-media-ci link set lo up
+          printf '[Service]\nNetworkNamespacePath=/run/netns/mcnd-media-ci\n' \
+            | sudo -n tee /etc/systemd/system/mcnd-media.service.d/isolate.conf >/dev/null
+          sudo -n install -m 0600 /dev/null /etc/mcnd-media.env
+          sudo -n systemd-analyze verify /etc/systemd/system/mcnd-media.service
+          sudo -n systemctl daemon-reload
+          sudo -n ip netns exec mcnd-media-ci \
+            env PYTHONPATH="$GITHUB_WORKSPACE/network/media" MCND_MEDIA_SYSTEMD_CI=1 \
+              /opt/mcnd-media/venv/bin/python -B -m unittest discover -v -s network/media/tests -p 'test_systemd.py' \
+            2>&1 | tee "$RUNNER_TEMP/media-systemd.log"
+      - name: Print service logs on failure
+        if: failure()
+        run: sudo -n journalctl --no-pager -u mcnd-media.service -n 100
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
         if: always()
         with:
           name: media-validation-${{ github.sha }}
-          path: ${{ runner.temp }}/media-validation.log
+          path: |
+            ${{ runner.temp }}/media-validation.log
+            ${{ runner.temp }}/media-systemd.log
           if-no-files-found: warn
           retention-days: 30

@@ -8,7 +8,7 @@ from pathlib import Path
 import tempfile
 from threading import Thread
 import unittest
-from contextlib import redirect_stdout
+from contextlib import contextmanager, redirect_stdout
 from unittest.mock import patch
 
 from mcnd_media.commitment import CommittedReader, LocalRPC, main
@@ -110,6 +110,31 @@ class RPCFixture:
         raise AssertionError((method, params))
 
 
+@contextmanager
+def serve_rpc(fixture):
+    class Handler(BaseHTTPRequestHandler):
+        def do_POST(self):
+            req = json.loads(self.rfile.read(int(self.headers['Content-Length'])))
+            call = fixture.evm if req['method'].startswith('eth_') else fixture.comet
+            result = canonical({'jsonrpc': '2.0', 'id': req['id'], 'result': call(req['method'], req['params'])})
+            self.send_response(200)
+            self.send_header('Content-Length', str(len(result)))
+            self.end_headers()
+            self.wfile.write(result)
+
+        def log_message(self, *_):
+            pass
+
+    with HTTPServer(('127.0.0.1', 0), Handler) as server:
+        worker = Thread(target=server.serve_forever, daemon=True)
+        worker.start()
+        try:
+            yield f'http://127.0.0.1:{server.server_port}'
+        finally:
+            server.shutdown()
+            worker.join(timeout=5)
+
+
 class CommittedTests(unittest.TestCase):
     def setUp(self):
         self.rpc = RPCFixture()
@@ -194,48 +219,28 @@ class CommittedTests(unittest.TestCase):
         fixture = self.rpc
         fixture.now = datetime.now(timezone.utc)
 
-        class Handler(BaseHTTPRequestHandler):
-            def do_POST(self):
-                req = json.loads(self.rfile.read(int(self.headers['Content-Length'])))
-                call = fixture.evm if req['method'].startswith('eth_') else fixture.comet
-                result = canonical({'jsonrpc': '2.0', 'id': req['id'], 'result': call(req['method'], req['params'])})
-                self.send_response(200)
-                self.send_header('Content-Length', str(len(result)))
-                self.end_headers()
-                self.wfile.write(result)
-
-            def log_message(self, *_):
-                pass
-
-        with tempfile.TemporaryDirectory() as tmp, HTTPServer(('127.0.0.1', 0), Handler) as rpc:
-            worker = Thread(target=rpc.serve_forever, daemon=True)
-            worker.start()
+        with tempfile.TemporaryDirectory() as tmp, serve_rpc(fixture) as endpoint:
+            root = Path(tmp)
+            (root / 'metadata.json').write_bytes(canonical(META))
+            Image.new('RGB', (5, 5), '#00dd99').save(root / 'avatar.png')
+            inputs = ['--chain-id', CHAIN, '--kind', 'erc20', '--metadata', str(root / 'metadata.json'),
+                      '--image', str(root / 'avatar.png'), '--mime', 'image/png']
+            prepared = io.StringIO()
+            with redirect_stdout(prepared):
+                self.assertEqual(main(['prepare', *inputs]), 0)
+            fixture.uri = json.loads(prepared.getvalue())['metadata_uri']
+            output = io.StringIO()
+            with redirect_stdout(output):
+                self.assertEqual(main(['publish', *inputs, '--contract', TOKEN, '--comet-rpc', endpoint,
+                                       '--evm-rpc', endpoint, '--store', str(root / 'store')]), 0)
+            self.assertEqual(json.loads(output.getvalue())['metadata_uri'], fixture.uri)
+            store = MediaStore(root / 'store')
             try:
-                root = Path(tmp)
-                (root / 'metadata.json').write_bytes(canonical(META))
-                Image.new('RGB', (5, 5), '#00dd99').save(root / 'avatar.png')
-                inputs = ['--chain-id', CHAIN, '--kind', 'erc20', '--metadata', str(root / 'metadata.json'),
-                          '--image', str(root / 'avatar.png'), '--mime', 'image/png']
-                prepared = io.StringIO()
-                with redirect_stdout(prepared):
-                    self.assertEqual(main(['prepare', *inputs]), 0)
-                fixture.uri = json.loads(prepared.getvalue())['metadata_uri']
-                endpoint = f'http://127.0.0.1:{rpc.server_port}'
-                output = io.StringIO()
-                with redirect_stdout(output):
-                    self.assertEqual(main(['publish', *inputs, '--contract', TOKEN, '--comet-rpc', endpoint,
-                                           '--evm-rpc', endpoint, '--store', str(root / 'store')]), 0)
-                self.assertEqual(json.loads(output.getvalue())['metadata_uri'], fixture.uri)
-                store = MediaStore(root / 'store')
-                try:
-                    rows, objects = store.verify()
-                    self.assertEqual(len(rows), 1)
-                    self.assertEqual(len(objects), 2)
-                finally:
-                    store.close()
+                rows, objects = store.verify()
+                self.assertEqual(len(rows), 1)
+                self.assertEqual(len(objects), 2)
             finally:
-                rpc.shutdown()
-                worker.join(timeout=5)
+                store.close()
 
 
 if __name__ == '__main__':
