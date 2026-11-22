@@ -52,7 +52,7 @@ func checkSignedTinyUnitRounding(t *testing.T, keys []*ecdsa.PrivateKey, roles m
 		Crr                                         uint8
 		Identity, Symbol, Name                      string
 	}
-	coin := coinMeta{new(big.Int).Mul(unit, big.NewInt(100)), new(big.Int).Set(unit), new(big.Int).Mul(unit, big.NewInt(1000)), owner, 100, "rounding-fixture", "roundcoinx", "Rounding reserve coin"}
+	coin := coinMeta{new(big.Int).Mul(unit, big.NewInt(100)), new(big.Int).Set(unit), new(big.Int).Mul(unit, big.NewInt(1000)), owner, 100, "rounding-fixture", "roundcoinx", "ROUNDING RESERVE COIN"}
 	commission := call(0, "token-center", "getCommissionSymbol", new(big.Int), coin.Symbol)[0].(*big.Int)
 	funding := new(big.Int).Add(new(big.Int).Mul(unit, big.NewInt(100)), commission)
 	call(0, "token-center", "createToken", funding, coin)

@@ -46,7 +46,7 @@ func TestExportLaunchMediaCreation(t *testing.T) {
 	require.NoError(t, err)
 	abi, err := contracts.CompiledABI("NewNetworkTokenCenter")
 	require.NoError(t, err)
-	payload, err := abi.Pack("createTokenReserveless", "Launch avatar fixture", "media", false, true,
+	payload, err := abi.Pack("createTokenReserveless", "LAUNCH AVATAR TOKEN", "media", false, true,
 		big.NewInt(10), new(big.Int), uri)
 	require.NoError(t, err)
 	tx := ethtypes.NewTx(&ethtypes.LegacyTx{To: &center, Gas: 3_000_000,

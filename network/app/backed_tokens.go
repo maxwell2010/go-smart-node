@@ -101,7 +101,7 @@ func (c *withdrawalController) admitBackedToken(ctx sdk.Context, sender common.A
 		return true, err
 	}
 	meta := abi.ConvertType(args[0], new(backedTokenMeta)).(*backedTokenMeta)
-	if meta.Creator != msg.From || !identity.ValidDisplayName(meta.Name, coinconfig.MaxCoinTitleLength) || !identity.ValidPublicText(meta.Identity, 256) || !coinconfig.CoinDenomValidator.MatchString(meta.Symbol) || reservedPublicTokenSymbol(meta.Symbol) {
+	if meta.Creator != msg.From || !validPublicTokenName(meta.Name, coinconfig.MaxCoinTitleLength) || !identity.ValidPublicText(meta.Identity, 256) || !coinconfig.CoinDenomValidator.MatchString(meta.Symbol) || reservedPublicTokenSymbol(meta.Symbol) {
 		return true, errors.New("invalid backed token creator or bounded display metadata")
 	}
 	commission := backedSymbolCommission(len(meta.Symbol))
@@ -180,6 +180,9 @@ func (c *withdrawalController) admitBackedToken(ctx sdk.Context, sender common.A
 	}
 	entry, err := customCollateralEntry(coin)
 	if err != nil {
+		return true, err
+	}
+	if err := r.reservePublicTokenName(ctx, meta.Name); err != nil {
 		return true, err
 	}
 	if err := r.keeper.SetCoin(ctx, coin); err != nil {

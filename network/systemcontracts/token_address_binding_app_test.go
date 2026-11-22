@@ -74,7 +74,7 @@ func runExactTokenAddressBindings(t *testing.T, e isolatedBackendEnv, registryAd
 	}
 	const symbol = "addrbindx"
 	commission := integer(center, centerAddress, "getCommissionSymbol", symbol)
-	call(0, center, centerAddress, new(big.Int).Add(amount(10), commission), true, "createToken", coinMeta{amount(10), amount(5), amount(100), from, 100, "exact-address-control", symbol, "Registered binding control"})
+	call(0, center, centerAddress, new(big.Int).Add(amount(10), commission), true, "createToken", coinMeta{amount(10), amount(5), amount(100), from, 100, "exact-address-control", symbol, "REGISTERED BINDING CONTROL"})
 	currency := query(center, centerAddress, "tokens", symbol)[0].(common.Address)
 
 	// A genuine pinned proxy may have the same symbol and actual immutable

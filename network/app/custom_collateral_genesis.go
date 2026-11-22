@@ -71,6 +71,10 @@ func (r *customCollateralRegistry) attestGenesis(ctx sdk.Context) error {
 		return err
 	}
 	store.Set([]byte{customCollateralManifestKey}, manifest)
+	for _, coin := range genesis.Coins {
+		store.Set(publicTokenNameKey(coin.Title), []byte{1})
+	}
+	store.Set(publicTokenNameKey(""), []byte{1})
 	return nil
 }
 

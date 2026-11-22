@@ -145,7 +145,7 @@ func runCurveConverterFinancial(t *testing.T, e isolatedBackendEnv) {
 	}
 	mintCurve := func(symbol string, reserve, minimum *big.Int, crr uint8) common.Address {
 		commission := integer(center, centerAddress, "getCommissionSymbol", symbol)
-		call(0, center, centerAddress, new(big.Int).Add(new(big.Int).Set(reserve), commission), true, "createToken", coinMeta{amount(10), minimum, amount(100), owner, crr, "converter-financial-control", symbol, "Converter reserve coin"})
+		call(0, center, centerAddress, new(big.Int).Add(new(big.Int).Set(reserve), commission), true, "createToken", coinMeta{amount(10), minimum, amount(100), owner, crr, "converter-financial-control", symbol, "CONVERTER RESERVE COIN"})
 		target := query(center, centerAddress, "tokens", symbol)[0].(common.Address)
 		require.True(t, query(center, centerAddress, "isTokenExists", target)[0].(bool))
 		require.Equal(t, reserve, native(target))
@@ -270,7 +270,7 @@ func runCurveConverterFinancial(t *testing.T, e isolatedBackendEnv) {
 		require.Equal(t, before, snapshot(coin, low, controllers[0]))
 	})
 	t.Run("unregistered reserveless token", func(t *testing.T) {
-		created := call(0, center, centerAddress, new(big.Int), true, "createTokenReserveless", "Converter free control", "freeconvx", true, true, amount(10), amount(100), "converter-control")
+		created := call(0, center, centerAddress, new(big.Int), true, "createTokenReserveless", "CONVERTER FREE CONTROL", "freeconvx", true, true, amount(10), amount(100), "converter-control")
 		free := integerAddress(t, center, "createTokenReserveless", created)
 		call(0, freeCoin, free, new(big.Int), true, "transfer", controllers[0], amount(1))
 		before := snapshot(freeCoin, free, controllers[0])

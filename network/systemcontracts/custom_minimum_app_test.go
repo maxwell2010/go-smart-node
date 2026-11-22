@@ -96,7 +96,7 @@ func runRegisteredCustomMinimum(t *testing.T, e customMinimumEnv) {
 	}
 	mintCurrency := func(symbol string, crr uint8) common.Address {
 		commission := integer(center, centerAddress, "getCommissionSymbol", symbol)
-		metadata := coinMeta{amount(10), amount(5), amount(100), owner, crr, "isolated-minimum-control", symbol, "Isolated minimum reserve coin"}
+		metadata := coinMeta{amount(10), amount(5), amount(100), owner, crr, "isolated-minimum-control", symbol, "ISOLATED MINIMUM RESERVE COIN"}
 		e.call(0, center, centerAddress, new(big.Int).Add(amount(10), commission), true, "createToken", metadata)
 		currency := query(center, centerAddress, "tokens", symbol)[0].(common.Address)
 		require.NotEqual(t, common.Address{}, currency)

@@ -1106,7 +1106,7 @@ func TestOwnedAppSignedRegistryBootstrap(t *testing.T) {
 			tokenCenter := roles["token-center"]
 			tokenFactory := roleABI["token-center"]
 			originalTokens := read("getContractAddress", "token-center")
-			freeData, err := tokenFactory.ABI.Pack("createTokenReserveless", "Fresh free token", "freshfree", true, true, big.NewInt(100), big.NewInt(1000), "fixture")
+			freeData, err := tokenFactory.ABI.Pack("createTokenReserveless", "FRESH FREE TOKEN", "freshfree", true, true, big.NewInt(100), big.NewInt(1000), "fixture")
 			require.NoError(t, err)
 			send(keys[0], &originalTokens, new(big.Int), freeData, true)
 			created := send(keys[0], &tokenCenter, new(big.Int), freeData, true)
@@ -1154,7 +1154,7 @@ func TestOwnedAppSignedRegistryBootstrap(t *testing.T) {
 				Symbol         string
 				Name           string
 			}
-			coin := coinMeta{InitialMint: new(big.Int).Mul(unit, big.NewInt(10)), MinTotalSupply: new(big.Int).Set(unit), MaxTotalSupply: new(big.Int).Mul(unit, big.NewInt(100)), Creator: creator, Crr: 50, Identity: "fixture", Symbol: "freshcoinx", Name: "Fresh reserve coin"}
+			coin := coinMeta{InitialMint: new(big.Int).Mul(unit, big.NewInt(10)), MinTotalSupply: new(big.Int).Set(unit), MaxTotalSupply: new(big.Int).Mul(unit, big.NewInt(100)), Creator: creator, Crr: 50, Identity: "fixture", Symbol: "freshcoinx", Name: "FRESH RESERVE COIN"}
 			create, err := tokenFactory.ABI.Pack("createToken", coin)
 			require.NoError(t, err)
 			commission := query(tokenFactory, tokenCenter, "getCommissionSymbol", coin.Symbol)[0].(*big.Int)

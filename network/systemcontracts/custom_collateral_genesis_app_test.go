@@ -70,7 +70,7 @@ func seedNativeCustomCollateralGenesis(t *testing.T, e isolatedBackendEnv, profi
 	creator := crypto.PubkeyToAddress(e.keys[3].PublicKey)
 	unit := func(amount int64) sdkmath.Int { return sdkmath.NewIntWithDecimal(amount, 18) }
 	volume := max(int64(10), fixtureVolume)
-	want := cointypes.Coin{Denom: "genesis20", Title: "Fresh isolated DRC20 collateral asset",
+	want := cointypes.Coin{Denom: "genesis20", Title: "FRESH ISOLATED DRC20 COLLATERAL ASSET",
 		Creator: sdk.AccAddress(creator.Bytes()).String(), CRR: 100, Identity: "fixture://approved-collateral/long-identity",
 		Volume: unit(volume), Reserve: unit(volume), MinVolume: unit(5), LimitVolume: unit(max(int64(100), volume+1))}
 	metadata := struct {

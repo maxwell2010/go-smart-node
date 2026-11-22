@@ -33,6 +33,7 @@ import (
 )
 
 const reservelessNativePhaseEnv = "MCND_RESERVELESS_NATIVE_PHASE"
+const reservelessFixtureName = "RESERVE FREE TOKEN"
 
 // A metadata payload is stored as untrusted text. This test never fetches or
 // renders its image; safe fetching, durable pinning and display are separate gates.
@@ -227,18 +228,20 @@ func runNativeReservelessTokens(t *testing.T, dir, phase string) {
 		require.Equal(t, checkpoint.Supply, l.supply().String())
 		call(3, checkpoint.Token, "mint", true, other, big.NewInt(1))
 		require.Equal(t, int64(14), balance(checkpoint.Token, other), "persisted admission must survive restart")
+		create(reservelessFixtureName, "newafter", true, true, 100, 200, false)
 		return
 	}
 	baseSupply := l.supply().String()
 	factoryNonce := app.EVMKeeper.GetNonce(l.snapshot(), profile.TokenCenter)
-	for _, name := range []string{"", " \u00a0\u3000", "\u200d", "A\u202eB"} {
+	for _, name := range []string{"", " \u00a0\u3000", "\u200d", "A\u202eB", "Reserve Free Token", "RESERVE FRЕE TOKEN", "ТОКЕН", "MSP"} {
 		create(name, "freex", true, true, 100, 200, false)
 	}
 	for _, symbol := range []string{"", " ", "msp", "del"} {
-		create("Free token", symbol, true, true, 100, 200, false)
+		create("FREE TOKEN", symbol, true, true, 100, 200, false)
 	}
 	require.Equal(t, factoryNonce, app.EVMKeeper.GetNonce(l.snapshot(), profile.TokenCenter), "invalid metadata must roll back the factory nonce")
-	token := create("Токен без резерва", "freex", true, true, 100, 200, true)
+	token := create(reservelessFixtureName, "freex", true, true, 100, 200, true)
+	create(reservelessFixtureName, "dupfree", true, true, 100, 200, false)
 	require.Equal(t, nativeAvatarMetadata, readIdentity(token), "signed creation must preserve avatar metadata bytes")
 	assertNativeReserveFeeQuotes(t, l, profile, token)
 	assertNativeDRC20FeePayments(t, l, token, dir)
@@ -264,14 +267,14 @@ func runNativeReservelessTokens(t *testing.T, dir, phase string) {
 	require.Equal(t, int64(125), app.EVMKeeper.GetState(l.snapshot(), token, supplySlot).Big().Int64())
 	require.Equal(t, int64(112), balance(token, expected.Actor))
 	require.Equal(t, int64(13), balance(token, other))
-	fixed := create("Fixed nonburnable asset", "fixedx", false, false, 10, 0, true)
+	fixed := create("FIXED NONBURNABLE ASSET", "fixedx", false, false, 10, 0, true)
 	call(3, fixed, "mint", false, expected.Actor, big.NewInt(1))
 	call(3, fixed, "burn", false, big.NewInt(1))
 	require.Equal(t, int64(10), balance(fixed, expected.Actor))
-	bad := create(strings.Repeat("x", 97), "longx", true, true, 10, 100, false)
+	bad := create(strings.Repeat("X", 97), "longx", true, true, 10, 100, false)
 	require.Empty(t, app.EVMKeeper.GetCode(l.snapshot(), app.EVMKeeper.GetCodeHash(l.snapshot(), bad)), "late admission failure must remove created code")
 	for index, metadata := range []string{strings.Repeat("x", 257), "metadata\x00tail", string([]byte{0xff})} {
-		bad := create("Rejected metadata fixture", []string{"badmetaone", "badmetatwo", "badmetathr"}[index], true, true, 10, 100, false, metadata)
+		bad := create("REJECTED METADATA FIXTURE", []string{"badmetaone", "badmetatwo", "badmetathr"}[index], true, true, 10, 100, false, metadata)
 		require.Empty(t, app.EVMKeeper.GetCode(l.snapshot(), app.EVMKeeper.GetCodeHash(l.snapshot(), bad)), "rejected metadata must not leave deployed code")
 	}
 	call(3, token, "approve", true, profile.CurveConverter, big.NewInt(1))
@@ -283,7 +286,7 @@ func runNativeReservelessTokens(t *testing.T, dir, phase string) {
 	require.Equal(t, int64(125), app.EVMKeeper.GetState(l.snapshot(), token, supplySlot).Big().Int64())
 	require.Equal(t, baseSupply, l.supply().String(), "ordinary token issuance and destruction must not issue or burn DEL")
 	checkpoint.Token, checkpoint.Supply = token, baseSupply
-	assertNativeBackedTokenLifecycle(t, l, profile, dir)
+	assertNativeBackedTokenLifecycle(t, l, profile, dir, reservelessFixtureName)
 	encoded, err := json.Marshal(checkpoint)
 	require.NoError(t, err)
 	require.NoError(t, os.WriteFile(filepath.Join(dir, "reserveless.json"), encoded, 0600))

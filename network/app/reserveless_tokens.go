@@ -119,7 +119,7 @@ func (c *withdrawalController) admitReservelessCreation(ctx sdk.Context, msg cor
 	name, symbol, tokenIdentity := args[0].(string), args[1].(string), args[6].(string)
 	mintable, burnable := args[2].(bool), args[3].(bool)
 	initial, cap := args[4].(*big.Int), args[5].(*big.Int)
-	if !identity.ValidDisplayName(name, 96) || len(symbol) < 3 || len(symbol) > 10 || reservedPublicTokenSymbol(symbol) || !identity.ValidPublicText(tokenIdentity, 256) ||
+	if !validPublicTokenName(name, maxReservelessNameBytes) || len(symbol) < 3 || len(symbol) > 10 || reservedPublicTokenSymbol(symbol) || !identity.ValidPublicText(tokenIdentity, 256) ||
 		(cap.Sign() > 0 && (!mintable || initial.Cmp(cap) > 0)) || ctx.BlockTime().Unix() < 0 {
 		return errors.New("invalid reserveless name, symbol, identity, flags or cap")
 	}
@@ -177,6 +177,9 @@ func (c *withdrawalController) admitReservelessCreation(ctx sdk.Context, msg cor
 	expected = append(expected, &ethtypes.Log{Address: token, Topics: []common.Hash{crypto.Keccak256Hash([]byte("Initialized(uint64)"))}, Data: common.BigToHash(big.NewInt(1)).Bytes()})
 	if !equalReservelessLogs(receipt.Logs, expected) {
 		return errors.New("reserveless creation logs differ from the signed factory initialization")
+	}
+	if err := r.reservePublicTokenName(ctx, name); err != nil {
+		return err
 	}
 	ctx.KVStore(r.store).Set(key, []byte{1})
 	return nil

@@ -27,7 +27,7 @@ type publicBackedMeta struct {
 	Identity, Symbol, Name                      string
 }
 
-func assertNativeBackedTokenLifecycle(t *testing.T, l nativeHistoricalLifecycle, profile ownedapp.WithdrawalProfile, dir string) {
+func assertNativeBackedTokenLifecycle(t *testing.T, l nativeHistoricalLifecycle, profile ownedapp.WithdrawalProfile, dir, existingFreeName string) {
 	t.Helper()
 	center, err := contracts.CompiledABI("NewNetworkTokenCenter")
 	require.NoError(t, err)
@@ -84,16 +84,25 @@ func assertNativeBackedTokenLifecycle(t *testing.T, l nativeHistoricalLifecycle,
 		return result.GasUsed
 	}
 	supply := l.supply().String()
-	metadata := publicBackedMeta{InitialMint: new(big.Int).Mul(unit, big.NewInt(10)), MinTotalSupply: new(big.Int).Set(unit), MaxTotalSupply: new(big.Int).Mul(unit, big.NewInt(1000)), Creator: creator, Crr: 50, Identity: nativeAvatarMetadata, Symbol: "publicbx", Name: "Резервный токен"}
+	metadata := publicBackedMeta{InitialMint: new(big.Int).Mul(unit, big.NewInt(10)), MinTotalSupply: new(big.Int).Set(unit), MaxTotalSupply: new(big.Int).Mul(unit, big.NewInt(1000)), Creator: creator, Crr: 50, Identity: nativeAvatarMetadata, Symbol: "publicbx", Name: "PUBLIC RESERVE TOKEN"}
 	payment := new(big.Int).Add(new(big.Int).Mul(unit, big.NewInt(10)), big.NewInt(250_000_000_000_000_000))
 	factoryNonce := l.app.EVMKeeper.GetNonce(l.snapshot(), profile.TokenCenter)
-	for _, name := range []string{"", " \u00a0\u3000", "\u200b", "A\u202eB"} {
+	for _, name := range []string{"", " \u00a0\u3000", "\u200b", "A\u202eB", "Public Reserve Token", "PUBLIC RЕSERVE TOKEN", "ТОКЕН", "MINTCANDY"} {
 		bad := metadata
 		bad.Name = name
 		data, err := center.Pack("createToken", bad)
 		require.NoError(t, err)
 		send(profile.TokenCenter, payment, data, false)
 		_, err = l.app.NativeCoinKeeper.GetCoin(l.snapshot(), bad.Symbol)
+		require.Error(t, err)
+	}
+	if existingFreeName != "" {
+		duplicate := metadata
+		duplicate.Name = existingFreeName
+		data, err := center.Pack("createToken", duplicate)
+		require.NoError(t, err)
+		send(profile.TokenCenter, payment, data, false)
+		_, err = l.app.NativeCoinKeeper.GetCoin(l.snapshot(), duplicate.Symbol)
 		require.Error(t, err)
 	}
 	require.Equal(t, factoryNonce, l.app.EVMKeeper.GetNonce(l.snapshot(), profile.TokenCenter), "invalid metadata must roll back the factory nonce")
@@ -109,11 +118,22 @@ func assertNativeBackedTokenLifecycle(t *testing.T, l nativeHistoricalLifecycle,
 	require.Equal(t, "publicbx", coin.Denom)
 	require.Equal(t, new(big.Int).Mul(unit, big.NewInt(10)).String(), coin.Reserve.String())
 	require.Equal(t, metadata.InitialMint.String(), coin.Volume.String())
+	duplicate := metadata
+	duplicate.Symbol = "secondbx"
+	data, err = center.Pack("createToken", duplicate)
+	require.NoError(t, err)
+	send(profile.TokenCenter, payment, data, false)
+	_, err = l.app.NativeCoinKeeper.GetCoin(l.snapshot(), duplicate.Symbol)
+	require.Error(t, err)
+	data, err = center.Pack("createTokenReserveless", metadata.Name, "samefree", true, true, big.NewInt(1), big.NewInt(100), "")
+	require.NoError(t, err)
+	send(profile.TokenCenter, new(big.Int), data, false)
 	data, err = tokenABI.Pack("transfer", common.HexToAddress(l.expect.Validators[0].EVM), unit)
 	require.NoError(t, err)
 	send(token, new(big.Int), data, true)
 	bad := metadata
 	bad.Symbol = "badbackx"
+	bad.Name = "BAD BACKED METADATA"
 	bad.Identity = strings.Repeat("x", 257)
 	data, err = center.Pack("createToken", bad)
 	require.NoError(t, err)
@@ -133,6 +153,7 @@ func assertNativeBackedTokenLifecycle(t *testing.T, l nativeHistoricalLifecycle,
 		length := i + 3
 		meta := metadata
 		meta.Symbol = strings.Repeat("q", length)
+		meta.Name = "TARIFF " + strings.Repeat("Q", length)
 		commission := new(big.Int).Mul(quarter, big.NewInt(quarters))
 		minPayment := new(big.Int).Add(commission, unit)
 		data, err := center.Pack("createToken", meta)

@@ -113,7 +113,7 @@ func runEmptyUserAssetsLifecycle(t *testing.T, dir, phase string) {
 		return
 	}
 	if phase == "run" {
-		assertNativeBackedTokenLifecycle(t, l, profile, dir)
+		assertNativeBackedTokenLifecycle(t, l, profile, dir, "")
 	} else {
 		assertNativeBackedTokenRestart(t, l, dir)
 	}
@@ -141,7 +141,7 @@ func assertEmptySeedReservelessLifecycle(t *testing.T, l nativeHistoricalLifecyc
 	}
 	if phase == "run" {
 		checkpoint.Supply = l.supply().String()
-		data, err := center.Pack("createTokenReserveless", "Empty launch reserve-free asset", "emptyfree", true, true,
+		data, err := center.Pack("createTokenReserveless", "EMPTY LAUNCH RESERVE-FREE ASSET", "emptyfree", true, true,
 			big.NewInt(100), big.NewInt(200), nativeAvatarMetadata)
 		require.NoError(t, err)
 		balance := func(address common.Address) sdkmath.Int {

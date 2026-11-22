@@ -82,7 +82,12 @@ func validateCustomCollateralGenesis(genesis cointypes.GenesisState) error {
 	if len(genesis.Coins) > maxCustomCollateralCoins || len(genesis.Checks) != 0 {
 		return errors.New("DRC20 genesis requires at most four approved coins and no redeemed checks")
 	}
+	names := make(map[string]bool, len(genesis.Coins))
 	for _, coin := range genesis.Coins {
+		if !validPublicTokenName(coin.Title, coinconfig.MaxCoinTitleLength) || names[coin.Title] {
+			return errors.New("DRC20 genesis requires unique uppercase Latin token names")
+		}
+		names[coin.Title] = true
 		if !cointypes.ValidContractAddress(coin.DRC20Contract) || coin.MinVolume.LT(coinconfig.MinCoinSupply) ||
 			coin.Reserve.LT(coinconfig.MinCoinReserve) {
 			return errors.New("DRC20 genesis requires a backed token with valid minimum supply and DEL reserve")
