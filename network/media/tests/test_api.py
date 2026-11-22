@@ -65,13 +65,15 @@ class ApiChecks(unittest.TestCase):
                 return CREATOR
 
             app = create_app(root, CHAIN, reader)
-            (root / 'objects' / name).write_bytes(prepared)
+            staged_path = root / 'objects' / name
+            staged_path.write_bytes(prepared[:5])
             response, _ = wsgi_request(app, '/ipfs/' + name)
             self.assertEqual(response['status'], 404)
             body = {**upload(TEST_PNG), 'contract': TOKEN, 'token_id': '0'}
             altered = {**body, 'metadata': {'name': 'changed'}}
             response, _ = wsgi_request(app, '/v1/publish', 'POST', canonical(altered))
             self.assertEqual(response['status'], 422)
+            self.assertEqual(staged_path.read_bytes(), prepared[:5])
             response, payload = wsgi_request(app, '/v1/publish', 'POST', canonical(body))
             self.assertEqual(response['status'], 200)
             self.assertEqual(json.loads(payload)['version'], 1)
@@ -79,7 +81,7 @@ class ApiChecks(unittest.TestCase):
             self.assertEqual(response['status'], 200)
             self.assertEqual(response['headers']['Content-Type'], 'application/json')
             self.assertEqual(payload, prepared)
-            (root / 'objects' / name).write_bytes(b'changed')
+            staged_path.write_bytes(b'changed')
             response, _ = wsgi_request(app, '/ipfs/' + name)
             self.assertEqual(response['status'], 503)
             self.assertEqual(response['headers']['Cache-Control'], 'no-store')

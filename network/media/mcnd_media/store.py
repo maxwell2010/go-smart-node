@@ -108,17 +108,65 @@ class MediaStore:
         require(self.root.is_absolute() and not self.root.is_symlink(),'absolute non-symlink root required')
         require('..' not in self.root.parts and all(not p.is_symlink() for p in self.root.parents),'symlink parent rejected')
         self.root.mkdir(parents=True,exist_ok=True)
-        require(not (self.root/'objects').is_symlink() and not (self.root/'index.sqlite3').is_symlink(),'symlink store rejected')
-        (self.root/'objects').mkdir(exist_ok=True)
+        objects = self.root / 'objects'
+        database = self.root / 'index.sqlite3'
+        require(not objects.is_symlink() and not database.is_symlink(), 'symlink store rejected')
+        objects.mkdir(exist_ok=True)
+        has_objects = next(objects.iterdir(), None) is not None
         self.authorizer=authorizer
         self.commitment_reader = commitment_reader
         require(type(quota) is int and 0<quota<=MAX_TOTAL,'invalid store quota')
         self.quota=quota
-        self.db=sqlite3.connect(self.root/'index.sqlite3')
-        self.db.execute('PRAGMA journal_mode=DELETE')
-        self.db.execute('CREATE TABLE IF NOT EXISTS records(asset TEXT,version INTEGER,owner TEXT,metadata TEXT,image TEXT,PRIMARY KEY(asset,version))')
-        self.db.commit()
+        if has_objects:
+            require(database.exists(), 'media index missing for existing objects; restore a verified backup')
+            self.db = sqlite3.connect(database.as_uri() + '?mode=rw', uri=True)
+        else:
+            self.db = sqlite3.connect(database)
+        try:
+            if has_objects:
+                require(self.db.execute("SELECT 1 FROM sqlite_schema WHERE type='table' AND name='records'").fetchone(),
+                        'media index missing for existing objects; restore a verified backup')
+            self.db.execute('PRAGMA journal_mode=DELETE')
+            self.db.execute('CREATE TABLE IF NOT EXISTS records(asset TEXT,version INTEGER,owner TEXT,metadata TEXT,image TEXT,PRIMARY KEY(asset,version))')
+            self.db.commit()
+        except BaseException:
+            self.db.close()
+            raise
     def close(self): self.db.close()
+
+    def _recover_object_usage(self):
+        # The caller holds BEGIN IMMEDIATE so another publisher cannot be staging files.
+        require(self.db.in_transaction, 'media recovery requires the writer transaction')
+        rows = self.db.execute('SELECT metadata,image FROM records LIMIT ?', (MAX_RECORDS + 1,)).fetchall()
+        require(len(rows) <= MAX_RECORDS, 'record quota')
+        referenced = {name for row in rows for name in row}
+        require(all(isinstance(name, str) and CID.fullmatch(name) for name in referenced), 'invalid recorded CID')
+        present = set()
+        orphans = []
+        used = 0
+        for path in (self.root / 'objects').iterdir():
+            require(len(present) < 2 * MAX_RECORDS + 2, 'object count exceeds recovery limit')
+            info = path.lstat()
+            require(stat.S_ISREG(info.st_mode) and CID.fullmatch(path.name), 'invalid object store entry')
+            present.add(path.name)
+            if path.name in referenced:
+                require(0 < info.st_size <= MAX_BLOB, 'invalid committed object size')
+                used += info.st_size
+            else:
+                orphans.append(path)
+        require(referenced <= present, 'committed media is missing; restore a verified backup')
+        for path in orphans:
+            path.unlink()
+        return used
+
+    def _sync_objects(self):
+        if sys.platform == 'linux':
+            directory = os.open(self.root / 'objects', os.O_RDONLY | os.O_DIRECTORY)
+            try:
+                os.fsync(directory)
+            finally:
+                os.close(directory)
+
     def _put(self,data):
         name=cid(data);path=self.root/'objects'/name
         if path.exists() or path.is_symlink():
@@ -160,6 +208,7 @@ class MediaStore:
                     'SELECT version,owner,metadata,image FROM records WHERE asset=? ORDER BY version DESC LIMIT 1',
                     (key,),
                 ).fetchone()
+            used = self._recover_object_usage()
             if previous is not None and previous[1:] == (actor, metadata_cid, image_cid):
                 # Check the already published objects before acknowledging a retry.
                 objects = self.root / 'objects'
@@ -172,15 +221,13 @@ class MediaStore:
             records=self.db.execute('SELECT COUNT(*) FROM records').fetchone()[0]
             version=self.db.execute('SELECT COALESCE(MAX(version),0)+1 FROM records WHERE asset=?',(key,)).fetchone()[0]
             require(records<MAX_RECORDS and version<=16,'record/version quota')
-            used=0
-            for p in (self.root/'objects').iterdir():
-                require(not p.is_symlink() and p.is_file() and CID.fullmatch(p.name),'invalid object store entry')
-                used+=p.stat().st_size
             needed=sum(len(data) for data in (clean,payload) if not (self.root/'objects'/cid(data)).exists())
             require(used+needed<=self.quota,'storage quota exceeded')
             for data in (clean,payload):
                 name,new=self._put(data)
                 if new: created.append(self.root/'objects'/name)
+            if created:
+                self._sync_objects()
             self.db.execute('INSERT INTO records VALUES(?,?,?,?,?)',(key,version,actor,metadata_cid,image_cid))
             self.db.commit()
         except BaseException:
@@ -230,6 +277,7 @@ class MediaStore:
         # Lock writers during the consistent index/object snapshot.
         self.db.execute('BEGIN IMMEDIATE')
         try:
+            self._recover_object_usage()
             rows,names=self.verify();index=canonical({'schema':1,'records':rows})
             require(len(index)<=MAX_INDEX,'backup index limit')
             with destination.open('xb') as handle:

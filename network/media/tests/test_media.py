@@ -1,8 +1,8 @@
 import hashlib,io,json,os,struct,zlib
 from pathlib import Path
-import sqlite3,tempfile,unittest,zipfile
+import sqlite3,subprocess,sys,tempfile,unittest,zipfile
 from unittest.mock import patch
-from mcnd_media.store import Asset,MediaStore,cid,restore,decode_image,strict,MAX_BLOB
+from mcnd_media.store import Asset,MediaStore,cid,restore,decode_image,canonical,strict,MAX_BLOB
 
 OWNER='0x'+'11'*20
 OTHER='0x'+'22'*20
@@ -110,6 +110,86 @@ class StoreTests(unittest.TestCase):
    self.assertEqual((restored.root/'objects'/original['image_uri'][7:]).read_bytes(),CLEAN)
   finally:restored.close()
   with self.assertRaises(ValueError):restore(backup,self.root/'restored',digest)
+
+ def test_recovers_blobs_after_worker_exits_without_rolling_back(self):
+  original = self.publish()
+  child = """
+import os, sys
+from pathlib import Path
+from mcnd_media.store import MediaStore, cid
+
+root, key, owner, partial, png_hex, metadata_hex = sys.argv[1:]
+image, metadata = bytes.fromhex(png_hex), bytes.fromhex(metadata_hex)
+store = MediaStore(Path(root))
+put = store._put
+
+def interrupted_write(data):
+    if partial == '1':
+        (store.root / 'objects' / cid(data)).write_bytes(data[:1])
+        os._exit(41)
+    saved = put(data)
+    if data == metadata:
+        os._exit(41)
+    return saved
+
+store._put = interrupted_write
+store._publish(key, owner, image, metadata)
+"""
+  for partial in (True, False):
+   with self.subTest(partial=partial):
+    expected_rows = self.store.records()
+    image = b'new-image-' + str(partial).encode()
+    metadata = {'name': 'Second version ' + str(partial)}
+    payload = canonical({**metadata, 'image': 'ipfs://' + cid(image)})
+    exit_status = subprocess.run(
+     [sys.executable, '-B', '-c', child, str(self.store.root), ASSET.key(), OWNER,
+      str(int(partial)), image.hex(), payload.hex()], timeout=10,
+    ).returncode
+    self.assertEqual(exit_status, 41)
+    self.assertEqual(self.store.records(), expected_rows)
+    self.assertTrue((self.store.root / 'objects' / cid(image)).is_file())
+    self.assertEqual((self.store.root / 'objects' / cid(payload)).exists(), not partial)
+    if partial:
+     with patch('mcnd_media.store.decode_image', return_value=image):
+      result = self.publish(metadata=metadata)
+     self.assertEqual(result['version'], 2)
+     self.assertEqual(result['image_uri'], 'ipfs://' + cid(image))
+     self.assertEqual(self.store.verify()[0][0]['metadata'], original['metadata_uri'][7:])
+    else:
+     archive = self.root / 'worker-crash.zip'
+     digest = self.store.backup(archive)
+     restored = restore(archive, self.root / 'recovered-worker', digest)
+     try:
+      self.assertEqual(restored.verify(), self.store.verify())
+      self.assertEqual(restored.records(), expected_rows)
+      self.assertFalse((self.store.root / 'objects' / cid(image)).exists())
+      self.assertFalse((self.store.root / 'objects' / cid(payload)).exists())
+     finally:
+      restored.close()
+
+ def test_missing_database_or_committed_object_preserves_unindexed_files(self):
+  missing_db = self.root / 'lost-index'
+  objects = missing_db / 'objects'
+  objects.mkdir(parents=True)
+  orphan = objects / cid(CLEAN)
+  orphan.write_bytes(CLEAN)
+  with self.assertRaisesRegex(ValueError, 'media index missing'):
+   MediaStore(missing_db)
+  self.assertFalse((missing_db / 'index.sqlite3').exists())
+  self.assertEqual(orphan.read_bytes(), CLEAN)
+  (missing_db / 'index.sqlite3').touch()
+  with self.assertRaisesRegex(ValueError, 'media index missing'):
+   MediaStore(missing_db)
+  self.assertEqual(orphan.read_bytes(), CLEAN)
+
+  original = self.publish()
+  objects = self.store.root / 'objects'
+  (objects / original['metadata_uri'][7:]).unlink()
+  orphan = objects / cid(b'partial')
+  orphan.write_bytes(b'p')
+  with self.assertRaisesRegex(ValueError, 'committed media is missing'):
+   self.store.backup(self.root / 'incomplete.zip')
+  self.assertEqual(orphan.read_bytes(), b'p')
  def test_tampered_backup_and_object_rejected(self):
   result=self.publish();backup=self.root/'backup.zip';digest=self.store.backup(backup)
   raw=bytearray(backup.read_bytes());raw[-1]^=1;backup.write_bytes(raw)
