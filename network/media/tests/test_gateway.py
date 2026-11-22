@@ -34,12 +34,13 @@ def request(port, path, method='GET'):
 
 
 @contextmanager
-def gateway(root, public):
+def gateway(root, public, rules=NGINX_RULES, http_rules=None):
     root.mkdir()
     with socket.socket() as listener:
         listener.bind(('127.0.0.1', 0))
         port = listener.getsockname()[1]
     config = root / 'nginx.conf'
+    http_include = f'include "{http_rules}";' if http_rules else ''
     config.write_text(f'''daemon off;
 master_process off;
 pid "{root}/nginx.pid";
@@ -47,6 +48,7 @@ lock_file "{root}/nginx.lock";
 error_log stderr;
 events {{ worker_connections 32; }}
 http {{
+    {http_include}
     access_log off;
     client_body_temp_path client-body;
     proxy_temp_path proxy;
@@ -56,7 +58,7 @@ http {{
     server {{
         listen 127.0.0.1:{port};
         root "{public}";
-        include "{NGINX_RULES}";
+        include "{rules}";
     }}
 }}
 ''', encoding='utf8')

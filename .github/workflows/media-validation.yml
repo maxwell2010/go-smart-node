@@ -23,7 +23,8 @@ jobs:
         run: |
           set -euo pipefail
           python3 -m venv "$RUNNER_TEMP/media-venv"
-          "$RUNNER_TEMP/media-venv/bin/pip" install --only-binary=:all: --require-hashes -r network/media/requirements-linux-cp312.lock
+          "$RUNNER_TEMP/media-venv/bin/pip" install --only-binary=:all: --require-hashes \
+            -r network/media/requirements-linux-cp312.lock -r network/media/requirements-api.lock
       - name: Unpack Nginx for the isolated localhost test
         run: |
           set -euo pipefail
