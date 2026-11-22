@@ -16,6 +16,10 @@ signed reserve-free token creation.
 [Signed media rehearsal](https://github.com/maxwell2010/go-smart-node/actions/runs/45005487421) ·
 [Release evidence](../network/docs/ru/evidence/software-release-1.1.2.json).
 
+The rehearsal was repeated from the published archive with the same binary and
+isolated genesis checksums. It also verified historical state retention and AppHash
+after restart. [Published archive rehearsal](https://github.com/maxwell2010/go-smart-node/actions/runs/45007278028).
+
 The release also includes separately attested offline launch tools for this
 binary. CI unpacked them, checked the draft, assembled an isolated genesis
 and installed the signed test genesis in a disposable validator home.

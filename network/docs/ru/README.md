@@ -7,8 +7,9 @@
 Версионные программные пакеты перечислены в
 [GitHub Releases](https://github.com/maxwell2010/go-smart-node/releases).
 Для установки готового пакета без Go и кэшей сборки используйте
-[готовую инструкцию 1.1.1 с однострочником](https://github.com/maxwell2010/go-smart-node/releases/download/v1.1.1/INSTALL_RU.md)
-и [правила проверки GitHub OIDC](SOFTWARE_RELEASE_VERIFICATION.md).
+[готовую инструкцию 1.1.2 с однострочником](https://github.com/maxwell2010/go-smart-node/releases/download/v1.1.2/INSTALL_RU.md)
+и [правила проверки GitHub OIDC](SOFTWARE_RELEASE_VERIFICATION.md). Для подготовки
+и проверки genesis есть [офлайн-комплект v1.1.2](INSTALL_LAUNCH_TOOLS.md).
 Публичный запуск сети требует отдельно утверждённых genesis и операторов.
 Корневой модуль
 и `dscd` относятся к отдельной legacy-сборке/replay. Нельзя заменять
@@ -58,7 +59,7 @@ Production-нагрузка завершённой сети ещё не изме
 Архивному RPC и сборочной машине нужна отдельная оценка. До production
 обязательны замеры CPU/RAM/IOPS, роста GiB/сутки, block latency и catch-up
 на целевой нагрузке. Оставляйте запас диска и настройте уведомления.
-[Измерения CPU, памяти и базы в GitHub CI](OPERATOR_LAUNCH.md#потребление-ресурсов-на-v111).
+[Измерения CPU, памяти и базы в GitHub CI](OPERATOR_LAUNCH.md#потребление-ресурсов-в-github-ci).
 
 ```sh
 set -eu
@@ -295,7 +296,7 @@ SDK53 учитывает также evidence.max_age_num_blocks и snapshot rete
 задаёт `indexer="null"`, `discard_abci_responses=true` ценой исторических
 запросов. Такую ноду нельзя обещать как полноценный Explorer/Hermes backend;
 нужны отдельные RPC/архивные службы.
-[Проверка истории и AppHash после pruning на v1.1.1](SYNCHRONIZATION_AND_STORAGE.md#проверка-pruning-на-v111).
+[Проверка истории и AppHash после pruning на v1.1.2](SYNCHRONIZATION_AND_STORAGE.md#проверка-pruning-на-v112).
 
 Жёсткого безопасного лимита N GiB эти настройки не дают: живое состояние
 и активные IBC commitments могут расти. Не удаляйте отдельные DB/SST/WAL

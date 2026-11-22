@@ -64,7 +64,7 @@ SHA256 Go 1.26.11 Linux amd64 из этой инструкции совпада�
 отдельные замеры. Место для backup, compaction и восстановления snapshot
 резервируется сверх живой базы.
 
-### Потребление ресурсов на v1.1.1
+### Потребление ресурсов в GitHub CI
 
 Для теста массовых делегаций GitHub CI собрал тестовый бинарник из исходников
 релиза v1.1.1 (`3880898bf95fe701b9d6f28d6e029a63f88a16ae`). Каждый сценарий
@@ -110,6 +110,14 @@ SHA256 Go 1.26.11 Linux amd64 из этой инструкции совпада�
 [Прогон GitHub CI](https://github.com/maxwell2010/go-smart-node/actions/runs/44707566885) ·
 [Отчёты `systemd.json` и `ibc.json`](https://github.com/maxwell2010/go-smart-node/actions/runs/44707566885/artifacts/14616861448) ·
 [Метрики процесса Linux](https://docs.kernel.org/filesystems/proc.html#process-specific-subdirectories).
+
+Повторный прогон с опубликованным v1.1.2 проверил те же 10 сценариев Hermes.
+Валидаторы занимали 228-246 МиБ пикового RSS на процесс и 2,37-2,68 МиБ в `data`.
+Пик наблюдающей ноды после перезапуска systemd составил 196 МиБ, ноды после
+восстановления из snapshot - 174 МиБ. Измерения относятся к короткому стенду
+с четырьмя валидаторами и свежей базой.
+[Прогон v1.1.2](https://github.com/maxwell2010/go-smart-node/actions/runs/45007278028) ·
+[Отчёты `systemd.json` и `ibc.json`](https://github.com/maxwell2010/go-smart-node/actions/runs/45007278028/artifacts/14748862323).
 
 Быстрый путь без локальной Go-сборки - установить уже проверенный архив.
 Для отдельного версионного software-only формата предусмотрены
