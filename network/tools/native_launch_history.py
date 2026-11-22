@@ -67,7 +67,7 @@ def rehearse_blockstore(binary, root, genesis, expected, keys, env, owner, repor
     run_nodes = (*validators, observer)
     for validator in validators:
         write_config(validator.home, 'app.toml', {(None, 'min-retain-blocks'): '0'})
-        write_config(validator.home, 'config.toml', {('consensus', 'timeout_commit'): '1s'})
+        write_config(validator.home, 'config.toml', {('consensus', 'timeout_commit'): json.dumps('1s')})
         validator.start(binary, env, owner, 'blockstore-validator')
     report['phase'] = 'blockstore-catchup'
     wait_replicas(validators, 8, 90, report)
