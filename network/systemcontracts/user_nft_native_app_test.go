@@ -114,13 +114,13 @@ func runNativeUserNFTLifecycle(t *testing.T, l nativeHistoricalLifecycle, dir, p
 			Refundable  bool
 			Burnable    bool
 		}{owner, "USER", "Коллекция NFT", "ipfs://user-collection", true, true}
-		before := l.app.EVMKeeper.GetNonce(l.snapshot(), profile.NFTCenter)
+		factoryNonce := l.app.EVMKeeper.GetNonce(l.snapshot(), profile.NFTCenter)
 		bad := meta
 		bad.Name = []string{"", " \u00a0\u3000", "\u200d", "A\u202eB"}[i]
 		badData, err := center.Pack(method, bad)
 		require.NoError(t, err)
 		send(3, profile.NFTCenter, badData, new(big.Int), false)
-		require.Equal(t, before, l.app.EVMKeeper.GetNonce(l.snapshot(), profile.NFTCenter))
+		require.Equal(t, factoryNonce, l.app.EVMKeeper.GetNonce(l.snapshot(), profile.NFTCenter))
 		if i == 2 {
 			for _, blankURI := range []bool{false, true} {
 				bad := meta
@@ -132,7 +132,7 @@ func runNativeUserNFTLifecycle(t *testing.T, l nativeHistoricalLifecycle, dir, p
 				data, err := center.Pack(method, bad)
 				require.NoError(t, err)
 				send(3, profile.NFTCenter, data, new(big.Int), false)
-				require.Equal(t, before, l.app.EVMKeeper.GetNonce(l.snapshot(), profile.NFTCenter))
+				require.Equal(t, factoryNonce, l.app.EVMKeeper.GetNonce(l.snapshot(), profile.NFTCenter))
 			}
 		}
 		data, err := center.Pack(method, meta)

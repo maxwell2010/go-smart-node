@@ -230,12 +230,14 @@ func runNativeReservelessTokens(t *testing.T, dir, phase string) {
 		return
 	}
 	baseSupply := l.supply().String()
+	factoryNonce := app.EVMKeeper.GetNonce(l.snapshot(), profile.TokenCenter)
 	for _, name := range []string{"", " \u00a0\u3000", "\u200d", "A\u202eB"} {
 		create(name, "freex", true, true, 100, 200, false)
 	}
 	for _, symbol := range []string{"", " ", "msp", "del"} {
 		create("Free token", symbol, true, true, 100, 200, false)
 	}
+	require.Equal(t, factoryNonce, app.EVMKeeper.GetNonce(l.snapshot(), profile.TokenCenter), "invalid metadata must roll back the factory nonce")
 	token := create("Токен без резерва", "freex", true, true, 100, 200, true)
 	require.Equal(t, nativeAvatarMetadata, readIdentity(token), "signed creation must preserve avatar metadata bytes")
 	assertNativeReserveFeeQuotes(t, l, profile, token)

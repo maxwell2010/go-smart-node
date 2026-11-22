@@ -86,6 +86,7 @@ func assertNativeBackedTokenLifecycle(t *testing.T, l nativeHistoricalLifecycle,
 	supply := l.supply().String()
 	metadata := publicBackedMeta{InitialMint: new(big.Int).Mul(unit, big.NewInt(10)), MinTotalSupply: new(big.Int).Set(unit), MaxTotalSupply: new(big.Int).Mul(unit, big.NewInt(1000)), Creator: creator, Crr: 50, Identity: nativeAvatarMetadata, Symbol: "publicbx", Name: "Резервный токен"}
 	payment := new(big.Int).Add(new(big.Int).Mul(unit, big.NewInt(10)), big.NewInt(250_000_000_000_000_000))
+	factoryNonce := l.app.EVMKeeper.GetNonce(l.snapshot(), profile.TokenCenter)
 	for _, name := range []string{"", " \u00a0\u3000", "\u200b", "A\u202eB"} {
 		bad := metadata
 		bad.Name = name
@@ -95,6 +96,7 @@ func assertNativeBackedTokenLifecycle(t *testing.T, l nativeHistoricalLifecycle,
 		_, err = l.app.NativeCoinKeeper.GetCoin(l.snapshot(), bad.Symbol)
 		require.Error(t, err)
 	}
+	require.Equal(t, factoryNonce, l.app.EVMKeeper.GetNonce(l.snapshot(), profile.TokenCenter), "invalid metadata must roll back the factory nonce")
 	data, err := center.Pack("createToken", metadata)
 	require.NoError(t, err)
 	send(profile.TokenCenter, payment, data, true)
