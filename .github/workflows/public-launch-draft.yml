@@ -22,7 +22,7 @@ on:
       - 'network/tools/*install_validator_genesis.py'
       - 'network/tools/configure_history.py'
       - 'network/tools/*native_launch_package.py'
-      - 'network/docs/ru/evidence/software-release-1.1.1.json'
+      - 'network/docs/ru/evidence/software-release-*.json'
       - 'network/tools/withdrawal_genesis_smoke.py'
   pull_request:
     paths:
@@ -42,7 +42,7 @@ on:
       - 'network/tools/*install_validator_genesis.py'
       - 'network/tools/configure_history.py'
       - 'network/tools/*native_launch_package.py'
-      - 'network/docs/ru/evidence/software-release-1.1.1.json'
+      - 'network/docs/ru/evidence/software-release-*.json'
       - 'network/tools/withdrawal_genesis_smoke.py'
 permissions:
   contents: read

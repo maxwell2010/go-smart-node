@@ -1,5 +1,21 @@
 # Software release verification
 
+## 1.1.2 software release
+
+[MintCandy Node 1.1.2](https://github.com/maxwell2010/go-smart-node/releases/tag/v1.1.2)
+is published for Linux amd64 at source `bf788083671e05d330df7ee48c711ff7fbb046ea`.
+Reserve-backed and reserve-free DRC20 assets share a registry of unique uppercase
+Latin names. Native validator and NFT admission reject blank or invisible names.
+
+The attested binary passed installation, four-validator quorum recovery,
+follower replay, systemd restart, snapshot restore and all ten Hermes scenarios
+on the same isolated signing domain. The final IBC checkpoint had all four
+signatures at height 58. A separate rehearsal checked media publication after a
+signed reserve-free token creation.
+[Attested rehearsal](https://github.com/maxwell2010/go-smart-node/actions/runs/45005205221) ·
+[Signed media rehearsal](https://github.com/maxwell2010/go-smart-node/actions/runs/45005487421) ·
+[Release evidence](../network/docs/ru/evidence/software-release-1.1.2.json).
+
 ## 1.1.1 software release
 
 [MintCandy Node 1.1.1](https://github.com/maxwell2010/go-smart-node/releases/tag/v1.1.1)

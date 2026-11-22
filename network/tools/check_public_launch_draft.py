@@ -13,6 +13,7 @@ import re
 DEFAULT_DRAFT = Path(__file__).resolve().parents[1] / 'docs/ru/public-genesis.draft.json'
 DEFAULT_PLAN = DEFAULT_DRAFT.with_name('public-launch-allocation.draft.json')
 DEFAULT_INTAKE = DEFAULT_DRAFT.with_name('operator-launch-intake.example.json')
+PUBLISHED_SOFTWARE_RECORD = DEFAULT_DRAFT.parent / 'evidence/software-release-1.1.2.json'
 ATOMS_PER_DEL = 10**18
 APPROVED_CHAIN_ID = 'mintcandy_9905401-1'
 APPROVED_EVM_CHAIN_ID = '9905401'
@@ -238,13 +239,22 @@ def check_intake(intake):
             'network launch approval inputs remain unresolved')
     release = intake['release']
     software = release['software']
-    require(software['version'] == '1.1.1' and
-            re.fullmatch(r'[0-9a-f]{40}', software['source_revision']) is not None and
-            all(re.fullmatch(r'[0-9a-f]{64}', software[name]) is not None
-                for name in ('binary_archive_sha256', 'binary_sha256')),
-            'released software metadata requires version and source/archive/binary hashes')
-    require(software['release_url'] == 'https://github.com/maxwell2010/go-smart-node/releases/tag/v1.1.1' and
-            software['signature_scheme'] == 'github_oidc_sigstore', 'software release identity differs')
+    published = read_json(PUBLISHED_SOFTWARE_RECORD)
+    require(published['status'] == 'software-release' and published['includesGenesis'] is False and
+            published['networkLaunchApproved'] is False, 'invalid published software record')
+    require(all(software[field] == published[record] for field, record in (
+        ('version', 'releaseVersion'), ('source_revision', 'sourceRevision'),
+        ('binary_archive_sha256', 'archiveSha256'), ('binary_sha256', 'binarySha256'),
+    )), 'intake software version or hashes differ from the published release')
+    github = 'https://github.com/maxwell2010/go-smart-node/releases'
+    version = published['releaseVersion']
+    download = f'{github}/download/v{version}'
+    require(software['release_url'] == f'{github}/tag/v{version}' and
+            software['binary_archive_url'] == f'{download}/mcnd-{version}-linux-amd64.tar.gz' and
+            software['installation_url'] == f'{download}/INSTALL_RU.md' and
+            software['source_ref'] == published['sourceRef'] and software['signature_scheme'] == 'github_oidc_sigstore' and
+            software['signer_workflow'] == 'maxwell2010/go-smart-node/.github/workflows/software-release.yml',
+            'software release identity differs')
     require(release['genesis'] and all(value is None for value in release['genesis'].values()),
             'software publication cannot approve or sign an unresolved public genesis')
     require(atomic(intake['allocation']['expected_total_atoms']) == APPROVED_SUPPLY and

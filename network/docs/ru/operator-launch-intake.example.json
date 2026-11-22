@@ -165,16 +165,16 @@
   },
   "release": {
     "software": {
-      "version": "1.1.1",
-      "source_revision": "3880898bf95fe701b9d6f28d6e029a63f88a16ae",
-      "release_url": "https://github.com/maxwell2010/go-smart-node/releases/tag/v1.1.1",
-      "binary_archive_url": "https://github.com/maxwell2010/go-smart-node/releases/download/v1.1.1/mcnd-1.1.1-linux-amd64.tar.gz",
-      "binary_archive_sha256": "5e2081b86197f24fcec1a0e1421edb387de06f49a520f420734ae649158eeeda",
-      "binary_sha256": "a0c0b9b08fc40bc875f289c3c8499a1fcdc1b9396113aed7cf6003554e26467d",
+      "version": "1.1.2",
+      "source_revision": "bf788083671e05d330df7ee48c711ff7fbb046ea",
+      "release_url": "https://github.com/maxwell2010/go-smart-node/releases/tag/v1.1.2",
+      "binary_archive_url": "https://github.com/maxwell2010/go-smart-node/releases/download/v1.1.2/mcnd-1.1.2-linux-amd64.tar.gz",
+      "binary_archive_sha256": "2599b216825fa25e8b7291c830cbdcadcd0bc36cfc4169c393213f27f01a9074",
+      "binary_sha256": "257ae81f573c68f6a0a7a9f463c6acb102e6ebe601239f319460d95895742a02",
       "signature_scheme": "github_oidc_sigstore",
       "signer_workflow": "maxwell2010/go-smart-node/.github/workflows/software-release.yml",
       "source_ref": "refs/heads/feat/native-duplicate-vote-master-20261112",
-      "installation_url": "https://github.com/maxwell2010/go-smart-node/releases/download/v1.1.1/INSTALL_RU.md"
+      "installation_url": "https://github.com/maxwell2010/go-smart-node/releases/download/v1.1.2/INSTALL_RU.md"
     },
     "genesis": {
       "url": null,

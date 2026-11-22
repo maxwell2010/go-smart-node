@@ -160,6 +160,14 @@ class PublicLaunchPlanTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, 'public genesis'):
             check_intake(self.intake)
 
+    def test_intake_software_hashes_must_match_the_published_record(self):
+        for field, length in (('source_revision', 40), ('binary_archive_sha256', 64), ('binary_sha256', 64)):
+            with self.subTest(field=field):
+                draft = copy.deepcopy(self.intake)
+                draft['release']['software'][field] = 'a' * length
+                with self.assertRaisesRegex(ValueError, 'differ from the published release'):
+                    check_intake(draft)
+
 
 if __name__ == '__main__':
     unittest.main()

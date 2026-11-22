@@ -1,0 +1,69 @@
+{
+  "archiveSha256": "2599b216825fa25e8b7291c830cbdcadcd0bc36cfc4169c393213f27f01a9074",
+  "binarySha256": "257ae81f573c68f6a0a7a9f463c6acb102e6ebe601239f319460d95895742a02",
+  "ci": {
+    "attestedBinaryRehearsal": "https://github.com/maxwell2010/go-smart-node/actions/runs/45005205221",
+    "committedMedia": "https://github.com/maxwell2010/go-smart-node/actions/runs/45005487421",
+    "ipfs": "https://github.com/maxwell2010/go-smart-node/actions/runs/45004941490",
+    "signedEVM": "https://github.com/maxwell2010/go-smart-node/actions/runs/45003565408",
+    "software": "https://github.com/maxwell2010/go-smart-node/actions/runs/45003814829"
+  },
+  "includesGenesis": false,
+  "minimumNativeValidatorCommission": "0.05",
+  "networkLaunchApproved": false,
+  "releaseVersion": "1.1.2",
+  "reportsSha256": {
+    "allocation.json": "31cd4e54763893a098bf0fbc27cb56d39865f397860b49f83245e44e87278a21",
+    "assembly.json": "31a2cec94cff8dc11862f68b9534f09078d486346795d2b87a8ccc46d15fbdf7",
+    "default-launch-parameters.json": "8c4caa732a01922b8362ba76abedd366e35f9a2757ba7cfbb174ca52c22b99cf",
+    "ibc.json": "4bc159080ffe0e8d9032fb70e9bc02731199bda1cf323aee968b06427e204860",
+    "install.json": "81010eb1d7b271f0c090d2286cf0309d3a360d2bde9a1842acdd70044b74f5fe",
+    "media.json": "e79152476e3bf8a9dceb7baa08ebfbef5c92e5104dc8a9543513d5b697aa0b01",
+    "quorum.json": "dca50fdbbebb95213283ed64e7d5e7796f502a034205e0f37821fc9dd5e6a960",
+    "systemd.json": "58371fc1a25e1d49b1551d8988ae8fa6285aa91b1175ddba21b0817a525e7063",
+    "validator-install.json": "b494f611f5e06e1538575f44b9ffcbfb23eab5cbd89eb612d3412b2eab9c5efe"
+  },
+  "sourceRef": "refs/heads/feat/native-duplicate-vote-master-20261112",
+  "sourceRevision": "bf788083671e05d330df7ee48c711ff7fbb046ea",
+  "status": "software-release",
+  "testNetwork": {
+    "chainId": "mintcandy_990014-1",
+    "changedDefaultSectionsComparedWith1_1_1": [],
+    "finalIbcConsensus": {
+      "app_hash": "0368AEB0A0EA8A54AC780C0957CAF3C80206685BB8B5A4B9B0616EEEDB99114B",
+      "block_hash": "9B52930E0CC03AA012ACB0F569054BC99A4D04A7AFBBED874312725360C628D4",
+      "height": 58,
+      "next_validators_hash": "5E64B64EACD3280CFD968D20000ED20771841FF364173822530FF05FFE059C49",
+      "power": {
+        "a": 10000,
+        "b": 10000,
+        "c": 10000,
+        "d": 10000
+      },
+      "proposer_address": "3449A0F6AE0D44305EFAB9264906E4E92E4C296E",
+      "signers": [
+        "a",
+        "b",
+        "c",
+        "d"
+      ],
+      "validators_hash": "5E64B64EACD3280CFD968D20000ED20771841FF364173822530FF05FFE059C49"
+    },
+    "genesisSha256": "8a584e9688adc821f5561f8efd27f6cf85d39ff50bb2dccd79fada0f4a65dc87",
+    "observedIbcPhases": {
+      "client_connection_channel_handshake": "PASS",
+      "daemon_live_relay": "PASS",
+      "daemon_restart_backlog": "PASS",
+      "error_ack_refund": "PASS",
+      "foreign_bank_voucher": "PASS",
+      "foreign_bank_voucher_return": "PASS",
+      "native_send": "PASS",
+      "pending_packet_restart": "PASS",
+      "timeout_refund": "PASS",
+      "voucher_return": "PASS"
+    },
+    "snapshotRestoredHeight": 40,
+    "validatorSignaturesAfterRecovery": 4,
+    "validatorSignaturesAtQuorum": 3
+  }
+}

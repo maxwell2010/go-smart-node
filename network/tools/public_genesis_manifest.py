@@ -9,14 +9,16 @@ import subprocess
 import tempfile
 
 from check_operator_applications import check_applications, read_intake
-from check_public_launch_draft import DEFAULT_DRAFT, DEFAULT_PLAN, check_contents, check_plan, read_json, require, unique_object
+from check_public_launch_draft import (
+    DEFAULT_DRAFT, DEFAULT_PLAN, PUBLISHED_SOFTWARE_RECORD, check_contents, check_plan, read_json, require, unique_object,
+)
 from install_validator_genesis import install_operator_genesis
 from native_launch_allocation import MAX_GENESIS_BYTES, summarize_allocation, verify_launch_plan
 from native_launch_package import BINARY, LIMITS, fingerprint, sha256, verify_detached_signature
 from verify_public_launch_genesis import verify_candidate, verify_cold_launch_profile
 
 
-RELEASE = DEFAULT_DRAFT.parent / 'evidence/software-release-1.1.1.json'
+RELEASE = PUBLISHED_SOFTWARE_RECORD
 MANIFEST_LIMIT = 8192
 PGP_LIMIT = 65536
 HEX256 = re.compile(r'[0-9a-f]{64}')

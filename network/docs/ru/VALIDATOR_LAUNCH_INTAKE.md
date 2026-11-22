@@ -241,9 +241,9 @@ P2P-подключений. Для sentry берите ID из его собст
 
 ## Доверие к программе и окончательному genesis
 
-Программа `mcnd` **1.1.1 уже опубликована**. В JSON-разделе `release.software`
+Программа `mcnd` **1.1.2 опубликована**. В JSON-разделе `release.software`
 указаны известные source SHA, SHA256 и GitHub OIDC signer.
-[Установка без Go](https://github.com/maxwell2010/go-smart-node/releases/download/v1.1.1/INSTALL_RU.md),
+[Установка без Go](https://github.com/maxwell2010/go-smart-node/releases/download/v1.1.2/INSTALL_RU.md),
 [строгая проверка GitHub-аттестации](SOFTWARE_RELEASE_VERIFICATION.md).
 Постоянный личный GPG-ключ не требуется для этой software-аттестации.
 
@@ -256,7 +256,7 @@ P2P-подключений. Для sentry берите ID из его собст
 
 На Linux из проверенной копии репозитория организатор собирает манифест после
 сверки заявок и холодного `InitChain`. `MCND_BINARY` указывает на файл `mcnd`
-из аттестованного выпуска 1.1.1. `CANDIDATE_GENESIS` и `INIT_CHAIN_REPORT`
+из аттестованного выпуска 1.1.2. `CANDIDATE_GENESIS` и `INIT_CHAIN_REPORT`
 берутся из одной проверки. Команда повторно сверяет каждую запись с реестром,
 проверяет SHA256 бинарника и создаёт новый JSON со временем UTC, двумя chain ID,
 SHA256 genesis и программного выпуска, суммой MSP и числом валидаторов.
