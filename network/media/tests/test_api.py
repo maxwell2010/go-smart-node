@@ -96,6 +96,9 @@ class ApiChecks(unittest.TestCase):
                 (400, b'{"kind":"erc20","kind":"erc721"}', {}),
                 (400, b'{}', {'CONTENT_LENGTH': '5'}),
                 (413, canonical(upload(b'x' * ((1 << 20) + 1))), {}),
+                (400, canonical({**upload(b'x'), 'metadata': {'name': ''}}), {}),
+                (400, canonical({**upload(b'x'), 'metadata': {'name': ' \u00a0\u200d'}}), {}),
+                (400, canonical({**upload(b'x'), 'metadata': {'name': 'A\u202eB'}}), {}),
             ):
                 with self.subTest(status=status, env=env):
                     response, _ = wsgi_request(app, '/v1/prepare', 'POST', body, **env)

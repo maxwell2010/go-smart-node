@@ -27,8 +27,7 @@ func (app *App) nativeValidatorRegistration(ctx sdk.Context, metadata, proposer,
 	if !app.usesNativeValidatorRegistration() {
 		return nil, errors.New("native validator registration governance is disabled")
 	}
-	moniker := strings.TrimSpace(title)
-	if len(moniker) == 0 || len(moniker) > 70 {
+	if !identity.ValidDisplayName(title, validatortypes.MaxValidatorNameBytes) {
 		return nil, errors.New("native validator registration title must be a valid validator moniker")
 	}
 	operator, err := app.AccountKeeper.AddressCodec().StringToBytes(proposer)

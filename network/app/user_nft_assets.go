@@ -213,7 +213,7 @@ func (c *withdrawalController) admitUserNFTCreation(ctx sdk.Context, msg core.Me
 		return err
 	}
 	meta := abi.ConvertType(args[0], new(userNFTMetadata)).(*userNFTMetadata)
-	if meta.Creator != msg.From || !validReservelessText(meta.Name, 1, 96) || !validReservelessText(meta.Symbol, 1, 32) || !validReservelessText(meta.ContractURI, 1, 2048) {
+	if meta.Creator != msg.From || !identity.ValidDisplayName(meta.Name, 96) || !identity.ValidDisplayName(meta.Symbol, 32) || !identity.ValidDisplayName(meta.ContractURI, 2048) {
 		return errors.New("invalid signed NFT creator or metadata")
 	}
 	event := factory.Events["NFTCreated"]
@@ -373,7 +373,7 @@ func (c *withdrawalController) admitUserNFTMint(ctx sdk.Context, msg core.Messag
 		uriIndex = 3
 	}
 	uri := args[uriIndex].(string)
-	if !validReservelessText(uri, 1, 2048) {
+	if !identity.ValidDisplayName(uri, 2048) {
 		return errors.New("invalid NFT metadata URI")
 	}
 	if !reserved && (msg.Value.Sign() != 0 || args[len(args)-2].(*big.Int).Sign() != 0 || args[len(args)-1].(common.Address) != (common.Address{})) {

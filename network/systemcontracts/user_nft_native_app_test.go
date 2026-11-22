@@ -95,7 +95,7 @@ func runNativeUserNFTLifecycle(t *testing.T, l nativeHistoricalLifecycle, dir, p
 		for i, target := range cp.Collections {
 			collection, err := l.app.NativeNFTKeeper.GetCollectionByDRC(l.snapshot(), target.Hex())
 			require.NoError(t, err)
-			require.Equal(t, "User NFT", collection.ExternalName)
+			require.Equal(t, "Коллекция NFT", collection.ExternalName)
 			token, err := l.app.NativeNFTKeeper.GetToken(l.snapshot(), cp.NativeIDs[i])
 			require.NoError(t, err)
 			require.Equal(t, "ipfs://user-nft-metadata", token.URI)
@@ -113,7 +113,28 @@ func runNativeUserNFTLifecycle(t *testing.T, l nativeHistoricalLifecycle, dir, p
 			ContractURI string
 			Refundable  bool
 			Burnable    bool
-		}{owner, "USER", "User NFT", "ipfs://user-collection", true, true}
+		}{owner, "USER", "Коллекция NFT", "ipfs://user-collection", true, true}
+		before := l.app.EVMKeeper.GetNonce(l.snapshot(), profile.NFTCenter)
+		bad := meta
+		bad.Name = []string{"", " \u00a0\u3000", "\u200d", "A\u202eB"}[i]
+		badData, err := center.Pack(method, bad)
+		require.NoError(t, err)
+		send(3, profile.NFTCenter, badData, new(big.Int), false)
+		require.Equal(t, before, l.app.EVMKeeper.GetNonce(l.snapshot(), profile.NFTCenter))
+		if i == 2 {
+			for _, blankURI := range []bool{false, true} {
+				bad := meta
+				if blankURI {
+					bad.ContractURI = " \u00a0"
+				} else {
+					bad.Symbol = " \u00a0"
+				}
+				data, err := center.Pack(method, bad)
+				require.NoError(t, err)
+				send(3, profile.NFTCenter, data, new(big.Int), false)
+				require.Equal(t, before, l.app.EVMKeeper.GetNonce(l.snapshot(), profile.NFTCenter))
+			}
+		}
 		data, err := center.Pack(method, meta)
 		require.NoError(t, err)
 		ret := send(3, profile.NFTCenter, data, new(big.Int), true)
@@ -145,6 +166,13 @@ func runNativeUserNFTLifecycle(t *testing.T, l nativeHistoricalLifecycle, dir, p
 		}
 		if i >= 2 {
 			args = append(args, new(big.Int), common.Address{})
+		}
+		if i == 3 {
+			badArgs := append([]interface{}(nil), args...)
+			badArgs[3] = " \u00a0"
+			data, err := asset.Pack(mint, badArgs...)
+			require.NoError(t, err)
+			send(3, target, data, value, false)
 		}
 		data, err = asset.Pack(mint, args...)
 		require.NoError(t, err)

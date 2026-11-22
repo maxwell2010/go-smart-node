@@ -127,6 +127,9 @@ func validateWithdrawalGenesisSnapshot(profile WithdrawalProfile, nft *nfttypes.
 			return errors.New("withdrawal genesis cannot import precomputed native power or mismatched eligibility")
 		}
 		if profile.EnableNativeConsensus {
+			if !identity.ValidDisplayName(val.Description.Moniker, validatortypes.MaxValidatorNameBytes) {
+				return errors.New("withdrawal genesis: invalid validator name")
+			}
 			if err := validateNativeValidatorCommission(val.Commission); err != nil {
 				return fmt.Errorf("withdrawal genesis: %w", err)
 			}

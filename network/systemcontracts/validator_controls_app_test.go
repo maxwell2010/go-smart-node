@@ -194,8 +194,11 @@ func runNativeValidatorSelfControls(t *testing.T, dir, phase string) {
 	// A valid EVM log with invalid native metadata rolls back the whole call.
 	offline := read(first.Operator)
 	submit(0, false, "updateValidatorMeta", common.HexToAddress(first.EVM), `{"avatar_uri":"javascript:bad"}`)
+	for _, bad := range []string{`{"name":""}`, `{"name":" \u00a0\u3000"}`, `{"name":"\u200d"}`, `{"name":"A\u202eB"}`} {
+		submit(0, false, "updateValidatorMeta", common.HexToAddress(first.EVM), bad)
+	}
 	require.Equal(t, offline, read(first.Operator))
-	metadata, err := ownedapp.CanonicalValidatorControlMetadata([]byte(`{"name":"Self operator A","description":"Verified signed self control","avatar_uri":"ipfs://bafyfixture/avatar.png","commission":"0.125"}`))
+	metadata, err := ownedapp.CanonicalValidatorControlMetadata([]byte(`{"name":"Оператор А","description":"Verified signed self control","avatar_uri":"ipfs://bafyfixture/avatar.png","commission":"0.125"}`))
 	require.NoError(t, err)
 	before, err := app.NativeValidatorKeeper.GetValidator(l.snapshot(), first.Operator)
 	require.NoError(t, err)
@@ -204,6 +207,7 @@ func runNativeValidatorSelfControls(t *testing.T, dir, phase string) {
 	require.NoError(t, err)
 	require.Equal(t, before.RewardAddress, after.RewardAddress)
 	require.Equal(t, before.ConsensusPubkey, after.ConsensusPubkey)
+	require.Equal(t, "Оператор А", after.Description.Moniker)
 	require.Equal(t, "0.125000000000000000", after.Commission.String())
 	aboveFloor := read(first.Operator)
 	submit(0, false, "updateValidatorMeta", common.HexToAddress(first.EVM),

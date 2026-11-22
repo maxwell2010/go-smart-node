@@ -12,6 +12,7 @@ import (
 	ethtypes "github.com/ethereum/go-ethereum/core/types"
 	validatorkeeper "github.com/maxwell2010/go-smart-node/network/decimal/validator/keeper"
 	validatortypes "github.com/maxwell2010/go-smart-node/network/decimal/validator/types"
+	"github.com/maxwell2010/go-smart-node/network/identity"
 	contracts "github.com/maxwell2010/go-smart-node/network/systemcontracts"
 	"io"
 	"strings"
@@ -68,25 +69,14 @@ func CanonicalValidatorControlMetadata(raw []byte) ([]byte, error) {
 	if meta.Name == nil && meta.Description == nil && meta.AvatarURI == nil && meta.Commission == nil {
 		return nil, errors.New("empty validator metadata change")
 	}
-	valid := func(s string, max int) bool {
-		if len(s) > max || !utf8.ValidString(s) {
-			return false
-		}
-		for _, r := range s {
-			if r < 32 || r == 127 {
-				return false
-			}
-		}
-		return true
-	}
 	if meta.Name != nil {
-		v := strings.TrimSpace(*meta.Name)
-		if v == "" || !valid(v, 70) {
+		if !identity.ValidDisplayName(*meta.Name, validatortypes.MaxValidatorNameBytes) {
 			return nil, errors.New("invalid validator name")
 		}
+		v := strings.TrimSpace(*meta.Name)
 		meta.Name = &v
 	}
-	if meta.Description != nil && !valid(*meta.Description, 280) {
+	if meta.Description != nil && !identity.ValidPublicText(*meta.Description, 280) {
 		return nil, errors.New("invalid validator description")
 	}
 	if meta.AvatarURI != nil {

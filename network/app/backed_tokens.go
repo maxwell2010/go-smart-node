@@ -101,7 +101,7 @@ func (c *withdrawalController) admitBackedToken(ctx sdk.Context, sender common.A
 		return true, err
 	}
 	meta := abi.ConvertType(args[0], new(backedTokenMeta)).(*backedTokenMeta)
-	if meta.Creator != msg.From || !validReservelessText(meta.Name, 1, coinconfig.MaxCoinTitleLength) || !validReservelessText(meta.Identity, 0, 256) || !coinconfig.CoinDenomValidator.MatchString(meta.Symbol) || meta.Symbol == identity.BaseDenom || meta.Symbol == "msp" {
+	if meta.Creator != msg.From || !identity.ValidDisplayName(meta.Name, coinconfig.MaxCoinTitleLength) || !identity.ValidPublicText(meta.Identity, 256) || !coinconfig.CoinDenomValidator.MatchString(meta.Symbol) || reservedPublicTokenSymbol(meta.Symbol) {
 		return true, errors.New("invalid backed token creator or bounded display metadata")
 	}
 	commission := backedSymbolCommission(len(meta.Symbol))

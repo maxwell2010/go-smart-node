@@ -36,7 +36,7 @@ func checkNativeGovernanceSignalRoutesAndTally(t *testing.T, a *App) {
 	profile := WithdrawalProfile{
 		Gateway: common.HexToAddress("0x1111"), WrappedDEL: common.HexToAddress("0x2222"),
 		SettlementOnly: true, EnableDELDelegation: true, EnableDELHold: true,
-		EnableNativeConsensus: true, EnableNativeGovernance: true,
+		EnableNativeConsensus: true, EnableNativeGovernance: true, EnableNativeDuplicateVote: true,
 	}
 	a.withdrawals = &withdrawalController{profile: profile}
 	circuit := nativeConsensusCircuit{app: a}
@@ -115,6 +115,20 @@ func checkNativeGovernanceSignalRoutesAndTally(t *testing.T, a *App) {
 	id, err := a.GovKeeper.ProposalID.Peek(ctx)
 	require.NoError(t, err)
 	require.Equal(t, govGenesis.StartingProposalId, id)
+	registrationKey := ed25519.GenPrivKeyFromSecret([]byte("new named operator"))
+	registration, err := BuildNativeValidatorRegistrationMetadata(a.chainID, a.evmChainID, proposer, 100, 5, registrationKey.Key)
+	require.NoError(t, err)
+	for _, title := range []string{" \u00a0\u3000", "\u200d", "A\u202eB"} {
+		proposal, err := govv1.NewMsgSubmitProposal(nil, deposit, proposer.String(), registration, title, "Register a validator", false)
+		require.NoError(t, err)
+		_, err = a.MsgServiceRouter().Handler(proposal)(ctx, proposal)
+		require.ErrorContains(t, err, "valid validator moniker")
+	}
+	_, err = a.nativeValidatorRegistration(ctx, registration, proposer.String(), "Валидатор №1")
+	require.NoError(t, err)
+	unchangedID, err := a.GovKeeper.ProposalID.Peek(ctx)
+	require.NoError(t, err)
+	require.Equal(t, id, unchangedID)
 
 	signal, err := govv1.NewMsgSubmitProposal(nil, deposit, proposer.String(), "ipfs://signal", "Signal", "Test signal", false)
 	require.NoError(t, err)

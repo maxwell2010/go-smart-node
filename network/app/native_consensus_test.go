@@ -215,12 +215,16 @@ func TestNativeConsensusValidatesGenesisSnapshot(t *testing.T) {
 		{"commission below floor", func(state *validatortypes.GenesisState) {
 			state.Validators[0].Commission = sdkmath.LegacyMustNewDecFromStr("0.049999999999999999")
 		}, "between 5% and 100%"},
+		{"validator name with no visible characters", func(state *validatortypes.GenesisState) {
+			state.Validators[0].Description.Moniker = "\u00a0\u200d"
+		}, "invalid validator name"},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			state := &validatortypes.GenesisState{
 				BindingDomain: &validatortypes.EVMSourceDomain{},
 				Validators: []validatortypes.Validator{{Status: validatortypes.BondStatus_Unbonded, Online: true,
-					Commission: sdkmath.LegacyNewDecWithPrec(NativeValidatorMinCommissionPercent, 2)}},
+					Description: validatortypes.Description{Moniker: "Валидатор"},
+					Commission:  sdkmath.LegacyNewDecWithPrec(NativeValidatorMinCommissionPercent, 2)}},
 				EVMStakeBindings: []validatortypes.EVMStakeBinding{{}},
 				Delegations:      []validatortypes.Delegation{{}},
 			}

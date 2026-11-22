@@ -8,6 +8,7 @@ import ipaddress
 import json
 from pathlib import Path
 import re
+import unicodedata
 
 from check_public_launch_draft import (
     ATOMS_PER_DEL, DEFAULT_DRAFT, DEFAULT_PLAN, check_contents, check_plan, read_json, require, unique_object,
@@ -122,6 +123,9 @@ def check_operator(row, plan):
             'commission must be a decimal string from 0 to 1 with at most 18 fractional digits')
     require(Decimal(commission) >= Decimal('0.05'), 'native validator commission must be at least 5%')
     moniker = text(row['moniker'], 'moniker', 70)
+    require('\ufffd' not in moniker and
+            any(unicodedata.category(ch)[0] in 'LNPS' and ch not in '\u115f\u1160\u2800\u3164\uffa0'
+                for ch in moniker), 'moniker must contain a visible character')
     text(row['operator_contact'], 'operator contact', 256)
 
     connectivity = row['connectivity']

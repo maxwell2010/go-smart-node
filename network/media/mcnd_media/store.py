@@ -16,6 +16,7 @@ import stat
 import subprocess
 import sys
 import tempfile
+import unicodedata
 import zipfile
 
 MAX_BLOB=10<<20
@@ -90,6 +91,12 @@ def decode_image(data,mime,avatar):
 def prepare_media(asset, metadata, image, mime):
     asset.key()
     doc = metadata_record(metadata)
+    name = doc['name']
+    invisible = '\u115f\u1160\u2800\u3164\uffa0'
+    require(all(unicodedata.category(ch) not in ('Cc', 'Cf', 'Zl', 'Zp') or ch in '\u200c\u200d'
+                for ch in name) and '\ufffd' not in name and
+            any(unicodedata.category(ch)[0] in 'LNPS' and ch not in invisible for ch in name),
+            'media name must contain visible text without control characters')
     clean = decode_image(image, mime, asset.kind == 'erc20')
     doc['image'] = 'ipfs://' + cid(clean)
     return clean, canonical(doc)

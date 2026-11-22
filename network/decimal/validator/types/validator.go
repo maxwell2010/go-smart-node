@@ -20,7 +20,12 @@ import (
 	"time"
 )
 
+const MaxValidatorNameBytes = 70
+
 func NewValidator(operator, reward string, key cryptotypes.PubKey, description Description, commission sdkmath.LegacyDec) (Validator, error) {
+	if !identity.ValidDisplayName(description.Moniker, MaxValidatorNameBytes) {
+		return Validator{}, fmt.Errorf("invalid validator name")
+	}
 	if key == nil {
 		return Validator{}, fmt.Errorf("missing consensus key")
 	}
@@ -92,7 +97,7 @@ func (v Validator) Validate() error {
 	if v.DRC20Contract != "" && (len(v.DRC20Contract) != 42 || !strings.HasPrefix(v.DRC20Contract, "0x") || !common.IsHexAddress(v.DRC20Contract) || common.HexToAddress(v.DRC20Contract) == (common.Address{})) {
 		return fmt.Errorf("invalid validator token contract")
 	}
-	if strings.TrimSpace(v.Description.Moniker) == "" || len(v.Description.Moniker) > 70 || len(v.Description.Identity) > 3000 || len(v.Description.Website) > 140 || len(v.Description.SecurityContact) > 140 || len(v.Description.Details) > 280 {
+	if strings.TrimSpace(v.Description.Moniker) == "" || len(v.Description.Moniker) > MaxValidatorNameBytes || len(v.Description.Identity) > 3000 || len(v.Description.Website) > 140 || len(v.Description.SecurityContact) > 140 || len(v.Description.Details) > 280 {
 		return fmt.Errorf("invalid validator description")
 	}
 	return nil

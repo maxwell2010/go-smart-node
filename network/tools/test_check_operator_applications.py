@@ -92,6 +92,9 @@ class OperatorApplicationTests(unittest.TestCase):
             ('gas_budget_atoms', '200', 'operator gas budget'),
             ('commission_fraction', '1.01', 'commission must be'),
             ('commission_fraction', '0.049999999999999999', 'commission must be at least 5%'),
+            ('moniker', '\u00a0\u3000', 'moniker'),
+            ('moniker', '\u2800', 'moniker'),
+            ('moniker', 'A\u202eB', 'moniker'),
         ):
             with self.subTest(field=field):
                 document = copy.deepcopy(self.document)

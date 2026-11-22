@@ -84,8 +84,17 @@ func assertNativeBackedTokenLifecycle(t *testing.T, l nativeHistoricalLifecycle,
 		return result.GasUsed
 	}
 	supply := l.supply().String()
-	metadata := publicBackedMeta{InitialMint: new(big.Int).Mul(unit, big.NewInt(10)), MinTotalSupply: new(big.Int).Set(unit), MaxTotalSupply: new(big.Int).Mul(unit, big.NewInt(1000)), Creator: creator, Crr: 50, Identity: nativeAvatarMetadata, Symbol: "publicbx", Name: "Public backed avatar token"}
+	metadata := publicBackedMeta{InitialMint: new(big.Int).Mul(unit, big.NewInt(10)), MinTotalSupply: new(big.Int).Set(unit), MaxTotalSupply: new(big.Int).Mul(unit, big.NewInt(1000)), Creator: creator, Crr: 50, Identity: nativeAvatarMetadata, Symbol: "publicbx", Name: "Резервный токен"}
 	payment := new(big.Int).Add(new(big.Int).Mul(unit, big.NewInt(10)), big.NewInt(250_000_000_000_000_000))
+	for _, name := range []string{"", " \u00a0\u3000", "\u200b", "A\u202eB"} {
+		bad := metadata
+		bad.Name = name
+		data, err := center.Pack("createToken", bad)
+		require.NoError(t, err)
+		send(profile.TokenCenter, payment, data, false)
+		_, err = l.app.NativeCoinKeeper.GetCoin(l.snapshot(), bad.Symbol)
+		require.Error(t, err)
+	}
 	data, err := center.Pack("createToken", metadata)
 	require.NoError(t, err)
 	send(profile.TokenCenter, payment, data, true)
@@ -94,6 +103,7 @@ func assertNativeBackedTokenLifecycle(t *testing.T, l nativeHistoricalLifecycle,
 	token := common.HexToAddress(coin.DRC20Contract)
 	require.NotEqual(t, common.Address{}, token)
 	require.Equal(t, metadata.Identity, coin.Identity)
+	require.Equal(t, metadata.Name, coin.Title)
 	require.Equal(t, "publicbx", coin.Denom)
 	require.Equal(t, new(big.Int).Mul(unit, big.NewInt(10)).String(), coin.Reserve.String())
 	require.Equal(t, metadata.InitialMint.String(), coin.Volume.String())

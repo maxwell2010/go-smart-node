@@ -5,7 +5,6 @@ import (
 	"errors"
 	"math/big"
 	"sync"
-	"unicode/utf8"
 
 	sdk "github.com/cosmos/cosmos-sdk/types"
 	"github.com/ethereum/go-ethereum/accounts/abi"
@@ -13,6 +12,7 @@ import (
 	"github.com/ethereum/go-ethereum/core"
 	ethtypes "github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/crypto"
+	"github.com/maxwell2010/go-smart-node/network/identity"
 	contracts "github.com/maxwell2010/go-smart-node/network/systemcontracts"
 )
 
@@ -102,16 +102,8 @@ func canonicalReservelessArgs(method abi.Method, data []byte) ([]interface{}, er
 	return args, nil
 }
 
-func validReservelessText(s string, minimum, maximum int) bool {
-	if len(s) < minimum || len(s) > maximum || !utf8.ValidString(s) {
-		return false
-	}
-	for _, ch := range s {
-		if ch < 0x20 || ch == 0x7f {
-			return false
-		}
-	}
-	return true
+func reservedPublicTokenSymbol(symbol string) bool {
+	return symbol == identity.BaseDenom || symbol == "msp"
 }
 
 func (c *withdrawalController) admitReservelessCreation(ctx sdk.Context, msg core.Message, receipt *ethtypes.Receipt, beacon common.Address) error {
@@ -124,10 +116,10 @@ func (c *withdrawalController) admitReservelessCreation(ctx sdk.Context, msg cor
 	if err != nil {
 		return err
 	}
-	name, symbol, identity := args[0].(string), args[1].(string), args[6].(string)
+	name, symbol, tokenIdentity := args[0].(string), args[1].(string), args[6].(string)
 	mintable, burnable := args[2].(bool), args[3].(bool)
 	initial, cap := args[4].(*big.Int), args[5].(*big.Int)
-	if !validReservelessText(name, 1, 96) || !validReservelessText(symbol, 3, 10) || !validReservelessText(identity, 0, 256) ||
+	if !identity.ValidDisplayName(name, 96) || len(symbol) < 3 || len(symbol) > 10 || reservedPublicTokenSymbol(symbol) || !identity.ValidPublicText(tokenIdentity, 256) ||
 		(cap.Sign() > 0 && (!mintable || initial.Cmp(cap) > 0)) || ctx.BlockTime().Unix() < 0 {
 		return errors.New("invalid reserveless name, symbol, identity, flags or cap")
 	}
@@ -135,7 +127,7 @@ func (c *withdrawalController) admitReservelessCreation(ctx sdk.Context, msg cor
 	if err != nil {
 		return err
 	}
-	initialization, err := tokenABI.Pack("initialize", name, symbol, msg.From, mintable, burnable, initial, cap, identity)
+	initialization, err := tokenABI.Pack("initialize", name, symbol, msg.From, mintable, burnable, initial, cap, tokenIdentity)
 	if err != nil {
 		return err
 	}

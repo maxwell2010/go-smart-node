@@ -230,7 +230,13 @@ func runNativeReservelessTokens(t *testing.T, dir, phase string) {
 		return
 	}
 	baseSupply := l.supply().String()
-	token := create("Independent reserve-free asset", "freex", true, true, 100, 200, true)
+	for _, name := range []string{"", " \u00a0\u3000", "\u200d", "A\u202eB"} {
+		create(name, "freex", true, true, 100, 200, false)
+	}
+	for _, symbol := range []string{"", " ", "msp", "del"} {
+		create("Free token", symbol, true, true, 100, 200, false)
+	}
+	token := create("Токен без резерва", "freex", true, true, 100, 200, true)
 	require.Equal(t, nativeAvatarMetadata, readIdentity(token), "signed creation must preserve avatar metadata bytes")
 	assertNativeReserveFeeQuotes(t, l, profile, token)
 	assertNativeDRC20FeePayments(t, l, token, dir)

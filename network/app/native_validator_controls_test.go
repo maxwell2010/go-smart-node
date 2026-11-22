@@ -15,6 +15,13 @@ func TestValidatorControlMetadataBoundaries(t *testing.T) {
 	require.Contains(t, string(value), `"commission":"0.050000000000000000"`)
 	_, err = CanonicalValidatorControlMetadata([]byte(`{"commission":"0.049999999999999999"}`))
 	require.ErrorContains(t, err, "between 5% and 100%")
+	for _, input := range []string{`{"name":" \u00a0\u3000 "}`, `{"name":"\u200d"}`, `{"name":"A\u202eB"}`, `{"name":"\ud800"}`, `{"name":"\u2800"}`} {
+		_, err := CanonicalValidatorControlMetadata([]byte(input))
+		require.ErrorContains(t, err, "invalid validator name", input)
+	}
+	value, err = CanonicalValidatorControlMetadata([]byte(`{"name":" Валидатор Выбор ","description":""}`))
+	require.NoError(t, err)
+	require.JSONEq(t, `{"name":"Валидатор Выбор","description":""}`, string(value))
 	for _, input := range []string{`{}`, `{"operator":"0x1234"}`, `{"commission":"-0.1"}`, `{"commission":"1.01"}`, `{"name":""}`, `{"avatar_uri":"javascript:alert(1)"}`, `{"avatar_uri":"http://example.invalid/avatar.png"}`, `{"avatar_uri":"https://user:password@example.invalid/x"}`, `{"name":"A\u0000B"}`, `{"name":"A"} {"name":"B"}`} {
 		_, err := CanonicalValidatorControlMetadata([]byte(input))
 		require.Error(t, err, input)
