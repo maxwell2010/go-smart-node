@@ -35,11 +35,26 @@ jobs:
           dpkg-deb -x nginx_*.deb "$directory/extracted"
           "$directory/extracted/usr/sbin/nginx" -v
           echo "MCND_MEDIA_NGINX=$directory/extracted/usr/sbin/nginx" >> "$GITHUB_ENV"
+      - name: Install Kubo for isolated IPFS interoperability
+        run: |
+          set -euo pipefail
+          directory=$(mktemp -d "$RUNNER_TEMP/media-kubo.XXXXXXXX")
+          curl --fail --silent --show-error --location --retry 3 \
+            https://github.com/ipfs/kubo/releases/download/v0.43.1/kubo_v0.43.1_linux-amd64.tar.gz \
+            --output "$directory/kubo.tar.gz"
+          printf '%s  %s\n' 3f2bf974ab2a3ec6d997fac7d8cb46f59983a7cddd0b55ef998e6ce379155fb2 "$directory/kubo.tar.gz" \
+            | sha256sum --check --strict
+          tar --extract --gzip --file "$directory/kubo.tar.gz" --directory "$directory" kubo/ipfs
+          "$directory/kubo/ipfs" version
+          echo "MCND_MEDIA_KUBO=$directory/kubo/ipfs" >> "$GITHUB_ENV"
       - name: Test decoding, quotas and HTTP delivery from restored media
         run: |
           set -euo pipefail
-          export PYTHONPATH="$GITHUB_WORKSPACE/network/media"
-          "$RUNNER_TEMP/media-venv/bin/python" -B -m unittest discover -v -s network/media/tests -p 'test_*.py' 2>&1 | tee "$RUNNER_TEMP/media-validation.log"
+          sudo -n unshare --net -- bash -euc 'ip link set lo up; exec runuser -u "$SUDO_USER" -- "$@"' _ \
+            env PYTHONPATH="$GITHUB_WORKSPACE/network/media" MCND_MEDIA_TEST_FULL=1 \
+              MCND_MEDIA_NGINX="$MCND_MEDIA_NGINX" MCND_MEDIA_KUBO="$MCND_MEDIA_KUBO" \
+              "$RUNNER_TEMP/media-venv/bin/python" -B -m unittest discover -v -s network/media/tests -p 'test_*.py' \
+            2>&1 | tee "$RUNNER_TEMP/media-validation.log"
           git diff --exit-code
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
         if: always()

@@ -3,7 +3,6 @@
 No DNS, URL downloads, IPFS daemon, private keys or consensus writes exist here.
 A host process must supply an adapter that verifies current on-chain ownership.
 """
-import base64
 from dataclasses import dataclass
 import hashlib
 import io
@@ -19,18 +18,16 @@ import tempfile
 import unicodedata
 import zipfile
 
-MAX_BLOB=10<<20
+from .ipfs import CID, MAX_FILE_SIZE, RAW_BLOCK_LIMIT, cid, matches_cid, object_cid
+
+MAX_BLOB=MAX_FILE_SIZE
 MAX_TOTAL=64<<20
 MAX_INDEX=1<<20
 MAX_RECORDS=512
-CID=re.compile(r'bafkrei[a-z2-7]{52}')
 ADDRESS=re.compile(r'0x[0-9a-f]{40}')
 
 def require(ok,message):
     if not ok: raise ValueError(message)
-
-def cid(data):
-    return 'b'+base64.b32encode(b'\x01\x55\x12\x20'+hashlib.sha256(data).digest()).decode().lower().rstrip('=')
 
 def canonical(value):
     return json.dumps(value,ensure_ascii=False,sort_keys=True,separators=(',',':'),allow_nan=False).encode()
@@ -98,7 +95,7 @@ def prepare_media(asset, metadata, image, mime):
             any(unicodedata.category(ch)[0] in 'LNPS' and ch not in invisible for ch in name),
             'media name must contain visible text without control characters')
     clean = decode_image(image, mime, asset.kind == 'erc20')
-    doc['image'] = 'ipfs://' + cid(clean)
+    doc['image'] = 'ipfs://' + object_cid(clean)
     return clean, canonical(doc)
 
 def regular_read(path,limit):
@@ -108,6 +105,10 @@ def regular_read(path,limit):
         st=os.fstat(f.fileno());require(stat.S_ISREG(st.st_mode) and 0<st.st_size<=limit,'invalid file size/type')
         data=f.read(limit+1);require(len(data)<=limit,'file grew beyond bound')
     return data
+
+class CommitmentMismatch(ValueError):
+    """State was verified, but the asset committed to different metadata."""
+
 
 class MediaStore:
     def __init__(self,root,authorizer=None,quota=MAX_TOTAL,*,commitment_reader=None):
@@ -174,8 +175,9 @@ class MediaStore:
             finally:
                 os.close(directory)
 
-    def _put(self,data):
-        name=cid(data);path=self.root/'objects'/name
+    def _put(self,data,*,legacy_raw=False):
+        name=cid(data) if legacy_raw else object_cid(data)
+        path=self.root/'objects'/name
         if path.exists() or path.is_symlink():
             require(regular_read(path,MAX_BLOB)==data,'existing content mismatch');return name,False
         fd=os.open(path,os.O_WRONLY|os.O_CREAT|os.O_EXCL,0o600)
@@ -199,10 +201,21 @@ class MediaStore:
     def publish_committed(self, asset, metadata, image, mime):
         require(self.commitment_reader is not None, 'verified chain commitment reader required')
         clean, payload = prepare_media(asset, metadata, image, mime)
-        return self._publish(asset.key(), None, clean, payload, asset=asset)
+        key = asset.key()
+        try:
+            return self._publish(key, None, clean, payload, asset=asset)
+        except CommitmentMismatch:
+            if len(clean) <= RAW_BLOCK_LIMIT:
+                raise
+            # A URI committed before UnixFS support still authenticates its
+            # original raw image. Only a verified URI mismatch permits retry.
+            legacy = strict(payload)
+            legacy['image'] = 'ipfs://' + cid(clean)
+            return self._publish(key, None, clean, canonical(legacy), asset=asset, legacy_raw=True)
 
-    def _publish(self, key, actor, clean, payload, *, asset=None):
-        image_cid, metadata_cid = cid(clean), cid(payload)
+    def _publish(self, key, actor, clean, payload, *, asset=None, legacy_raw=False):
+        image_cid = cid(clean) if legacy_raw else object_cid(clean)
+        metadata_cid = cid(payload)
         created=[]
         try:
             self.db.execute('BEGIN IMMEDIATE')
@@ -228,10 +241,14 @@ class MediaStore:
             records=self.db.execute('SELECT COUNT(*) FROM records').fetchone()[0]
             version=self.db.execute('SELECT COALESCE(MAX(version),0)+1 FROM records WHERE asset=?',(key,)).fetchone()[0]
             require(records<MAX_RECORDS and version<=16,'record/version quota')
-            needed=sum(len(data) for data in (clean,payload) if not (self.root/'objects'/cid(data)).exists())
+            blobs = ((image_cid, clean), (metadata_cid, payload))
+            needed = sum(len(data) for name, data in blobs if not (self.root / 'objects' / name).exists())
             require(used+needed<=self.quota,'storage quota exceeded')
-            for data in (clean,payload):
-                name,new=self._put(data)
+            for expected, data in blobs:
+                if expected.startswith('bafkrei') and len(data) > RAW_BLOCK_LIMIT:
+                    name, new = self._put(data, legacy_raw=True)
+                else:
+                    name, new = self._put(data)
                 if new: created.append(self.root/'objects'/name)
             if created:
                 self._sync_objects()
@@ -271,7 +288,8 @@ class MediaStore:
             for field in ('metadata','image'):
                 name=row[field];require(isinstance(name,str) and CID.fullmatch(name),'invalid CID')
                 value=regular_read(self.root/'objects'/name,MAX_BLOB)
-                require(cid(value)==name,'content hash mismatch');required.add(name)
+                require(matches_cid(name,value),'content hash mismatch');required.add(name)
+            require(row['metadata'].startswith('bafkrei'), 'metadata CID must address a raw JSON block')
             raw=regular_read(self.root/'objects'/row['metadata'],64<<10)
             doc=strict(raw);require(doc.pop('image',None)=='ipfs://'+row['image'],'metadata image reference mismatch')
             metadata_record(doc)
@@ -321,8 +339,9 @@ def restore(archive,destination,expected_sha256,authorizer=None):
                     require(len(data)==info.file_size and len(data)<=limit,'truncated backup')
                     if info.filename=='index.json': index=strict(data)
                     else:
-                        require(cid(data)==info.filename[8:],'backup object CID mismatch')
-                        store._put(data)
+                        name = info.filename[8:]
+                        require(matches_cid(name,data),'backup object CID mismatch')
+                        store._put(data, legacy_raw=name.startswith('bafkrei'))
                 require(set(index)=={'schema','records'} and index['schema']==1 and isinstance(index['records'],list) and len(index['records'])<=MAX_RECORDS,'invalid backup index')
                 for row in index['records']:
                     require(isinstance(row,dict) and set(row)=={'asset','version','owner','metadata','image'} and type(row['version']) is int,'invalid record fields')

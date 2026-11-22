@@ -5,6 +5,7 @@ import io
 import json
 import os
 from pathlib import Path
+import random
 import socket
 import subprocess
 import sys
@@ -13,6 +14,7 @@ import time
 import unittest
 
 from mcnd_media.gateway_export import export_backup
+from mcnd_media.ipfs import matches_cid
 from mcnd_media.store import Asset, MediaStore, cid
 
 
@@ -123,10 +125,14 @@ class GatewayChecks(unittest.TestCase):
             source = root / 'primary'
             store = MediaStore(source, lambda asset, actor, action: actor == OWNER)
             try:
-                for asset, label, color in ((AVATAR, 'Token avatar', 'blue'), (NFT, 'NFT metadata', 'red')):
-                    image = io.BytesIO()
-                    Image.new('RGB', (7, 6), color).save(image, format='JPEG')
-                    store.publish(asset, OWNER, {'name': label}, image.getvalue(), 'image/jpeg')
+                avatar = io.BytesIO()
+                Image.new('RGB', (7, 6), 'blue').save(avatar, format='JPEG')
+                store.publish(AVATAR, OWNER, {'name': 'Token avatar'}, avatar.getvalue(), 'image/jpeg')
+                image = io.BytesIO()
+                size = (1100, 900)
+                Image.frombytes('RGB', size, random.Random(462).randbytes(size[0] * size[1] * 3)).save(image, 'PNG')
+                published_nft = store.publish(NFT, OWNER, {'name': 'NFT metadata'}, image.getvalue(), 'image/png')
+                self.assertTrue(published_nft['image_uri'].startswith('ipfs://bafybei'))
                 checksum = store.backup(backup)
             finally:
                 store.close()
@@ -155,7 +161,7 @@ class GatewayChecks(unittest.TestCase):
             self.assertEqual(headers['X-Content-Type-Options'], 'nosniff')
             self.assertEqual(headers['Access-Control-Allow-Origin'], '*')
             self.assertIn('immutable', headers['Cache-Control'])
-            self.assertEqual(cid(body), row['cid'])
+            self.assertTrue(matches_cid(row['cid'], body))
             self.assertEqual(hashlib.sha256(body).hexdigest(), row['sha256'])
             self.assertEqual(len(body), row['sizeBytes'])
             head, head_headers, empty = request(port, row['path'], 'HEAD')

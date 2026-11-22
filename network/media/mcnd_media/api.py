@@ -11,7 +11,8 @@ from subprocess import TimeoutExpired
 
 from .commitment import CommittedReader, LocalRPC
 from .gateway_export import PNG_HEADER
-from .store import CID, MAX_BLOB, Asset, MediaStore, canonical, cid, prepare_media, regular_read, require, strict
+from .ipfs import CID, cid, matches_cid, object_cid
+from .store import MAX_BLOB, Asset, MediaStore, canonical, prepare_media, regular_read, require, strict
 
 
 BODY_LIMIT = 14 << 20
@@ -73,7 +74,7 @@ def read_object(root, name):
     (content_type,), = rows
     is_image = content_type == 'image/png'
     blob = regular_read(root / 'objects' / name, MAX_BLOB if is_image else METADATA_LIMIT)
-    if cid(blob) != name or (is_image and not blob.startswith(PNG_HEADER)):
+    if not matches_cid(name, blob) or (is_image and not blob.startswith(PNG_HEADER)):
         raise OSError('published object failed integrity verification')
     return content_type, blob
 
@@ -112,7 +113,7 @@ def create_app(root, chain_id, commitment_reader):
                         result = store.publish_committed(*args)
                 else:
                     clean, payload = prepare_media(*args)
-                    result = {'metadata_uri': 'ipfs://' + cid(payload), 'image_uri': 'ipfs://' + cid(clean)}
+                    result = {'metadata_uri': 'ipfs://' + cid(payload), 'image_uri': 'ipfs://' + object_cid(clean)}
                 blob = canonical(result)
         except RequestError as error:
             status = error.status

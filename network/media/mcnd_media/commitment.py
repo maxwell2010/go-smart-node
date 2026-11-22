@@ -9,7 +9,8 @@ import re
 from urllib.error import URLError
 from urllib.request import HTTPRedirectHandler, ProxyHandler, Request, build_opener
 
-from .store import ADDRESS, MAX_BLOB, Asset, MediaStore, canonical, cid, prepare_media, regular_read, require, strict
+from .ipfs import cid, object_cid
+from .store import ADDRESS, MAX_BLOB, Asset, CommitmentMismatch, MediaStore, canonical, prepare_media, regular_read, require, strict
 
 
 # ABI selectors from the release contracts.
@@ -152,7 +153,8 @@ class CommittedReader:
             height = self._height()
             owner, committed_uri = (self._token(height, asset.contract) if asset.kind == 'erc20'
                                     else self._nft(height, asset))
-            require(abi_string(committed_uri) == uri, 'asset URI does not commit to this content')
+            if abi_string(committed_uri) != uri:
+                raise CommitmentMismatch('asset URI does not commit to this content')
             return abi_address(owner)
         except (KeyError, TypeError, AttributeError, IndexError):
             raise ValueError('invalid committed state response') from None
@@ -181,7 +183,7 @@ def main(argv=None):
         if args.command == 'prepare':
             asset = Asset(args.chain_id, '0x' + '01' * 20, args.kind)
             clean, payload = prepare_media(asset, metadata, image, args.mime)
-            result = {'metadata_uri': 'ipfs://' + cid(payload), 'image_uri': 'ipfs://' + cid(clean)}
+            result = {'metadata_uri': 'ipfs://' + cid(payload), 'image_uri': 'ipfs://' + object_cid(clean)}
         else:
             asset = Asset(args.chain_id, args.contract.lower(), args.kind, args.token_id)
             asset.key()

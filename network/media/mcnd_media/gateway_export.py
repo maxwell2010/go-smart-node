@@ -9,7 +9,8 @@ import sqlite3
 import tempfile
 import zipfile
 
-from .store import MAX_BLOB, canonical, cid, regular_read, require, restore
+from .ipfs import matches_cid
+from .store import MAX_BLOB, canonical, regular_read, require, restore
 
 
 PNG_HEADER = b'\x89PNG\r\n\x1a\n'
@@ -26,7 +27,7 @@ def stage_objects(store, public):
     for name in sorted(names):
         is_image = name in images
         raw = regular_read(store.root / 'objects' / name, MAX_BLOB if is_image else 64 << 10)
-        require(cid(raw) == name, 'object changed after store verification')
+        require(matches_cid(name, raw), 'object changed after store verification')
         content_type = 'image/png' if is_image else 'application/json'
         if is_image:
             require(raw.startswith(PNG_HEADER), 'image must be a normalized PNG')

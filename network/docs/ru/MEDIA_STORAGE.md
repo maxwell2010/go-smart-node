@@ -133,10 +133,12 @@ Base64 - 14 MiB. Ограничения исходного файла - 1 MiB д
 
 ## Формат и целостность
 
-Asset namespace состоит из chain ID, contract, типа и token ID. Объекты имеют
-CIDv1 raw/SHA-256; SHA256 вычисляется по фактически сохранённым байтам. Это
-валидный content identifier, но создание имени CID не размещает объект в IPFS.
-Metadata JSON canonical, поле image - `ipfs://<CID нормализованной картинки>`.
+Asset namespace состоит из chain ID, contract, типа и token ID. JSON и изображения
+до 2 МиБ включительно сохраняют CIDv1 raw/SHA-256. Изображения большего размера
+получают UnixFS CIDv1 с блоками по 256 КиБ. Поле `image` в JSON указывает
+на CID нормализованной картинки. Сохранённые ранее raw CID продолжают работать
+через HTTP и резервные копии. Стандартный Bitswap передаёт raw-блоки до 2 МиБ.
+[Параметры UnixFS](https://specs.ipfs.tech/unixfs/) · [Лимит Kubo](https://docs.ipfs.tech/reference/kubo/cli/#ipfs-block-put).
 Доступный через identity/URI pointer на JSON короче 256 байт.
 
 Дедупликация не создаёт второй экземпляр одинакового содержимого. SQLite index
@@ -208,9 +210,28 @@ PYTHONPATH="$PWD/network/media" python3 -B -m mcnd_media.gateway_export \
 SHA256, MIME и отсутствие HTTP-доступа к служебным файлам.
 [Прогон Linux CI](https://github.com/maxwell2010/go-smart-node/actions/runs/44702433627).
 
-Раздача через этот URL сохраняет CID и байты. Публичный pinning в сети IPFS
-и интеграцию media-домена в кошельки нужно подключить отдельно.
+Раздача через этот URL сохраняет CID и байты. Интеграцию media-домена в кошельки
+нужно подключить отдельно.
 [Семантика путей и MIME в Nginx](https://nginx.org/en/docs/http/ngx_http_core_module.html#try_files).
+
+## Закрепление проверенной копии в Kubo
+
+Для импорта подготовьте отдельный инициализированный репозиторий Kubo.
+Утилита рассчитана на импорт при выключенном процессе Kubo для этого каталога.
+Проверьте SHA256 исходного архива по доверенному манифесту. Из корня проекта:
+
+```sh
+PYTHONPATH="$PWD/network/media" python3 -B -m mcnd_media.pin_backup \
+  --backup "$MEDIA_BACKUP" --backup-sha256 "$MEDIA_BACKUP_SHA256" \
+  --ipfs "$KUBO_BINARY" --repo "$DEDICATED_IPFS_PATH"
+```
+
+Утилита проверяет архив, сверяет CID каждого файла с результатом Kubo и читает
+закреплённые файлы обратно. В отчёте `pinned` перечислены закреплённые CID,
+в `legacyRawHttpOnly` - старые raw-блоки больше 2 МиБ. Ссылки на эти
+файлы продолжает обслуживать HTTPS-шлюз. После импорта доступность файлов в
+сети IPFS зависит от запуска и связности отдельного узла с закреплёнными данными.
+[Режимы Kubo](https://docs.ipfs.tech/reference/kubo/cli/).
 
 ## Команды Linux CI
 
