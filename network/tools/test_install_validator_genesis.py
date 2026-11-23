@@ -83,6 +83,10 @@ class PublishedValidatorInstallTest(unittest.TestCase):
                 with self.assertRaisesRegex(ValueError, 'genesis SHA256 differs'):
                     verify_manifest(args, genesis + b'\n', plan, draft, software)
                 verified = verify_manifest(args, genesis, plan, draft, software)
+                manifest_output = os.environ.get('MCND_VERIFIED_CONSENT_MANIFEST')
+                if manifest_output:
+                    with Path(manifest_output).open('xb') as stream:
+                        stream.write(args.manifest.read_bytes())
                 assembler = os.environ['MCND_VALIDATOR_INSTALL_ASSEMBLER']
                 output_file = root / 'operator-message.txt'
                 commonly = ['--manifest', str(args.manifest), '--genesis', str(fixture / 'genesis.json'),
