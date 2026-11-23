@@ -93,6 +93,14 @@ and a mismatched hostname. The gateway rejected plaintext on the HTTPS
 port. Tests also covered restored media and a separate systemd restart.
 [HTTPS media validation](https://github.com/maxwell2010/go-smart-node/actions/runs/45150996621).
 
+The attested daemon then confirmed a signed reserveless token creation
+at height 23 in the isolated EVM network. The live media API read the
+on-chain CID through an observer RPC, rejected modified metadata and
+returned the same version on retry over HTTPS. With the original API and
+store offline, a separate HTTPS export served both the restored PNG and
+JSON with their original CIDs and bytes.
+[Signed EVM to HTTPS restore rehearsal](https://github.com/maxwell2010/go-smart-node/actions/runs/45152969534).
+
 ## 1.1.4 software release
 
 [MintCandy Node 1.1.4](https://github.com/maxwell2010/go-smart-node/releases/tag/v1.1.4)
