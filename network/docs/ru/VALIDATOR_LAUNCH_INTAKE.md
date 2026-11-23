@@ -79,7 +79,8 @@ consensus address, уникальность операторов и P2P ID, су
 [плана распределения](public-launch-allocation.draft.json) и создаёт новый
 одноразовый код командой `openssl rand -hex 32`. Хеш утверждённого плана и
 код проверки записываются у организатора. Для повторной проверки нужен
-новый код. `MCND_GENESIS` указывает на актуальную утилиту из Linux CI.
+новый код. `MCND_GENESIS` указывает на `bin/mcnd-genesis` из
+[проверенного комплекта CI](INSTALL_LAUNCH_TOOLS.md#комплект-ci-для-наблюдающей-ноды).
 
 ```sh
 "$MCND_GENESIS" founder-proof payload \

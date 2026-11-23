@@ -79,6 +79,12 @@ key and returned `changed: false` on repeat.
 [Toolkit rehearsal and attestation](https://github.com/maxwell2010/go-smart-node/actions/runs/45145835371) ·
 [Download and verify](../network/docs/ru/INSTALL_LAUNCH_TOOLS.md#комплект-ci-для-наблюдающей-ноды).
 
+The current toolkit also contains the offline founder wallet proof. Linux CI
+accepted the disposable founder's signature and rejected a different signer,
+a different challenge and a byte-modified allocation plan. The attested
+toolkit retains the same v1.1.5 daemon compatibility.
+[Founder proof tests and toolkit](https://github.com/maxwell2010/go-smart-node/actions/runs/45148803166).
+
 ## 1.1.4 software release
 
 [MintCandy Node 1.1.4](https://github.com/maxwell2010/go-smart-node/releases/tag/v1.1.4)

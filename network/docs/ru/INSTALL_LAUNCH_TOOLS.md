@@ -71,10 +71,11 @@ printf '%s\n' "$work/tools"
 ## Комплект CI для наблюдающей ноды
 
 Этот комплект совместим с опубликованным `mcnd` v1.1.5 и содержит
-`install-observer` и готовый `bin/comet-commit-probe`. Артефакт хранится
+`install-observer`, готовый `bin/comet-commit-probe` и офлайн-команду
+`mcnd-genesis founder-proof`. Артефакт хранится
 в GitHub Actions 90 дней. После распаковки примените команду
 [установки проверенного genesis](https://github.com/maxwell2010/go-smart-node/blob/12f6c37364b7967af1eea5f8698fdd854653d9f7/network/docs/ru/OPERATOR_LAUNCH.md#применение-подписанного-публичного-genesis).
-[Отчёт CI и файлы](https://github.com/maxwell2010/go-smart-node/actions/runs/45145835371#artifacts).
+[Отчёт CI и файлы](https://github.com/maxwell2010/go-smart-node/actions/runs/45148803166#artifacts).
 
 ```sh
 set -eu
@@ -82,9 +83,9 @@ umask 077
 work=$(mktemp -d)
 repo=maxwell2010/go-smart-node
 archive=mintcandy-launch-tools-linux-amd64.tar.gz
-source_sha=12f6c37364b7967af1eea5f8698fdd854653d9f7
-archive_sha=41d0eb69bdc118f392d4fc3bc2c28d68b076f14fee90b157f70b383faee94fff
-gh run download 45145835371 --repo "$repo" --dir "$work" --name attested-mintcandy-launch-tools-1
+source_sha=bad9d2a68b6295b83af63c0cbe707293b328ddb2
+archive_sha=e4e8cf6ec108c881e2ae3d229e4b133efed031f59d007dd1d17b7fc5f5f0ca16
+gh run download 45148803166 --repo "$repo" --dir "$work" --name attested-mintcandy-launch-tools-1
 cd "$work"
 printf '%s  %s\n' "$archive_sha" "$archive" | sha256sum --check --strict
 gh attestation verify "$archive" --bundle launch-tools.sigstore.json \

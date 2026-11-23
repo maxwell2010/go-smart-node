@@ -1,0 +1,13 @@
+{
+  "checkedAtUtc": "2026-11-23T09:39:48.701563+00:00",
+  "chainId": 9905401,
+  "registrySnapshot": "https://chainid.network/chains_mini.json",
+  "snapshotSha256": "ba1cc1d5a14ade29ffd4bacc7e6f5487f40fd93dd387525fa4b491bde69a58a2",
+  "snapshotEntryCount": 2899,
+  "matchingEntries": [],
+  "registryRepository": "https://github.com/ethereum-lists/chains",
+  "registryCommit": "d72007c2723acf6b8723d16ba0f3457748d1af8c",
+  "recursiveTreeComplete": true,
+  "matchingRepositoryPaths": [],
+  "scope": "Registry collision preflight at the recorded snapshots."
+}
