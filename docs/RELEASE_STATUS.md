@@ -27,6 +27,11 @@ published daemon in a fresh validator home.
 [Download and verification](../network/docs/ru/INSTALL_LAUNCH_TOOLS.md) ·
 [Tools rehearsal](https://github.com/maxwell2010/go-smart-node/actions/runs/45110885140).
 
+The published toolkit also verified four offline operator signatures bound to
+the same signed test manifest and genesis used for installation. Verification
+rejected a set of three signatures.
+[Founding approvals rehearsal](https://github.com/maxwell2010/go-smart-node/actions/runs/45113292355).
+
 ## 1.1.2 software release
 
 [MintCandy Node 1.1.2](https://github.com/maxwell2010/go-smart-node/releases/tag/v1.1.2)
