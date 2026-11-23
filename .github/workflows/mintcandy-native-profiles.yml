@@ -112,9 +112,9 @@ jobs:
           "$work/mcnd-genesis" build "${options[@]}" --genesis "$work/rebuilt.json"
           cmp "$genesis" "$work/rebuilt.json"
           "$work/mcnd-genesis" verify "${options[@]}" --genesis "$genesis" > "$work/evidence/assembly.json"
-          jq -e --arg wrapper "$WRAPPER" --arg chain "$chain" --arg evm "$EVM_ID" \
+          jq -e --arg wrapper "$WRAPPER" --arg chain "$chain" --arg evm "$EVM_ID" --arg denom "$DENOM" \
             '.status == "CANDIDATE_INIT_CHAIN_VERIFIED" and .chainId == $chain and .evmChainId == $evm and
-             .wrappedTokenSymbol == $wrapper and .validators == 4 and .votingPower == 40000 and
+             .nativeDenom == $denom and .wrappedTokenSymbol == $wrapper and .validators == 4 and .votingPower == 40000 and
              .publicGenesisApproved == false' "$work/evidence/assembly.json" >/dev/null
           jq -e --arg denom "$DENOM" --arg symbol "$SYMBOL" \
             '.app_state.bank.denom_metadata | any(.base == $denom and .symbol == $symbol and .display == $symbol)' \
@@ -209,6 +209,7 @@ jobs:
                    verify_state_sync_checkpoint)
           inputs=(LICENSE network/docs/ru/{INSTALL_LAUNCH_TOOLS.md,OPERATOR_LAUNCH.md,VALIDATOR_LAUNCH_INTAKE.md}
                   network/docs/ru/{public-genesis.draft.json,public-launch-allocation.draft.json,operator-launch-intake.example.json}
+                  network/docs/ru/{public-genesis-msp.draft.json,public-launch-allocation-msp.draft.json}
                   network/docs/ru/evidence/software-release-1.1.5.json)
           for script in "${scripts[@]}"; do inputs+=("network/tools/$script.py"); done
           mapfile -d '' notices < <(git -C "$GITHUB_WORKSPACE" ls-files -z -- \
