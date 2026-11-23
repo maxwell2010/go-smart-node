@@ -46,7 +46,7 @@ metadata record 64 KiB. Нода не должна загружать HTTP/IPFS-
 
 В публичном проекте `coin.coins=[]`, пользовательские NFT bindings пусты,
 резервы начальных активов равны нулю. Системные Registry/TokenCenter/NFTCenter,
-Gateway, WDEL и vault квитанций всё равно нужны в согласованном профиле.
+Gateway, обёртка WMSP и vault квитанций входят в согласованный профиль.
 
 Опубликованный v1.0.0 требовал 1-4 обеспеченных coins и NFT origins. Новая
 реализация в feature-ветке допускает пустой authenticated registry и системную

@@ -61,12 +61,23 @@ same packet and one acknowledgment was recorded at height 46.
 [Combined rehearsal and report](https://github.com/maxwell2010/go-smart-node/actions/runs/45136627719).
 
 The first-block verification tool checked the approved test genesis SHA256
-and verified block 1 as reported by two isolated RPC endpoints. All four Ed25519 signatures
-verified with 40,000 of 40,000 voting power. The tool rejected a modified
-AppHash in the signed header. In the same run, a fresh observer restored
-snapshot 40 and agreed with the validators on the AppHash at height 44.
+and verified block 1 as reported by two isolated RPC endpoints. All four
+Ed25519 signatures verified with 40,000 of 40,000 voting power. The tool
+rejected a modified AppHash in the signed header. In the same run,
+a fresh observer restored snapshot 40 and agreed with the validators on
+the AppHash at height 44. A separate push run repeated these checks
+alongside the block retention and Hermes scenarios.
 [First block and snapshot rehearsal](https://github.com/maxwell2010/go-smart-node/actions/runs/45142480619) ·
+[Combined node, retention and Hermes run](https://github.com/maxwell2010/go-smart-node/actions/runs/45142445494) ·
 [Verification instructions](../network/docs/ru/VALIDATOR_LAUNCH_INTAKE.md#проверка-подписей-первого-блока).
+
+An independently attested toolkit adds `install-observer` and a prebuilt
+`comet-commit-probe` for Linux amd64. The v1.1.5 daemon validated the signed
+fixture genesis before installation in a fresh observer home. The installer
+preserved the other six home files, rejected a founding validator's consensus
+key and returned `changed: false` on repeat.
+[Toolkit rehearsal and attestation](https://github.com/maxwell2010/go-smart-node/actions/runs/45145835371) ·
+[Download and verify](../network/docs/ru/INSTALL_LAUNCH_TOOLS.md#комплект-ci-для-наблюдающей-ноды).
 
 ## 1.1.4 software release
 
