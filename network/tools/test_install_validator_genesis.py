@@ -46,6 +46,8 @@ class PreparedHomeTest(unittest.TestCase):
 @unittest.skipUnless(os.environ.get('MCND_VALIDATOR_INSTALL_BINARY'), 'requires the published Linux binary and disposable fixture')
 class PublishedValidatorInstallTest(unittest.TestCase):
     def test_exact_install_preserves_signer_and_rejects_used_or_unrelated_home(self):
+        import install_validator_genesis
+        import public_genesis_manifest
         from check_public_launch_draft import DEFAULT_DRAFT, read_json
         from mcnd_process_smoke import private_namespace
         from public_genesis_manifest import prepare_manifest, release_for, verify_manifest
@@ -53,6 +55,10 @@ class PublishedValidatorInstallTest(unittest.TestCase):
         from test_public_genesis_manifest import signed_fixture
 
         private_namespace()
+        installed_tools = os.environ.get('MCND_VALIDATOR_INSTALL_TOOLS')
+        if installed_tools:
+            for module in (install_validator_genesis, public_genesis_manifest):
+                self.assertEqual(Path(module.__file__).resolve().parent, Path(installed_tools).resolve())
         binary = Path(os.environ['MCND_VALIDATOR_INSTALL_BINARY'])
         fixture = Path(os.environ['MCND_VALIDATOR_INSTALL_FIXTURE'])
         genesis = (fixture / 'genesis.json').read_bytes()
@@ -164,6 +170,7 @@ class PublishedValidatorInstallTest(unittest.TestCase):
                 with Path(output).open('x', encoding='utf8') as stream:
                     json.dump({**report, 'chainId': chain_id, 'preservedHomeFiles': len(preserved),
                                'signatureVerified': True, 'consentPayloadVerified': True, 'idempotent': True, 'rejectsForeignKey': True,
+                               'installerFromArchive': bool(installed_tools),
                                'rejectsExistingState': True, 'observer': {**observer_report, 'idempotent': True,
                                    'rejectsFoundingKey': True, 'preservedHomeFiles': len(observer_files)}}, stream)
 
