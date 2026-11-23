@@ -82,8 +82,16 @@ key and returned `changed: false` on repeat.
 The current toolkit also contains the offline founder wallet proof. Linux CI
 accepted the disposable founder's signature and rejected a different signer,
 a different challenge and a byte-modified allocation plan. The attested
-toolkit retains the same v1.1.5 daemon compatibility.
-[Founder proof tests and toolkit](https://github.com/maxwell2010/go-smart-node/actions/runs/45148803166).
+toolkit retains the same v1.1.5 daemon compatibility. The same source revision
+passed the repeat observer, quorum, snapshot, block retention and Hermes gates.
+[Founder proof tests and toolkit](https://github.com/maxwell2010/go-smart-node/actions/runs/45148803166) ·
+[Repeat published-daemon rehearsal](https://github.com/maxwell2010/go-smart-node/actions/runs/45148747172).
+
+The isolated media gateway passed TLS 1.2 and TLS 1.3 publication and CID
+reads with Nginx and Gunicorn. Clients refused an untrusted certificate
+and a mismatched hostname. The gateway rejected plaintext on the HTTPS
+port. Tests also covered restored media and a separate systemd restart.
+[HTTPS media validation](https://github.com/maxwell2010/go-smart-node/actions/runs/45150996621).
 
 ## 1.1.4 software release
 
