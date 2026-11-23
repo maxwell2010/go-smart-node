@@ -14,13 +14,17 @@ genesis, число валидаторов, распределение моне�
 обычный development-сценарий. Допускается только канонический SemVer `X.Y.Z` без
 префикса `v`, ведущих нулей, prerelease и build metadata. Workflow разрешён
 в `maxwell2010/go-smart-node` на ветке
-`feat/native-duplicate-vote-master-20261112` или `release/**`.
+`feat/native-duplicate-vote-master-20261112`, `codex/mintcandy-native-denoms` или `release/**`.
 Запуск из PR или другого репозитория не предусмотрен. Пример вызова после
 согласования конечной ревизии и проверок:
 
 ```sh
 gh workflow run modern-network-development.yml --repo maxwell2010/go-smart-node --ref feat/native-duplicate-vote-master-20261112 -f software_release_version=1.0.0
 ```
+
+Для майнета MintCandy передайте `-f software_native_denom=msp`. Для нового
+тестового профиля предусмотрен `tmsp`. CI закрепляет выбранный тег сборки,
+проверяет denom на новом genesis и записывает `nativeDenom` в манифест пакета.
 
 Этот вызов не создаёт тег или GitHub Release. Запуск использует SHA выбранной
 ветки на момент dispatch. Перед выполнением сверяйте его с согласованным SHA.
@@ -102,6 +106,10 @@ python3 -B network/tools/verify_software_package.py \
   --archive "$ARCHIVE" --revision "$SOURCE_SHA" \
   --release-version "$RELEASE_VERSION"
 ```
+
+Для пакета майнета добавьте `--native-denom msp` к командам проверки и
+установки. Сверяйте это значение по сообщению о выпуске. Установщик
+проверяет профиль до записи программы по целевому пути.
 
 Инструмент читает ограниченный USTAR-формат без распаковки и без запуска
 бинарника: отклоняет ссылки, повторные/лишние файлы, genesis, приватные ключи,

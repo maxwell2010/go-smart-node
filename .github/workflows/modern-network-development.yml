@@ -6,6 +6,11 @@ on:
         description: Optional software-only SemVer X.Y.Z; empty keeps ordinary development packaging
         default: ''
         type: string
+      software_native_denom:
+        description: Native denomination for a versioned software package
+        default: del
+        type: choice
+        options: [del, msp, tmsp]
       security_audit:
         description: Check the exact daemon and source with pinned govulncheck
         default: false
@@ -49,11 +54,11 @@ on:
 permissions:
   contents: read
 concurrency:
-  group: mcnd-artifact-${{ github.ref }}-${{ inputs.software_release_version || 'development' }}-${{ inputs.launch_rehearsal }}-${{ inputs.launch_four_validators }}
+  group: mcnd-artifact-${{ github.ref }}-${{ inputs.software_release_version || 'development' }}-${{ inputs.software_native_denom || 'del' }}-${{ inputs.launch_rehearsal }}-${{ inputs.launch_four_validators }}
   cancel-in-progress: true
 jobs:
   software-release:
-    if: inputs.software_release_version != '' && github.repository == 'maxwell2010/go-smart-node' && github.event_name == 'workflow_dispatch' && (github.ref == 'refs/heads/feat/native-duplicate-vote-master-20261112' || startsWith(github.ref, 'refs/heads/release/'))
+    if: inputs.software_release_version != '' && github.repository == 'maxwell2010/go-smart-node' && github.event_name == 'workflow_dispatch' && (github.ref == 'refs/heads/feat/native-duplicate-vote-master-20261112' || github.ref == 'refs/heads/codex/mintcandy-native-denoms' || startsWith(github.ref, 'refs/heads/release/'))
     permissions:
       contents: read
       actions: read
@@ -62,6 +67,7 @@ jobs:
     uses: ./.github/workflows/software-release.yml
     with:
       release_version: ${{ inputs.software_release_version }}
+      native_denom: ${{ inputs.software_native_denom }}
   linux-amd64:
     if: ${{ !inputs.software_release_version }}
     runs-on: ubuntu-24.04

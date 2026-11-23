@@ -25,7 +25,7 @@ on:
 permissions:
   contents: read
 concurrency:
-  group: mcnd-software-release-${{ github.ref }}
+  group: mcnd-software-release-${{ github.ref }}-${{ inputs.native_denom || 'del' }}
   cancel-in-progress: false
 jobs:
   build-test-package:
@@ -218,7 +218,7 @@ jobs:
           ATTESTATION_BUNDLE: ${{ steps.provenance.outputs.bundle-path }}
         run: |
           set -euo pipefail
-          gh attestation verify "$SOFTWARE_ARCHIVE" --repo "$GITHUB_REPOSITORY" --signer-workflow "$GITHUB_REPOSITORY/.github/workflows/software-release.yml" --source-ref "$GITHUB_REF" --source-digest "$GITHUB_SHA" --signer-digest "$GITHUB_SHA" --deny-self-hosted-runners --format json > "$RUNNER_TEMP/software-attestation-verification.json"
+          gh attestation verify "$SOFTWARE_ARCHIVE" --bundle "$ATTESTATION_BUNDLE" --repo "$GITHUB_REPOSITORY" --signer-workflow "$GITHUB_REPOSITORY/.github/workflows/software-release.yml" --source-ref "$GITHUB_REF" --source-digest "$GITHUB_SHA" --signer-digest "$GITHUB_SHA" --deny-self-hosted-runners --format json > "$RUNNER_TEMP/software-attestation-verification.json"
           mkdir -p "$RUNNER_TEMP/software-attestation"
           cp -- "$ATTESTATION_BUNDLE" "$RUNNER_TEMP/software-attestation/provenance.sigstore.json"
           cp -- "$RUNNER_TEMP/software-verified.json" "$RUNNER_TEMP/software-attestation-verification.json" "$RUNNER_TEMP/software-attestation/"
