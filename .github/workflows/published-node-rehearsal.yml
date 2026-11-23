@@ -411,7 +411,10 @@ jobs:
           genesis_sha=$(sha256sum "$RELEASE_WORK/assembled/public/genesis.json" | cut -d' ' -f1)
           jq -e --arg sha "$genesis_sha" '.status == "PASS" and .loopbackOnlyNamespace and .offlineAssembledGenesis and
             .genesisSha256 == $sha and .followerVotingPower == 0 and .quorumRecovery.verifiedEd25519Signatures == 3 and
-            .fourSignerRecovery.verifiedEd25519Signatures == 4' "$RELEASE_WORK/evidence/quorum.json"
+            .fourSignerRecovery.verifiedEd25519Signatures == 4 and
+            (.foundingCommitProof | .status == "FOUNDING_COMMIT_VERIFIED" and .genesisSha256 == $sha and
+              .height == 1 and .matchingEndpoints == 2 and .modifiedAppHashRejected and .totalPower == 40000 and
+              .signedPower >= 30000)' "$RELEASE_WORK/evidence/quorum.json"
           jq -e --arg sha "$genesis_sha" '.status == "PASS" and .loopbackOnlyNamespace and .offlineAssembledGenesis and
             .genesisSha256 == $sha and .systemdFollower.genesisSha256 == $sha and
             .systemdRestart.sameHome and .wrappedTokenSymbol == "WMSP" and (.stateSync |

@@ -239,6 +239,24 @@ def restart_original_signer(node, binary, env, owner, state):
           "validator recovery changed its signing key")
 
 
+def verify_founding_commit(nodes, probe, report):
+    args = [str(probe), "--founding-genesis", str(nodes[0].home / "config/genesis.json"),
+            "--approved-genesis-sha256", report["genesisSha256"]]
+    reports = []
+    for node in nodes[:2]:
+        envelope = {"result": node.rpc("commit?height=1")}
+        result = subprocess.run(args, input=json.dumps(envelope), text=True, capture_output=True, timeout=10)
+        check(result.returncode == 0, "founding commit proof was rejected: " + result.stderr[:250])
+        reports.append(json.loads(result.stdout))
+    check(reports[0] == reports[1] and reports[0]["blockHash"] == verify_first_block(nodes),
+          "founding proof differs across RPC endpoints")
+    envelope["result"]["signed_header"]["header"]["app_hash"] = "00" * 32
+    rejected = subprocess.run(args, input=json.dumps(envelope), text=True, capture_output=True, timeout=10)
+    check(rejected.returncode == 1 and "commit signs block" in rejected.stderr,
+          "founding proof must reject a modified AppHash with the original signatures")
+    return {**reports[0], "matchingEndpoints": 2, "modifiedAppHashRejected": True}
+
+
 def assess_stalled_minority(nodes, report=None):
     """Feed actual isolated-node observations to the read-only health monitor."""
     statuses = []
@@ -572,6 +590,8 @@ def run_launch(binary, root, genesis, expected, keys, env, owner, report, *, fou
         node.start(binary, env, owner, "launch-validator")
     started_at = wait_replicas(validators, 8, 100, report)
     effective_set(validators, rows, 1, powers)
+    if commit_probe is not None and report.get("offlineAssembledGenesis"):
+        report["foundingCommitProof"] = verify_founding_commit(validators, commit_probe, report)
     if stopped is not None:
         last_startup_height = wait_replicas(validators, started_at + 4, 60, report) - 1
         report["initialConfirmedSigners"] = check_signing(validators, rows, 1, last_startup_height)

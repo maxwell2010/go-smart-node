@@ -5,6 +5,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"errors"
+	"flag"
 	"fmt"
 	"io"
 	"os"
@@ -115,6 +116,20 @@ func verify(input request) ([]string, error) {
 }
 
 func main() {
+	genesis := flag.String("founding-genesis", "", "Path to the approved founding genesis")
+	digest := flag.String("approved-genesis-sha256", "", "Independently verified founding genesis SHA256")
+	flag.Parse()
+	if flag.NArg() != 0 || (*genesis == "") != (*digest == "") {
+		fmt.Fprintln(os.Stderr, "use both --founding-genesis and --approved-genesis-sha256, or neither")
+		os.Exit(2)
+	}
+	if *genesis != "" {
+		if err := runFoundingProbe(*genesis, *digest, os.Stdin, os.Stdout); err != nil {
+			fmt.Fprintln(os.Stderr, "comet-commit-probe:", err)
+			os.Exit(1)
+		}
+		return
+	}
 	var input request
 	reader := json.NewDecoder(io.LimitReader(os.Stdin, 64*1024))
 	reader.DisallowUnknownFields()
