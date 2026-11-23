@@ -75,7 +75,7 @@ func NewLaunchConsent(manifestBytes, genesis []byte, approvedManifestHash string
 	if manifest.SchemaVersion != 1 || manifest.Scope != "mintcandy-public-genesis" || manifest.Validators != foundingValidatorCount {
 		return result, fmt.Errorf("expected the four-validator MintCandy genesis manifest")
 	}
-	if err := identity.ValidateChainIDs(manifest.ChainID, manifest.EVMChainID); err != nil {
+	if err := identity.ValidateProfileChainIDs(manifest.ChainID, manifest.EVMChainID); err != nil {
 		return result, err
 	}
 	if len(genesis) == 0 || len(genesis) > MaxCandidateBytes || manifest.GenesisSHA256 != fmt.Sprintf("%x", sha256.Sum256(genesis)) {

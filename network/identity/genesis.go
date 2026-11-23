@@ -15,7 +15,7 @@ func ValidateHomeGenesis(home, chainID string, evmID uint64) error {
 	if home == "" {
 		return fmt.Errorf("node home is required")
 	}
-	if err := ValidateChainIDs(chainID, evmID); err != nil {
+	if err := ValidateProfileChainIDs(chainID, evmID); err != nil {
 		return err
 	}
 	file, err := os.Open(filepath.Join(home, "config", "genesis.json"))
@@ -24,7 +24,8 @@ func ValidateHomeGenesis(home, chainID string, evmID uint64) error {
 	}
 	defer file.Close()
 	var genesis struct {
-		ChainID string `json:"chain_id"`
+		ChainID  string                     `json:"chain_id"`
+		AppState map[string]json.RawMessage `json:"app_state"`
 	}
 	decoder := json.NewDecoder(file)
 	if err := decoder.Decode(&genesis); err != nil {
@@ -34,11 +35,61 @@ func ValidateHomeGenesis(home, chainID string, evmID uint64) error {
 	if err := decoder.Decode(&extra); err != io.EOF {
 		return fmt.Errorf("node genesis must contain exactly one JSON document")
 	}
-	if err := ValidateChainIDs(genesis.ChainID, evmID); err != nil {
+	if err := ValidateProfileChainIDs(genesis.ChainID, evmID); err != nil {
 		return fmt.Errorf("genesis signing domain: %w", err)
 	}
 	if genesis.ChainID != chainID {
 		return fmt.Errorf("configured chain ID %q differs from genesis chain ID %q", chainID, genesis.ChainID)
 	}
-	return nil
+	return ValidateNativeDenomGenesis(genesis.AppState)
+}
+
+// ValidateNativeDenomGenesis checks the native denomination declared by the
+// modules before opening a database or applying a tagged network's genesis.
+func ValidateNativeDenomGenesis(state map[string]json.RawMessage) error {
+	if ProfileChainID == "" {
+		return nil
+	}
+	for _, module := range []struct{ name, field string }{
+		{"coin", "base_denom"},
+		{"validator", "base_denom"},
+		{"evm", "evm_denom"},
+		{"staking", "bond_denom"},
+		{"mint", "mint_denom"},
+	} {
+		var record struct {
+			Params map[string]json.RawMessage `json:"params"`
+		}
+		var denom string
+		if json.Unmarshal(state[module.name], &record) != nil ||
+			json.Unmarshal(record.Params[module.field], &denom) != nil || denom != BaseDenom {
+			return fmt.Errorf("genesis %s.%s must be %q", module.name, module.field, BaseDenom)
+		}
+	}
+	var evm struct {
+		Params struct {
+			Extended struct {
+				Denom string `json:"extended_denom"`
+			} `json:"extended_denom_options"`
+		} `json:"params"`
+	}
+	if json.Unmarshal(state["evm"], &evm) != nil || evm.Params.Extended.Denom != BaseDenom {
+		return fmt.Errorf("genesis EVM extended denomination must be %q", BaseDenom)
+	}
+	var bank struct {
+		Metadata []struct {
+			Base, Display, Name, Symbol string
+		} `json:"denom_metadata"`
+	}
+	if err := json.Unmarshal(state["bank"], &bank); err != nil {
+		return fmt.Errorf("decode native bank metadata: %w", err)
+	}
+	for _, meta := range bank.Metadata {
+		if meta.Base == BaseDenom && meta.Display == NativeTokenSymbol && meta.Name == NativeTokenName &&
+			meta.Symbol == NativeTokenSymbol {
+			return nil
+		}
+	}
+	return fmt.Errorf("genesis bank metadata must identify %s (%s) with base denomination %q",
+		NativeTokenName, NativeTokenSymbol, BaseDenom)
 }

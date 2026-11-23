@@ -169,7 +169,7 @@ func nativeAddress(bech32, prefix string) (common.Address, error) {
 }
 
 func (l Ledger) verify(profile app.WithdrawalProfile) ([]foundingPosition, sdkmath.Int, error) {
-	if err := identity.ValidateChainIDs(l.ChainID, l.EVMChainID); err != nil {
+	if err := identity.ValidateProfileChainIDs(l.ChainID, l.EVMChainID); err != nil {
 		return nil, sdkmath.Int{}, err
 	}
 	reg, funding := l.ContractSetup.Registration, l.ContractSetup.Funding

@@ -34,6 +34,7 @@ type ColdReport struct {
 	Power                 int64  `json:"votingPower"`
 	BankBalances          int    `json:"bankBalances"`
 	InitialSupplyAtoms    string `json:"initialSupplyAtoms"`
+	NativeDenom           string `json:"nativeDenom,omitempty"`
 	WrappedTokenSymbol    string `json:"wrappedTokenSymbol"`
 	PublicGenesisApproved bool   `json:"publicGenesisApproved"`
 }
@@ -173,11 +174,15 @@ func VerifyCold(body []byte, ledger Ledger, parameters LaunchParameters) (report
 		}
 	}
 	hash := sha256.Sum256(body)
+	var nativeDenom string
+	if identity.ProfileChainID != "" {
+		nativeDenom = supply.Denom
+	}
 	return ColdReport{
 		Status: "CANDIDATE_INIT_CHAIN_VERIFIED", ChainID: doc.ChainID, EVMChainID: ledger.EVMChainID,
 		GenesisSHA256: hex.EncodeToString(hash[:]), FirstBlockAppHash: hex.EncodeToString(block.AppHash),
 		Validators: len(set.Validators), Power: set.TotalVotingPower(), BankBalances: len(bank.Balances), InitialSupplyAtoms: supply.Amount.String(),
-		WrappedTokenSymbol: wrappedSymbol,
+		NativeDenom: nativeDenom, WrappedTokenSymbol: wrappedSymbol,
 	}, nil
 }
 

@@ -9,11 +9,12 @@ import (
 )
 
 const (
-	BaseDenom            = "del"
-	NativeTokenName      = "MintCandy"
-	NativeTokenSymbol    = "MSP"
-	WrappedMSPName       = "MintCandy Wrapped MSP"
-	WrappedMSPSymbol     = "WMSP"
+	MainnetChainID       = "mintcandy_9905401-1"
+	MainnetEVMChainID    = 9905401
+	MainnetBaseDenom     = "msp"
+	TestnetChainID       = "mintcandy_990098-1"
+	TestnetEVMChainID    = 990098
+	TestnetBaseDenom     = "tmsp"
 	Bech32Prefix         = "d0"
 	Bech32PrefixAccAddr  = "d0"
 	Bech32PrefixAccPub   = "d0pub"
@@ -46,6 +47,18 @@ func ValidateChainIDs(chainID string, evmID uint64) error {
 	switch evmID {
 	case 75, 202020, 20202020:
 		return fmt.Errorf("Decimal production and development signing domains cannot be reused")
+	}
+	return nil
+}
+
+// ValidateProfileChainIDs checks that the binary's native asset belongs to this
+// signing domain. Legacy binaries remain compatible with existing del chains.
+func ValidateProfileChainIDs(chainID string, evmID uint64) error {
+	if err := ValidateChainIDs(chainID, evmID); err != nil {
+		return err
+	}
+	if ProfileChainID != "" && chainID != ProfileChainID {
+		return fmt.Errorf("%s profile requires chain ID %q", BaseDenom, ProfileChainID)
 	}
 	return nil
 }

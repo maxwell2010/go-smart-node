@@ -72,7 +72,7 @@ func configuredDomains(cmd *cobra.Command, ctx client.Context) (string, uint64, 
 			return "", 0, true, fmt.Errorf("read application configuration: %w", err)
 		}
 	}
-	if err := identity.ValidateChainIDs(chainID, evmID); err != nil {
+	if err := identity.ValidateProfileChainIDs(chainID, evmID); err != nil {
 		return "", 0, true, err
 	}
 	if cmd.Name() != "init" {

@@ -1,12 +1,17 @@
 package identity
 
 import (
+	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"testing"
 )
 
 func TestHomeGenesisSigningDomain(t *testing.T) {
+	if ProfileChainID != "" {
+		t.Skip("legacy genesis signing domains")
+	}
 	for _, test := range []struct {
 		name, content, configured string
 		evmID                     uint64
@@ -38,5 +43,69 @@ func TestHomeGenesisSigningDomain(t *testing.T) {
 	}
 	if err := ValidateHomeGenesis(t.TempDir(), "mintcandy_990001-1", 990001); err == nil {
 		t.Fatal("missing genesis accepted")
+	}
+}
+
+func TestCompiledNativeProfile(t *testing.T) {
+	for _, tc := range []struct {
+		chainID, denom, symbol, wrapper string
+		evmID                           uint64
+	}{
+		{MainnetChainID, "msp", "MSP", "WMSP", MainnetEVMChainID},
+		{TestnetChainID, "tmsp", "tMSP", "WtMSP", TestnetEVMChainID},
+	} {
+		t.Run(tc.chainID, func(t *testing.T) {
+			domainErr := ValidateProfileChainIDs(tc.chainID, tc.evmID)
+			if ProfileChainID == "" {
+				if domainErr != nil || BaseDenom != "del" {
+					t.Fatalf("legacy profile changed: %s %v", BaseDenom, domainErr)
+				}
+				return
+			}
+			if ProfileChainID != tc.chainID {
+				if domainErr == nil {
+					t.Fatal("foreign signing domain accepted")
+				}
+				return
+			}
+			if domainErr != nil || BaseDenom != tc.denom || NativeTokenSymbol != tc.symbol || WrappedMSPSymbol != tc.wrapper {
+				t.Fatalf("invalid compiled profile: %s %s %s %v", BaseDenom, NativeTokenSymbol, WrappedMSPSymbol, domainErr)
+			}
+			home := t.TempDir()
+			if err := os.Mkdir(filepath.Join(home, "config"), 0700); err != nil {
+				t.Fatal(err)
+			}
+			var state map[string]json.RawMessage
+			template := fmt.Sprintf(`{
+				"coin":{"params":{"base_denom":%[1]q}},
+				"validator":{"params":{"base_denom":%[1]q}},
+				"evm":{"params":{"evm_denom":%[1]q,"extended_denom_options":{"extended_denom":%[1]q}}},
+				"staking":{"params":{"bond_denom":%[1]q}},
+				"mint":{"params":{"mint_denom":%[1]q}},
+				"bank":{"denom_metadata":[{"base":%[1]q,"display":%[2]q,"symbol":%[2]q,"name":%[3]q}]}
+			}`, tc.denom, tc.symbol, NativeTokenName)
+			if err := json.Unmarshal([]byte(template), &state); err != nil {
+				t.Fatal(err)
+			}
+			writeGenesis := func() {
+				t.Helper()
+				raw, err := json.Marshal(map[string]any{"chain_id": tc.chainID, "app_state": state})
+				if err != nil {
+					t.Fatal(err)
+				}
+				if err := os.WriteFile(filepath.Join(home, "config", "genesis.json"), raw, 0600); err != nil {
+					t.Fatal(err)
+				}
+			}
+			writeGenesis()
+			if err := ValidateHomeGenesis(home, tc.chainID, tc.evmID); err != nil {
+				t.Fatal(err)
+			}
+			state["staking"] = json.RawMessage(`{"params":{"bond_denom":"del"}}`)
+			writeGenesis()
+			if err := ValidateHomeGenesis(home, tc.chainID, tc.evmID); err == nil {
+				t.Fatal("legacy staking denomination accepted in tagged genesis")
+			}
+		})
 	}
 }

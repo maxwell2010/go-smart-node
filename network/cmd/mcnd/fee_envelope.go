@@ -174,7 +174,7 @@ func readFeeEnvelopeIntent(f feeEnvelopeFlags) (*ethtypes.Transaction, authoriza
 	fail := func(err error) (*ethtypes.Transaction, authorization.Policy, authorization.Authorization, error) {
 		return nil, policy, auth, err
 	}
-	if err := identity.ValidateChainIDs(f.cosmosID, f.evmID); err != nil {
+	if err := identity.ValidateProfileChainIDs(f.cosmosID, f.evmID); err != nil {
 		return fail(err)
 	}
 	if !common.IsHexAddress(f.token) || common.HexToAddress(f.token) == (common.Address{}) {

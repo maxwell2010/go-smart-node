@@ -52,7 +52,7 @@ func validatorControlAddress(value string) (common.Address, error) {
 
 func buildValidatorControlIntent(chain string, evm uint64, operator, master, action string, nonce, gas uint64, price string, metadata []byte) (validatorControlIntent, error) {
 	var intent validatorControlIntent
-	if err := identity.ValidateChainIDs(chain, evm); err != nil {
+	if err := identity.ValidateProfileChainIDs(chain, evm); err != nil {
 		return intent, err
 	}
 	op, err := validatorControlAddress(operator)

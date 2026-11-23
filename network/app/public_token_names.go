@@ -8,6 +8,7 @@ import (
 	sdk "github.com/cosmos/cosmos-sdk/types"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/crypto"
+	"github.com/maxwell2010/go-smart-node/network/identity"
 )
 
 const (
@@ -25,6 +26,8 @@ func validPublicTokenName(name string, maxBytes int) bool {
 	switch name {
 	case "MINTCANDY", "MSP", "DEL", "WMSP", "MINTCANDY WRAPPED MSP":
 		return false
+	case "TMSP", "WTMSP", "MINTCANDY TEST MSP", "MINTCANDY WRAPPED TEST MSP":
+		return identity.ProfileChainID == ""
 	}
 	return true
 }

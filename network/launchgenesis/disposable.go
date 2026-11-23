@@ -43,7 +43,7 @@ type isolatedApp struct {
 }
 
 func newIsolatedApp(chainID string, evmID uint64) (*isolatedApp, error) {
-	if err := identity.ValidateChainIDs(chainID, evmID); err != nil {
+	if err := identity.ValidateProfileChainIDs(chainID, evmID); err != nil {
 		return nil, err
 	}
 	home, err := os.MkdirTemp("", "mcnd-genesis-")

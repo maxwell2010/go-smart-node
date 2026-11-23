@@ -36,7 +36,7 @@ func nativeValidatorRegistrationMetadataCmd() *cobra.Command {
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			evmDomain, _, _ := strings.Cut(strings.TrimPrefix(chainID, "mintcandy_"), "-")
 			evmID, _ := strconv.ParseUint(evmDomain, 10, 64)
-			if err := identity.ValidateChainIDs(chainID, evmID); err != nil {
+			if err := identity.ValidateProfileChainIDs(chainID, evmID); err != nil {
 				return err
 			}
 			proposer, err := address.NewBech32Codec(identity.Bech32PrefixAccAddr).StringToBytes(operator)

@@ -43,7 +43,7 @@ func foundingWrapperSymbol(a *app.App, ctx sdk.Context, wrapper common.Address) 
 	switch {
 	case name == shortStorageString(identity.WrappedMSPName) && symbol == shortStorageString(identity.WrappedMSPSymbol):
 		return identity.WrappedMSPSymbol, nil
-	case name == shortStorageString(legacyWrapperName) && symbol == shortStorageString(legacyWrapperSymbol):
+	case identity.ProfileChainID == "" && name == shortStorageString(legacyWrapperName) && symbol == shortStorageString(legacyWrapperSymbol):
 		return legacyWrapperSymbol, nil
 	default:
 		return "", fmt.Errorf("invalid committed wrapper name or symbol")

@@ -31,7 +31,7 @@ func nativeAllocation(cdc codec.JSONCodec, genesis map[string]json.RawMessage) (
 		return coin, sdkmath.Int{}, err
 	}
 	if coin.Params.BaseDenom != identity.BaseDenom {
-		return coin, sdkmath.Int{}, errors.New("native base denomination must be del")
+		return coin, sdkmath.Int{}, fmt.Errorf("native base denomination must be %s", identity.BaseDenom)
 	}
 	total := sdkmath.ZeroInt()
 	for _, balance := range bank.Balances {
@@ -119,7 +119,7 @@ func ValidateNativeGenesisAllocation(cdc codec.JSONCodec, genesis map[string]jso
 		return err
 	}
 	if validators.Params.BaseDenom != identity.BaseDenom {
-		return errors.New("native validator base denomination must be del")
+		return fmt.Errorf("native validator base denomination must be %s", identity.BaseDenom)
 	}
 	if profile != nil {
 		if profile.customCollateralEnabled() && profile.EnableNativeFeeRewards {

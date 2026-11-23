@@ -243,7 +243,7 @@ func NewApp(
 ) *App {
 	evmChainID := cast.ToUint64(appOpts.Get(srvflags.EVMChainID))
 	chainID := cast.ToString(appOpts.Get(flags.FlagChainID))
-	if err := identity.ValidateChainIDs(chainID, evmChainID); err != nil {
+	if err := identity.ValidateProfileChainIDs(chainID, evmChainID); err != nil {
 		panic(err)
 	}
 	baseAppOptions = append(baseAppOptions, baseapp.SetChainID(chainID))
@@ -584,6 +584,9 @@ func NewApp(
 	ibcRouter := porttypes.NewRouter()
 	ibcRouter.AddRoute(ibctransfertypes.ModuleName, nativeIBCTransferModule{Middleware: transferStack, bank: bankTransfer, app: app})
 	ibcRouterV2 := ibcapi.NewRouter()
+	if identity.ProfileChainID == identity.MainnetChainID {
+		transferStackV2 = nativeIBCTransferModuleV2{IBCModule: transferStackV2}
+	}
 	ibcRouterV2.AddRoute(ibctransfertypes.ModuleName, transferStackV2)
 
 	app.IBCKeeper.SetRouter(ibcRouter)
@@ -901,7 +904,7 @@ func (app *App) Configurator() module.Configurator {
 
 // InitChainer application update at chain initialization
 func (app *App) InitChainer(ctx sdk.Context, req *abci.RequestInitChain) (*abci.ResponseInitChain, error) {
-	if err := identity.ValidateChainIDs(req.ChainId, app.evmChainID); err != nil {
+	if err := identity.ValidateProfileChainIDs(req.ChainId, app.evmChainID); err != nil {
 		return nil, err
 	}
 	if req.ChainId != app.chainID {
@@ -912,6 +915,9 @@ func (app *App) InitChainer(ctx sdk.Context, req *abci.RequestInitChain) (*abci.
 		panic(err)
 	}
 
+	if err := identity.ValidateNativeDenomGenesis(genesisState); err != nil {
+		return nil, err
+	}
 	if err := ValidateNativeGenesisAllocation(app.appCodec, genesisState); err != nil {
 		return nil, err
 	}

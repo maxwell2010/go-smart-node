@@ -2,12 +2,17 @@ package app
 
 import (
 	"errors"
+	"strings"
 	"time"
 
 	sdk "github.com/cosmos/cosmos-sdk/types"
+	transfertypes "github.com/cosmos/ibc-go/v10/modules/apps/transfer/types"
 	channeltypes "github.com/cosmos/ibc-go/v10/modules/core/04-channel/types"
+	channeltypesv2 "github.com/cosmos/ibc-go/v10/modules/core/04-channel/v2/types"
 	porttypes "github.com/cosmos/ibc-go/v10/modules/core/05-port/types"
+	ibcapi "github.com/cosmos/ibc-go/v10/modules/core/api"
 	ibcexported "github.com/cosmos/ibc-go/v10/modules/core/exported"
+	"github.com/maxwell2010/go-smart-node/network/identity"
 )
 
 // Keep this list explicit. IBC namespaces also contain administrative routes
@@ -88,6 +93,9 @@ func (m nativeIBCTransferModule) packetModule(ctx sdk.Context) porttypes.IBCModu
 }
 
 func (m nativeIBCTransferModule) OnRecvPacket(ctx sdk.Context, version string, packet channeltypes.Packet, relayer sdk.AccAddress) ibcexported.Acknowledgement {
+	if err := checkMainnetICS20Denom(packet.GetData(), version, ""); err != nil {
+		return channeltypes.NewErrorAcknowledgement(err)
+	}
 	return m.packetModule(ctx).OnRecvPacket(ctx, version, packet, relayer)
 }
 
@@ -105,4 +113,32 @@ func (m nativeIBCTransferModule) UnmarshalPacketData(ctx sdk.Context, portID, ch
 		return nil, "", errors.New("ICS-20 transfer route does not support packet decoding")
 	}
 	return module.UnmarshalPacketData(ctx, portID, channelID, data)
+}
+
+type nativeIBCTransferModuleV2 struct {
+	ibcapi.IBCModule
+}
+
+func (m nativeIBCTransferModuleV2) OnRecvPacket(ctx sdk.Context, source, destination string, sequence uint64, payload channeltypesv2.Payload, relayer sdk.AccAddress) channeltypesv2.RecvPacketResult {
+	if err := checkMainnetICS20Denom(payload.Value, payload.Version, payload.Encoding); err != nil {
+		return channeltypesv2.RecvPacketResult{Status: channeltypesv2.PacketStatus_Failure}
+	}
+	return m.IBCModule.OnRecvPacket(ctx, source, destination, sequence, payload, relayer)
+}
+
+func checkMainnetICS20Denom(payload []byte, version, encoding string) error {
+	if identity.ProfileChainID != identity.MainnetChainID {
+		return nil
+	}
+	transfer, err := transfertypes.UnmarshalPacketData(payload, version, encoding)
+	if err != nil {
+		return err
+	}
+	// The transfer decoder resolves the wire trace before it hashes the local
+	// voucher denomination. Forwarded testnet vouchers retain this base.
+	switch strings.ToLower(transfer.Token.Denom.Base) {
+	case identity.TestnetBaseDenom, "wtmsp":
+		return errors.New("testnet assets cannot be received on MintCandy mainnet")
+	}
+	return nil
 }
