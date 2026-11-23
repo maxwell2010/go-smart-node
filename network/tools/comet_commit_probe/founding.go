@@ -101,9 +101,12 @@ func verifyFoundingBlock(genesis []byte, expectedHash string, response []byte) (
 	if err := signed.ValidateBasic(doc.ChainID); err != nil {
 		return foundingReport{}, err
 	}
-	if signed.Height != 1 || !signed.Time.Equal(doc.GenesisTime) ||
-		!bytes.Equal(signed.ValidatorsHash, trusted.Hash()) || len(signed.AppHash) != sha256.Size {
-		return foundingReport{}, errors.New("first block height, genesis time, validator set or AppHash differs")
+	if signed.Height != 1 || !signed.Time.Equal(doc.GenesisTime) || !bytes.Equal(signed.ValidatorsHash, trusted.Hash()) {
+		return foundingReport{}, errors.New("first block height, genesis time or validator set differs")
+	}
+	// The SDK has not committed application state before the first block.
+	if len(signed.AppHash) != 0 && len(signed.AppHash) != sha256.Size {
+		return foundingReport{}, errors.New("unexpected AppHash size in the first block")
 	}
 	if err := trusted.VerifyCommit(doc.ChainID, signed.Commit.BlockID, signed.Height, signed.Commit); err != nil {
 		return foundingReport{}, err

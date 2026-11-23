@@ -264,6 +264,36 @@ P2P-подключений. Для sentry берите ID из его собст
 6. После разрешённого старта отдельно подтверждаются состав на высоте 1,
    одинаковый AppHash/хеш блока на общей высоте и доступность заявленных сервисов.
 
+### Проверка подписей первого блока
+
+Из актуального checkout соберите проверяющую утилиту в каталоге `network`
+на Linux или в CI. Для запуска готовой утилиты Go не нужен.
+
+```sh
+go build -mod=readonly -trimpath -o ./comet-commit-probe ./tools/comet_commit_probe
+```
+
+После запуска сети получите `/commit?height=1` с двух согласованных Comet
+RPC. Передайте в `APPROVED_GENESIS_SHA256` SHA256 genesis из проверенного
+подписанного манифеста. `APPROVED_GENESIS` указывает на те же байты genesis.
+
+```bash
+set -euo pipefail
+for rpc in "$COMET_RPC_A" "$COMET_RPC_B"; do
+  curl --fail --silent --show-error --max-time 15 "${rpc%/}/commit?height=1" |
+    ./comet-commit-probe --founding-genesis "$APPROVED_GENESIS" \
+      --approved-genesis-sha256 "$APPROVED_GENESIS_SHA256"
+done
+```
+
+Утилита сверяет время genesis, цепочку и хеш набора валидаторов по
+публичным ключам из genesis. Для стартового профиля четыре валидатора
+имеют по 10 000 голосов, а проверенные подписи должны превышать две трети
+общей мощности. В обоих отчётах `FOUNDING_COMMIT_VERIFIED` сравните
+`blockHash` и `validatorsHash`. `appHash` в заголовке первого блока может
+быть пустым. Хеш состояния, зафиксированного после первого блока,
+сверяется в заголовке следующего блока. Доступность сервисов проверяется отдельно.
+
 ## Доверие к программе и окончательному genesis
 
 Программа `mcnd` **1.1.5 опубликована**. В JSON-разделе `release.software`
