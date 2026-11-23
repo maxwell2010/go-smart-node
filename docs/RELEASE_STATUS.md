@@ -111,6 +111,15 @@ this toolkit revision and SHA256.
 [Archive validation](https://github.com/maxwell2010/go-smart-node/actions/runs/45159268185) ·
 [Release toolkit installation](../network/docs/ru/INSTALL_LAUNCH_TOOLS.md#комплект-ci-для-наблюдающей-ноды).
 
+The isolated v1.1.5 observer installed the signed genesis into its fresh
+home and joined the four-validator network using only the one persistent
+peer from the verified manifest. The hostname resolved to loopback in the
+test namespace. The chain was at height 27 when the observer joined.
+The observer had zero voting power and matched validator AppHash at height
+31. The same run covered systemd restart and snapshot restore on a separate
+observer.
+[Signed bootstrap and node rehearsal](https://github.com/maxwell2010/go-smart-node/actions/runs/45162703235).
+
 The isolated media gateway passed TLS 1.2 and TLS 1.3 publication and CID
 reads with Nginx and Gunicorn. Clients refused an untrusted certificate
 and a mismatched hostname. The gateway rejected plaintext on the HTTPS
