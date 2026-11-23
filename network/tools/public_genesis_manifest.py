@@ -12,7 +12,7 @@ from check_operator_applications import check_applications, read_intake
 from check_public_launch_draft import (
     DEFAULT_DRAFT, DEFAULT_PLAN, PUBLISHED_SOFTWARE_RECORD, check_contents, check_plan, read_json, require, unique_object,
 )
-from install_validator_genesis import install_operator_genesis
+from install_validator_genesis import install_genesis, install_operator_genesis
 from native_launch_allocation import MAX_GENESIS_BYTES, summarize_allocation, verify_launch_plan
 from native_launch_package import BINARY, LIMITS, fingerprint, sha256, verify_detached_signature
 from verify_public_launch_genesis import verify_candidate, verify_cold_launch_profile
@@ -108,20 +108,21 @@ def verify_manifest(args, genesis, plan, draft, software):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     commands = parser.add_subparsers(dest='command', required=True)
-    for name in ('prepare', 'verify', 'install'):
+    for name in ('prepare', 'verify', 'install', 'install-observer'):
         command = commands.add_parser(name)
         command.add_argument('--genesis', required=True, type=Path)
         command.add_argument('--binary', required=True, type=Path)
     for name in ('intake', 'init-chain-report', 'output'):
         commands.choices['prepare'].add_argument('--' + name, required=True, type=Path)
     commands.choices['prepare'].add_argument('--relayer-wallet', required=True, action='append')
-    for command in (commands.choices['verify'], commands.choices['install']):
+    for command in (commands.choices[name] for name in ('verify', 'install', 'install-observer')):
         for name in ('manifest', 'signature', 'trusted-keyring'):
             command.add_argument('--' + name, required=True, type=Path)
         command.add_argument('--approved-manifest-sha256', required=True)
         command.add_argument('--signer-fingerprint', required=True)
     commands.choices['install'].add_argument('--home', required=True, type=Path)
     commands.choices['install'].add_argument('--operator', required=True, help='reviewed d0valoper address')
+    commands.choices['install-observer'].add_argument('--home', required=True, type=Path)
 
     args = parser.parse_args()
     try:
@@ -139,6 +140,8 @@ def main():
             result = verify_manifest(args, genesis, plan, draft, software)
             if args.command == 'install':
                 result = install_operator_genesis(args.binary, args.home, args.operator, genesis, result)
+            elif args.command == 'install-observer':
+                result = install_genesis(args.binary, args.home, genesis, result)
             print(json.dumps(result, sort_keys=True))
     except (AttributeError, KeyError, OSError, RecursionError, TypeError, ValueError, subprocess.SubprocessError) as error:
         parser.exit(1, f'public genesis manifest: {error}\n')

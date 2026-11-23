@@ -423,7 +423,7 @@ python3 network/tools/native_launch_package.py verify --archive "$LAUNCH_ARCHIVE
 Получите у организатора манифест, подпись, открытый ключ и точные байты
 genesis. Сверьте отпечаток подписанта и SHA256 манифеста по согласованному
 каналу. Установите аттестованный бинарник той версии, которая указана
-в манифесте. Для v1.1.3 используйте [комплект оператора](INSTALL_LAUNCH_TOOLS.md).
+в манифесте. [Комплект оператора](INSTALL_LAUNCH_TOOLS.md).
 [Процедура проверки манифеста](VALIDATOR_LAUNCH_INTAKE.md#подготовка-и-проверка-подписанного-манифеста).
 
 Начальный валидатор использует подготовленный при регистрации `MCND_HOME`
@@ -454,9 +454,29 @@ signing-state, чужой ключ и вручную изменённый ста
 до и после установки.
 [Прогон GitHub CI](https://github.com/maxwell2010/go-smart-node/actions/runs/45110885140).
 
-Для новой наблюдающей ноды используйте `verify` из инструкции к манифесту.
-В её отдельном новом home выполните `mcnd init` с утверждёнными chain ID,
-поместите туда байты проверенного genesis и запустите `mcnd genesis validate`.
+Для новой наблюдающей ноды подготовьте отдельный, ещё не запускавшийся home
+командой `mcnd init` с утверждёнными chain ID. Используйте установленную
+версию `mcnd` из манифеста.
+
+```sh
+"$MCND_BINARY" init "$MONIKER" --home "$MCND_HOME" \
+  --chain-id "$CHAIN_ID" --evm.evm-chain-id "$EVM_CHAIN_ID"
+python3 -B network/tools/public_genesis_manifest.py install-observer \
+  --genesis "$DOWNLOADED_GENESIS" --binary "$MCND_BINARY" \
+  --manifest public-genesis-manifest.json \
+  --signature public-genesis-manifest.json.asc --trusted-keyring genesis-signer.gpg \
+  --signer-fingerprint "$GENESIS_SIGNER_FINGERPRINT" \
+  --approved-manifest-sha256 "$APPROVED_MANIFEST_SHA256" \
+  --home "$MCND_HOME"
+```
+
+Установщик проверяет подпись и точные байты genesis. Он отклоняет home с
+блоками, использованным signing-state или consensus key из стартового набора
+валидаторов. Успешный отчёт `OBSERVER_GENESIS_INSTALLED` означает, что
+genesis подготовлен к дальнейшей настройке P2P. Служба запускается отдельно.
+Команда есть в актуальных исходниках утилит. В архиве утилит v1.1.5 доступна
+команда `verify`, после которой оператор вручную устанавливает проверенные байты
+genesis в свой новый home и запускает `mcnd genesis validate`.
 
 Примените согласованный P2P и, если выбран state sync, параметры доверия.
 Перед началом подписи проверьте публичный ключ своей ноды и начальную мощность

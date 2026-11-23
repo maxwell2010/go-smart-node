@@ -7,7 +7,7 @@ import unittest
 from unittest.mock import patch
 
 from configure_history import validate_fresh_home
-from install_validator_genesis import COMET_PATHS, install_operator_genesis, run_offline, validate_prepared_home
+from install_validator_genesis import COMET_PATHS, install_genesis, install_operator_genesis, run_offline, validate_prepared_home
 from native_launch_allocation import allocation_report
 from native_launch_package import sha256
 
@@ -108,6 +108,9 @@ class PublishedValidatorInstallTest(unittest.TestCase):
             self.assertEqual(path.read_bytes(), original_genesis)
 
             local_key.write_bytes(key)
+            with self.assertRaisesRegex(ValueError, 'observer home uses a consensus key declared in'):
+                install_genesis(binary, home, genesis, verified)
+            self.assertEqual(path.read_bytes(), original_genesis)
             pristine_state = state.read_bytes()
             state.write_text('{"height": "2", "round": 0, "step": 0}')
             with self.assertRaisesRegex(ValueError, 'existing signing state'):
@@ -138,12 +141,29 @@ class PublishedValidatorInstallTest(unittest.TestCase):
             self.assertEqual(path.read_bytes(), genesis)
             self.assertFalse(install_operator_genesis(binary, home, operator, genesis, verified)['changed'])
             self.assertEqual(preserved, {file: sha256(file) for file in home.rglob('*') if file.is_file() and file != path})
+
+            observer = root / 'observer'
+            run_offline(binary, observer, root, 'init', 'observer-install-ci', '--chain-id', chain_id, '--evm.evm-chain-id', evm_id)
+            observer_genesis = observer / 'config/genesis.json'
+            observer_files = {file: sha256(file) for file in observer.rglob('*')
+                              if file.is_file() and file != observer_genesis}
+            observer_report = install_genesis(binary, observer, genesis, verified)
+            self.assertEqual(observer_report['status'], 'OBSERVER_GENESIS_INSTALLED')
+            self.assertEqual(observer_report['genesisSha256'], report['genesisSha256'])
+            self.assertEqual(observer_report['manifestSha256'], report['manifestSha256'])
+            self.assertTrue(observer_report['changed'])
+            self.assertFalse(observer_report['networkLaunchAuthorized'])
+            self.assertEqual(observer_genesis.read_bytes(), genesis)
+            self.assertFalse(install_genesis(binary, observer, genesis, verified)['changed'])
+            self.assertEqual(observer_files, {file: sha256(file) for file in observer.rglob('*')
+                                              if file.is_file() and file != observer_genesis})
             output = os.environ.get('MCND_VALIDATOR_INSTALL_REPORT')
             if output:
                 with Path(output).open('x', encoding='utf8') as stream:
                     json.dump({**report, 'chainId': chain_id, 'preservedHomeFiles': len(preserved),
                                'signatureVerified': True, 'consentPayloadVerified': True, 'idempotent': True, 'rejectsForeignKey': True,
-                               'rejectsExistingState': True}, stream)
+                               'rejectsExistingState': True, 'observer': {**observer_report, 'idempotent': True,
+                                   'rejectsFoundingKey': True, 'preservedHomeFiles': len(observer_files)}}, stream)
 
 
 if __name__ == '__main__':

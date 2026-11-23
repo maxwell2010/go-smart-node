@@ -268,17 +268,19 @@ jobs:
             ':(glob)network/third_party/**/LICENSE*' ':(glob)network/third_party/**/COPYING*' ':(glob)network/third_party/**/NOTICE*')
           git archive --format=tar "$GITHUB_SHA" -- "${inputs[@]}" "${notices[@]}" | tar -xf - -C "$kit"
           install -D -m 0755 -- "$root/mcnd-genesis" "$kit/bin/mcnd-genesis"
-          go version -m "$kit/bin/mcnd-genesis" > "$kit/BUILD_INFO.txt"
+          install -m 0755 -- "$root/comet-commit-probe" "$kit/bin/comet-commit-probe"
+          go version -m "$kit/bin/mcnd-genesis" "$kit/bin/comet-commit-probe" > "$kit/BUILD_INFO.txt"
           grep -Fq $'\tpath\tgithub.com/maxwell2010/go-smart-node/network/cmd/mcnd-genesis' "$kit/BUILD_INFO.txt"
-          grep -Fq "vcs.revision=$GITHUB_SHA" "$kit/BUILD_INFO.txt"
-          grep -Fq 'vcs.modified=false' "$kit/BUILD_INFO.txt"
-          grep -Fq 'GOOS=linux' "$kit/BUILD_INFO.txt"
-          grep -Fq 'GOARCH=amd64' "$kit/BUILD_INFO.txt"
+          grep -Fq $'\tpath\tgithub.com/maxwell2010/go-smart-node/network/tools/comet_commit_probe' "$kit/BUILD_INFO.txt"
+          for field in "vcs.revision=$GITHUB_SHA" 'vcs.modified=false' 'GOOS=linux' 'GOARCH=amd64'; do
+            test "$(grep -Fc "$field" "$kit/BUILD_INFO.txt")" = 2
+          done
           binary_sha=$(sha256sum "$kit/bin/mcnd-genesis" | cut -d' ' -f1)
+          probe_sha=$(sha256sum "$kit/bin/comet-commit-probe" | cut -d' ' -f1)
           jq -n --arg source "$GITHUB_SHA" --arg binary "$binary_sha" --arg release "$RELEASE_VERSION" \
-            --arg daemon "$RELEASE_BINARY_SHA" \
+            --arg daemon "$RELEASE_BINARY_SHA" --arg probe "$probe_sha" \
             '{schemaVersion: 1, scope: "offline-launch-tools", platform: "linux/amd64", sourceRevision: $source,
-              assemblerSha256: $binary, compatibleMcndVersion: $release, compatibleMcndSha256: $daemon,
+              assemblerSha256: $binary, commitProbeSha256: $probe, compatibleMcndVersion: $release, compatibleMcndSha256: $daemon,
               includesRunnableGenesis: false, includesValidatorKeys: false, networkLaunchAuthorized: false}' > "$kit/PACKAGE.json"
           (
             cd "$kit"
@@ -299,6 +301,9 @@ jobs:
               python3 -B "network/tools/$script.py" --help >/dev/null
             done
             cmp bin/mcnd-genesis "$root/mcnd-genesis"
+            cmp bin/comet-commit-probe "$root/comet-commit-probe"
+            bin/comet-commit-probe --help 2>&1 | grep -F -- '-founding-genesis' >/dev/null
+            python3 -B network/tools/public_genesis_manifest.py install-observer --help >/dev/null
             bin/mcnd-genesis verify --ledger "$root/ledger.json" \
               --parameters "$GITHUB_WORKSPACE/launch-assembly/network/tools/fixtures/founding-genesis-ci-parameters.json" \
               --genesis "$root/assembled/public/genesis.json" | cmp - "$root/evidence/assembly.json"
@@ -332,7 +337,7 @@ jobs:
           jq -e --arg source "$source" --arg version "$RELEASE_VERSION" --arg daemon "$RELEASE_BINARY_SHA" \
             '.sourceRevision == $source and .compatibleMcndVersion == $version and .compatibleMcndSha256 == $daemon and
             .networkLaunchAuthorized == false and .includesRunnableGenesis == false and .includesValidatorKeys == false' PACKAGE.json
-      - name: Prepare a disposable validator home with the published daemon
+      - name: Prepare disposable validator and observer homes with the published daemon
         shell: bash
         working-directory: launch-assembly/network
         run: |
@@ -365,7 +370,9 @@ jobs:
           jq -e --arg sha "$sha" --arg binary "$RELEASE_BINARY_SHA" \
             '.status == "VALIDATOR_GENESIS_INSTALLED" and .genesisSha256 == $sha and .binarySha256 == $binary and
             .chainId == "mintcandy_990014-1" and .idempotent and .rejectsForeignKey and .rejectsExistingState and .consentPayloadVerified and
-            (.preservedHomeFiles >= 5) and (.networkLaunchAuthorized | not)' "$report"
+            (.preservedHomeFiles >= 5) and (.networkLaunchAuthorized | not) and
+            (.observer | .status == "OBSERVER_GENESIS_INSTALLED" and .genesisSha256 == $sha and .binarySha256 == $binary
+              and .idempotent and .rejectsFoundingKey and .preservedHomeFiles >= 5 and (.networkLaunchAuthorized | not))' "$report"
       - name: Verify all four offline operator signatures against the installed genesis
         if: inputs.scenario == 'approvals'
         shell: bash

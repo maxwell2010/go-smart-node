@@ -1,4 +1,4 @@
-"""Install already verified genesis bytes in a stopped initial validator home."""
+"""Install already verified genesis bytes in a fresh, stopped node home."""
 
 import json
 import os
@@ -59,30 +59,42 @@ def run_offline(binary, home, scratch, *args):
 
 
 def install_operator_genesis(binary, home, operator, genesis, verified):
+    return install_genesis(binary, home, genesis, verified, operator=operator)
+
+
+def install_genesis(binary, home, genesis, verified, *, operator=None):
     require(verified.get('status') == 'PUBLIC_GENESIS_SIGNATURE_VERIFIED', 'a verified genesis manifest is required')
     allocation = allocation_report(genesis)
     require(all(verified[key] == allocation[key] for key in ('chainId', 'evmChainId', 'genesisSha256')),
             'verified genesis bytes or signing domain differ')
-    matches = [row for row in allocation['validators'] if row['operatorAddress'] == operator]
-    require(len(matches) == 1 and matches[0]['declaredOnline'] is True and int(matches[0]['initialStakeAtomic']) > 0,
-            'operator has no active starting stake in the verified genesis')
-    validator = matches[0]
+    validators = allocation['validators']
+    if operator is not None:
+        matches = [row for row in validators if row['operatorAddress'] == operator]
+        require(len(matches) == 1 and matches[0]['declaredOnline'] is True and int(matches[0]['initialStakeAtomic']) > 0,
+                'operator has no active starting stake in the verified genesis')
+        validator = matches[0]
     chain_id, evm_id = allocation['chainId'], allocation['evmChainId']
 
-    require(not home.is_symlink(), 'a symbolic link cannot be used as the validator home')
+    require(not home.is_symlink(), 'a symbolic link cannot be used as the node home')
     home = home.resolve(strict=True)
     binary = binary.resolve(strict=True)
     require(sha256(binary) == verified['software']['binarySha256'], 'mcnd binary changed after manifest verification')
     validate_prepared_home(home, chain_id, evm_id)
     target = home / 'config/genesis.json'
     original = target.read_bytes()
-    # Retain the operator's existing node key and signer. Read their public
-    # consensus key through mcnd without replicating the private key to scratch.
+    # Read the public consensus key through mcnd without copying the private key.
     with tempfile.TemporaryDirectory(prefix='mcnd-genesis-check-') as directory:
         scratch = Path(directory)
         public = json.loads(run_offline(binary, home, scratch, 'comet', 'show-validator'), object_pairs_hook=unique_object)
-        require(public == {'@type': '/cosmos.crypto.ed25519.PubKey', 'key': validator['consensusPublicKeyBase64']},
-                'local consensus key does not match the operator in the verified genesis')
+        require(isinstance(public, dict) and set(public) == {'@type', 'key'}
+                and public['@type'] == '/cosmos.crypto.ed25519.PubKey' and isinstance(public['key'], str),
+                'invalid local Ed25519 consensus key')
+        if operator is None:
+            require(all(public['key'] != row['consensusPublicKeyBase64'] for row in validators),
+                    'observer home uses a consensus key declared in the verified genesis')
+        else:
+            require(public['key'] == validator['consensusPublicKeyBase64'],
+                    'local consensus key does not match the operator in the verified genesis')
 
         reference = scratch / 'reference'
         run_offline(binary, reference, scratch, 'init', 'genesis-check', '--chain-id', chain_id, '--evm.evm-chain-id', evm_id)
@@ -119,8 +131,11 @@ def install_operator_genesis(binary, home, operator, genesis, verified):
         finally:
             temporary.unlink(missing_ok=True)
 
-    return {'status': 'VALIDATOR_GENESIS_INSTALLED', 'changed': original != genesis,
-            'operatorAddress': operator, 'consensusAddressHex': validator['consensusAddressHex'],
-            'genesisSha256': allocation['genesisSha256'], 'binarySha256': verified['software']['binarySha256'],
-            'manifestSha256': verified['manifestSha256'], 'signerFingerprint': verified['signerFingerprint'],
-            'networkLaunchAuthorized': False}
+    report = {'status': 'OBSERVER_GENESIS_INSTALLED', 'changed': original != genesis,
+              'genesisSha256': allocation['genesisSha256'], 'binarySha256': verified['software']['binarySha256'],
+              'manifestSha256': verified['manifestSha256'], 'signerFingerprint': verified['signerFingerprint'],
+              'networkLaunchAuthorized': False}
+    if operator is not None:
+        report.update(status='VALIDATOR_GENESIS_INSTALLED', operatorAddress=operator,
+                      consensusAddressHex=validator['consensusAddressHex'])
+    return report
