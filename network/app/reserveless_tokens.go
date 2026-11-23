@@ -103,7 +103,7 @@ func canonicalReservelessArgs(method abi.Method, data []byte) ([]interface{}, er
 }
 
 func reservedPublicTokenSymbol(symbol string) bool {
-	return symbol == identity.BaseDenom || symbol == "msp"
+	return symbol == identity.BaseDenom || symbol == "msp" || symbol == "wmsp"
 }
 
 func (c *withdrawalController) admitReservelessCreation(ctx sdk.Context, msg core.Message, receipt *ethtypes.Receipt, beacon common.Address) error {

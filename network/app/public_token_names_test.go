@@ -16,9 +16,10 @@ func TestPublicTokenNameAlphabetAndLimits(t *testing.T) {
 	for _, name := range []string{"A", "STAR TOKEN 2", "RESERVE-FREE", strings.Repeat("X", 64)} {
 		require.True(t, validPublicTokenName(name, 64), name)
 	}
-	for _, name := range []string{"", "  ", "Star token", "STAR TОKEN", "ТОКЕН", "A\n", " A", "A  B", "123", "MINTCANDY", "MSP", "DEL", strings.Repeat("X", 65)} {
+	for _, name := range []string{"", "  ", "Star token", "STAR TОKEN", "ТОКЕН", "A\n", " A", "A  B", "123", "MINTCANDY", "MSP", "DEL", "WMSP", "MINTCANDY WRAPPED MSP", strings.Repeat("X", 65)} {
 		require.False(t, validPublicTokenName(name, 64), name)
 	}
+	require.True(t, reservedPublicTokenSymbol("wmsp"))
 }
 
 func checkPublicTokenNamesBackfillLegacyStorage(t *testing.T, app *App) {

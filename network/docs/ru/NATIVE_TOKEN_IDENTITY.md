@@ -12,6 +12,7 @@ DEL Decimal и обеспеченный им voucher моста остаются
 | Знаков после запятой | 18 |
 | Внутренний bank denom | `del` |
 | Пересчёт | `1 MSP = 1000000000000000000 del` |
+| ERC-20 обёртка в новом genesis | MintCandy Wrapped MSP (`WMSP`), 18 знаков |
 
 В проекте genesis `coin.params.base_title` задан как `MintCandy`, а
 `bank.denom_metadata` содержит `name=MintCandy`, `symbol=MSP`, `display=MSP`,
@@ -23,10 +24,12 @@ DEL Decimal и обеспеченный им voucher моста остаются
 
 `del` остаётся техническим идентификатором в bank/EVM/staking/mint/validator,
 комиссиях и суммах genesis. Это не означает использование актива Decimal.
-Строки `wrapped_del`, WDEL, `delegateDEL`, `enable_del_delegation`,
+Строки `wrapped_del`, ключ реестра `wdel`, `delegateDEL`, `enable_del_delegation`,
 `initial_del_delegations` и `atoms_per_del` сохраняют значение идентификаторов
-текущей реализации. Обеспечением WDEL в новой сети служит нативная MSP.
-Коэффициент пересчёта, банковские суммы, лимиты и финансовые правила не меняются.
+текущей реализации. Новый сборщик genesis записывает в ERC-20 metadata
+имя `MintCandy Wrapped MSP` и тикер `WMSP`. Каждый WMSP обеспечен одним
+нативным MSP. Опубликованные genesis и офлайн-комплект v1.1.3 используют
+прежний тикер `WDEL` для той же обёртки MSP.
 
 Объявленный software-only бинарник mcnd 1.0.0 пока создаёт старые metadata
 `Native DEL` / `DEL` при обычном `init`. Builder будущего публичного genesis

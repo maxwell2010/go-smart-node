@@ -118,6 +118,9 @@ func Build(ledger Ledger, parameters LaunchParameters) (body []byte, err error) 
 		ledger, int64(delay/time.Second)); err != nil {
 		return nil, err
 	}
+	if err := brandFoundingWrapper(seed.app, deployment.ctx, deployment.profile.WrappedDEL); err != nil {
+		return nil, err
+	}
 	state, err := assembleState(seed.app, deployment, ledger, parameters)
 	if err != nil {
 		return nil, err

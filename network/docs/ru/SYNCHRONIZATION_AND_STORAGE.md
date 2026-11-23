@@ -197,6 +197,21 @@ State sync восстанавливает текущее состояние из
    RPC и relayer proofs. Новому native/EVM-состоянию отдельно нужны проверки
    binding/backing, restart и сквозной финансовой модели.
 
+Для шага 5 в проверенной копии репозитория используйте команду чтения RPC.
+Подставьте одобренные высоту, хеш и срок доверия в секундах.
+
+```sh
+python3 -B network/tools/verify_state_sync_checkpoint.py \
+  --rpc-servers "$RPC_A" "$RPC_B" --chain-id "$CHAIN_ID" \
+  --trust-height "$TRUST_HEIGHT" --trust-hash "$TRUST_HASH" \
+  --trust-period-seconds "$TRUST_PERIOD_SECONDS"
+```
+
+`STATE_SYNC_CHECKPOINT_MATCH` означает, что два разных RPC сообщают один
+заголовок с утверждённым хешем, согласны по AppHash и укладываются в срок
+доверия. Источник доверенного хеша и независимость операторов подтверждаются
+отдельно. Восстановление снапшота выполняется штатным light client CometBFT.
+
 Comet не начинает state sync при наличии local state с LastBlockHeight > 0.
 Не стирайте data или consensus signing-state, пытаясь принудить этот путь.
 Не запускайте один consensus key одновременно на старой и новой машине.

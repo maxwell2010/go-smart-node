@@ -10,6 +10,8 @@ import (
 
 const (
 	BaseDenom            = "del"
+	WrappedMSPName       = "MintCandy Wrapped MSP"
+	WrappedMSPSymbol     = "WMSP"
 	Bech32Prefix         = "d0"
 	Bech32PrefixAccAddr  = "d0"
 	Bech32PrefixAccPub   = "d0pub"

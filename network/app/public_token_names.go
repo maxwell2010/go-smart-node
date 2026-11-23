@@ -23,7 +23,7 @@ func validPublicTokenName(name string, maxBytes int) bool {
 		return false
 	}
 	switch name {
-	case "MINTCANDY", "MSP", "DEL":
+	case "MINTCANDY", "MSP", "DEL", "WMSP", "MINTCANDY WRAPPED MSP":
 		return false
 	}
 	return true

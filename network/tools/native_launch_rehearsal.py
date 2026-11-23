@@ -74,6 +74,8 @@ def load_fixture(directory, *, four_validators=False, empty_user_assets=False, a
         expected["founderBalanceAtomic"] = str(5_000_000 * 10**18)
         check(profile.get("test_grace_until_height", 0) == 0 and int(doc["consensus_params"]["block"]["max_gas"]) == 24_000_000,
               "empty launch must use production penalty and gas rules")
+    if assembly_report is not None and checked.get("wrappedTokenSymbol") == "WMSP":
+        expected["wmspContract"] = profile["wrapped_del"]
     validators = expected["validators"]
     check(tuple(row["name"] for row in validators) == labels and
           tuple(row["initialPower"] for row in validators) == powers, "unexpected initial native validator set")
@@ -608,6 +610,14 @@ def run_launch(binary, root, genesis, expected, keys, env, owner, report, *, fou
     for node in nodes:
         check(int(ethereum("eth_chainId", [], base=node.evm), 16) == expected["evmChainId"], "wrong JSON-RPC signing domain")
         values.add(balance(expected["actor"], expected["actorNative"], height, node.evm, node.rest))
+        if "wmspContract" in expected:
+            for selector, text in (("0x06fdde03", "MintCandy Wrapped MSP"), ("0x95d89b41", "WMSP")):
+                data = text.encode("ascii")
+                encoded = (32).to_bytes(32, "big") + len(data).to_bytes(32, "big") + data.ljust(32, b"\0")
+                actual = ethereum("eth_call", [{"to": expected["wmspContract"], "data": selector}, hex(height)], base=node.evm)
+                check(actual == "0x" + encoded.hex(), "EVM wrapper metadata differs from WMSP")
+    if "wmspContract" in expected:
+        report["wrappedTokenSymbol"] = "WMSP"
     check(len(values) == 1 and next(iter(values)) > 0, "nodes disagree on the positive native and EVM balance")
     first_balance = balance(expected["actor"], expected["actorNative"], 1, follower.evm, follower.rest)
     check(first_balance == next(iter(values)), "ordinary peer cannot query the same funded state at block 1")

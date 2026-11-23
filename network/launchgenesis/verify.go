@@ -34,6 +34,7 @@ type ColdReport struct {
 	Power                 int64  `json:"votingPower"`
 	BankBalances          int    `json:"bankBalances"`
 	InitialSupplyAtoms    string `json:"initialSupplyAtoms"`
+	WrappedTokenSymbol    string `json:"wrappedTokenSymbol"`
 	PublicGenesisApproved bool   `json:"publicGenesisApproved"`
 }
 
@@ -147,6 +148,10 @@ func VerifyCold(body []byte, ledger Ledger, parameters LaunchParameters) (report
 	if !supply.Equal(ledger.Bank.Supply[0]) {
 		return report, fmt.Errorf("committed supply differs")
 	}
+	wrappedSymbol, err := foundingWrapperSymbol(fresh.app, ctx, profile.WrappedDEL)
+	if err != nil {
+		return report, err
+	}
 	for _, position := range positions {
 		declared := position.validator
 		actual, err := fresh.app.NativeValidatorKeeper.GetValidator(ctx, declared.OperatorAddress)
@@ -172,6 +177,7 @@ func VerifyCold(body []byte, ledger Ledger, parameters LaunchParameters) (report
 		Status: "CANDIDATE_INIT_CHAIN_VERIFIED", ChainID: doc.ChainID, EVMChainID: ledger.EVMChainID,
 		GenesisSHA256: hex.EncodeToString(hash[:]), FirstBlockAppHash: hex.EncodeToString(block.AppHash),
 		Validators: len(set.Validators), Power: set.TotalVotingPower(), BankBalances: len(bank.Balances), InitialSupplyAtoms: supply.Amount.String(),
+		WrappedTokenSymbol: wrappedSymbol,
 	}, nil
 }
 

@@ -6,6 +6,7 @@ import time
 from configure_history import validate_fresh_home
 from del_delegation_smoke import balance, observe_state_sync, write_config
 from native_consensus_smoke import committed_header, create_replica, wait_replicas
+from verify_state_sync_checkpoint import verify_checkpoint
 from withdrawal_genesis_smoke import check, ethereum, log_records, private_bytes
 
 
@@ -35,16 +36,20 @@ def rehearse_snapshot(binary, root, genesis, expected, env, owner, report, *,
     snapshot_height = wait_for_snapshot(source, minimum_height)
     trust_height = snapshot_height + 2
     trust_peers = (source, witness)
-    wait_replicas(trust_peers, trust_height, 60, report)
+    wait_replicas(trust_peers, trust_height + 1, 60, report)
     trust_hash = committed_header(trust_peers, trust_height)["block_hash"]
     check(int(witness.rpc("status")["sync_info"]["earliest_block_height"]) == report["initialHeight"],
           "trust witness must have replayed from genesis")
     rpc_servers = [f"http://127.0.0.1:{node.p2p + 1}" for node in trust_peers]
+    checkpoint = verify_checkpoint(rpc_servers, expected["chainId"], trust_height, trust_hash, 3600)
+    check({peer["nodeId"] for peer in checkpoint["peers"]} == {source.node_id, witness.node_id},
+          "checkpoint RPC identity differs from the state sync peers")
     state_sync = {
         "sourceSnapshotHeight": snapshot_height,
         "trustHeight": trust_height,
         "trustHash": trust_hash,
         "trustRpcServers": rpc_servers,
+        "checkpointPreflight": checkpoint,
         "sourceNodeId": source.node_id,
         "witnessNodeId": witness.node_id,
     }
