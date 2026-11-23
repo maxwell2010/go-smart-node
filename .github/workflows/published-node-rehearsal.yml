@@ -44,12 +44,12 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 35
     env:
-      RELEASE_TAG: v1.1.2
-      RELEASE_VERSION: ${{ inputs.candidate_version || '1.1.2' }}
-      RELEASE_SOURCE: ${{ inputs.candidate_source || 'bf788083671e05d330df7ee48c711ff7fbb046ea' }}
+      RELEASE_TAG: v1.1.3
+      RELEASE_VERSION: ${{ inputs.candidate_version || '1.1.3' }}
+      RELEASE_SOURCE: ${{ inputs.candidate_source || '8c8b844c9f70d09a0bafebfc02a261dc51a75c53' }}
       RELEASE_REF: refs/heads/feat/native-duplicate-vote-master-20261112
-      RELEASE_ARCHIVE_SHA: ${{ inputs.candidate_archive_sha || '2599b216825fa25e8b7291c830cbdcadcd0bc36cfc4169c393213f27f01a9074' }}
-      RELEASE_BINARY_SHA: ${{ inputs.candidate_binary_sha || '257ae81f573c68f6a0a7a9f463c6acb102e6ebe601239f319460d95895742a02' }}
+      RELEASE_ARCHIVE_SHA: ${{ inputs.candidate_archive_sha || '71924275a94953ede28e997a585598de3e994b67ca8f333a7b47584377a84f31' }}
+      RELEASE_BINARY_SHA: ${{ inputs.candidate_binary_sha || 'e7de87e4fd9e9825bf1d303c31717e5c87b479bd632a2897251c52a521d6031a' }}
       RELEASE_PACKAGE_RUN: ${{ inputs.candidate_run }}
       RELEASE_PACKAGE_ATTEMPT: ${{ inputs.candidate_attempt }}
       GOENV: 'off'
@@ -256,7 +256,7 @@ jobs:
           mkdir -m 700 -- "$kit" "$output"
           test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
           test -z "$(git status --porcelain)"
-          inputs=(LICENSE network/docs/ru/{INSTALL_LAUNCH_TOOLS.md,public-genesis.draft.json,public-launch-allocation.draft.json,operator-launch-intake.example.json,evidence/software-release-1.1.2.json})
+          inputs=(LICENSE network/docs/ru/{INSTALL_LAUNCH_TOOLS.md,public-genesis.draft.json,public-launch-allocation.draft.json,operator-launch-intake.example.json,evidence/software-release-1.1.3.json})
           for script in check_operator_applications check_public_launch_draft configure_history install_validator_genesis \
                         mcnd_process_smoke native_launch_allocation native_launch_package prepare_founding_ledger \
                         public_genesis_manifest verify_public_launch_genesis withdrawal_genesis_smoke; do

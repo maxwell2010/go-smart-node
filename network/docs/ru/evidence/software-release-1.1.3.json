@@ -1,0 +1,99 @@
+{
+  "archiveSha256": "71924275a94953ede28e997a585598de3e994b67ca8f333a7b47584377a84f31",
+  "binarySha256": "e7de87e4fd9e9825bf1d303c31717e5c87b479bd632a2897251c52a521d6031a",
+  "ci": {
+    "attestedBinaryRehearsal": "https://github.com/maxwell2010/go-smart-node/actions/runs/45012997466",
+    "blockstoreRetention": "https://github.com/maxwell2010/go-smart-node/actions/runs/45012994146",
+    "committedMedia": "https://github.com/maxwell2010/go-smart-node/actions/runs/45013060357",
+    "mediaSystemd": "https://github.com/maxwell2010/go-smart-node/actions/runs/45009462939",
+    "software": "https://github.com/maxwell2010/go-smart-node/actions/runs/45012161369"
+  },
+  "includesGenesis": false,
+  "minimumNativeValidatorCommission": "0.05",
+  "networkLaunchApproved": false,
+  "releaseVersion": "1.1.3",
+  "reportsSha256": {
+    "allocation.json": "31cd4e54763893a098bf0fbc27cb56d39865f397860b49f83245e44e87278a21",
+    "assembly.json": "31a2cec94cff8dc11862f68b9534f09078d486346795d2b87a8ccc46d15fbdf7",
+    "blockstore.json": "736b6ec33a4fbb88ebdc787b36c893c75994e07892824aad565dad2fbdd37102",
+    "default-launch-parameters.json": "7b4b3d24f8169ebff90c61554e132d52bb5ddc485e9ef53f44c0398823fca0a6",
+    "ibc.json": "9cf85066bc2530d45ffab925ea1a6f26c20bda8998468c4748817117c507d89c",
+    "install.json": "0e537e21987e96e7c3412d4cb19c290d57401c41e92aecd119e569a74071ef16",
+    "media.json": "e59c24d271c6c4edef117220ff489024bf24e582c5fe30f43ca32923eab381bd",
+    "quorum.json": "a2aa3dc8ce677fc86da629ee2bd1521e5442c1e835d089cc1ac45c733d67ab49",
+    "systemd.json": "1bd3f52b0c16fd7102f566e1fdedc528a05a2c69749b1aeb9b0cb5b2d033d2b4",
+    "validator-install.json": "5e7ed75f2ef59d219caeb2f33e2f19a6e45324440ceb29419fc3d166970ff9f9"
+  },
+  "sourceRef": "refs/heads/feat/native-duplicate-vote-master-20261112",
+  "sourceRevision": "8c8b844c9f70d09a0bafebfc02a261dc51a75c53",
+  "status": "software-release",
+  "testNetwork": {
+    "blockstoreRetention": {
+      "appHash": "8034491588EE7035CB6A751E060082103FA781208615BABF861A1175F9D706CB",
+      "earliestAfterRestart": 13,
+      "earliestBeforeRestart": 8,
+      "evidenceWindowBlocks": 24,
+      "historicalBlockStillAvailableOnArchive": true,
+      "loadedHeightAfterRestart": 32,
+      "minRetainBlocks": 10,
+      "sameAppHashOnFiveReplicas": true,
+      "verifiedHeight": 37
+    },
+    "blockstoreRetentionTestGenesisSha256": "f2d6f5124c15f2954477a581f8936e27584881cf96eb4aae71cdf79223487c16",
+    "chainId": "mintcandy_990014-1",
+    "changedDefaultSectionsComparedWith1_1_2": [],
+    "finalIbcConsensus": {
+      "app_hash": "CEE9C2132F81A02D85A0DB00D3441A83B64CC614710E34019ACDEE17A8008A93",
+      "block_hash": "F2B3EFD878904C103BF821EED19AF0AAE0172FFE1E468F40F88BC7BFE3351595",
+      "height": 58,
+      "next_validators_hash": "5E64B64EACD3280CFD968D20000ED20771841FF364173822530FF05FFE059C49",
+      "power": {
+        "a": 10000,
+        "b": 10000,
+        "c": 10000,
+        "d": 10000
+      },
+      "proposer_address": "3449A0F6AE0D44305EFAB9264906E4E92E4C296E",
+      "signers": [
+        "a",
+        "b",
+        "c",
+        "d"
+      ],
+      "validators_hash": "5E64B64EACD3280CFD968D20000ED20771841FF364173822530FF05FFE059C49"
+    },
+    "genesisSha256": "8a584e9688adc821f5561f8efd27f6cf85d39ff50bb2dccd79fada0f4a65dc87",
+    "historicalStateRetention": {
+      "appHash": "198A7D85F24AEC11EC2AFCB91FD057AA2B6CCD221CC42A55D79E05D7D59E18B3",
+      "archivedSupplyProofAvailable": true,
+      "delAtomic": "5000000000000000000000000",
+      "freshProofMatchesArchive": true,
+      "freshProofSha256": "1e31f0dcad9c2c28f8905bf69e1edd7be42776e91dccbb3d39efc5ea4ab3d8aa",
+      "historicalABCIResponsesDisabled": true,
+      "historicalProofHeight": 2,
+      "keepStateVersions": 20,
+      "loadedHeightAfterRestart": 48,
+      "minRetainBlocks": 10,
+      "prunedSupplyProofUnavailable": true,
+      "pruningInterval": 10,
+      "retainedBlockHeight": 1,
+      "transactionSearchDisabled": true,
+      "verifiedHeight": 51
+    },
+    "observedIbcPhases": {
+      "client_connection_channel_handshake": "PASS",
+      "daemon_live_relay": "PASS",
+      "daemon_restart_backlog": "PASS",
+      "error_ack_refund": "PASS",
+      "foreign_bank_voucher": "PASS",
+      "foreign_bank_voucher_return": "PASS",
+      "native_send": "PASS",
+      "pending_packet_restart": "PASS",
+      "timeout_refund": "PASS",
+      "voucher_return": "PASS"
+    },
+    "snapshotRestoredHeight": 40,
+    "validatorSignaturesAfterRecovery": 4,
+    "validatorSignaturesAtQuorum": 3
+  }
+}

@@ -1,5 +1,21 @@
 # Software release verification
 
+## 1.1.3 software release
+
+[MintCandy Node 1.1.3](https://github.com/maxwell2010/go-smart-node/releases/tag/v1.1.3)
+preserves the full evidence and snapshot retention windows at the block pruning
+boundary. A separate short-window genesis verified pruning, a local restart,
+and matching AppHash across the observer and four validators. The archive node
+retained historical blocks.
+[Block retention](https://github.com/maxwell2010/go-smart-node/actions/runs/45012994146).
+
+The attested Linux amd64 binary also passed quorum recovery, follower sync,
+systemd restart, snapshot restore, ten ICS-20 scenarios, and media publication
+after signed DRC20 creation.
+[Node and Hermes](https://github.com/maxwell2010/go-smart-node/actions/runs/45012997466) ·
+[Signed media](https://github.com/maxwell2010/go-smart-node/actions/runs/45013060357) ·
+[Release evidence](../network/docs/ru/evidence/software-release-1.1.3.json).
+
 ## 1.1.2 software release
 
 [MintCandy Node 1.1.2](https://github.com/maxwell2010/go-smart-node/releases/tag/v1.1.2)

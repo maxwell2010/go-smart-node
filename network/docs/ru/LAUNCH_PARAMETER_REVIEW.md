@@ -1,13 +1,13 @@
 # Параметры публичного запуска MintCandy Network
 
-Ниже сопоставлены настройки, которые создаёт опубликованный `mcnd 1.1.2`,
+Ниже сопоставлены настройки, которые создаёт опубликованный `mcnd 1.1.3`,
 и параметры обсуждаемого публичного genesis. CI установил подписанный
 Linux-бинарник, выполнил `mcnd init` и `mcnd genesis validate-genesis` в новом
 каталоге на тестовом домене `mintcandy_990013-1`. В отчёт вошли параметры
 `genesis.json` и локальный предел из `app.toml`. Проверенные значения совпали
-с отчётом версии 1.1.1.
-[JSON с исходными значениями](evidence/default-launch-parameters-1.1.2.json) ·
-[Прогон GitHub CI](https://github.com/maxwell2010/go-smart-node/actions/runs/45005205221).
+с отчётом версии 1.1.2.
+[JSON с исходными значениями](evidence/default-launch-parameters-1.1.3.json) ·
+[Прогон GitHub CI](https://github.com/maxwell2010/go-smart-node/actions/runs/45012994146).
 
 ## Консенсус и учёт
 
