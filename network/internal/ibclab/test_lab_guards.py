@@ -18,6 +18,26 @@ daemon_spec.loader.exec_module(daemon)
 
 
 class LabGuards(unittest.TestCase):
+    def test_clear_only_retries_the_link_setup_height_race(self):
+        transient = RuntimeError(
+            "link failed with underlying error: gRPC call `query_connection` failed: "
+            "context did not contain latest block height in either check state or finalize block state (378)"
+        )
+        broadcast = RuntimeError("broadcast failed after packet was submitted")
+        with patch.object(lab.time, "sleep") as wait:
+            run = Mock(side_effect=[transient, "success"])
+            self.assertEqual(lab.clear_packets(run, "chain-1", "channel-0"), 1)
+            self.assertEqual(run.call_args_list[0], run.call_args_list[1])
+            wait.assert_called_once_with(0.25)
+            run = Mock(side_effect=broadcast)
+            with self.assertRaisesRegex(RuntimeError, "broadcast failed"):
+                lab.clear_packets(run, "chain-1", "channel-0")
+            self.assertEqual(run.call_count, 1)
+            run = Mock(side_effect=transient)
+            with self.assertRaisesRegex(RuntimeError, "latest block height"):
+                lab.clear_packets(run, "chain-1", "channel-0")
+            self.assertEqual(run.call_count, 3)
+
     def test_native_hermes_loads_fee_only_fixture(self):
         fixture = Path("unused")
         tools = Path(__file__).parents[2] / "tools"

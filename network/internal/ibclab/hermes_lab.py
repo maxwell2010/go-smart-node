@@ -742,6 +742,21 @@ clear_on_start = true
     lab.report["phases"]["daemon_restart_backlog"].update(sequence=recovered_sequence, commitment_before_restart=pending)
 
 
+def clear_packets(run, chain_id, channel):
+    for attempt in range(3):
+        try:
+            run("clear", "packets", "--chain", chain_id, "--port", "transfer", "--channel", channel)
+            return attempt
+        except RuntimeError as error:
+            # Hermes v1.13.3 clear.rs constructs both links before sending packets.
+            # Retry only the setup query that can race the latest committed SDK header.
+            reason = str(error)
+            if (attempt == 2 or "link failed with underlying error: gRPC call `query_connection`" not in reason or
+                    "context did not contain latest block height in either check state or finalize block state" not in reason):
+                raise
+            time.sleep(0.25)
+
+
 def full_suite(lab, mcnd, reference, hermes, native_fixture=None, *, assembly_report=None, donor_file=None,
                replacement=None):
     a, b, run, a_channel, b_channel = connect_transfer(lab, mcnd, reference, hermes, native_fixture=native_fixture,
@@ -754,7 +769,9 @@ def full_suite(lab, mcnd, reference, hermes, native_fixture=None, *, assembly_re
         run("tx", "ft-transfer", "--src-chain", source, "--dst-chain", dest, "--src-port", "transfer", "--src-channel", channel, "--denom", denom, "--amount", count, "--receiver", receiver, "--timeout-seconds", seconds)
 
     def clear():
-        run("clear", "packets", "--chain", chain_id, "--port", "transfer", "--channel", a_channel)
+        retries = clear_packets(run, chain_id, a_channel)
+        if retries:
+            lab.report["linkQueryRetries"] = lab.report.get("linkQueryRetries", 0) + retries
         lab.wait(lambda: not commitments(a["rpc"], a_channel) and not commitments(b["rpc"], b_channel), "all actual packet commitments must clear", 60)
 
     before = phase_before(a, b)
@@ -891,7 +908,10 @@ def full_suite(lab, mcnd, reference, hermes, native_fixture=None, *, assembly_re
         lab.report["status"] = "TWO_PROCESS_HERMES_PASS"
         lab.report["scope"] = "Actual owned/reference IBC interoperability only; native Decimal economic parity is a separate gate."
     lab.report["release_gate"] = True
-    lab.report["upgrade_scope"] = "Same-binary disk reopen only; no module migration, client upgrade or SDK major upgrade is verified."
+    if replacement is None:
+        lab.report["upgrade_scope"] = "Same-binary disk reopen only; no module migration, client upgrade or SDK major upgrade is verified."
+    else:
+        lab.report["upgrade_scope"] = "Two published binaries switched on the same homes; module migration and database restore were outside this scenario."
 
 
 def client_upgrade_suite(lab, mcnd, replacement, reference, hermes):
