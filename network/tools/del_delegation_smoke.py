@@ -68,10 +68,10 @@ def read_words(address, data, height, count, evm):
     return [int(response[i:i + 64], 16) for i in range(2, len(response), 64)]
 
 
-def balance(account, native_account, height, evm, rest):
+def balance(account, native_account, height, evm, rest, *, denom='del'):
     value = int(ethereum('eth_getBalance', [account, hex(height)], base=evm), 16)
-    native_balance = native(f'/cosmos/bank/v1beta1/balances/{native_account}/by_denom?denom=del', height, base=rest)['balance']
-    check(native_balance['denom'] == 'del' and value == int(native_balance['amount']), 'EVM and native bank DEL balances differ')
+    native_balance = native(f'/cosmos/bank/v1beta1/balances/{native_account}/by_denom?denom={denom}', height, base=rest)['balance']
+    check(native_balance['denom'] == denom and value == int(native_balance['amount']), 'EVM and native bank balances differ')
     return value
 
 

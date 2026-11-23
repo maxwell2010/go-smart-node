@@ -26,14 +26,22 @@ from withdrawal_genesis_smoke import ADDRESS, SHA256, bech32_payload, check, eth
 
 
 GENESIS_LIMIT = 64 * 1024 * 1024
+NETWORK_PROFILES = {
+    "mainnet": (9905401, "msp", "MSP", "MintCandy Wrapped MSP", "WMSP"),
+    "testnet": (990098, "tmsp", "tMSP", "MintCandy Wrapped Test MSP", "WtMSP"),
+}
 
 
-def load_fixture(directory, *, four_validators=False, empty_user_assets=False, assembly_report=None):
+def load_fixture(directory, *, four_validators=False, empty_user_assets=False, assembly_report=None,
+                 network_profile=None):
     if four_validators:
         evm_id = 990014 if assembly_report is not None else (990013 if empty_user_assets else 990012)
         labels, powers = ("a", "b", "c", "d"), (10000, 10000, 10000, 10000)
     else:
         evm_id, labels, powers = 990011, ("a", "b", "c"), (4, 4, 2)
+    native_denom = "del"
+    if network_profile is not None:
+        evm_id, native_denom, symbol, wrapper_name, wrapper_symbol = NETWORK_PROFILES[network_profile]
     chain_id = f"mintcandy_{evm_id}-1"
     info = directory.lstat()
     check(stat.S_ISDIR(info.st_mode) and stat.S_IMODE(info.st_mode) & 0o077 == 0, "private fixture directory required")
@@ -68,13 +76,22 @@ def load_fixture(directory, *, four_validators=False, empty_user_assets=False, a
         check(not state["coin"].get("coins") and not state["nft"].get("external_bindings") and
               len(state["nft"]["collections"]) == 1 and not (state["nft"]["collections"][0].get("tokens") or []),
               "empty launch contains user assets")
-        check(int(allocation["initialSupplyAtomic"]) == 5_041_000 * 10**18 and
+        check(allocation["denom"] == native_denom and int(allocation["initialSupplyAtomic"]) == 5_041_000 * 10**18 and
               all(row["delegator"] == expected["actorNative"] for row in allocation["genesisDelegations"]) and
               len(allocation["genesisDelegations"]) == 4, "empty launch differs from founder allocation")
         expected["founderBalanceAtomic"] = str(5_000_000 * 10**18)
         check(profile.get("test_grace_until_height", 0) == 0 and int(doc["consensus_params"]["block"]["max_gas"]) == 24_000_000,
               "empty launch must use production penalty and gas rules")
-    if assembly_report is not None and checked.get("wrappedTokenSymbol") == "WMSP":
+    if network_profile is not None:
+        check(state["coin"]["params"]["base_denom"] == state["mint"]["params"]["mint_denom"] ==
+              state["evm"]["params"]["evm_denom"] == state["staking"]["params"]["bond_denom"] == native_denom,
+              "genesis modules disagree on the compiled native denomination")
+        check(all(coin["denom"] == native_denom for key in ("min_deposit", "expedited_min_deposit")
+                  for coin in state["gov"]["params"][key]), "genesis governance deposits use a foreign denomination")
+        check(checked.get("wrappedTokenSymbol") == wrapper_symbol, "cold genesis used the wrong wrapper")
+        expected.update(profile=network_profile, nativeDenom=native_denom, nativeSymbol=symbol,
+                        wrapName=wrapper_name, wrapSymbol=wrapper_symbol, wmspContract=profile["wrapped_del"])
+    elif assembly_report is not None and checked.get("wrappedTokenSymbol") == "WMSP":
         expected["wmspContract"] = profile["wrapped_del"]
     validators = expected["validators"]
     check(tuple(row["name"] for row in validators) == labels and
@@ -92,6 +109,17 @@ def load_fixture(directory, *, four_validators=False, empty_user_assets=False, a
         keys.append(data)
     check(len(identities) == len(validators), "repeated genesis consensus identity")
     return genesis, expected, keys
+
+
+def check_network_metadata(node, height, expected):
+    denom = expected["nativeDenom"]
+    metadata = native(f"/cosmos/bank/v1beta1/denoms_metadata/{denom}", height, base=node.rest)["metadata"]
+    check(metadata["base"] == denom and metadata["display"] == metadata["symbol"] == expected["nativeSymbol"],
+          "live bank metadata disagrees with the compiled profile")
+    check([(unit["denom"], int(unit.get("exponent", 0))) for unit in metadata["denom_units"]] ==
+          [(denom, 0), (expected["nativeSymbol"], 18)], "unexpected live bank denomination units")
+    supply = native(f"/cosmos/bank/v1beta1/supply/by_denom?denom={denom}", height, base=node.rest)["amount"]
+    check(supply == {"denom": denom, "amount": str(5_041_000 * 10**18)}, "live native supply differs from the genesis")
 
 
 def configure_peers(node, peers, *, signed_p2p=None):
@@ -646,23 +674,31 @@ def run_launch(binary, root, genesis, expected, keys, env, owner, report, *, fou
     report["followerVotingPower"] = 0
     report["phase"] = "rpc-and-peer-evidence"
     values = set()
+    denom = expected.get("nativeDenom", "del")
     for node in nodes:
         check(int(ethereum("eth_chainId", [], base=node.evm), 16) == expected["evmChainId"], "wrong JSON-RPC signing domain")
-        values.add(balance(expected["actor"], expected["actorNative"], height, node.evm, node.rest))
+        if "profile" in expected:
+            check_network_metadata(node, height, expected)
+        values.add(balance(expected["actor"], expected["actorNative"], height, node.evm, node.rest, denom=denom))
         if "wmspContract" in expected:
-            for selector, text in (("0x06fdde03", "MintCandy Wrapped MSP"), ("0x95d89b41", "WMSP")):
+            for selector, text in (("0x06fdde03", expected.get("wrapName", "MintCandy Wrapped MSP")),
+                                   ("0x95d89b41", expected.get("wrapSymbol", "WMSP"))):
                 data = text.encode("ascii")
                 encoded = (32).to_bytes(32, "big") + len(data).to_bytes(32, "big") + data.ljust(32, b"\0")
                 actual = ethereum("eth_call", [{"to": expected["wmspContract"], "data": selector}, hex(height)], base=node.evm)
-                check(actual == "0x" + encoded.hex(), "EVM wrapper metadata differs from WMSP")
+                check(actual == "0x" + encoded.hex(), "EVM wrapper metadata differs from the launch profile")
     if "wmspContract" in expected:
-        report["wrappedTokenSymbol"] = "WMSP"
+        report["wrappedTokenSymbol"] = expected.get("wrapSymbol", "WMSP")
     check(len(values) == 1 and next(iter(values)) > 0, "nodes disagree on the positive native and EVM balance")
-    first_balance = balance(expected["actor"], expected["actorNative"], 1, follower.evm, follower.rest)
+    first_balance = balance(expected["actor"], expected["actorNative"], 1, follower.evm, follower.rest, denom=denom)
     check(first_balance == next(iter(values)), "ordinary peer cannot query the same funded state at block 1")
     if "founderBalanceAtomic" in expected:
         check(str(first_balance) == expected["founderBalanceAtomic"], "founder balance differs from the launch plan")
-    report["rpc"] = {"historicalHeight": 1, "verifiedHeight": height, "delAtomic": str(first_balance)}
+    report["rpc"] = {"historicalHeight": 1, "verifiedHeight": height}
+    if "profile" in expected:
+        report["rpc"].update(nativeDenom=denom, nativeSymbol=expected["nativeSymbol"], nativeAtomic=str(first_balance))
+    else:
+        report["rpc"]["delAtomic"] = str(first_balance)
     report.update(verify_network(nodes, follower, configured, env, stopped=stopped))
     if signed_bootstrap:
         outbound = [peer["nodeId"] for peer in report["observedPeers"][follower.label] if peer["outbound"]]
@@ -709,6 +745,7 @@ def main(argv=None, signals=None):
     parser.add_argument("--four-validators", action="store_true", help="check quorum and peer catchup after stopping one of four validators")
     parser.add_argument("--empty-user-assets", action="store_true", help="rehearse the isolated four-validator founder allocation without user assets")
     parser.add_argument("--assembly-report", type=Path, help="cold verification report for the offline-assembled isolated genesis")
+    parser.add_argument("--network-profile", choices=NETWORK_PROFILES, help="opt in to a compiled native denomination profile")
     parser.add_argument("--quorum-loss-recovery", action="store_true", help="halt safely with two of four validators and recover original signers")
     parser.add_argument("--commit-probe", type=Path, help="owned Comet Ed25519 commit verifier")
     parser.add_argument("--signed-bootstrap", action="store_true", help="start the fresh test observer using the signed P2P manifest")
@@ -726,6 +763,8 @@ def main(argv=None, signals=None):
         parser.error("--empty-user-assets requires four validators and no treasury transfer fixture")
     if args.assembly_report and not args.empty_user_assets:
         parser.error("--assembly-report requires --empty-user-assets")
+    if args.network_profile and not args.assembly_report:
+        parser.error("--network-profile requires an offline-assembled isolated genesis")
     if args.media_fixture and not args.assembly_report:
         parser.error("--media-fixture requires the offline-assembled isolated genesis")
     if args.quorum_loss_recovery and (not args.four_validators or args.commit_probe is None):
@@ -760,8 +799,11 @@ def main(argv=None, signals=None):
             with open(binary, "rb") as daemon:
                 check(hashlib.file_digest(daemon, "sha256").hexdigest() == args.binary_sha256, "packaged daemon hash differs")
             genesis, expected, keys = load_fixture(Path(args.fixture), four_validators=args.four_validators,
-                                                   empty_user_assets=args.empty_user_assets, assembly_report=args.assembly_report)
+                                                   empty_user_assets=args.empty_user_assets, assembly_report=args.assembly_report,
+                                                   network_profile=args.network_profile)
             report["emptyUserAssetGenesis"] = args.empty_user_assets
+            if args.network_profile:
+                report["networkProfile"] = args.network_profile
             if args.assembly_report and not args.block_retention:
                 report["offlineAssembledGenesis"] = True
             if args.package_genesis:

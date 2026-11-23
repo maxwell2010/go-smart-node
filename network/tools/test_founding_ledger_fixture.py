@@ -8,18 +8,25 @@ import unittest
 
 from check_operator_applications import ED25519_TYPE, check_applications
 from check_public_launch_draft import ATOMS_PER_DEL, DEFAULT_DRAFT, DEFAULT_INTAKE, DEFAULT_PLAN, read_json
+from native_launch_rehearsal import NETWORK_PROFILES
 from prepare_founding_ledger import prepare_ledger
 from verify_public_launch_genesis import verify_candidate
 
 
-def prepared_fixture(source, deployment=None):
+def prepared_fixture(source, deployment=None, *, network_profile=None):
     expected = read_json(source / 'expectations.json')
     doc = read_json(source / 'public/genesis.json')
     if (doc['chain_id'], expected['evmChainId']) != ('mintcandy_990014-1', 990014):
         raise ValueError('founding ledger rehearsal requires the sponsored CI domain')
     plan = read_json(DEFAULT_PLAN)
-    plan.update(chain_id=doc['chain_id'], evm_chain_id=str(expected['evmChainId']),
-                founder_evm_address=expected['actor'].lower())
+    evm_id = expected['evmChainId']
+    if network_profile is not None:
+        if deployment is None:
+            raise ValueError('compiled fixture requires the matching assembler contract addresses')
+        evm_id, denom, symbol, _, _ = NETWORK_PROFILES[network_profile]
+        name = 'MintCandy' if network_profile == 'mainnet' else 'MintCandy Test MSP'
+        plan.update(denom=denom, native_token_name=name, native_token_symbol=symbol, display_denom=symbol)
+    plan.update(chain_id=f'mintcandy_{evm_id}-1', evm_chain_id=str(evm_id), founder_evm_address=expected['actor'].lower())
     intake = read_json(DEFAULT_INTAKE)
     intake['network'].update(cosmos_chain_id=plan['chain_id'], evm_chain_id=plan['evm_chain_id'])
     sample = intake['validators'][0]
@@ -62,7 +69,9 @@ class FoundingLedgerFixtureTest(unittest.TestCase):
         fixture = Path(os.environ['MCND_FOUNDING_LEDGER_FIXTURE'])
         source = Path(os.environ['MCND_FOUNDING_LEDGER_SOURCE'])
         roles = os.environ.get('MCND_FOUNDING_LEDGER_ROLES')
-        ledger, applications, plan, relayers = prepared_fixture(source, read_json(Path(roles)) if roles else None)
+        network_profile = os.environ.get('MCND_FOUNDING_NETWORK_PROFILE')
+        ledger, applications, plan, relayers = prepared_fixture(source, read_json(Path(roles)) if roles else None,
+                                                               network_profile=network_profile)
         raw = (fixture / 'public/genesis.json').read_bytes()
         doc = json.loads(raw)
         state = doc['app_state']
@@ -99,7 +108,9 @@ if __name__ == '__main__':
     parser.add_argument('--source', required=True, type=Path)
     parser.add_argument('--output', required=True, type=Path)
     parser.add_argument('--roles', type=Path)
+    parser.add_argument('--network-profile', choices=NETWORK_PROFILES)
     args = parser.parse_args()
-    ledger, _, _, _ = prepared_fixture(args.source, read_json(args.roles) if args.roles else None)
+    ledger, _, _, _ = prepared_fixture(args.source, read_json(args.roles) if args.roles else None,
+                                       network_profile=args.network_profile)
     with args.output.open('x', encoding='utf-8') as stream:
         json.dump(ledger, stream)

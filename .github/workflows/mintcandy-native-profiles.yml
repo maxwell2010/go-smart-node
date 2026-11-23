@@ -1,0 +1,319 @@
+name: MintCandy native profile rehearsal
+
+on:
+  push:
+    branches: ['codex/mintcandy-native-denoms', 'integration/mintcandy-native-denoms', 'integration/mintcandy-mainnet*']
+    paths: ['network/**', '.github/workflows/mintcandy-native-profiles.yml']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: mintcandy-native-profiles-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  isolated-launch:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - profile: mainnet
+            evm_id: '9905401'
+            denom: msp
+            other_denom: tmsp
+            symbol: MSP
+            wrapper: WMSP
+          - profile: testnet
+            evm_id: '990098'
+            denom: tmsp
+            other_denom: msp
+            symbol: tMSP
+            wrapper: WtMSP
+    defaults:
+      run:
+        shell: bash
+        working-directory: network
+    env:
+      CGO_ENABLED: '1'
+      CC: gcc
+      GOENV: 'off'
+      GOWORK: 'off'
+      GOTOOLCHAIN: local
+      GOMAXPROCS: '2'
+      PROFILE: ${{ matrix.profile }}
+      EVM_ID: ${{ matrix.evm_id }}
+      DENOM: ${{ matrix.denom }}
+      OTHER_DENOM: ${{ matrix.other_denom }}
+      SYMBOL: ${{ matrix.symbol }}
+      WRAPPER: ${{ matrix.wrapper }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e
+        with:
+          go-version: '1.26.11'
+          cache-dependency-path: network/go.sum
+      - name: Validate dependencies and offline tooling
+        run: |
+          set -euo pipefail
+          go mod download
+          go mod verify
+          git diff --exit-code -- go.mod go.sum
+          python3 scripts/verify_owned_evm.py
+          python3 scripts/verify_owned_geth.py
+          python3 scripts/verify_owned_sdk.py --compiled
+          python3 -B -m unittest test_check_operator_applications test_public_genesis_manifest \
+            test_install_validator_genesis test_native_launch_package
+        env:
+          PYTHONPATH: tools
+      - name: Build the profile and verify isolated genesis
+        run: |
+          set -euo pipefail
+          umask 077
+          work=$(mktemp -d "$RUNNER_TEMP/mc.XXXXXX")
+          printf 'PROFILE_WORK=%s\n' "$work" >> "$GITHUB_ENV"
+          mkdir -m 700 -p "$work/fixture" "$work/assembled/public" "$work/evidence"
+          tags="mintcandy_$PROFILE"
+          chain="mintcandy_${EVM_ID}-1"
+          go build -mod=readonly -p 2 -tags "$tags" -trimpath \
+            -ldflags "-X main.buildCommit=$GITHUB_SHA" -o "$work/mcnd" ./cmd/mcnd
+          go build -mod=readonly -p 2 -tags "$tags" -trimpath -o "$work/mcnd-genesis" ./cmd/mcnd-genesis
+          go build -mod=readonly -p 2 -tags "$tags" -trimpath -o "$work/comet-commit-probe" ./tools/comet_commit_probe
+          go test -mod=readonly -p 2 -tags "$tags" -count=1 -timeout 2m -json \
+            -run '^TestCompiledNativeProfile$' ./identity | tee "$work/evidence/compiled-profile.jsonl"
+          jq -s -e 'any(.[]; .Action == "pass" and .Test == "TestCompiledNativeProfile")' \
+            "$work/evidence/compiled-profile.jsonl" >/dev/null
+          if [[ "$PROFILE" == mainnet ]]; then
+            go test -mod=readonly -p 2 -tags "$tags" -count=1 -timeout 4m -json \
+              -run '^TestMainnetICS20DenomAdmission$' ./app | tee "$work/evidence/ics20-admission.jsonl"
+            jq -s -e 'any(.[]; .Action == "pass" and .Test == "TestMainnetICS20DenomAdmission")' \
+              "$work/evidence/ics20-admission.jsonl" >/dev/null
+          fi
+          # Generate disposable signing identities through the existing sponsored CI fixture.
+          export MCND_NATIVE_CONSENSUS_FIXTURE_DIR="$work/fixture"
+          export MCND_NATIVE_LAUNCH_REHEARSAL=4-empty-sponsored
+          if ! go test -mod=readonly -p 2 -count=1 -timeout 8m -json \
+            -run '^TestOwnedAppSignedRegistryBootstrap$/^authenticated_isolated_position_reader$' ./systemcontracts \
+            > "$work/fixture.log" 2>&1; then
+            sed -nE 's/.*([ /])(native_(consensus|launch)[[:alnum:]_]*\.go:[0-9]+).*/\2/p' "$work/fixture.log" | sort -u
+            exit 1
+          fi
+          "$work/mcnd-genesis" addresses --chain-id "$chain" --evm-chain-id "$EVM_ID" > "$work/roles.json"
+          python3 -B tools/test_founding_ledger_fixture.py --source "$work/fixture" --roles "$work/roles.json" \
+            --network-profile "$PROFILE" --output "$work/ledger.json"
+          genesis="$work/assembled/public/genesis.json"
+          options=(--ledger "$work/ledger.json" --parameters tools/fixtures/founding-genesis-ci-parameters.json)
+          "$work/mcnd-genesis" build "${options[@]}" --genesis "$genesis"
+          "$work/mcnd-genesis" build "${options[@]}" --genesis "$work/rebuilt.json"
+          cmp "$genesis" "$work/rebuilt.json"
+          "$work/mcnd-genesis" verify "${options[@]}" --genesis "$genesis" > "$work/evidence/assembly.json"
+          jq -e --arg wrapper "$WRAPPER" --arg chain "$chain" --arg evm "$EVM_ID" \
+            '.status == "CANDIDATE_INIT_CHAIN_VERIFIED" and .chainId == $chain and .evmChainId == $evm and
+             .wrappedTokenSymbol == $wrapper and .validators == 4 and .votingPower == 40000 and
+             .publicGenesisApproved == false' "$work/evidence/assembly.json" >/dev/null
+          jq -e --arg denom "$DENOM" --arg symbol "$SYMBOL" \
+            '.app_state.bank.denom_metadata | any(.base == $denom and .symbol == $symbol and .display == $symbol)' \
+            "$genesis" >/dev/null
+          jq --arg foreign "$OTHER_DENOM" '.app_state.evm.params.evm_denom = $foreign' "$genesis" > "$work/foreign.json"
+          if "$work/mcnd-genesis" verify "${options[@]}" --genesis "$work/foreign.json"; then
+            echo 'Cold verification unexpectedly accepted a different EVM denomination.' >&2
+            exit 1
+          fi
+          install -m 600 "$genesis" "$work/assembled/genesis.json"
+          install -m 600 "$work/fixture/"priv_validator_key_{a,b,c,d}.json "$work/assembled/"
+          jq --arg chain "$chain" --argjson evm "$EVM_ID" '{chainId: $chain, evmChainId: $evm, actor, actorNative,
+            validators: [.validators[] | {name, initialPower, consensusAddress, publicKey}]}' \
+            "$work/fixture/expectations.json" > "$work/assembled/expectations.json"
+          MCND_FOUNDING_LEDGER_SOURCE="$work/fixture" MCND_FOUNDING_LEDGER_FIXTURE="$work/assembled" \
+            MCND_FOUNDING_LEDGER_ROLES="$work/roles.json" MCND_FOUNDING_NETWORK_PROFILE="$PROFILE" \
+            python3 -B -m unittest discover -s tools -p test_founding_ledger_fixture.py
+      - name: Sign and verify a test archive with a disposable key
+        run: |
+          set -euo pipefail
+          umask 077
+          work="$PROFILE_WORK"
+          signer_home=$(mktemp -d "$work/g.XXXXXX")
+          trap 'gpgconf --homedir "$signer_home" --kill all' EXIT
+          gpg --homedir "$signer_home" --batch --no-tty --pinentry-mode loopback --passphrase '' \
+            --quick-generate-key 'MintCandy native profile rehearsal' ed25519 sign 1d
+          signer=$(gpg --homedir "$signer_home" --batch --with-colons --list-keys | awk -F: '$1 == "fpr" {print $10}')
+          [[ "$signer" =~ ^[0-9A-F]{40}$ ]]
+          gpg --homedir "$signer_home" --batch --export "$signer" > "$work/trusted.gpg"
+          genesis="$work/assembled/public/genesis.json"
+          archive="$work/mcnd-test.tar.gz"
+          python3 -B tools/native_launch_package.py build --binary "$work/mcnd" --genesis "$genesis" \
+            --source-commit "$GITHUB_SHA" --output "$archive" --signer-home "$signer_home" --signer-fingerprint "$signer"
+          python3 -B tools/native_launch_package.py verify --archive "$archive" --trusted-keyring "$work/trusted.gpg" \
+            --signer-fingerprint "$signer" --output-dir "$work/verified" > "$work/evidence/package.json"
+          cmp "$work/mcnd" "$work/verified/bin/mcnd"
+          cmp "$genesis" "$work/verified/genesis.json"
+          jq --arg revision "$GITHUB_SHA" '{releaseVersion: "0.0.0", sourceRevision: $revision, binarySha256}' \
+            "$work/evidence/package.json" > "$work/evidence/install.json"
+          binary="$work/verified/bin/mcnd"
+          "$binary" init retention-check --home "$work/retention" --chain-id "mintcandy_${EVM_ID}-1" \
+            --evm.evm-chain-id "$EVM_ID" >/dev/null 2>&1
+          python3 -B tools/configure_history.py --home "$work/retention" --apply --role rpc-ibc > "$work/evidence/retention.json"
+      - name: Verify four-validator consensus and signed observer bootstrap
+        run: |
+          set -euo pipefail
+          umask 077
+          work="$PROFILE_WORK"
+          printf '127.0.0.1 localhost peer-bootstrap.example.invalid\n' > "$work/hosts"
+          binary="$work/verified/bin/mcnd"
+          package="$work/evidence/package.json"
+          report="$work/evidence/network.json"
+          status=0
+          sudo -n unshare --net --mount --propagation private -- bash -euc '
+            ip link set lo up
+            mount --bind "$1" /etc/hosts
+            shift
+            exec "$@"
+          ' _ "$work/hosts" env TMPDIR="$work" "$(command -v python3)" -B "$PWD/tools/native_launch_rehearsal.py" \
+            --binary "$binary" --binary-sha256 "$(jq -er .binarySha256 "$package")" \
+            --archive-sha256 "$(jq -er .archiveSha256 "$package")" --source-commit "$GITHUB_SHA" \
+            --fixture "$work/assembled" --home-parent "$work" --assembly-report "$work/evidence/assembly.json" \
+            --report "$report" --network-profile "$PROFILE" --four-validators --empty-user-assets \
+            --quorum-loss-recovery --signed-bootstrap --commit-probe "$work/comet-commit-probe" \
+            --package-genesis "$work/verified/genesis.json" || status=$?
+          if [[ -f "$report" ]]; then
+            sudo -n chown "$(id -u):$(id -g)" "$report"
+          fi
+          (( status == 0 ))
+          jq -e --arg denom "$DENOM" --arg symbol "$SYMBOL" --arg wrapper "$WRAPPER" \
+            --arg genesis "$(jq -er .genesisSha256 "$package")" \
+            '.status == "PASS" and .loopbackOnlyNamespace and .offlineAssembledGenesis and .followerVotingPower == 0 and
+             .genesisSha256 == $genesis and .foundingCommitProof.status == "FOUNDING_COMMIT_VERIFIED" and
+             .rpc.nativeDenom == $denom and .rpc.nativeSymbol == $symbol and .wrappedTokenSymbol == $wrapper and
+             .quorumRecovery.verifiedEd25519Signatures == 3 and .fourSignerRecovery.verifiedEd25519Signatures == 4 and
+             .signedBootstrap.appHash == .appHash and .signedBootstrap.outboundPeers == [.signedBootstrap.nodeId] and
+             (.signedBootstrap.networkLaunchAuthorized | not)' "$report" >/dev/null
+      - name: Package the exact tested daemon and offline launch tools
+        run: |
+          set -euo pipefail
+          umask 077
+          work="$PROFILE_WORK"
+          kit="$work/candidate"
+          output="$work/output"
+          archive="mintcandy-$PROFILE-candidate-linux-amd64.tar.gz"
+          mkdir -m 700 -- "$kit" "$output"
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          git diff --exit-code
+          scripts=(check_operator_applications check_public_launch_draft configure_history install_validator_genesis
+                   mcnd_process_smoke native_launch_allocation native_launch_package prepare_founding_ledger
+                   public_genesis_manifest verify_public_launch_genesis withdrawal_genesis_smoke consensus_health
+                   verify_state_sync_checkpoint)
+          inputs=(LICENSE network/docs/ru/{INSTALL_LAUNCH_TOOLS.md,OPERATOR_LAUNCH.md,VALIDATOR_LAUNCH_INTAKE.md}
+                  network/docs/ru/{public-genesis.draft.json,public-launch-allocation.draft.json,operator-launch-intake.example.json}
+                  network/docs/ru/evidence/software-release-1.1.5.json)
+          for script in "${scripts[@]}"; do inputs+=("network/tools/$script.py"); done
+          mapfile -d '' notices < <(git -C "$GITHUB_WORKSPACE" ls-files -z -- \
+            network/LICENSE ':(glob)network/systemcontracts/LICENSE*' ':(glob)network/third_party/**/LICENSE*' \
+            ':(glob)network/third_party/**/COPYING*' ':(glob)network/third_party/**/NOTICE*')
+          git -C "$GITHUB_WORKSPACE" archive --format=tar "$GITHUB_SHA" -- "${inputs[@]}" "${notices[@]}" \
+            | tar -xf - -C "$kit"
+          install -D -m 0755 -- "$work/verified/bin/mcnd" "$kit/bin/mcnd"
+          install -m 0755 -- "$work/mcnd-genesis" "$work/comet-commit-probe" "$kit/bin/"
+          install -d -m 0700 -- "$kit/evidence"
+          install -m 0600 -- "$work/evidence/"{assembly,network,package,retention}.json "$kit/evidence/"
+          install -m 0600 -- "$work/evidence/"*.jsonl "$kit/evidence/"
+          go version -m "$kit/bin/"{mcnd,mcnd-genesis,comet-commit-probe} > "$kit/BUILD_INFO.txt"
+          sha256() { sha256sum "$1" | cut -d' ' -f1; }
+          jq -n --arg revision "$GITHUB_SHA" --arg tag "mintcandy_$PROFILE" --arg profile "$PROFILE" \
+            --arg chain "mintcandy_${EVM_ID}-1" --arg evm "$EVM_ID" --arg denom "$DENOM" --arg symbol "$SYMBOL" \
+            --arg binary "$(sha256 "$kit/bin/mcnd")" --arg assembler "$(sha256 "$kit/bin/mcnd-genesis")" \
+            '{status:"ci-candidate", profile:$profile, sourceRevision:$revision, buildTag:$tag, chainId:$chain,
+              evmChainId:$evm, nativeDenom:$denom, nativeSymbol:$symbol, binarySha256:$binary,
+              assemblerSha256:$assembler, includesGenesis:false, networkLaunchAuthorized:false}' > "$kit/PACKAGE.json"
+          printf '%s\n' 'CI candidate from loopback-only tests. No public genesis or launch approval is included.' \
+            'Verify the outer archive SHA256, GitHub attestation and internal SHA256SUMS before use.' > "$kit/README-CI.txt"
+          (
+            cd "$kit"
+            find . -type f ! -name SHA256SUMS -print0 | sort -z | xargs -0 sha256sum > SHA256SUMS
+            sha256sum --check --strict --quiet SHA256SUMS
+          )
+          tar --sort=name --mtime='@0' --owner=0 --group=0 --numeric-owner -czf "$output/$archive" -C "$kit" .
+          (
+            cd "$output"
+            sha256sum "$archive" > "$archive.sha256"
+            sha256sum --check --strict --quiet "$archive.sha256"
+          )
+          (
+            extract=$(mktemp -d "$work/extract.XXXXXX")
+            tar --no-same-owner --no-same-permissions -xzf "$output/$archive" -C "$extract"
+            cd "$extract"
+            sha256sum --check --strict --quiet SHA256SUMS
+            cmp bin/mcnd "$work/verified/bin/mcnd"
+            cmp bin/mcnd-genesis "$work/mcnd-genesis"
+            bin/mcnd version >/dev/null
+            bin/mcnd-genesis founder-proof --help >/dev/null
+            python3 -B network/tools/public_genesis_manifest.py install-observer --help >/dev/null
+          )
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+        with:
+          name: mintcandy-${{ matrix.profile }}-candidate-${{ github.run_attempt }}
+          path: ${{ env.PROFILE_WORK }}/output/
+          compression-level: 0
+          if-no-files-found: error
+          retention-days: 30
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+        if: always() && env.PROFILE_WORK != ''
+        with:
+          name: mintcandy-${{ matrix.profile }}-rehearsal-${{ github.sha }}-${{ github.run_attempt }}
+          path: ${{ env.PROFILE_WORK }}/evidence/
+          if-no-files-found: ignore
+          retention-days: 14
+
+  attest-candidates:
+    needs: isolated-launch
+    if: github.repository == 'maxwell2010/go-smart-node' && github.ref == 'refs/heads/codex/mintcandy-native-denoms'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      actions: read
+      id-token: write
+      attestations: write
+    strategy:
+      matrix:
+        profile: [mainnet, testnet]
+    defaults:
+      run:
+        shell: bash
+        working-directory: ${{ runner.temp }}/candidate
+    env:
+      ARCHIVE: mintcandy-${{ matrix.profile }}-candidate-linux-amd64.tar.gz
+    steps:
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333
+        with:
+          name: mintcandy-${{ matrix.profile }}-candidate-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/candidate
+      - name: Verify the tested archive checksum
+        run: sha256sum --check --strict --quiet "$ARCHIVE.sha256"
+      - uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6
+        id: provenance
+        with:
+          subject-path: ${{ runner.temp }}/candidate/${{ env.ARCHIVE }}
+          create-storage-record: false
+      - name: Verify the provenance against this commit and workflow
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ATTESTATION_BUNDLE: ${{ steps.provenance.outputs.bundle-path }}
+        run: |
+          set -euo pipefail
+          cp -- "$ATTESTATION_BUNDLE" provenance.sigstore.json
+          gh attestation verify "$ARCHIVE" --bundle provenance.sigstore.json --repo "$GITHUB_REPOSITORY" \
+            --signer-workflow "$GITHUB_REPOSITORY/.github/workflows/mintcandy-native-profiles.yml" \
+            --source-ref "$GITHUB_REF" --source-digest "$GITHUB_SHA" --signer-digest "$GITHUB_SHA" \
+            --deny-self-hosted-runners --format json > attestation-verification.json
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+        with:
+          name: attested-mintcandy-${{ matrix.profile }}-candidate-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/candidate/
+          compression-level: 0
+          if-no-files-found: error
+          retention-days: 30
