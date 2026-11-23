@@ -6,7 +6,7 @@ import os
 from pathlib import Path
 import unittest
 
-from check_operator_applications import ED25519_TYPE, check_applications
+from check_operator_applications import ED25519_TYPE, check_applications, strict_native_address
 from check_public_launch_draft import ATOMS_PER_DEL, DEFAULT_DRAFT, DEFAULT_INTAKE, DEFAULT_PLAN, read_json
 from native_launch_rehearsal import NETWORK_PROFILES
 from prepare_founding_ledger import prepare_ledger
@@ -29,6 +29,10 @@ def prepared_fixture(source, deployment=None, *, network_profile=None):
     plan.update(chain_id=f'mintcandy_{evm_id}-1', evm_chain_id=str(evm_id), founder_evm_address=expected['actor'].lower())
     intake = read_json(DEFAULT_INTAKE)
     intake['network'].update(cosmos_chain_id=plan['chain_id'], evm_chain_id=plan['evm_chain_id'])
+    if network_profile == 'mainnet':
+        intake['schema_version'] = 3
+        intake['allocation'].update(denom='msp', expected_total_atoms=plan['initial_supply_atoms'])
+        intake['launch_coordination'] = {'requested_mainnet_native_denom': 'msp'}
     sample = intake['validators'][0]
     relayers = [row['address'] for row in doc['app_state']['bank']['balances']
                 if row['coins'] == [{'denom': 'del', 'amount': str(100 * ATOMS_PER_DEL)}]]
@@ -52,6 +56,10 @@ def prepared_fixture(source, deployment=None, *, network_profile=None):
                                    role='sentry')
         if index == 1:
             row['gas_wallet_address'], relayers[0] = relayers[0], row['gas_wallet_address']
+        if network_profile == 'mainnet':
+            row['operator_address'] = row.pop('evm_operator_address')
+            for field in ('reward_address', 'stake_owner_address', 'beneficiary_address', 'gas_wallet_address'):
+                row[field] = strict_native_address(row[field], 'd0')
         intake['validators'].append(row)
     applications = check_applications(intake, plan)
     if deployment is None:

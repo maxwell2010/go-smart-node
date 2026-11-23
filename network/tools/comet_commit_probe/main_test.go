@@ -12,6 +12,7 @@ import (
 	cmtjson "github.com/cometbft/cometbft/libs/json"
 	cmtproto "github.com/cometbft/cometbft/proto/tendermint/types"
 	"github.com/cometbft/cometbft/types"
+	"github.com/maxwell2010/go-smart-node/network/identity"
 )
 
 func fixture(t *testing.T, absent ...int) (request, *types.Commit) {
@@ -75,7 +76,11 @@ func marshalCommit(t *testing.T, input *request, commit *types.Commit) {
 }
 
 func TestVerifiedQuorum(t *testing.T) {
-	for _, domain := range []string{"mintcandy_990012-1", "mintcandy_990013-1", "mintcandy_990014-1"} {
+	domains := []string{"mintcandy_990012-1", "mintcandy_990013-1", "mintcandy_990014-1"}
+	if identity.ProfileChainID != "" {
+		domains = append(domains, identity.ProfileChainID)
+	}
+	for _, domain := range domains {
 		t.Run(domain, func(t *testing.T) {
 			for _, absent := range [][]int{nil, {3}} {
 				input, _ := fixtureChain(t, domain, absent...)
@@ -86,6 +91,15 @@ func TestVerifiedQuorum(t *testing.T) {
 				}
 			}
 		})
+	}
+	for _, domain := range []string{identity.MainnetChainID, identity.TestnetChainID} {
+		if domain == identity.ProfileChainID {
+			continue
+		}
+		input, _ := fixtureChain(t, domain)
+		if _, err := verify(input); err == nil {
+			t.Fatalf("accepted a quorum outside the compiled profile: %s", domain)
+		}
 	}
 }
 

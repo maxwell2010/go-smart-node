@@ -84,6 +84,7 @@ jobs:
             -ldflags "-X main.buildCommit=$GITHUB_SHA" -o "$work/mcnd" ./cmd/mcnd
           go build -mod=readonly -p 2 -tags "$tags" -trimpath -o "$work/mcnd-genesis" ./cmd/mcnd-genesis
           go build -mod=readonly -p 2 -tags "$tags" -trimpath -o "$work/comet-commit-probe" ./tools/comet_commit_probe
+          go test -mod=readonly -p 2 -tags "$tags" -count=1 -timeout 2m -run '^TestVerifiedQuorum$' ./tools/comet_commit_probe
           go test -mod=readonly -p 2 -tags "$tags" -count=1 -timeout 2m -json \
             -run '^TestCompiledNativeProfile$' ./identity | tee "$work/evidence/compiled-profile.jsonl"
           jq -s -e 'any(.[]; .Action == "pass" and .Test == "TestCompiledNativeProfile")' \
