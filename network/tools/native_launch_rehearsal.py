@@ -576,7 +576,7 @@ def run_launch(binary, root, genesis, expected, keys, env, owner, report, *, fou
 
         report["phase"] = "signed-observer-bootstrap-install"
         report["signedBootstrap"] = install_signed_test_bootstrap(
-            binary, root, genesis, rows[0], validators[0], follower, signed_bootstrap, report,
+            binary, genesis, rows[0], validators[0], follower, signed_bootstrap, report,
         )
         signed_p2p = report["signedBootstrap"]["publicP2P"]
     configured[follower.label] = configure_peers(follower, live_validators, signed_p2p=signed_p2p)

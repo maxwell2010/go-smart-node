@@ -2,6 +2,7 @@
 
 from pathlib import Path
 import socket
+import tempfile
 
 from check_public_launch_draft import DEFAULT_DRAFT, read_json
 from install_validator_genesis import install_genesis
@@ -11,7 +12,7 @@ from test_public_genesis_manifest import signed_fixture
 from withdrawal_genesis_smoke import check
 
 
-def install_signed_test_bootstrap(binary, root, genesis, source_identity, source, follower, inputs, report):
+def install_signed_test_bootstrap(binary, genesis, source_identity, source, follower, inputs, report):
     fixture, cold = inputs
     check(report["loopbackOnlyNamespace"] and report["offlineAssembledGenesis"] and
           source.chain_id == "mintcandy_990014-1", "signed bootstrap test requires the isolated launch fixture")
@@ -33,11 +34,11 @@ def install_signed_test_bootstrap(binary, root, genesis, source_identity, source
     draft = read_json(DEFAULT_DRAFT)
     manifest = prepare_manifest(genesis, applications, plan, draft, relayers, software, read_json(cold),
                                 include_public_p2p=True)
-    signing_root = root / "bootstrap-check"
-    signing_root.mkdir(mode=0o700)
-    with signed_fixture(signing_root, manifest) as args:
-        verified = verify_manifest(args, genesis, plan, draft, software)
-        evidence = install_genesis(Path(binary), follower.home, genesis, verified)
+    # Leave room for the GPG agent's Unix socket names under the runner's temporary path.
+    with tempfile.TemporaryDirectory(prefix="boot-", dir=artifacts) as directory:
+        with signed_fixture(Path(directory), manifest) as args:
+            verified = verify_manifest(args, genesis, plan, draft, software)
+            evidence = install_genesis(Path(binary), follower.home, genesis, verified)
     check(evidence["changed"] and evidence["publicP2P"] == {"persistent_peers": address, "seeds": ""},
           "observer must install the exact signed genesis and use the selected peer")
     return {**evidence, "nodeId": source.node_id}
