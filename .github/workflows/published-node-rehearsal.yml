@@ -527,8 +527,8 @@ jobs:
           genesis="$root/assembled/public/genesis.json"
           install -m 600 -- "$genesis" "$root/genesis.json"
           jq -e --arg archive "$RELEASE_ARCHIVE_SHA" --arg sha "$RELEASE_BINARY_SHA" --arg source "$RELEASE_SOURCE" '
-            select(.archiveSha256 == $archive and .binarySha256 == $sha and .sourceRevision == $source and .includesGenesis == false) |
-            {archiveSha256, binarySha256, sourceCommit: .sourceRevision}
+            select(.binarySha256 == $sha and .sourceRevision == $source and .includesGenesis == false and .networkLaunchApproved == false) |
+            {archiveSha256: $archive, binarySha256, sourceCommit: .sourceRevision}
           ' "$root/evidence/install.json" > "$root/replacement.json"
           go build -mod=readonly -p 2 -trimpath -o "$root/iavl-schema-probe" ./tools/iavl_schema_probe
           report="$root/evidence/release-restore.json"
