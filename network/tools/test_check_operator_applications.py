@@ -6,7 +6,9 @@ import sys
 import tempfile
 import unittest
 
-from check_operator_applications import ED25519_TYPE, check_applications, public_bootstrap, strict_native_address
+from check_operator_applications import (
+    ED25519_TYPE, check_applications, check_observer_peers, public_bootstrap, strict_native_address,
+)
 from check_public_launch_draft import DEFAULT_INTAKE, DEFAULT_PLAN, read_json
 
 
@@ -201,6 +203,22 @@ class OperatorApplicationTests(unittest.TestCase):
             self.assertNotIn(secret, json.dumps(result))
         self.document['validators'].reverse()
         self.assertEqual(public_bootstrap(check_applications(self.document, self.plan)), result)
+
+    def test_reviewed_observer_bootstrap_keeps_validator_endpoints_private(self):
+        applications = check_applications(self.document, self.plan)
+        observer = f'{100:040x}@observer.example.invalid:36657'
+        bootstrap = {'persistent_peers': [
+            {'p2p_address': observer, 'endpoint_publication_allowed': True},
+            {'p2p_address': 'internal', 'endpoint_publication_allowed': False},
+        ]}
+        applications['publicObserverPeers'] = check_observer_peers(bootstrap, applications['operators'], 4)
+        self.assertEqual(public_bootstrap(applications)['p2p'], {'persistent_peers': observer, 'seeds': ''})
+        applications['publicObserverPeers'].append(observer)
+        with self.assertRaisesRegex(ValueError, 'repeated public observer'):
+            public_bootstrap(applications)
+        bootstrap['persistent_peers'][0]['p2p_address'] = applications['operators'][0]['p2pAddress']
+        with self.assertRaisesRegex(ValueError, 'reuses a validator endpoint'):
+            check_observer_peers(bootstrap, applications['operators'], 4)
 
     def test_bootstrap_requires_a_full_roster_and_an_address_providing_blocks(self):
         seed = self.document['validators'][0]['connectivity']

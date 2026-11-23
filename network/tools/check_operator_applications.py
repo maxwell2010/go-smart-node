@@ -249,7 +249,7 @@ def check_applications(intake, plan, *, preflight_only=False):
             for field, prefix in SDK_ADDRESS_FIELDS.items():
                 candidate[field] = native_address_from_evm(candidate[field], prefix)
 
-    return {
+    report = {
         'status': 'PRECHECK_PASSED' if len(candidates) == count else 'APPLICATIONS_PENDING',
         'chainId': plan['chain_id'],
         'evmChainId': plan['evm_chain_id'],
@@ -262,6 +262,31 @@ def check_applications(intake, plan, *, preflight_only=False):
         'endpointsReachabilityVerified': False,
         'publicGenesisApproved': False,
     }
+    if evm_addresses:
+        report['publicObserverPeers'] = check_observer_peers(intake.get('bootstrap', {}), candidates, count)
+    return report
+
+
+def check_observer_peers(bootstrap, validators, count):
+    require(isinstance(bootstrap, dict), 'bootstrap must be an object')
+    entries = bootstrap.get('persistent_peers', [])
+    require(isinstance(entries, list) and len(entries) <= count, 'too many observer peer entries')
+    validator_ids = {validator['p2pNodeId'] for validator in validators}
+    validator_services = {validator['p2pAddress'].split('@', 1)[1] for validator in validators}
+    peers = []
+    for row in entries:
+        require(isinstance(row, dict), 'observer peer entry must be an object')
+        allowed = row.get('endpoint_publication_allowed')
+        require(allowed is None or type(allowed) is bool, 'invalid observer peer publication permission')
+        if allowed is True:
+            endpoint = row.get('p2p_address')
+            node_id = endpoint.split('@', 1)[0] if isinstance(endpoint, str) else None
+            peer = p2p_endpoint(endpoint, node_id, public=True)
+            require(node_id not in validator_ids and int(node_id, 16) != 0 and
+                    peer.split('@', 1)[1] not in validator_services,
+                    'observer peer reuses a validator endpoint or an invalid node ID')
+            peers.append(peer)
+    return sorted(peers)
 
 
 def read_intake(path):
@@ -282,7 +307,7 @@ def public_bootstrap(applications):
     if applications['status'] != 'PRECHECK_PASSED':
         return {**report, 'status': 'APPLICATIONS_PENDING'}
 
-    peers, seeds, services = [], [], set()
+    peers, seeds, services, nodes = [], [], set(), set()
     for operator in applications['operators']:
         if operator['endpointPublicationAllowed'] is not True:
             continue
@@ -290,8 +315,16 @@ def public_bootstrap(applications):
         service = endpoint.split('@', 1)[1]
         require(service not in services, 'multiple public P2P IDs use the same host and port')
         services.add(service)
+        nodes.add(operator['p2pNodeId'])
         group = seeds if operator['p2pRole'] == 'seed' else peers
         group.append(endpoint)
+
+    for endpoint in applications.get('publicObserverPeers', []):
+        node, service = endpoint.split('@', 1)
+        require(node not in nodes and service not in services, 'repeated public observer P2P node ID or service')
+        nodes.add(node)
+        services.add(service)
+        peers.append(endpoint)
 
     if not peers:
         return {**report, 'status': 'BOOTSTRAP_PEERS_PENDING'}

@@ -128,6 +128,9 @@ RPC и MSP. [Стандарт подписи сообщения EIP-191](https:/
 Из актуального checkout получите отдельный файл для сверки настроек CometBFT.
 В него входят только P2P-адреса с явным `endpoint_publication_allowed: true`.
 Отчёт не содержит контактов, кошельков и consensus keys.
+Для отдельного наблюдателя со своим P2P ID укажите адрес и это разрешение
+в `bootstrap.persistent_peers` анкеты схемы 3. Его можно внести в подписанный
+манифест, оставив адреса подписывающих валидаторов закрытыми.
 
 ```sh
 python3 -B network/tools/check_operator_applications.py "$REVIEWED_INTAKE" \
