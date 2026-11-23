@@ -24,6 +24,13 @@ with the published v1.1.5 daemon.
 [Toolkit and verification](../network/docs/ru/INSTALL_LAUNCH_TOOLS.md) ·
 [Toolkit rehearsal](https://github.com/maxwell2010/go-smart-node/actions/runs/45126815779).
 
+The published archive passed the same snapshot and ten Hermes scenarios.
+The published toolkit verified all four offline operator acknowledgments
+for the installed test genesis and rejected a set of three. The test
+genesis SHA256 is the same as in the v1.1.4 rehearsal.
+[Published runtime rehearsal](https://github.com/maxwell2010/go-smart-node/actions/runs/45126815678) ·
+[Founding approvals rehearsal](https://github.com/maxwell2010/go-smart-node/actions/runs/45127945020).
+
 ## 1.1.4 software release
 
 [MintCandy Node 1.1.4](https://github.com/maxwell2010/go-smart-node/releases/tag/v1.1.4)
