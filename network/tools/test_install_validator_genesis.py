@@ -142,13 +142,14 @@ class PublishedValidatorInstallTest(unittest.TestCase):
 
             validate_fresh_home(home)
             preserved = {file: sha256(file) for file in home.rglob('*') if file.is_file() and file != path}
-            report = install_operator_genesis(binary, home, operator, genesis, verified)
+            report = install_operator_genesis(binary, home, evm_operator, genesis, verified)
             self.assertTrue(report['changed'])
+            self.assertEqual(report['operatorAddress'], evm_operator)
             self.assertFalse(report['networkLaunchAuthorized'])
             self.assertEqual(report['manifestSha256'], verified['manifestSha256'])
             self.assertEqual(report['signerFingerprint'], verified['signerFingerprint'])
             self.assertEqual(path.read_bytes(), genesis)
-            self.assertFalse(install_operator_genesis(binary, home, operator, genesis, verified)['changed'])
+            self.assertFalse(install_operator_genesis(binary, home, evm_operator, genesis, verified)['changed'])
             self.assertEqual(preserved, {file: sha256(file) for file in home.rglob('*') if file.is_file() and file != path})
 
             observer = root / 'observer'

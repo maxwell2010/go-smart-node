@@ -47,6 +47,52 @@ on:
 permissions:
   contents: read
 jobs:
+  published-installer:
+    if: github.repository == 'maxwell2010/go-smart-node' && github.event_name != 'pull_request'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      attestations: read
+    steps:
+      - name: Run the published installation command in a clean home
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          root=$(mktemp -d "$RUNNER_TEMP/mcnd-install-doc.XXXXXXXX")
+          gh release download v1.1.5 --repo "$GITHUB_REPOSITORY" --pattern INSTALL_RU.md --dir "$root"
+          cd "$root"
+          printf '%s  %s\n' e7d68d75f9412ae10600f99a1bd7600da8daeb721d3e72b16c7c0bf313f286dd INSTALL_RU.md |
+            sha256sum --check --strict
+          python3 -B - <<'PY'
+          from pathlib import Path
+          import re
+
+          document = Path('INSTALL_RU.md').read_text(encoding='utf8')
+          blocks = re.findall(r'^\x60{3}sh\n(.*?)^\x60{3}$', document, re.M | re.S)
+          settings, = [block for block in blocks if block.startswith('SOURCE_SHA=')]
+          install, = [block for block in blocks if block.startswith('( set -eu; work=')]
+          Path('release-settings.sh').write_text(settings, encoding='utf8')
+          Path('one-line.sh').write_text(install, encoding='utf8')
+          PY
+          export HOME="$root/home"
+          mkdir -m 700 "$HOME"
+          source ./release-settings.sh
+          source ./one-line.sh >installed.json
+          binary_sha=016943857fd4c9a929b1922c540a222afb93e4e5bcbd1ac74f3ccaf78f41cd0d
+          jq -e --arg sha "$binary_sha" --arg path "$MCND_BINARY" --arg revision "$SOURCE_SHA" '
+            .binary == $path and .binarySha256 == $sha and .sourceRevision == $revision
+              and .releaseVersion == "1.1.5" and .includesGenesis == false and .networkLaunchApproved == false
+          ' installed.json
+          if (set -eu; source ./one-line.sh) >duplicate.stdout 2>duplicate.stderr; then
+            echo 'The documented command unexpectedly accepted an existing binary path.' >&2
+            exit 1
+          fi
+          grep -F 'choose a new absolute versioned binary path' duplicate.stderr
+          printf '%s  %s\n' "$binary_sha" "$MCND_BINARY" | sha256sum --check --strict
+          "$MCND_BINARY" version --long
   draft-integrity:
     runs-on: ubuntu-24.04
     timeout-minutes: 5

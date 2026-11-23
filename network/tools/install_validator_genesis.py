@@ -8,6 +8,7 @@ import subprocess
 import tempfile
 import tomllib
 
+from check_operator_applications import address_for_genesis, strict_native_address
 from check_public_launch_draft import require, unique_object
 from configure_history import validate_fresh_home
 from native_launch_allocation import MAX_GENESIS_BYTES, allocation_report
@@ -69,6 +70,7 @@ def install_genesis(binary, home, genesis, verified, *, operator=None):
             'verified genesis bytes or signing domain differ')
     validators = allocation['validators']
     if operator is not None:
+        operator = address_for_genesis(operator, 'd0valoper')
         matches = [row for row in validators if row['operatorAddress'] == operator]
         require(len(matches) == 1 and matches[0]['declaredOnline'] is True and int(matches[0]['initialStakeAtomic']) > 0,
                 'operator has no active starting stake in the verified genesis')
@@ -136,7 +138,7 @@ def install_genesis(binary, home, genesis, verified, *, operator=None):
               'manifestSha256': verified['manifestSha256'], 'signerFingerprint': verified['signerFingerprint'],
               'networkLaunchAuthorized': False}
     if operator is not None:
-        report.update(status='VALIDATOR_GENESIS_INSTALLED', operatorAddress=operator,
+        report.update(status='VALIDATOR_GENESIS_INSTALLED', operatorAddress=strict_native_address(operator, 'd0valoper'),
                       consensusAddressHex=validator['consensusAddressHex'])
     if 'publicP2P' in verified:
         report['publicP2P'] = verified['publicP2P']

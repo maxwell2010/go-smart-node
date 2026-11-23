@@ -8,9 +8,7 @@ import re
 import subprocess
 import tempfile
 
-from check_operator_applications import (
-    address_for_genesis, check_applications, p2p_endpoint, public_bootstrap, read_intake, strict_native_address,
-)
+from check_operator_applications import check_applications, p2p_endpoint, public_bootstrap, read_intake
 from check_public_launch_draft import (
     DEFAULT_DRAFT, DEFAULT_PLAN, PUBLISHED_SOFTWARE_RECORD, check_contents, check_plan, read_json, require, unique_object,
 )
@@ -169,9 +167,7 @@ def main():
         else:
             result = verify_manifest(args, genesis, plan, draft, software)
             if args.command == 'install':
-                operator = address_for_genesis(args.operator, 'd0valoper')
-                result = install_operator_genesis(args.binary, args.home, operator, genesis, result)
-                result['operatorAddress'] = strict_native_address(operator, 'd0valoper')
+                result = install_operator_genesis(args.binary, args.home, args.operator, genesis, result)
             elif args.command == 'install-observer':
                 result = install_genesis(args.binary, args.home, genesis, result)
             print(json.dumps(result, sort_keys=True))
