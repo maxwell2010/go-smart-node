@@ -60,6 +60,14 @@ restored to 1.0.0 from the backup. Hermes subsequently delivered the
 same packet and one acknowledgment was recorded at height 46.
 [Combined rehearsal and report](https://github.com/maxwell2010/go-smart-node/actions/runs/45136627719).
 
+The first-block verification tool checked the approved test genesis SHA256
+and verified block 1 as reported by two isolated RPC endpoints. All four Ed25519 signatures
+verified with 40,000 of 40,000 voting power. The tool rejected a modified
+AppHash in the signed header. In the same run, a fresh observer restored
+snapshot 40 and agreed with the validators on the AppHash at height 44.
+[First block and snapshot rehearsal](https://github.com/maxwell2010/go-smart-node/actions/runs/45142480619) ·
+[Verification instructions](../network/docs/ru/VALIDATOR_LAUNCH_INTAKE.md#проверка-подписей-первого-блока).
+
 ## 1.1.4 software release
 
 [MintCandy Node 1.1.4](https://github.com/maxwell2010/go-smart-node/releases/tag/v1.1.4)
