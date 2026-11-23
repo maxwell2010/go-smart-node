@@ -31,6 +31,16 @@ genesis SHA256 is the same as in the v1.1.4 rehearsal.
 [Published runtime rehearsal](https://github.com/maxwell2010/go-smart-node/actions/runs/45126815678) ·
 [Founding approvals rehearsal](https://github.com/maxwell2010/go-smart-node/actions/runs/45127945020).
 
+The exact published binaries passed a separate `v1.1.4 → v1.1.5 → v1.1.4`
+switch with ICS-20 packet 3 pending on the same validator homes. All four
+signing states advanced from height 40 to 41. The reverted binary preserved
+the v1.1.5 checkpoint and the four validators agreed on the AppHash at
+height 42. Hermes delivered the packet and the source recorded one
+acknowledgement, at height 45. Each release archive was verified separately.
+The exercise covers binary replacement with intact state for this pair.
+[Release-switch run](https://github.com/maxwell2010/go-smart-node/actions/runs/45131811346) ·
+[Report artifact](https://github.com/maxwell2010/go-smart-node/actions/runs/45131811346#artifacts).
+
 ## 1.1.4 software release
 
 [MintCandy Node 1.1.4](https://github.com/maxwell2010/go-smart-node/releases/tag/v1.1.4)
