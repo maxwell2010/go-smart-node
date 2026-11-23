@@ -51,6 +51,15 @@ AppHash and format 1.0.0. The restored observer synchronized through
 height 26 and persisted the original format at height 27.
 [Systemd restore run and report](https://github.com/maxwell2010/go-smart-node/actions/runs/45134099952).
 
+The combined IBC and systemd rehearsal made an offline observer backup at
+height 39 while ICS-20 packet 3 was pending. The v1.1.5 upgrade and v1.1.4
+restore agreed with four validators through heights 42 and 43 respectively.
+The observer reported the same packet commitment and 1 MSP in escrow
+after each operation. The bank IAVL store migrated to 1.1.0 and was
+restored to 1.0.0 from the backup. Hermes subsequently delivered the
+same packet and one acknowledgment was recorded at height 46.
+[Combined rehearsal and report](https://github.com/maxwell2010/go-smart-node/actions/runs/45136627719).
+
 ## 1.1.4 software release
 
 [MintCandy Node 1.1.4](https://github.com/maxwell2010/go-smart-node/releases/tag/v1.1.4)
