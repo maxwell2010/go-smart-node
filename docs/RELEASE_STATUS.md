@@ -19,6 +19,12 @@ and installed it in a disposable validator home using the published v1.1.4 daemo
 [Toolkit and instructions](../network/docs/ru/INSTALL_LAUNCH_TOOLS.md) ·
 [Toolkit rehearsal](https://github.com/maxwell2010/go-smart-node/actions/runs/45119625770).
 
+The published archive repeated the snapshot and ten Hermes scenarios.
+The published toolkit verified four offline operator signatures for the same
+signed test genesis and rejected a set of three signatures.
+[Published runtime rehearsal](https://github.com/maxwell2010/go-smart-node/actions/runs/45119625380) ·
+[Founding approvals rehearsal](https://github.com/maxwell2010/go-smart-node/actions/runs/45120650589).
+
 ## 1.1.3 software release
 
 [MintCandy Node 1.1.3](https://github.com/maxwell2010/go-smart-node/releases/tag/v1.1.3)
