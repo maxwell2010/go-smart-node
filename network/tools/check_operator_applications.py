@@ -13,12 +13,20 @@ import unicodedata
 from check_public_launch_draft import (
     ATOMS_PER_DEL, DEFAULT_DRAFT, DEFAULT_PLAN, check_contents, check_plan, read_json, require, unique_object,
 )
+from native_launch_package import fingerprint
 from withdrawal_genesis_smoke import ALPHABET, bech32_payload
 
 
 MAX_INTAKE_BYTES = 256 * 1024
 ED25519_TYPE = '/cosmos.crypto.ed25519.PubKey'
 BECH32_GENERATORS = (0x3b6a57b2, 0x26508e6d, 0x1ea119fa, 0x3d4233dd, 0x2a1462b3)
+SDK_ADDRESS_FIELDS = {
+    'operatorAddress': 'd0valoper',
+    'rewardAddress': 'd0',
+    'stakeOwnerAddress': 'd0',
+    'beneficiaryAddress': 'd0',
+    'gasWalletAddress': 'd0',
+}
 FIELDS = (
     'application_id', 'operator_address', 'evm_operator_address', 'consensus_pubkey.key',
     'moniker', 'operator_contact', 'reward_address', 'commission_fraction',
@@ -43,24 +51,42 @@ def text(value, field, limit):
     return value
 
 
-def strict_native_address(value, prefix):
-    require(isinstance(value, str) and value.startswith(prefix + '1') and
-            len(value) == len(prefix) + 39, f'invalid {prefix} address shape')
-    payload = value[len(prefix) + 1:]
-    require(all(character in ALPHABET for character in payload), f'invalid {prefix} address alphabet')
+def bech32_checksum(prefix, data):
     parts = [ord(c) >> 5 for c in prefix] + [0] + [ord(c) & 31 for c in prefix]
-    parts.extend(ALPHABET.index(c) for c in payload)
     checksum = 1
-    for part in parts:
+    for part in parts + data:
         top = checksum >> 25
         checksum = ((checksum & 0x1ffffff) << 5) ^ part
         for index, generator in enumerate(BECH32_GENERATORS):
             if (top >> index) & 1:
                 checksum ^= generator
-    require(checksum == 1, f'invalid {prefix} address checksum')
+    return checksum
+
+
+def strict_native_address(value, prefix):
+    require(isinstance(value, str) and value.startswith(prefix + '1') and
+            len(value) == len(prefix) + 39, f'invalid {prefix} address shape')
+    payload = value[len(prefix) + 1:]
+    require(all(character in ALPHABET for character in payload), f'invalid {prefix} address alphabet')
+    require(bech32_checksum(prefix, [ALPHABET.index(c) for c in payload]) == 1,
+            f'invalid {prefix} address checksum')
     address = bech32_payload(value, prefix)
     require(int(address, 16) != 0, f'{prefix} address must be nonzero')
     return address
+
+
+def strict_evm_address(value, field):
+    require(isinstance(value, str) and re.fullmatch(r'0x[0-9a-fA-F]{40}', value) and int(value, 16) != 0,
+            f'invalid {field} EVM address')
+    return value.lower()
+
+
+def native_address_from_evm(value, prefix='d0'):
+    address = int(strict_evm_address(value, prefix), 16)
+    payload = [(address >> shift) & 31 for shift in range(155, -1, -5)]
+    checksum = bech32_checksum(prefix, payload + [0] * 6) ^ 1
+    payload.extend((checksum >> shift) & 31 for shift in range(25, -1, -5))
+    return prefix + '1' + ''.join(ALPHABET[part] for part in payload)
 
 
 def p2p_endpoint(peer, node_id, public):
@@ -89,13 +115,25 @@ def p2p_endpoint(peer, node_id, public):
     return f'{node_id}@{host}:{port}'
 
 
-def check_operator(row, plan):
+def check_operator(row, plan, *, evm_addresses=False):
     application = text(row['application_id'], 'application ID', 64)
     require(re.fullmatch(r'[A-Za-z0-9_-]+', application) is not None, 'invalid application ID')
-    operator = strict_native_address(row['operator_address'], 'd0valoper')
-    evm = row['evm_operator_address']
-    require(isinstance(evm, str) and re.fullmatch(r'0x[0-9a-fA-F]{40}', evm) and
-            evm.lower() == operator, 'operator Bech32 and EVM addresses differ')
+    if evm_addresses:
+        operator = strict_evm_address(row['operator_address'], 'operator')
+        reward = strict_evm_address(row['reward_address'], 'reward')
+        gas_wallet = strict_evm_address(row['gas_wallet_address'], 'gas wallet')
+        owner = strict_evm_address(row['stake_owner_address'], 'stake owner')
+        beneficiary = strict_evm_address(row['beneficiary_address'], 'beneficiary')
+    else:
+        operator = strict_native_address(row['operator_address'], 'd0valoper')
+        require(strict_evm_address(row['evm_operator_address'], 'operator') == operator,
+                'operator Bech32 and EVM addresses differ')
+        strict_native_address(row['reward_address'], 'd0')
+        strict_native_address(row['gas_wallet_address'], 'd0')
+        owner = strict_native_address(row['stake_owner_address'], 'd0')
+        beneficiary = strict_native_address(row['beneficiary_address'], 'd0')
+        reward = row['reward_address']
+        gas_wallet = row['gas_wallet_address']
     pub = row['consensus_pubkey']
     require(pub.get('@type') == ED25519_TYPE and isinstance(pub.get('key'), str), 'expected a public Ed25519 key')
     key = pub['key']
@@ -108,10 +146,6 @@ def check_operator(row, plan):
     require(supplied is None or (isinstance(supplied, str) and supplied.upper() == consensus),
             'consensus address differs from public key')
 
-    strict_native_address(row['reward_address'], 'd0')
-    strict_native_address(row['gas_wallet_address'], 'd0')
-    owner = strict_native_address(row['stake_owner_address'], 'd0')
-    beneficiary = strict_native_address(row['beneficiary_address'], 'd0')
     require(owner == beneficiary == plan['founder_evm_address'].lower() and
             row['stake_ownership_model'] == plan['decisions']['selected_stake_ownership'],
             'stake ownership or beneficiary differs from approved founder delegations')
@@ -141,16 +175,16 @@ def check_operator(row, plan):
     return {
         'applicationId': application,
         'moniker': moniker,
-        'operatorAddress': row['operator_address'],
+        'operatorAddress': operator if evm_addresses else row['operator_address'],
         'operatorEvmAddress': operator,
         'consensusPubkey': {'@type': ED25519_TYPE, 'key': key},
         'consensusAddressHex': consensus,
         'commission': commission,
-        'rewardAddress': row['reward_address'],
-        'stakeOwnerAddress': row['stake_owner_address'],
-        'beneficiaryAddress': row['beneficiary_address'],
+        'rewardAddress': reward,
+        'stakeOwnerAddress': owner if evm_addresses else row['stake_owner_address'],
+        'beneficiaryAddress': beneficiary if evm_addresses else row['beneficiary_address'],
         'stakeAmountAtoms': row['stake_amount_atoms'],
-        'gasWalletAddress': row['gas_wallet_address'],
+        'gasWalletAddress': gas_wallet,
         'gasBudgetAtoms': row['gas_budget_atoms'],
         'p2pAddress': endpoint,
         'p2pNodeId': node_id,
@@ -159,10 +193,32 @@ def check_operator(row, plan):
     }
 
 
-def check_applications(intake, plan):
+def check_applications(intake, plan, *, preflight_only=False):
     check_contents(intake, forbid_public_material=False)
     require(isinstance(intake, dict) and type(intake.get('schema_version')) is int
-            and intake['schema_version'] == 2, 'expected operator intake schema 2')
+            and intake['schema_version'] in (2, 3), 'expected operator intake schema 2 or 3')
+    evm_addresses = intake['schema_version'] == 3
+    fields = FIELDS
+    common_reward = None
+    if evm_addresses:
+        allocation = intake.get('allocation')
+        coordination = intake.get('launch_coordination')
+        require(isinstance(allocation, dict) and isinstance(coordination, dict),
+                'schema 3 requires allocation and launch coordination')
+        require(allocation.get('denom') == coordination.get('requested_mainnet_native_denom') == 'msp',
+                'schema 3 requires the msp native denomination')
+        require(allocation.get('expected_total_atoms') == plan['initial_supply_atoms'],
+                'intake supply differs from the approved allocation')
+        signer = coordination.get('manifest_signer_fingerprint')
+        if signer is not None:
+            require(isinstance(signer, str), 'invalid manifest signer fingerprint')
+            fingerprint(signer)
+        require(preflight_only or plan.get('denom') == 'msp', 'schema 3 assembly requires an msp allocation plan')
+        fields = tuple(field for field in FIELDS if field != 'evm_operator_address')
+        if coordination.get('common_operator_reward_evm_address') is not None:
+            common_reward = strict_evm_address(coordination['common_operator_reward_evm_address'], 'common reward')
+    else:
+        require(plan.get('denom') != 'msp', 'an msp allocation plan requires schema 3')
     network = intake.get('network')
     count = plan['approved_validator_count']
     require(isinstance(network, dict) and network.get('cosmos_chain_id') == plan['chain_id'] and
@@ -174,16 +230,24 @@ def check_applications(intake, plan):
     candidates, incomplete = [], []
     for index, row in enumerate(rows, start=1):
         require(isinstance(row, dict), f'validator row {index} must be an object')
-        missing = [name for name in FIELDS if field_at(row, name) is None]
+        missing = [name for name in fields if field_at(row, name) is None]
         if missing:
             incomplete.append({'row': index, 'missingFields': missing})
             continue
         try:
-            candidates.append(check_operator(row, plan))
+            candidate = check_operator(row, plan, evm_addresses=evm_addresses)
+            require(common_reward is None or candidate['rewardAddress'] == common_reward,
+                    'reward address differs from the common reward wallet')
+            candidates.append(candidate)
         except ValueError as error:
             raise ValueError(f'validator row {index}: {error}') from error
     for field in ('applicationId', 'operatorAddress', 'consensusAddressHex', 'p2pNodeId'):
         require(len({candidate[field] for candidate in candidates}) == len(candidates), f'duplicate {field}')
+    if evm_addresses and not preflight_only:
+        # SDK genesis records have role-specific encodings of the same EVM bytes.
+        for candidate in candidates:
+            for field, prefix in SDK_ADDRESS_FIELDS.items():
+                candidate[field] = native_address_from_evm(candidate[field], prefix)
 
     return {
         'status': 'PRECHECK_PASSED' if len(candidates) == count else 'APPLICATIONS_PENDING',
@@ -245,7 +309,7 @@ def main():
     try:
         plan = read_json(DEFAULT_PLAN)
         check_plan(plan, read_json(DEFAULT_DRAFT))
-        report = check_applications(read_intake(args.intake), plan)
+        report = check_applications(read_intake(args.intake), plan, preflight_only=True)
         if args.public_bootstrap:
             report = public_bootstrap(report)
     except (OSError, ValueError, RecursionError) as error:

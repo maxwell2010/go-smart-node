@@ -74,6 +74,54 @@ class OperatorApplicationTests(unittest.TestCase):
         self.assertEqual((report['checkedOperators'], report['missingSlots']), (3, 1))
         self.assertEqual(report['incompleteRows'], [{'row': 1, 'missingFields': ['gas_wallet_address']}])
 
+    def test_mainnet_intake_preflight_accepts_msp_and_blocks_legacy_assembly(self):
+        self.document['schema_version'] = 3
+        self.document['allocation'].update(denom='msp', expected_total_atoms=self.plan['initial_supply_atoms'])
+        common_reward = TEST_IDENTITIES[0][1]
+        self.document['launch_coordination'] = {
+            'requested_mainnet_native_denom': 'msp',
+            'manifest_signer_fingerprint': 'A' * 40,
+            'common_operator_reward_evm_address': common_reward,
+        }
+        for row in self.document['validators']:
+            row['operator_address'] = row.pop('evm_operator_address')
+            for field in ('stake_owner_address', 'beneficiary_address', 'gas_wallet_address'):
+                row[field] = strict_native_address(row[field], 'd0')
+            row['reward_address'] = common_reward
+        report = check_applications(self.document, self.plan, preflight_only=True)
+        self.assertEqual((report['status'], report['checkedOperators']), ('PRECHECK_PASSED', 4))
+        self.assertFalse(report['publicGenesisApproved'])
+        with self.assertRaisesRegex(ValueError, 'requires an msp allocation plan'):
+            check_applications(self.document, self.plan)
+        msp_plan = {**self.plan, 'denom': 'msp'}
+        assembly = check_applications(self.document, msp_plan)
+        self.assertFalse(assembly['publicGenesisApproved'])
+        first = next(operator for operator in assembly['operators'] if operator['applicationId'] == 'V1')
+        self.assertEqual(first['operatorAddress'], TEST_IDENTITIES[0][0])
+        self.assertEqual(first['operatorEvmAddress'], TEST_IDENTITIES[0][1])
+        self.assertEqual(first['rewardAddress'], TEST_IDENTITIES[0][2])
+        self.assertEqual(first['stakeOwnerAddress'], TEST_IDENTITIES[0][2])
+        self.assertEqual(first['beneficiaryAddress'], TEST_IDENTITIES[0][2])
+        self.assertEqual(first['gasWalletAddress'], TEST_IDENTITIES[0][2])
+        with self.assertRaisesRegex(ValueError, 'requires schema 3'):
+            check_applications(self.draft, msp_plan)
+
+        for section, field, value, reason in (
+            ('launch_coordination', 'manifest_signer_fingerprint', 'A' * 8, 'fingerprint'),
+            ('allocation', 'denom', 'del', 'requires the msp native denomination'),
+            ('launch_coordination', 'common_operator_reward_evm_address', TEST_IDENTITIES[1][1], 'common reward wallet'),
+        ):
+            with self.subTest(field=field):
+                document = copy.deepcopy(self.document)
+                document[section][field] = value
+                with self.assertRaisesRegex(ValueError, reason):
+                    check_applications(document, self.plan, preflight_only=True)
+
+        operator = self.document['validators'][0]['operator_address']
+        self.document['validators'][1]['operator_address'] = '0x' + operator[2:].upper()
+        with self.assertRaisesRegex(ValueError, 'duplicate operatorAddress'):
+            check_applications(self.document, self.plan, preflight_only=True)
+
     def test_bech32_checksum_and_role_prefix_share_verified_sdk_address(self):
         operator, evm, account, *_ = TEST_IDENTITIES[0]
         self.assertEqual(strict_native_address(account, 'd0'), evm)
