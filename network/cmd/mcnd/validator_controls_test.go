@@ -42,7 +42,10 @@ func TestValidatorControlStatusUsesSDKCodecForConsensusAny(t *testing.T) {
 	require.EqualValues(t, 42, result.Height)
 	var decoded validatortypes.Validator
 	require.NoError(t, enc.Codec.UnmarshalJSON(result.Validator, &decoded))
-	require.Equal(t, row.OperatorAddress, decoded.OperatorAddress)
+	require.Equal(t, "0x0101010101010101010101010101010101010101", decoded.OperatorAddress)
+	require.Equal(t, "0x0202020202020202020202020202020202020202", decoded.RewardAddress)
+	require.NotContains(t, string(raw), row.OperatorAddress)
+	require.NotContains(t, string(raw), row.RewardAddress)
 	require.Equal(t, row.ConsensusPubkey.TypeUrl, decoded.ConsensusPubkey.TypeUrl)
 	require.Equal(t, row.ConsensusPubkey.Value, decoded.ConsensusPubkey.Value)
 }

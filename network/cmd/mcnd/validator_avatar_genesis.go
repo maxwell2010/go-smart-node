@@ -12,13 +12,15 @@ import (
 	"github.com/cosmos/cosmos-sdk/client"
 	"github.com/cosmos/cosmos-sdk/client/flags"
 	"github.com/cosmos/cosmos-sdk/codec/address"
+	"github.com/ethereum/go-ethereum/common"
 	ownedapp "github.com/maxwell2010/go-smart-node/network/app"
 	validatortypes "github.com/maxwell2010/go-smart-node/network/decimal/validator/types"
 	"github.com/maxwell2010/go-smart-node/network/identity"
 	"github.com/spf13/cobra"
 )
 
-const avatarTransferFormat = "mintcandy-validator-avatars-v1"
+const legacyAvatarTransferFormat = "mintcandy-validator-avatars-v1"
+const avatarTransferFormat = "mintcandy-validator-avatars-v2"
 const maxAvatarTransferOperators = 4096
 
 type validatorAvatarTransfer struct {
@@ -154,47 +156,69 @@ func readAvatarGenesis(raw []byte, evmID uint64) (avatarGenesisDocument, error) 
 	return doc, nil
 }
 
-func validateAvatarTransfer(transfer validatorAvatarTransfer) error {
-	if transfer.Format != avatarTransferFormat || !transfer.MetadataOnly || transfer.Height <= 0 ||
+func avatarGenesisOperator(operator, format string) (string, error) {
+	codec := address.NewBech32Codec(identity.Bech32PrefixValAddr)
+	if format == avatarTransferFormat {
+		evm, err := validatorControlAddress(operator)
+		if err != nil {
+			return "", err
+		}
+		return codec.BytesToString(evm[:])
+	}
+	raw, err := codec.StringToBytes(operator)
+	if err != nil || len(raw) != common.AddressLength {
+		return "", errors.New("invalid legacy avatar operator")
+	}
+	canonical, err := codec.BytesToString(raw)
+	if err != nil || canonical != operator {
+		return "", errors.New("noncanonical legacy avatar operator")
+	}
+	return canonical, nil
+}
+
+// avatarGenesisAddresses validates the external format and returns the SDK
+// encodings for use when importing into an existing genesis document.
+func avatarGenesisAddresses(transfer validatorAvatarTransfer) (map[string]string, error) {
+	if (transfer.Format != avatarTransferFormat && transfer.Format != legacyAvatarTransferFormat) ||
+		!transfer.MetadataOnly || transfer.Height <= 0 ||
 		len(transfer.Operators) == 0 || len(transfer.Operators) > maxAvatarTransferOperators || len(transfer.Avatars) > len(transfer.Operators) {
-		return errors.New("invalid bounded metadata-only avatar artifact")
+		return nil, errors.New("invalid bounded metadata-only avatar artifact")
 	}
 	if err := identity.ValidateChainIDs(transfer.ChainID, transfer.EVMChainID); err != nil {
-		return err
+		return nil, err
 	}
 	// A block hash is provenance for a trusted RPC snapshot, not a state proof.
 	if len(transfer.SourceBlockHash) != 64 {
-		return errors.New("avatar artifact requires a source block hash")
+		return nil, errors.New("avatar artifact requires a source block hash")
 	}
 	for _, r := range transfer.SourceBlockHash {
 		if !((r >= '0' && r <= '9') || (r >= 'a' && r <= 'f') || (r >= 'A' && r <= 'F')) {
-			return errors.New("invalid source block hash")
+			return nil, errors.New("invalid source block hash")
 		}
 	}
-	codec := address.NewBech32Codec(identity.Bech32PrefixValAddr)
+	addresses := make(map[string]string, len(transfer.Operators))
 	operators := make(map[string]bool, len(transfer.Operators))
 	for _, operator := range transfer.Operators {
-		raw, err := codec.StringToBytes(operator)
-		if err != nil || len(raw) != 20 || operators[operator] {
-			return errors.New("invalid or duplicate avatar operator")
+		native, err := avatarGenesisOperator(operator, transfer.Format)
+		if err != nil || operators[native] {
+			return nil, errors.New("invalid or duplicate avatar operator")
 		}
-		canonical, err := codec.BytesToString(raw)
-		if err != nil || canonical != operator {
-			return errors.New("noncanonical avatar operator")
-		}
-		operators[operator] = true
+		operators[native] = true
+		addresses[operator] = native
 	}
 	seen := make(map[string]bool, len(transfer.Avatars))
 	for _, avatar := range transfer.Avatars {
-		if !operators[avatar.OperatorAddress] || seen[avatar.OperatorAddress] || avatar.AvatarURI == "" {
-			return errors.New("avatar must name one included operator and a nonempty URI")
+		native, err := avatarGenesisOperator(avatar.OperatorAddress, transfer.Format)
+		if err != nil || !operators[native] || seen[native] || avatar.AvatarURI == "" {
+			return nil, errors.New("avatar must name one included operator and a nonempty URI")
 		}
 		if err := validatortypes.ValidateValidatorAvatarURI(avatar.AvatarURI); err != nil {
-			return err
+			return nil, err
 		}
-		seen[avatar.OperatorAddress] = true
+		seen[native] = true
+		addresses[avatar.OperatorAddress] = native
 	}
-	return nil
+	return addresses, nil
 }
 
 func importValidatorAvatars(genesis, artifact []byte, evmID uint64) ([]byte, error) {
@@ -235,7 +259,8 @@ func importValidatorAvatars(genesis, artifact []byte, evmID uint64) ([]byte, err
 	if decoder.Decode(new(json.RawMessage)) != io.EOF {
 		return nil, errors.New("trailing avatar artifact data")
 	}
-	if err := validateAvatarTransfer(transfer); err != nil {
+	addresses, err := avatarGenesisAddresses(transfer)
+	if err != nil {
 		return nil, err
 	}
 	if transfer.ChainID != doc.chainID || transfer.EVMChainID != evmID {
@@ -250,14 +275,15 @@ func importValidatorAvatars(genesis, artifact []byte, evmID uint64) ([]byte, err
 		avatars[avatar.OperatorAddress] = avatar.AvatarURI
 	}
 	for _, operator := range transfer.Operators {
-		if !known[operator] {
+		native := addresses[operator]
+		if !known[native] {
 			return nil, errors.New("avatar artifact references a validator absent from target genesis")
 		}
 		// An included operator with no record explicitly has no avatar at the source height.
-		delete(avatars, operator)
+		delete(avatars, native)
 	}
 	for _, avatar := range transfer.Avatars {
-		avatars[avatar.OperatorAddress] = avatar.AvatarURI
+		avatars[addresses[avatar.OperatorAddress]] = avatar.AvatarURI
 	}
 	doc.module.ValidatorAvatars = nil
 	for operator, uri := range avatars {
@@ -350,14 +376,15 @@ func validatorAvatarGenesisCommands() []*cobra.Command {
 			if err := validatortypes.ValidateValidatorAvatarURI(string(uri)); err != nil {
 				return err
 			}
-			transfer.Operators = append(transfer.Operators, validator.OperatorAddress)
+			evmOperator := common.BytesToAddress(operator).Hex()
+			transfer.Operators = append(transfer.Operators, evmOperator)
 			if len(uri) != 0 {
-				transfer.Avatars = append(transfer.Avatars, validatortypes.ValidatorAvatar{OperatorAddress: validator.OperatorAddress, AvatarURI: string(uri)})
+				transfer.Avatars = append(transfer.Avatars, validatortypes.ValidatorAvatar{OperatorAddress: evmOperator, AvatarURI: string(uri)})
 			}
 		}
 		sort.Strings(transfer.Operators)
 		sort.Slice(transfer.Avatars, func(i, j int) bool { return transfer.Avatars[i].OperatorAddress < transfer.Avatars[j].OperatorAddress })
-		if err := validateAvatarTransfer(transfer); err != nil {
+		if _, err := avatarGenesisAddresses(transfer); err != nil {
 			return err
 		}
 		payload, err := json.MarshalIndent(transfer, "", "  ")

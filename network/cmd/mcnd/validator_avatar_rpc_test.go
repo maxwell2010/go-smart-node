@@ -147,7 +147,10 @@ func TestValidatorAvatarRPCExportPinsOneHeightAndDistinctOperators(t *testing.T)
 			require.NoError(t, err)
 			var transfer validatorAvatarTransfer
 			require.NoError(t, json.Unmarshal(payload, &transfer))
-			require.NoError(t, validateAvatarTransfer(transfer))
+			_, err = avatarGenesisAddresses(transfer)
+			require.NoError(t, err)
+			require.Equal(t, avatarTransferFormat, transfer.Format)
+			require.NotContains(t, string(payload), "d0valoper")
 			wantHeight := selected
 			if wantHeight == 0 {
 				wantHeight = rpc.latest
@@ -161,9 +164,9 @@ func TestValidatorAvatarRPCExportPinsOneHeightAndDistinctOperators(t *testing.T)
 			require.Len(t, transfer.Avatars, 2)
 			require.NotEqual(t, transfer.Avatars[0].AvatarURI, transfer.Avatars[1].AvatarURI)
 			for _, avatar := range transfer.Avatars {
-				key, err := address.NewBech32Codec(identity.Bech32PrefixValAddr).StringToBytes(avatar.OperatorAddress)
+				key, err := validatorControlAddress(avatar.OperatorAddress)
 				require.NoError(t, err)
-				require.Equal(t, string(rpc.avatars[string(key)]), avatar.AvatarURI)
+				require.Equal(t, string(rpc.avatars[string(key[:])]), avatar.AvatarURI)
 			}
 		})
 	}
@@ -181,7 +184,8 @@ func TestValidatorAvatarRPCExportPreservesExplicitAbsentAvatar(t *testing.T) {
 	require.NoError(t, json.Unmarshal(payload, &transfer))
 	require.Len(t, transfer.Operators, 2, "source absence is still an explicitly included operator")
 	require.Len(t, transfer.Avatars, 1)
-	require.NoError(t, validateAvatarTransfer(transfer))
+	_, err = avatarGenesisAddresses(transfer)
+	require.NoError(t, err)
 }
 
 func TestValidatorAvatarRPCExportFailsClosedBeforePublishing(t *testing.T) {

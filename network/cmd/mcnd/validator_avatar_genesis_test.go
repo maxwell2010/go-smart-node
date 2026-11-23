@@ -42,7 +42,8 @@ func avatarTransferFixture(t *testing.T) ([]byte, validatorAvatarTransfer) {
 	})
 	require.NoError(t, err)
 	transfer := validatorAvatarTransfer{Format: avatarTransferFormat, MetadataOnly: true, ChainID: "mintcandy_990001-1", EVMChainID: 990001, Height: 100,
-		SourceBlockHash: strings.Repeat("a", 64), Operators: operators[:1], Avatars: []validatortypes.ValidatorAvatar{{OperatorAddress: operators[0], AvatarURI: "ipfs://bafyfixture/avatar.png"}}}
+		SourceBlockHash: strings.Repeat("a", 64), Operators: []string{"0x" + strings.Repeat("01", 20)},
+		Avatars: []validatortypes.ValidatorAvatar{{OperatorAddress: "0x" + strings.Repeat("01", 20), AvatarURI: "ipfs://bafyfixture/avatar.png"}}}
 	return raw, transfer
 }
 
@@ -57,6 +58,17 @@ func TestValidatorAvatarCLIImportChangesOnlyAvatarMetadata(t *testing.T) {
 	after, err := readAvatarGenesis(result, 990001)
 	require.NoError(t, err)
 	require.Len(t, after.module.ValidatorAvatars, 2)
+	legacy := transfer
+	legacy.Format = legacyAvatarTransferFormat
+	legacy.Operators = []string{before.module.Validators[0].OperatorAddress}
+	legacy.Avatars = []validatortypes.ValidatorAvatar{{
+		OperatorAddress: legacy.Operators[0], AvatarURI: transfer.Avatars[0].AvatarURI,
+	}}
+	legacyArtifact, err := json.Marshal(legacy)
+	require.NoError(t, err)
+	legacyResult, err := importValidatorAvatars(raw, legacyArtifact, 990001)
+	require.NoError(t, err)
+	require.Equal(t, result, legacyResult)
 	require.Equal(t, before.module.Validators, after.module.Validators)
 	require.JSONEq(t, string(before.document["consensus_params"]), string(after.document["consensus_params"]))
 	require.JSONEq(t, string(before.state["bank"]), string(after.state["bank"]))
@@ -84,6 +96,9 @@ func TestValidatorAvatarCLIRejectsMismatchedOrAmbiguousArtifacts(t *testing.T) {
 		"financial artifact": func(v *validatorAvatarTransfer) { v.MetadataOnly = false },
 		"wrong domain":       func(v *validatorAvatarTransfer) { v.ChainID, v.EVMChainID = "mintcandy_990002-1", 990002 },
 		"duplicate operator": func(v *validatorAvatarTransfer) { v.Operators = append(v.Operators, v.Operators[0]) },
+		"duplicate EVM operator with different casing": func(v *validatorAvatarTransfer) {
+			v.Operators = []string{"0x" + strings.Repeat("ab", 20), "0x" + strings.Repeat("AB", 20)}
+		},
 		"duplicate avatar": func(v *validatorAvatarTransfer) {
 			v.Operators = append(v.Operators, good.Avatars[0].OperatorAddress)
 			v.Avatars = append(v.Avatars, v.Avatars[0])

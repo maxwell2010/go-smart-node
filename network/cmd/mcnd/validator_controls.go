@@ -319,6 +319,19 @@ func marshalValidatorControlStatus(cdc codec.Codec, height int64, validator vali
 	if cdc == nil || len(avatar) > 512 {
 		return nil, errors.New("invalid validator status codec or avatar bound")
 	}
+	for _, field := range []struct {
+		value  *string
+		prefix string
+	}{
+		{&validator.OperatorAddress, identity.Bech32PrefixValAddr},
+		{&validator.RewardAddress, identity.Bech32PrefixAccAddr},
+	} {
+		raw, err := address.NewBech32Codec(field.prefix).StringToBytes(*field.value)
+		if err != nil || len(raw) != common.AddressLength {
+			return nil, errors.New("invalid wallet address in validator query response")
+		}
+		*field.value = common.BytesToAddress(raw).Hex()
+	}
 	encoded, err := cdc.MarshalJSON(&validator)
 	if err != nil {
 		return nil, err
