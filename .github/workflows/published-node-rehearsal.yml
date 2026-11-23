@@ -5,7 +5,7 @@ on:
     inputs:
       scenario:
         type: choice
-        options: [all, node, ibc, tools, media, retention, approvals, release-switch]
+        options: [all, node, ibc, tools, media, retention, approvals, release-switch, release-restore]
         default: all
       candidate_run:
         description: Successful software packaging run ID (empty uses the pinned release)
@@ -488,8 +488,8 @@ jobs:
           test "$status" = 0
           jq -e '.status == "PASS" and .loopbackOnlyNamespace and .chainId == "mintcandy_990014-1" and
             (.committedMedia | .status == "PASS" and .version == 1 and .kind == "erc20-reserveless" and .alteredMetadataRejected)' "$report"
-      - name: Install the previous published daemon for the IBC version switch
-        if: inputs.scenario == 'release-switch'
+      - name: Install the previous published daemon
+        if: inputs.scenario == 'release-switch' || inputs.scenario == 'release-restore'
         env:
           GH_TOKEN: ${{ github.token }}
         shell: bash
@@ -514,7 +514,51 @@ jobs:
             --release-version 1.1.4 --archive-sha "$archive_sha" --archive "$root/$archive" \
             --bundle "$root/provenance.sigstore.json" --destination "$root/mcnd" > "$RELEASE_WORK/evidence/predecessor-install.json"
           printf '%s  %s\n' "$binary_sha" "$root/mcnd" | sha256sum --check --strict
-          printf 'PREDECESSOR_SOURCE=%s\nPREDECESSOR_BINARY_SHA=%s\n' "$source" "$binary_sha" >> "$GITHUB_ENV"
+          printf 'PREDECESSOR_SOURCE=%s\nPREDECESSOR_BINARY_SHA=%s\nPREDECESSOR_ARCHIVE_SHA=%s\n' \
+            "$source" "$binary_sha" "$archive_sha" >> "$GITHUB_ENV"
+      - name: Verify systemd upgrade, IAVL schema change and backup restore across the published releases
+        if: inputs.scenario == 'release-restore'
+        shell: bash
+        working-directory: launch-assembly/network
+        run: |
+          set -euo pipefail
+          umask 077
+          root="$RELEASE_WORK"
+          genesis="$root/assembled/public/genesis.json"
+          install -m 600 -- "$genesis" "$root/genesis.json"
+          jq -e --arg archive "$RELEASE_ARCHIVE_SHA" --arg sha "$RELEASE_BINARY_SHA" --arg source "$RELEASE_SOURCE" '
+            select(.archiveSha256 == $archive and .binarySha256 == $sha and .sourceRevision == $source and .includesGenesis == false) |
+            {archiveSha256, binarySha256, sourceCommit: .sourceRevision}
+          ' "$root/evidence/install.json" > "$root/replacement.json"
+          go build -mod=readonly -p 2 -trimpath -o "$root/iavl-schema-probe" ./tools/iavl_schema_probe
+          report="$root/evidence/release-restore.json"
+          status=0
+          sudo -n unshare --net -- bash -euc 'ip link set lo up; exec "$@"' _ \
+            env TMPDIR="$root" "$(command -v python3)" -B "$PWD/tools/native_launch_rehearsal.py" \
+            --binary "$root/predecessor/mcnd" --binary-sha256 "$PREDECESSOR_BINARY_SHA" \
+            --archive-sha256 "$PREDECESSOR_ARCHIVE_SHA" --source-commit "$PREDECESSOR_SOURCE" \
+            --fixture "$root/assembled" --home-parent "$root" --assembly-report "$root/evidence/assembly.json" \
+            --report "$report" --four-validators --empty-user-assets --package-genesis "$genesis" \
+            --systemd-follower --upgrade-package "$root" --upgrade-package-report "$root/replacement.json" \
+            --iavl-schema-probe "$root/iavl-schema-probe" || status=$?
+          if [[ -f "$report" ]]; then
+            sudo -n chown "$(id -u):$(id -g)" "$report"
+            chmod 600 "$report"
+          fi
+          if [[ "$status" != 0 ]]; then
+            jq -r '.phase, .error' "$report" >&2
+            exit "$status"
+          fi
+          jq -e --arg old "$PREDECESSOR_BINARY_SHA" --arg new "$RELEASE_BINARY_SHA" '
+            .status == "PASS" and .loopbackOnlyNamespace and .offlineAssembledGenesis and .followerVotingPower == 0 and
+            .binarySha256 == $old and .systemdUpgrade.binarySha256 == $new and .systemdRollback.binarySha256 == $old and
+            (.systemdUpgrade as $upgrade | .systemdRollback |
+              .backupHomeSha256 == $upgrade.backupHomeSha256 and .loadedHeight == $upgrade.loadedHeight and
+              .loadedAppHash == $upgrade.loadedAppHash and .verifiedHeight > $upgrade.verifiedHeight and
+              .sameNodeId and $upgrade.sameNodeId and .catchingUp == false and $upgrade.catchingUp == false and
+              $upgrade.iavlBefore.storageVersion == "1.0.0" and .iavlAfterUpgrade.storageVersion == "1.1.0" and
+              .iavlRestored == $upgrade.iavlBefore and .iavlAfterSync.storageVersion == "1.0.0")
+          ' "$report"
       - name: Verify Hermes interoperability on the same assembled genesis
         if: github.event_name == 'push' || inputs.scenario == 'all' || inputs.scenario == 'ibc' || inputs.scenario == 'release-switch'
         shell: bash
