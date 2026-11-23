@@ -392,7 +392,13 @@ jobs:
             local name="$1"
             shift
             local status=0 report="$RELEASE_WORK/evidence/$name.json"
-            sudo -n unshare --net -- bash -euc 'ip link set lo up; exec "$@"' _ \
+            sudo -n unshare --net -- bash -euc '
+              ip link set lo up
+              # Keep the late-starting snapshot observer P2P and RPC ports out of the client port pool.
+              reserved=$(sysctl -n net.ipv4.ip_local_reserved_ports)
+              sysctl -qw "net.ipv4.ip_local_reserved_ports=${reserved:+$reserved,}33656-33657"
+              exec "$@"
+            ' _ \
               env TMPDIR="$RELEASE_WORK" "$(command -v python3)" -B "$GITHUB_WORKSPACE/launch-assembly/network/tools/native_launch_rehearsal.py" \
               --binary "$RELEASE_WORK/bin/mcnd" --binary-sha256 "$RELEASE_BINARY_SHA" \
               --archive-sha256 "$RELEASE_ARCHIVE_SHA" --source-commit "$RELEASE_SOURCE" \

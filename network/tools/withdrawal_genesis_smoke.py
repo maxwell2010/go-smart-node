@@ -160,6 +160,7 @@ def safe_diagnostic(text):
                   'consensus genesis cannot be nil', 'cosmos and evm chain ids do not match',
                   'failed to initialize', 'validator set', 'priv-validator', 'no space left on device',
                   'failed init node', 'failed start cometbft server', 'invalid cachemergeiterator',
+                  'address already in use', 'cannot assign requested address', 'permission denied',
                   'native fee rewards require an empty genesis del fee collector',
                   'native fee reward positions differ from the indexed active del reserve',
                   'native fee reward commission address is not admitted',
