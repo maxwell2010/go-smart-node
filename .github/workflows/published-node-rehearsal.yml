@@ -5,7 +5,7 @@ on:
     inputs:
       scenario:
         type: choice
-        options: [all, node, ibc, tools, media, retention, approvals]
+        options: [all, node, ibc, tools, media, retention, approvals, release-switch]
         default: all
       candidate_run:
         description: Successful software packaging run ID (empty uses the pinned release)
@@ -488,8 +488,35 @@ jobs:
           test "$status" = 0
           jq -e '.status == "PASS" and .loopbackOnlyNamespace and .chainId == "mintcandy_990014-1" and
             (.committedMedia | .status == "PASS" and .version == 1 and .kind == "erc20-reserveless" and .alteredMetadataRejected)' "$report"
+      - name: Install the previous published daemon for the IBC version switch
+        if: inputs.scenario == 'release-switch'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        working-directory: launch-assembly
+        run: |
+          set -euo pipefail
+          umask 077
+          test -z "$RELEASE_PACKAGE_RUN"
+          record=network/docs/ru/evidence/software-release-1.1.4.json
+          source=$(jq -er '.sourceRevision | select(test("^[a-f0-9]{40}$"))' "$record")
+          archive_sha=$(jq -er '.archiveSha256 | select(test("^[a-f0-9]{64}$"))' "$record")
+          binary_sha=$(jq -er '.binarySha256 | select(test("^[a-f0-9]{64}$"))' "$record")
+          test "$(gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/v1.1.4" --jq '.object.sha')" = "$source"
+          gh release view v1.1.4 --repo "$GITHUB_REPOSITORY" --json isDraft,isPrerelease \
+            | jq -e '.isDraft == false and .isPrerelease == false' >/dev/null
+          root="$RELEASE_WORK/predecessor"
+          mkdir -m 700 -- "$root"
+          archive=mcnd-1.1.4-linux-amd64.tar.gz
+          gh release download v1.1.4 --repo "$GITHUB_REPOSITORY" --dir "$root" \
+            --pattern "$archive" --pattern provenance.sigstore.json
+          python3 -B network/tools/install_software.py --source-sha "$source" --source-ref "$RELEASE_REF" \
+            --release-version 1.1.4 --archive-sha "$archive_sha" --archive "$root/$archive" \
+            --bundle "$root/provenance.sigstore.json" --destination "$root/mcnd" > "$RELEASE_WORK/evidence/predecessor-install.json"
+          printf '%s  %s\n' "$binary_sha" "$root/mcnd" | sha256sum --check --strict
+          printf 'PREDECESSOR_SOURCE=%s\nPREDECESSOR_BINARY_SHA=%s\n' "$source" "$binary_sha" >> "$GITHUB_ENV"
       - name: Verify Hermes interoperability on the same assembled genesis
-        if: github.event_name == 'push' || inputs.scenario == 'all' || inputs.scenario == 'ibc'
+        if: github.event_name == 'push' || inputs.scenario == 'all' || inputs.scenario == 'ibc' || inputs.scenario == 'release-switch'
         shell: bash
         working-directory: launch-assembly/network
         run: |
@@ -510,10 +537,17 @@ jobs:
           MCND_SPONSORED_IBC_DONOR_FILE="$root/fixture-donor.hex" \
             go test -mod=readonly -p 2 -count=1 -timeout 4m -run '^TestExportSponsoredLaunchIBCDonor$' ./systemcontracts
           report="$root/evidence/ibc.json"
+          daemon=(--mcnd-binary "$root/bin/mcnd" --mcnd-sha256 "$RELEASE_BINARY_SHA" --mcnd-source-commit "$RELEASE_SOURCE")
+          base_hash="$RELEASE_BINARY_SHA"
+          if [[ "$REHEARSAL_SCENARIO" == release-switch ]]; then
+            base_hash="$PREDECESSOR_BINARY_SHA"
+            daemon=(--mcnd-binary "$root/predecessor/mcnd" --mcnd-sha256 "$base_hash" --mcnd-source-commit "$PREDECESSOR_SOURCE"
+                    --replacement-binary "$root/bin/mcnd" --replacement-sha256 "$RELEASE_BINARY_SHA" --replacement-source-commit "$RELEASE_SOURCE")
+          fi
           status=0
           sudo -n unshare --net -- bash -euc 'ip link set lo up; exec "$@"' _ \
             env TMPDIR="$root" "$(command -v python3)" -B "$GITHUB_WORKSPACE/launch-assembly/network/internal/ibclab/hermes_lab.py" \
-            --mode native-full --mcnd-binary "$root/bin/mcnd" --mcnd-sha256 "$RELEASE_BINARY_SHA" --mcnd-source-commit "$RELEASE_SOURCE" \
+            --mode native-full "${daemon[@]}" \
             --reference-binary "$root/ibcreference" --reference-sha256 "$reference_sha" --reference-source-commit "$GITHUB_SHA" \
             --hermes-binary "$root/hermes" --native-fixture "$root/assembled" --assembly-report "$root/evidence/assembly.json" \
             --fixture-donor-key "$root/fixture-donor.hex" --report "$report" || status=$?
@@ -526,7 +560,7 @@ jobs:
             exit "$status"
           fi
           genesis_sha=$(sha256sum "$root/assembled/public/genesis.json" | cut -d' ' -f1)
-          jq -e --arg sha "$genesis_sha" --arg binary "$RELEASE_BINARY_SHA" \
+          jq -e --arg sha "$genesis_sha" --arg binary "$base_hash" \
             '.status == "NATIVE_CONSENSUS_HERMES_PASS" and .release_gate and .binaries.mcnd.sha256 == $binary and
             .owned_probe.genesis_sha256 == $sha and .owned_probe.replicas == 4 and .owned_probe.chain == "mintcandy_990014-1" and
             .routePreflight.status == "IBC_ROUTE_STATE_MATCH" and .routePreflight.receiptsUnchanged and
@@ -540,6 +574,14 @@ jobs:
               ([.validatorsBeforeRestart[], .validatorsAfterRestart[]] | all(.peakResidentBytes > 0 and .dataAllocatedBytes > 0)) and
               .hermesBeforeRestart.peakResidentBytes > 0 and .hermesAfterRestart.peakResidentBytes > 0 and
               .mintcandyCommittedTransactions > 0 and .mintcandyGasUsed > 0)' "$report"
+          if [[ "$REHEARSAL_SCENARIO" == release-switch ]]; then
+            jq -e --arg successor "$RELEASE_BINARY_SHA" '
+              .binaries.replacement.sha256 == $successor and
+              .publishedReleaseSwitch.acknowledgedSequence == (.phases.pending_packet_restart.preserved_packets[0].sequence | tostring) and
+              (.publishedReleaseSwitch | .ackCount == 1 and .successorCheckpoint.signers == ["a","b","c","d"] and
+                (.beforeSignerHeights | length == 4) and (.successorSignerHeights | length == 4))
+            ' "$report"
+          fi
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
         if: inputs.scenario == 'tools'
         with:

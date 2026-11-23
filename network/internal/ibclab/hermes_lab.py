@@ -510,19 +510,25 @@ def prepare_native_owned(lab, mcnd, fixture, *, assembly_report=None, donor_file
         for replica in replicas:
             patch_toml(replica.home / "config/app.toml", {("", "minimum-gas-prices"): "1000000000del"})
 
-    def start_all(label):
+    def start_all(label, daemon):
         for replica in replicas:
             if assembly_report is not None:
                 require(private_bytes(replica.home / "config/genesis.json", GENESIS_LIMIT) == genesis,
                         "an assembled replica has different genesis bytes")
-            replica.start(mcnd, lab.env, lab, label)
+            replica.start(daemon, lab.env, lab, label)
 
-    def restart_all():
-        if assembly_report is not None:
+    def restart_all(daemon=mcnd, label="ibc-restarted", *, check_signing=False):
+        if assembly_report is not None and "validatorsBeforeRestart" not in lab.report["resourceUsage"]:
             lab.report["resourceUsage"]["validatorsBeforeRestart"] = measure_validators()
         for replica in reversed(replicas):
             lab.stop(replica.child)
-        start_all("ibc-restarted")
+        states = {}
+        if check_signing:
+            require(all(replica.child.returncode == 0 for replica in replicas), "all signers must stop cleanly before switching")
+            states = {replica.label: int(json.loads(private_bytes(
+                replica.home / "data/priv_validator_state.json", 8192))["height"]) for replica in replicas}
+        start_all(label, daemon)
+        return states
 
     def measure_validators():
         return {replica.label: replica_usage(replica) for replica in replicas}
@@ -553,7 +559,7 @@ def prepare_native_owned(lab, mcnd, fixture, *, assembly_report=None, donor_file
         require(all(checkpoint[key] == value for key, value in header.items()),
                 "the native committed block before restart must remain unchanged")
 
-    start_all("ibc-initial")
+    start_all("ibc-initial", mcnd)
     snapshot = verify_replicas(height + 1)
     if assembly_report is not None:
         owned, funding = fund_assembled_relayer(lab, mcnd, replicas[0], donor_file)
@@ -736,7 +742,8 @@ clear_on_start = true
     lab.report["phases"]["daemon_restart_backlog"].update(sequence=recovered_sequence, commitment_before_restart=pending)
 
 
-def full_suite(lab, mcnd, reference, hermes, native_fixture=None, *, assembly_report=None, donor_file=None):
+def full_suite(lab, mcnd, reference, hermes, native_fixture=None, *, assembly_report=None, donor_file=None,
+               replacement=None):
     a, b, run, a_channel, b_channel = connect_transfer(lab, mcnd, reference, hermes, native_fixture=native_fixture,
                                                        assembly_report=assembly_report, donor_file=donor_file)
     chain_id = a.get("chain", A_ID)
@@ -786,7 +793,7 @@ def full_suite(lab, mcnd, reference, hermes, native_fixture=None, *, assembly_re
         phase_after(lab, "foreign_bank_voucher_return", a, b, before, native_b_delta=foreign)
 
     before = phase_before(a, b)
-    transfer(chain_id, B_ID, a_channel, "del", value, b["address"])
+    transfer(chain_id, B_ID, a_channel, "del", value, b["address"], seconds=600 if replacement else 300)
     lab.wait(lambda: len(commitments(a["rpc"], a_channel)) == 1, "pending packet before restart")
     pending = commitments(a["rpc"], a_channel)
     heights = [lab.height(a["rpc"], chain_id), lab.height(b["rpc"], B_ID)]
@@ -794,7 +801,20 @@ def full_suite(lab, mcnd, reference, hermes, native_fixture=None, *, assembly_re
         a["verify_pending"](a_channel, pending, value)
         before_restart = a["verify_replicas"](heights[0])
     lab.stop(b["process"])
-    if native_fixture:
+    if replacement is not None:
+        original_signing = a["restart"](replacement, "ibc-release-successor", check_signing=True)
+        successor = a["verify_replicas"](before_restart["height"] + 1)
+        a["verify_checkpoint"](before_restart)
+        a["verify_pending"](a_channel, pending, value)
+        successor_signing = a["restart"](mcnd, "ibc-release-predecessor", check_signing=True)
+        require(all(successor_signing[signer] > height for signer, height in original_signing.items()),
+                "signing state did not advance across the two releases")
+        a["verify_replicas"](max(successor["height"], *successor_signing.values()) + 1)
+        a["verify_checkpoint"](successor)
+        lab.report["publishedReleaseSwitch"] = {"successorCheckpoint": successor,
+                                               "beforeSignerHeights": original_signing,
+                                               "successorSignerHeights": successor_signing}
+    elif native_fixture:
         a["restart"]()
     else:
         lab.stop(a["process"])
@@ -809,6 +829,12 @@ def full_suite(lab, mcnd, reference, hermes, native_fixture=None, *, assembly_re
     clear()
     require(amount(b["rpc"], b["address"], voucher) == value, "pending packet failed after disk reopen")
     phase_after(lab, "pending_packet_restart", a, b, before, -value)
+    if replacement is not None:
+        sequence = str(pending[0]["sequence"])
+        acknowledgments = [event for event in new_events(a, before["a_tx"], "acknowledge_packet")
+                           if event.get("packet_sequence") == sequence and event.get("packet_src_channel") == a_channel]
+        require(len(acknowledgments) == 1, "the preserved packet must be acknowledged exactly once")
+        lab.report["publishedReleaseSwitch"].update(acknowledgedSequence=sequence, ackCount=len(acknowledgments))
     lab.report["phases"]["pending_packet_restart"]["preserved_packets"] = pending
     if native_fixture:
         lab.report["phases"]["pending_packet_restart"].update(
@@ -1044,6 +1070,7 @@ def main(argv=None, signals=None):
     parser.add_argument("--mcnd-source-commit")
     parser.add_argument("--replacement-binary")
     parser.add_argument("--replacement-sha256")
+    parser.add_argument("--replacement-source-commit")
     parser.add_argument("--native-fixture", type=Path)
     parser.add_argument("--assembly-report", type=Path)
     parser.add_argument("--fixture-donor-key", type=Path)
@@ -1066,6 +1093,18 @@ def main(argv=None, signals=None):
             mcnd, mcnd_hash = binary(args.mcnd_binary, args.mcnd_sha256)
             report["binaries"]["mcnd"] = {"sha256": mcnd_hash, "source_commit": args.mcnd_source_commit}
         replacement = None
+        require((args.replacement_binary is None and args.replacement_sha256 is None) or
+                args.mode == "client-upgrade" or args.replacement_source_commit is not None,
+                "replacement executable requires client-upgrade or an explicit published source")
+        if args.replacement_source_commit is not None:
+            require(args.mode == "native-full" and args.assembly_report is not None and
+                    args.replacement_binary and args.replacement_sha256 and
+                    re.fullmatch(r"[0-9a-f]{40}", args.replacement_source_commit) and
+                    args.replacement_source_commit != args.mcnd_source_commit,
+                    "published replacement requires a distinct release for an assembled native fixture")
+            replacement, replacement_hash = binary(args.replacement_binary, args.replacement_sha256)
+            require(replacement_hash != mcnd_hash, "published replacement must differ from the predecessor")
+            report["binaries"]["replacement"] = {"sha256": replacement_hash, "source_commit": args.replacement_source_commit}
         if args.mode == "client-upgrade":
             require(args.replacement_binary and args.replacement_sha256, "explicit rehearsal binary and hash required")
             replacement, replacement_hash = binary(args.replacement_binary, args.replacement_sha256)
@@ -1080,7 +1119,8 @@ def main(argv=None, signals=None):
                 report["hermes_version"] = command([hermes, "version"], env).strip()
                 if args.mode in ("full", "native-full"):
                     full_suite(lab, mcnd, reference, hermes, native_fixture=args.native_fixture,
-                               assembly_report=args.assembly_report, donor_file=args.fixture_donor_key)
+                               assembly_report=args.assembly_report, donor_file=args.fixture_donor_key,
+                               replacement=replacement)
                 elif args.mode == "client-upgrade":
                     client_upgrade_suite(lab, mcnd, replacement, reference, hermes)
                 else:
