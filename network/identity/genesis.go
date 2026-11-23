@@ -48,6 +48,17 @@ func ValidateHomeGenesis(home, chainID string, evmID uint64) error {
 // modules before opening a database or applying a tagged network's genesis.
 func ValidateNativeDenomGenesis(state map[string]json.RawMessage) error {
 	if ProfileChainID == "" {
+		// Legacy homes contain del. Do not open a tagged network's database
+		// using the legacy runtime, even when InitChain will not run again.
+		var coin struct {
+			Params struct {
+				Denom string `json:"base_denom"`
+			} `json:"params"`
+		}
+		if json.Unmarshal(state["coin"], &coin) == nil &&
+			(coin.Params.Denom == MainnetBaseDenom || coin.Params.Denom == TestnetBaseDenom) {
+			return fmt.Errorf("genesis denomination %q requires its dedicated MintCandy binary", coin.Params.Denom)
+		}
 		return nil
 	}
 	for _, module := range []struct{ name, field string }{
@@ -79,6 +90,10 @@ func ValidateNativeDenomGenesis(state map[string]json.RawMessage) error {
 	var bank struct {
 		Metadata []struct {
 			Base, Display, Name, Symbol string
+			Units                       []struct {
+				Denom    string
+				Exponent uint32
+			} `json:"denom_units"`
 		} `json:"denom_metadata"`
 	}
 	if err := json.Unmarshal(state["bank"], &bank); err != nil {
@@ -86,7 +101,9 @@ func ValidateNativeDenomGenesis(state map[string]json.RawMessage) error {
 	}
 	for _, meta := range bank.Metadata {
 		if meta.Base == BaseDenom && meta.Display == NativeTokenSymbol && meta.Name == NativeTokenName &&
-			meta.Symbol == NativeTokenSymbol {
+			meta.Symbol == NativeTokenSymbol && len(meta.Units) == 2 &&
+			meta.Units[0].Denom == BaseDenom && meta.Units[0].Exponent == 0 &&
+			meta.Units[1].Denom == NativeTokenSymbol && meta.Units[1].Exponent == 18 {
 			return nil
 		}
 	}

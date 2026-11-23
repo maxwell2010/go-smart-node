@@ -955,6 +955,16 @@ func (app *App) LoadHeight(height int64) error {
 func (app *App) loadCommittedState() error {
 	height := app.LastBlockHeight()
 	ctx := app.NewUncachedContext(false, cmtproto.Header{ChainID: app.chainID, Height: height})
+	if height > 0 && (app.chainID == identity.MainnetChainID || app.chainID == identity.TestnetChainID) {
+		params, err := app.NativeCoinKeeper.GetParams(ctx)
+		if err != nil {
+			return err
+		}
+		if params.BaseDenom != identity.BaseDenom {
+			return fmt.Errorf("committed native denomination %q differs from binary denomination %q",
+				params.BaseDenom, identity.BaseDenom)
+		}
+	}
 	if err := app.LoadWithdrawalSettlement(ctx); err != nil {
 		return err
 	}

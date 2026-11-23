@@ -60,6 +60,12 @@ func TestCompiledNativeProfile(t *testing.T) {
 				if domainErr != nil || BaseDenom != "del" {
 					t.Fatalf("legacy profile changed: %s %v", BaseDenom, domainErr)
 				}
+				state := map[string]json.RawMessage{
+					"coin": json.RawMessage(fmt.Sprintf(`{"params":{"base_denom":%q}}`, tc.denom)),
+				}
+				if err := ValidateNativeDenomGenesis(state); err == nil {
+					t.Fatal("legacy runtime accepted dedicated native denomination")
+				}
 				return
 			}
 			if ProfileChainID != tc.chainID {
@@ -82,7 +88,8 @@ func TestCompiledNativeProfile(t *testing.T) {
 				"evm":{"params":{"evm_denom":%[1]q,"extended_denom_options":{"extended_denom":%[1]q}}},
 				"staking":{"params":{"bond_denom":%[1]q}},
 				"mint":{"params":{"mint_denom":%[1]q}},
-				"bank":{"denom_metadata":[{"base":%[1]q,"display":%[2]q,"symbol":%[2]q,"name":%[3]q}]}
+				"bank":{"denom_metadata":[{"base":%[1]q,"display":%[2]q,"symbol":%[2]q,"name":%[3]q,
+					"denom_units":[{"denom":%[1]q,"exponent":0},{"denom":%[2]q,"exponent":18}]}]}
 			}`, tc.denom, tc.symbol, NativeTokenName)
 			if err := json.Unmarshal([]byte(template), &state); err != nil {
 				t.Fatal(err)

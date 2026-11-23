@@ -119,11 +119,17 @@ type nativeIBCTransferModuleV2 struct {
 	ibcapi.IBCModule
 }
 
+var _ ibcapi.PacketDataUnmarshaler = nativeIBCTransferModuleV2{}
+
 func (m nativeIBCTransferModuleV2) OnRecvPacket(ctx sdk.Context, source, destination string, sequence uint64, payload channeltypesv2.Payload, relayer sdk.AccAddress) channeltypesv2.RecvPacketResult {
 	if err := checkMainnetICS20Denom(payload.Value, payload.Version, payload.Encoding); err != nil {
 		return channeltypesv2.RecvPacketResult{Status: channeltypesv2.PacketStatus_Failure}
 	}
 	return m.IBCModule.OnRecvPacket(ctx, source, destination, sequence, payload, relayer)
+}
+
+func (m nativeIBCTransferModuleV2) UnmarshalPacketData(payload channeltypesv2.Payload) (any, error) {
+	return transfertypes.UnmarshalPacketData(payload.Value, payload.Version, payload.Encoding)
 }
 
 func checkMainnetICS20Denom(payload []byte, version, encoding string) error {
