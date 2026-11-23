@@ -565,6 +565,7 @@ def prepare_native_owned(lab, mcnd, fixture, *, assembly_report=None, donor_file
         from native_launch_systemd import SystemdFollower
 
         report = lab.report
+        report["initialHeight"] = height
         report["resourceUsage"]["validatorsBeforeRestart"] = measure_validators()
         report["binarySha256"] = report["binaries"]["mcnd"]["sha256"]
         report["upgradePackage"] = {"binarySha256": report["binaries"]["replacement"]["sha256"]}
