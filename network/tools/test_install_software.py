@@ -80,6 +80,15 @@ class InstallSoftwareTests(unittest.TestCase):
                 verify.assert_not_called()
             self.assertFalse(args["destination"].parent.exists())
 
+    def test_mainnet_install_rejects_another_native_denom(self):
+        with tempfile.TemporaryDirectory() as temporary, self.supported(), patch.object(installer.shutil, "which", return_value="gh"):
+            args, verified, _ = self.package(Path(temporary))
+            with patch.object(installer.subprocess, "run"), patch.object(installer, "verify_contents", return_value=dict(verified, nativeDenom="tmsp")) as verify:
+                with self.assertRaisesRegex(ValueError, "native denomination differs"):
+                    installer.install(**args, native_denom="msp")
+                self.assertEqual(verify.call_args.kwargs["native_denom"], "msp")
+            self.assertFalse(args["destination"].exists())
+
     def test_package_identity_and_existing_target_fail_closed(self):
         with tempfile.TemporaryDirectory() as temporary, self.supported(), patch.object(installer.shutil, "which", return_value="gh"):
             args, verified, _ = self.package(Path(temporary))

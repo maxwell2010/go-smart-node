@@ -11,7 +11,7 @@ from pathlib import Path, PurePosixPath
 import re
 import tarfile
 
-from binary_provenance import MAIN_MODULE, verify_recorded_build, validate_release_version
+from binary_provenance import MAIN_MODULE, NATIVE_BUILD_TAGS, verify_recorded_build, validate_release_version
 from install_mcnd import validate_revision, pinned_go_version
 
 REQUIRED = {"bin/mcnd", "BUILD_INFO.txt", "SOFTWARE_RELEASE.txt", "CLI_VERSION.json",
@@ -36,7 +36,7 @@ def allowed_name(name):
             path.name.startswith(("LICENSE","COPYING","NOTICE","UPSTREAM.json"))) and (
             not path.is_absolute() and ".." not in path.parts and "\\" not in name and str(path)==name)
 
-def verify(archive,revision,release_version):
+def verify(archive,revision,release_version,*,native_denom=None):
     validate_revision(revision);validate_release_version(release_version)
     archive=Path(archive)
     if not archive.is_file() or not 0<archive.stat().st_size<=MAX_ARCHIVE:raise ValueError("invalid software archive size")
@@ -69,7 +69,9 @@ def verify(archive,revision,release_version):
     if binary_header[:6]!=b"\x7fELF\x02\x01" or binary_header[18:20]!=b"\x3e\x00":raise ValueError("software package binary is not Linux amd64 ELF")
     manifest=strict_json(metadata["MANIFEST.json"])
     expected_fields={"schemaVersion","status","sourceRevision","binarySha256","files","dependencyScope","releaseVersion","includesGenesis","networkLaunchApproved"}
+    if native_denom is not None:expected_fields.add("nativeDenom")
     if set(manifest)!=expected_fields or manifest["schemaVersion"]!=1 or manifest["status"]!="software-release" or manifest["sourceRevision"]!=revision or manifest["releaseVersion"]!=release_version or manifest["includesGenesis"] is not False or manifest["networkLaunchApproved"] is not False:raise ValueError("software release manifest identity differs")
+    if manifest.get("nativeDenom")!=native_denom:raise ValueError("software package native denomination differs")
     if manifest["files"]!={name:digest for name,digest in hashes.items() if name!="MANIFEST.json"} or manifest["binarySha256"]!=hashes["bin/mcnd"]:raise ValueError("software release manifest SHA256 differs")
     runtime=strict_json(metadata["CLI_VERSION.json"])
     if runtime.get("commit")!=revision or runtime.get("version")!=release_version or runtime.get("server_name")!="mcnd":raise ValueError("software runtime version identity differs")
@@ -77,18 +79,22 @@ def verify(archive,revision,release_version):
     build=strict_json(metadata["VERIFIED_BUILD.json"])
     if source.get("sourceRevision")!=revision or build.get("settings",{}).get("vcs.revision")!=revision or build.get("settings",{}).get("vcs.modified")!="false" or build.get("module",{}).get("path")!=MAIN_MODULE:raise ValueError("software source/build provenance differs")
     expected_go=pinned_go_version((Path(__file__).resolve().parents[1]/"go.mod").read_text(encoding="utf-8"))
-    if verify_recorded_build(metadata["BUILD_INFO.txt"].decode(),revision,expected_go,release_version=release_version)!=build:raise ValueError("recorded software build metadata differs")
+    if verify_recorded_build(metadata["BUILD_INFO.txt"].decode(),revision,expected_go,release_version=release_version,
+                             native_denom=native_denom)!=build:raise ValueError("recorded software build metadata differs")
     sbom=strict_json(metadata["SBOM.cdx.json"])
     component=sbom.get("metadata",{}).get("component",{})
     props={p["name"]:p["value"] for p in component.get("properties",[])}
     if sbom.get("bomFormat")!="CycloneDX" or component.get("name")!="mcnd" or component.get("version")!=release_version or component.get("hashes")!=[{"alg":"SHA-256","content":hashes["bin/mcnd"]}] or props.get("source.commit")!=revision:raise ValueError("software SBOM identity differs")
     with archive.open("rb") as stream:archive_sha=hashlib.file_digest(stream,"sha256").hexdigest()
-    return {"status":"software-release","releaseVersion":release_version,"sourceRevision":revision,
+    result={"status":"software-release","releaseVersion":release_version,"sourceRevision":revision,
             "archiveSha256":archive_sha,"binarySha256":hashes["bin/mcnd"],"includesGenesis":False,"networkLaunchApproved":False}
+    if native_denom is not None:result["nativeDenom"]=native_denom
+    return result
 
 if __name__=="__main__":
     parser=argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--archive",type=Path,required=True);parser.add_argument("--revision",required=True);parser.add_argument("--release-version",required=True)
+    parser.add_argument("--native-denom",choices=NATIVE_BUILD_TAGS)
     args=parser.parse_args()
-    try:print(json.dumps(verify(args.archive,args.revision,args.release_version),sort_keys=True))
+    try:print(json.dumps(verify(args.archive,args.revision,args.release_version,native_denom=args.native_denom),sort_keys=True))
     except (ValueError,OSError,EOFError,tarfile.TarError,KeyError,TypeError) as error:parser.exit(1,"software package: "+str(error)+"\n")

@@ -2,10 +2,10 @@
 import argparse, hashlib, io, json, os, pathlib, platform, subprocess, sys, tarfile, tempfile
 from install_mcnd import pinned_go_version, validate_revision
 from source_inventory import production_environment, verify_build_inputs
-from binary_provenance import verify_binary_build, validate_release_version
+from binary_provenance import NATIVE_BUILD_TAGS, verify_binary_build, validate_release_version
 from mcnd_sbom import make_sbom
 
-def package(binary,source,revision,output,source_inputs=None,release_version=None):
+def package(binary,source,revision,output,source_inputs=None,release_version=None,*,native_denom=None):
  if release_version is not None:validate_release_version(release_version)
  validate_revision(revision);source=pathlib.Path(source).resolve(strict=True);binary=pathlib.Path(binary).resolve(strict=True)
  if subprocess.check_output(["git","-C",str(source),"rev-parse","HEAD"],text=True).strip()!=revision:raise ValueError("source mismatch")
@@ -19,7 +19,8 @@ def package(binary,source,revision,output,source_inputs=None,release_version=Non
  environment=production_environment()
  info=subprocess.check_output(["go","version","-m",str(binary)],text=True,env=environment)
  expected_go=pinned_go_version(module_text)
- verified_build=verify_binary_build(info,source,revision,expected_go,environment=environment,release_version=release_version)
+ verified_build=verify_binary_build(info,source,revision,expected_go,environment=environment,
+                                   release_version=release_version,native_denom=native_denom)
  runtime_version=None
  if "main.buildCommit=" in info:
   if "main.buildCommit="+revision not in info:raise ValueError("binary lacks exact source buildCommit")
@@ -46,6 +47,7 @@ def package(binary,source,revision,output,source_inputs=None,release_version=Non
  data["SBOM.cdx.json"]=(json.dumps(make_sbom(verified_build,inventory,data,binary_sha256,release_version=release_version),sort_keys=True,indent=2)+"\n").encode()
  manifest={"schemaVersion":1,"status":"development","sourceRevision":revision,"binarySha256":binary_sha256,"files":{name:hashlib.sha256(value).hexdigest() for name,value in data.items()},"dependencyScope":"Go build information records effective module replacements. UPSTREAM manifests identify local owned patches; this is not a complete security audit or signed provenance."}
  if release_version is not None:manifest.update(status="software-release",releaseVersion=release_version,includesGenesis=False,networkLaunchApproved=False)
+ if native_denom is not None:manifest["nativeDenom"]=native_denom
  data["MANIFEST.json"]=(json.dumps(manifest,indent=2)+"\n").encode()
  output=pathlib.Path(output);output.parent.mkdir(parents=True,exist_ok=True)
  if os.path.lexists(output.with_name(output.name+".sha256")):raise ValueError("checksum sidecar already exists")
@@ -61,4 +63,6 @@ if __name__=="__main__":
  for name in ("binary","source","revision","output"):parser.add_argument("--"+name,required=True)
  parser.add_argument("--source-inputs",help="matching production inventory captured before building")
  parser.add_argument("--release-version",help="explicit software-only stable SemVer; does not approve a public network")
- args=parser.parse_args();package(args.binary,args.source,args.revision,args.output,args.source_inputs,args.release_version)
+ parser.add_argument("--native-denom",choices=NATIVE_BUILD_TAGS)
+ args=parser.parse_args();package(args.binary,args.source,args.revision,args.output,args.source_inputs,args.release_version,
+                                 native_denom=args.native_denom)

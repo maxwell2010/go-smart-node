@@ -11,6 +11,16 @@ import subprocess
 from source_inventory import json_records, production_environment
 
 MAIN_MODULE = "github.com/maxwell2010/go-smart-node/network"
+NATIVE_BUILD_TAGS = {"msp": "mintcandy_mainnet", "tmsp": "mintcandy_testnet"}
+
+
+def native_build_tag(native_denom):
+    if native_denom is None:
+        return ""
+    try:
+        return NATIVE_BUILD_TAGS[native_denom]
+    except (KeyError, TypeError) as error:
+        raise ValueError("unsupported native release denomination") from error
 
 def validate_release_version(value):
     if not isinstance(value,str) or len(value)>64 or not re.fullmatch(r"(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)",value):
@@ -65,7 +75,7 @@ def module_identity(module):
     return result
 
 
-def verify_recorded_build(info, revision, go_version, *, release_version=None):
+def verify_recorded_build(info, revision, go_version, *, release_version=None, native_denom=None):
     metadata = parse_build_info(info)
     if metadata["goVersion"] != go_version or metadata.get("path") != MAIN_MODULE + "/cmd/mcnd":
         raise ValueError("binary toolchain or main package differs from default build policy")
@@ -74,6 +84,11 @@ def verify_recorded_build(info, revision, go_version, *, release_version=None):
     required = {"-buildmode": "exe", "-compiler": "gc", "-trimpath": "true",
                 "CGO_ENABLED": "1", "GOOS": "linux", "GOARCH": "amd64", "GOAMD64": "v1",
                 "vcs": "git", "vcs.revision": revision, "vcs.modified": "false"}
+    build_tag = native_build_tag(native_denom)
+    if build_tag:
+        if metadata["settings"].get("-tags") != build_tag:
+            raise ValueError("binary build tag differs from the requested native denomination")
+        required["-tags"] = build_tag
     settings = metadata["settings"]
     if any(settings.get(key) != value for key, value in required.items()):
         raise ValueError("binary settings or clean VCS revision differ from default build policy")
@@ -91,12 +106,14 @@ def verify_recorded_build(info, revision, go_version, *, release_version=None):
     return metadata
 
 
-def verify_binary_build(info, source, revision, go_version, *, environment=None, package_loader=None, release_version=None):
-    metadata=verify_recorded_build(info,revision,go_version,release_version=release_version)
+def verify_binary_build(info, source, revision, go_version, *, environment=None, package_loader=None,
+                        release_version=None, native_denom=None):
+    metadata = verify_recorded_build(info, revision, go_version, release_version=release_version,
+                                     native_denom=native_denom)
     environment = production_environment(environment)
     if package_loader is None:
         raw = subprocess.check_output(
-            ["go", "list", "-mod=readonly", "-tags=", "-deps", "-json", "./cmd/mcnd"],
+            ["go", "list", "-mod=readonly", "-tags=" + native_build_tag(native_denom), "-deps", "-json", "./cmd/mcnd"],
             cwd=Path(source) / "network", text=True, env=environment,
         )
         packages = json_records(raw)

@@ -6,6 +6,10 @@ on:
         description: Canonical software-only SemVer X.Y.Z
         required: true
         type: string
+      native_denom:
+        description: Native denomination for this software build
+        default: del
+        type: string
   workflow_dispatch:
     inputs:
       release_version:
@@ -13,6 +17,11 @@ on:
         required: true
         default: '1.0.0'
         type: string
+      native_denom:
+        description: Native denomination for this software build
+        default: del
+        type: choice
+        options: [del, msp, tmsp]
 permissions:
   contents: read
 concurrency:
@@ -20,13 +29,14 @@ concurrency:
   cancel-in-progress: false
 jobs:
   build-test-package:
-    if: github.repository == 'maxwell2010/go-smart-node' && github.event_name == 'workflow_dispatch' && (github.ref == 'refs/heads/feat/native-duplicate-vote-master-20261112' || startsWith(github.ref, 'refs/heads/release/'))
+    if: github.repository == 'maxwell2010/go-smart-node' && github.event_name == 'workflow_dispatch' && (github.ref == 'refs/heads/feat/native-duplicate-vote-master-20261112' || github.ref == 'refs/heads/codex/mintcandy-native-denoms' || startsWith(github.ref, 'refs/heads/release/'))
     runs-on: ubuntu-24.04
     timeout-minutes: 75
     permissions:
       contents: read
     env:
       RELEASE_VERSION: ${{ inputs.release_version }}
+      NATIVE_DENOM: ${{ inputs.native_denom || 'del' }}
       GOENV: 'off'
       GOWORK: 'off'
       GOFLAGS: ''
@@ -56,6 +66,13 @@ jobs:
           git diff --exit-code
           git diff --cached --exit-code
           python3 -B -c 'import os,sys; sys.path.insert(0,"tools"); from binary_provenance import validate_release_version; validate_release_version(os.environ["RELEASE_VERSION"])'
+          case "$NATIVE_DENOM" in
+            del) build_tag=; chain=990013; symbol=MSP; token_name=MintCandy ;;
+            msp) build_tag=mintcandy_mainnet; chain=9905401; symbol=MSP; token_name=MintCandy ;;
+            tmsp) build_tag=mintcandy_testnet; chain=990098; symbol=tMSP; token_name='MintCandy Testnet' ;;
+            *) echo 'Unsupported native denomination.' >&2; exit 1 ;;
+          esac
+          printf 'BUILD_TAG=%s\nEVM_CHAIN_ID=%s\nTOKEN_SYMBOL=%s\nTOKEN_NAME=%s\n' "$build_tag" "$chain" "$symbol" "$token_name" >> "$GITHUB_ENV"
           mkdir -p "$RUNNER_TEMP/software-evidence" "$RUNNER_TEMP/software-package"
       - name: Verify dependencies, owned sources and operator tooling
         run: |
@@ -105,21 +122,23 @@ jobs:
           set -euo pipefail
           test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
           test -z "$(git status --porcelain)"
+          profile_args=()
+          if [[ -n "$BUILD_TAG" ]]; then profile_args=(--native-denom "$NATIVE_DENOM"); fi
           python3 -B tools/source_inventory.py --source "$GITHUB_WORKSPACE" --output "$RUNNER_TEMP/software-source-inputs.json"
-          go build -mod=readonly -tags= -p 2 -trimpath -ldflags "-X main.buildCommit=$GITHUB_SHA -X main.buildVersion=$RELEASE_VERSION" -o "$RUNNER_TEMP/mcnd-software" ./cmd/mcnd
+          go build -mod=readonly -tags="$BUILD_TAG" -p 2 -trimpath -ldflags "-X main.buildCommit=$GITHUB_SHA -X main.buildVersion=$RELEASE_VERSION" -o "$RUNNER_TEMP/mcnd-software" ./cmd/mcnd
           init_home=$(mktemp -d "$RUNNER_TEMP/mcnd-init.XXXXXXXX")
-          "$RUNNER_TEMP/mcnd-software" init software-metadata-check --home "$init_home" --chain-id mintcandy_990013-1 --evm.evm-chain-id 990013
-          "$RUNNER_TEMP/mcnd-software" genesis validate-genesis --home "$init_home" --evm.evm-chain-id 990013
-          jq -e '
+          "$RUNNER_TEMP/mcnd-software" init software-metadata-check --home "$init_home" --chain-id "mintcandy_$EVM_CHAIN_ID-1" --evm.evm-chain-id "$EVM_CHAIN_ID"
+          "$RUNNER_TEMP/mcnd-software" genesis validate-genesis --home "$init_home" --evm.evm-chain-id "$EVM_CHAIN_ID"
+          jq -e --arg denom "$NATIVE_DENOM" --arg symbol "$TOKEN_SYMBOL" --arg name "$TOKEN_NAME" '
             .app_state as $state |
             ($state.bank.denom_metadata | length == 1) and
-            ($state.bank.denom_metadata[0] | .name == "MintCandy" and .display == "MSP" and .symbol == "MSP" and .base == "del" and
-              (.denom_units | map([.denom, (.exponent | tonumber)]) == [["del", 0], ["MSP", 18]])) and
-            ($state.coin.params | .base_title == "MintCandy" and .base_denom == "del") and
+            ($state.bank.denom_metadata[0] | .name == $name and .display == $symbol and .symbol == $symbol and .base == $denom and
+              (.denom_units | map([.denom, (.exponent | tonumber)]) == [[$denom, 0], [$symbol, 18]])) and
+            ($state.coin.params | .base_title == $name and .base_denom == $denom) and
             ($state.bank.balances | length == 0)
           ' "$init_home/config/genesis.json" > "$RUNNER_TEMP/software-evidence/init-metadata.json"
-          python3 -B tools/package_mcnd.py --binary "$RUNNER_TEMP/mcnd-software" --source "$GITHUB_WORKSPACE" --revision "$GITHUB_SHA" --release-version "$RELEASE_VERSION" --source-inputs "$RUNNER_TEMP/software-source-inputs.json" --output "$RUNNER_TEMP/software-package/mcnd-$RELEASE_VERSION-linux-amd64.tar.gz"
-          python3 -B tools/verify_software_package.py --archive "$RUNNER_TEMP/software-package/mcnd-$RELEASE_VERSION-linux-amd64.tar.gz" --revision "$GITHUB_SHA" --release-version "$RELEASE_VERSION" > "$RUNNER_TEMP/software-evidence/package.json"
+          python3 -B tools/package_mcnd.py --binary "$RUNNER_TEMP/mcnd-software" --source "$GITHUB_WORKSPACE" --revision "$GITHUB_SHA" --release-version "$RELEASE_VERSION" "${profile_args[@]}" --source-inputs "$RUNNER_TEMP/software-source-inputs.json" --output "$RUNNER_TEMP/software-package/mcnd-$RELEASE_VERSION-linux-amd64.tar.gz"
+          python3 -B tools/verify_software_package.py --archive "$RUNNER_TEMP/software-package/mcnd-$RELEASE_VERSION-linux-amd64.tar.gz" --revision "$GITHUB_SHA" --release-version "$RELEASE_VERSION" "${profile_args[@]}" > "$RUNNER_TEMP/software-evidence/package.json"
       - name: Validate SBOM and audit exact source and binary
         run: |
           set -euo pipefail
@@ -129,9 +148,13 @@ jobs:
           scanner="$RUNNER_TEMP/software-audit-tools/govulncheck"
           GOBIN="$(dirname "$scanner")" go install golang.org/x/vuln/cmd/govulncheck@v1.9.0
           for mode in source binary; do
-            target=./cmd/mcnd
-            if [[ "$mode" == binary ]]; then target="$RUNNER_TEMP/mcnd-software"; fi
-            python3 -B ../scripts/audit/capture_govuln.py --raw "$RUNNER_TEMP/software-evidence/$mode.json" --manifest "$RUNNER_TEMP/software-evidence/$mode.complete.json" --source-commit "$GITHUB_SHA" --scope "versioned mcnd software linux/amd64 CGO=1 $mode" -- "$scanner" -json -mode "$mode" "$target"
+            scan_args=(./cmd/mcnd)
+            if [[ "$mode" == binary ]]; then
+              scan_args=("$RUNNER_TEMP/mcnd-software")
+            elif [[ -n "$BUILD_TAG" ]]; then
+              scan_args=(-tags "$BUILD_TAG" ./cmd/mcnd)
+            fi
+            python3 -B ../scripts/audit/capture_govuln.py --raw "$RUNNER_TEMP/software-evidence/$mode.json" --manifest "$RUNNER_TEMP/software-evidence/$mode.complete.json" --source-commit "$GITHUB_SHA" --scope "versioned mcnd software linux/amd64 CGO=1 $mode $NATIVE_DENOM" -- "$scanner" -json -mode "$mode" "${scan_args[@]}"
             python3 -B ../scripts/audit/govuln_gate.py "$RUNNER_TEMP/software-evidence/$mode.json" --manifest "$RUNNER_TEMP/software-evidence/$mode.complete.json" > "$RUNNER_TEMP/software-evidence/$mode.gate.json"
           done
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
@@ -150,7 +173,7 @@ jobs:
           retention-days: 30
   attest-software:
     needs: build-test-package
-    if: needs.build-test-package.result == 'success' && github.repository == 'maxwell2010/go-smart-node' && github.event_name == 'workflow_dispatch' && (github.ref == 'refs/heads/feat/native-duplicate-vote-master-20261112' || startsWith(github.ref, 'refs/heads/release/'))
+    if: needs.build-test-package.result == 'success' && github.repository == 'maxwell2010/go-smart-node' && github.event_name == 'workflow_dispatch' && (github.ref == 'refs/heads/feat/native-duplicate-vote-master-20261112' || github.ref == 'refs/heads/codex/mintcandy-native-denoms' || startsWith(github.ref, 'refs/heads/release/'))
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     permissions:
@@ -160,6 +183,7 @@ jobs:
       attestations: write
     env:
       RELEASE_VERSION: ${{ inputs.release_version }}
+      NATIVE_DENOM: ${{ inputs.native_denom || 'del' }}
       PYTHONDONTWRITEBYTECODE: '1'
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
@@ -176,8 +200,10 @@ jobs:
           set -euo pipefail
           test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
           cd "$RUNNER_TEMP/software-package"
+          profile_args=()
+          if [[ "$NATIVE_DENOM" != del ]]; then profile_args=(--native-denom "$NATIVE_DENOM"); fi
           sha256sum --check --strict "mcnd-$RELEASE_VERSION-linux-amd64.tar.gz.sha256"
-          python3 -B "$GITHUB_WORKSPACE/network/tools/verify_software_package.py" --archive "mcnd-$RELEASE_VERSION-linux-amd64.tar.gz" --revision "$GITHUB_SHA" --release-version "$RELEASE_VERSION" > "$RUNNER_TEMP/software-verified.json"
+          python3 -B "$GITHUB_WORKSPACE/network/tools/verify_software_package.py" --archive "mcnd-$RELEASE_VERSION-linux-amd64.tar.gz" --revision "$GITHUB_SHA" --release-version "$RELEASE_VERSION" "${profile_args[@]}" > "$RUNNER_TEMP/software-verified.json"
           echo "SOFTWARE_ARCHIVE=$RUNNER_TEMP/software-package/mcnd-$RELEASE_VERSION-linux-amd64.tar.gz" >> "$GITHUB_ENV"
       - uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
         id: provenance
@@ -205,12 +231,14 @@ jobs:
           archive_sha=$(python3 -c 'import json,os; print(json.load(open(os.environ["RUNNER_TEMP"]+"/software-verified.json"))["archiveSha256"])')
           destination="$RUNNER_TEMP/software-installed/$RELEASE_VERSION/mcnd"
           bundle="$RUNNER_TEMP/software-attestation/provenance.sigstore.json"
-          python3 -B network/tools/install_software.py --source-sha "$GITHUB_SHA" --source-ref "$GITHUB_REF" --release-version "$RELEASE_VERSION" --archive-sha "$archive_sha" --archive "$SOFTWARE_ARCHIVE" --bundle "$bundle" --destination "$destination" > "$RUNNER_TEMP/software-attestation/install-result.json"
-          python3 -c 'import json,os; p=os.environ["RUNNER_TEMP"]+"/software-attestation/install-result.json"; r=json.load(open(p)); assert r["sourceRevision"]==os.environ["GITHUB_SHA"] and r["releaseVersion"]==os.environ["RELEASE_VERSION"] and r["includesGenesis"] is False and r["networkLaunchApproved"] is False'
+          profile_args=()
+          if [[ "$NATIVE_DENOM" != del ]]; then profile_args=(--native-denom "$NATIVE_DENOM"); fi
+          python3 -B network/tools/install_software.py --source-sha "$GITHUB_SHA" --source-ref "$GITHUB_REF" --release-version "$RELEASE_VERSION" --archive-sha "$archive_sha" --archive "$SOFTWARE_ARCHIVE" --bundle "$bundle" --destination "$destination" "${profile_args[@]}" > "$RUNNER_TEMP/software-attestation/install-result.json"
+          python3 -c 'import json,os; p=os.environ["RUNNER_TEMP"]+"/software-attestation/install-result.json"; r=json.load(open(p)); assert r["sourceRevision"]==os.environ["GITHUB_SHA"] and r["releaseVersion"]==os.environ["RELEASE_VERSION"] and r.get("nativeDenom", "del")==os.environ["NATIVE_DENOM"] and r["includesGenesis"] is False and r["networkLaunchApproved"] is False'
           before=$(sha256sum "$destination" | cut -d ' ' -f 1)
           expected=$(python3 -c 'import json,os; print(json.load(open(os.environ["RUNNER_TEMP"]+"/software-verified.json"))["binarySha256"])')
           test "$before" = "$expected"
-          if python3 -B network/tools/install_software.py --source-sha "$GITHUB_SHA" --source-ref "$GITHUB_REF" --release-version "$RELEASE_VERSION" --archive-sha "$archive_sha" --archive "$SOFTWARE_ARCHIVE" --bundle "$bundle" --destination "$destination" > "$RUNNER_TEMP/software-attestation/reinstall-result.txt" 2>&1; then
+          if python3 -B network/tools/install_software.py --source-sha "$GITHUB_SHA" --source-ref "$GITHUB_REF" --release-version "$RELEASE_VERSION" --archive-sha "$archive_sha" --archive "$SOFTWARE_ARCHIVE" --bundle "$bundle" --destination "$destination" "${profile_args[@]}" > "$RUNNER_TEMP/software-attestation/reinstall-result.txt" 2>&1; then
             echo 'Existing software binary was unexpectedly accepted for overwrite.' >&2
             exit 1
           fi

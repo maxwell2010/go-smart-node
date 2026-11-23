@@ -74,7 +74,7 @@ def archive_sha256(path):
         return hashlib.file_digest(stream, "sha256").hexdigest()
 
 
-def verify_contents(root, archive, source_sha, release_version):
+def verify_contents(root, archive, source_sha, release_version, *, native_denom=None):
     tools = root / "source" / "network" / "tools"
     tools.mkdir(parents=True)
     source_url = "https://raw.githubusercontent.com/" + REPOSITORY + "/" + source_sha + "/network/"
@@ -84,9 +84,11 @@ def verify_contents(root, archive, source_sha, release_version):
     # Isolated Python ignores user site packages, PYTHONPATH and the working
     # directory. Only the exact pinned verifier directory is added explicitly.
     runner = 'import runpy,sys; p=sys.argv.pop(1); sys.path.insert(0,p); sys.argv[0]=p+"/verify_software_package.py"; runpy.run_path(sys.argv[0],run_name="__main__")'
-    result = subprocess.run([sys.executable, "-I", "-B", "-c", runner, str(tools),
-                             "--archive", str(archive), "--revision", source_sha,
-                             "--release-version", release_version], check=True, capture_output=True, text=True, timeout=180)
+    arguments = [sys.executable, "-I", "-B", "-c", runner, str(tools),
+                 "--archive", str(archive), "--revision", source_sha, "--release-version", release_version]
+    if native_denom is not None:
+        arguments.extend(["--native-denom", native_denom])
+    result = subprocess.run(arguments, check=True, capture_output=True, text=True, timeout=180)
     return json.loads(result.stdout)
 
 
@@ -123,7 +125,8 @@ def copy_binary(archive, destination, expected_sha):
             raise
 
 
-def install(*, source_sha, source_ref, release_version, archive_sha, destination, archive_url=None, archive=None, bundle=None):
+def install(*, source_sha, source_ref, release_version, archive_sha, destination, archive_url=None, archive=None,
+            bundle=None, native_denom=None):
     if sys.version_info < (3, 11):
         raise ValueError("Python 3.11 or later is required")
     if platform.system() != "Linux" or platform.machine() != "x86_64":
@@ -132,6 +135,8 @@ def install(*, source_sha, source_ref, release_version, archive_sha, destination
         raise ValueError("full lowercase source SHA and archive SHA256 are required")
     if len(release_version) > 64 or not re.fullmatch(r"(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)", release_version):
         raise ValueError("release version must be canonical X.Y.Z")
+    if native_denom not in (None, "msp", "tmsp"):
+        raise ValueError("unsupported native release denomination")
     if not re.fullmatch(r"refs/heads/[A-Za-z0-9._/-]{1,240}", source_ref) or any(value in source_ref for value in ("..", "//")):
         raise ValueError("an exact refs/heads/... source ref is required")
     destination = Path(destination)
@@ -165,12 +170,18 @@ def install(*, source_sha, source_ref, release_version, archive_sha, destination
         if bundle is not None:
             command.extend(["--bundle", str(bundle)])
         subprocess.run(command, check=True, timeout=180, stdout=sys.stderr)
-        verified = verify_contents(root, downloaded, source_sha, release_version)
+        profile = {"native_denom": native_denom} if native_denom is not None else {}
+        verified = verify_contents(root, downloaded, source_sha, release_version, **profile)
         if verified.get("sourceRevision") != source_sha or verified.get("releaseVersion") != release_version or verified.get("archiveSha256") != archive_sha or verified.get("includesGenesis") is not False or verified.get("networkLaunchApproved") is not False:
             raise ValueError("verified software package identity differs")
+        if verified.get("nativeDenom") != native_denom:
+            raise ValueError("software package native denomination differs")
         copy_binary(downloaded, destination, verified["binarySha256"])
-    return {"binary": str(destination), "sourceRevision": source_sha, "releaseVersion": release_version,
-            "binarySha256": verified["binarySha256"], "includesGenesis": False, "networkLaunchApproved": False}
+    result = {"binary": str(destination), "sourceRevision": source_sha, "releaseVersion": release_version,
+              "binarySha256": verified["binarySha256"], "includesGenesis": False, "networkLaunchApproved": False}
+    if native_denom is not None:
+        result["nativeDenom"] = native_denom
+    return result
 
 
 if __name__ == "__main__":
@@ -181,11 +192,12 @@ if __name__ == "__main__":
     source.add_argument("--archive-url")
     source.add_argument("--archive", type=Path)
     parser.add_argument("--bundle", type=Path)
+    parser.add_argument("--native-denom", choices=("msp", "tmsp"))
     args = parser.parse_args()
     try:
         result = install(source_sha=args.source_sha, source_ref=args.source_ref, release_version=args.release_version,
                          archive_sha=args.archive_sha, destination=args.destination, archive_url=args.archive_url,
-                         archive=args.archive, bundle=args.bundle)
+                         archive=args.archive, bundle=args.bundle, native_denom=args.native_denom)
         print(json.dumps(result, sort_keys=True))
     except (ValueError, OSError, subprocess.CalledProcessError, subprocess.TimeoutExpired, tarfile.TarError, KeyError) as error:
         parser.exit(1, "software install failed: " + str(error) + "\n")

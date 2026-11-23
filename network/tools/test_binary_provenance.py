@@ -66,6 +66,16 @@ class BinaryProvenanceTest(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "default package graph"):
             self.verify(info, packages[1:])
 
+    def test_release_profile_requires_its_exact_build_tag(self):
+        info, packages = self.fixture()
+        mainnet = info + "\tbuild\t-tags=mintcandy_mainnet\n"
+        kwargs = dict(environment={}, package_loader=lambda: packages, release_version="1.2.0")
+        verified = verify_binary_build(mainnet, ".", REVISION, VERSION, native_denom="msp", **kwargs)
+        self.assertEqual(verified["settings"]["-tags"], "mintcandy_mainnet")
+        for metadata, denom in ((info, "msp"), (mainnet, "tmsp"), (mainnet, None)):
+            with self.subTest(denom=denom), self.assertRaises(ValueError):
+                verify_binary_build(metadata, ".", REVISION, VERSION, native_denom=denom, **kwargs)
+
     def test_duplicate_truncated_or_inconsistent_records_fail(self):
         info, packages = self.fixture()
         for suffix in ("\tbuild\tGOOS=linux\n", "\tdep\tgithub.com/cometbft/cometbft\tv0.38.26\th1:comet\n", "\t=>\tmissing-parent\t(devel)\n", "\tdep\ttruncated\n"):
