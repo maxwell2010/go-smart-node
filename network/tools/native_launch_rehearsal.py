@@ -662,7 +662,7 @@ def run_launch(binary, root, genesis, expected, keys, env, owner, report, *, fou
     if media_fixture is not None:
         from native_launch_media import rehearse_media
 
-        rehearse_media(root, expected, nodes, media_fixture, report)
+        rehearse_media(root, expected, nodes, media_fixture, report, env, owner)
     if restart_snapshot:
         restarted_height = verify_systemd_restart(systemd, follower, live_validators, expected, report)
         rehearse_snapshot(follower_binary, root, genesis, expected, env, owner, report,

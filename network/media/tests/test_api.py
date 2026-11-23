@@ -16,7 +16,7 @@ from unittest.mock import patch
 from mcnd_media.api import BODY_LIMIT, create_app
 from mcnd_media.store import Asset, MediaStore, canonical, cid, prepare_media
 from test_commitment import CHAIN, CREATOR, META, TOKEN
-from test_gateway import NGINX, gateway, request
+from test_gateway import NGINX, gateway, loopback_certificate, request
 
 
 MEDIA_ROOT = Path(__file__).resolve().parents[1]
@@ -117,10 +117,7 @@ class HttpsApiChecks(unittest.TestCase):
 
         with TemporaryDirectory() as directory:
             root = Path(directory)
-            cert, key = root / 'cert.pem', root / 'key.pem'
-            subprocess.run(['openssl', 'req', '-x509', '-newkey', 'rsa:2048', '-nodes', '-days', '1',
-                            '-subj', '/CN=media-test.invalid', '-addext', 'subjectAltName=IP:127.0.0.1',
-                            '-keyout', str(key), '-out', str(cert)], check=True, capture_output=True, timeout=10)
+            cert, key = loopback_certificate(root)
             trusted = ssl.create_default_context(cafile=str(cert))
             picture = io.BytesIO()
             Image.new('RGB', (5, 5), '#0055ee').save(picture, format='PNG')

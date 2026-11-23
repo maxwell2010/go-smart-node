@@ -26,6 +26,14 @@ AVATAR = Asset('mintcandy_9905401-1', '0x' + '22' * 20, 'erc20')
 NFT = Asset('mintcandy_9905401-1', '0x' + '33' * 20, 'erc1155', '1024')
 
 
+def loopback_certificate(root):
+    cert, key = root / 'cert.pem', root / 'key.pem'
+    subprocess.run(['openssl', 'req', '-x509', '-newkey', 'rsa:2048', '-nodes', '-days', '1',
+                    '-subj', '/CN=media-test.invalid', '-addext', 'subjectAltName=IP:127.0.0.1',
+                    '-keyout', str(key), '-out', str(cert)], check=True, capture_output=True, timeout=10)
+    return cert, key
+
+
 def request(port, path, method='GET', data=None, headers=None, *, context=None):
     conn = (http.client.HTTPConnection('127.0.0.1', port, timeout=4) if context is None
             else http.client.HTTPSConnection('127.0.0.1', port, timeout=4, context=context))

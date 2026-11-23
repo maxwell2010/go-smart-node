@@ -465,7 +465,7 @@ jobs:
               .earliestBeforeRestart > 1 and .earliestAfterRestart >= .earliestBeforeRestart and
               .verifiedHeight > .loadedHeightAfterRestart and .historicalBlockStillAvailableOnArchive and
               .sameAppHashOnFiveReplicas and (.appHash | test("^[A-Fa-f0-9]{64}$")))' "$report"
-      - name: Verify media publication after a signed user token creation
+      - name: Verify HTTPS media publication and backup restore after signed user token creation
         if: inputs.scenario == 'media'
         shell: bash
         working-directory: launch-assembly/network
@@ -476,9 +476,21 @@ jobs:
           fixture="$root/media"
           genesis="$root/assembled/public/genesis.json"
           mkdir -m 700 "$fixture"
+          command -v openssl
+          nginx_home="$root/nginx-media-package"
+          mkdir -m 700 "$nginx_home"
+          (
+            cd "$nginx_home"
+            sudo apt-get update -qq
+            apt-get download nginx
+            dpkg-deb -x nginx_*.deb "$nginx_home/extracted"
+          )
+          nginx="$nginx_home/extracted/usr/sbin/nginx"
+          "$nginx" -v
           python3 -m venv "$root/media-venv"
           py="$root/media-venv/bin/python"
-          "$py" -m pip install --only-binary=:all: --require-hashes -r media/requirements-linux-cp312.lock
+          "$py" -m pip install --only-binary=:all: --require-hashes \
+            -r media/requirements-linux-cp312.lock -r media/requirements-api.lock
           "$py" -B - "$fixture" <<'PY'
           from pathlib import Path
           from sys import argv
@@ -497,7 +509,7 @@ jobs:
           report="$root/evidence/media.json"
           status=0
           sudo -n unshare --net -- bash -euc 'ip link set lo up; exec "$@"' _ \
-            env TMPDIR="$root" "$py" -B tools/native_launch_rehearsal.py \
+            env TMPDIR="$root" MCND_MEDIA_NGINX="$nginx" "$py" -B tools/native_launch_rehearsal.py \
             --binary "$root/bin/mcnd" --binary-sha256 "$RELEASE_BINARY_SHA" \
             --archive-sha256 "$RELEASE_ARCHIVE_SHA" --source-commit "$RELEASE_SOURCE" \
             --fixture "$root/assembled" --home-parent "$root" --assembly-report "$root/evidence/assembly.json" \
@@ -505,7 +517,8 @@ jobs:
           if [[ -f "$report" ]]; then sudo -n chown "$(id -u):$(id -g)" "$report"; fi
           test "$status" = 0
           jq -e '.status == "PASS" and .loopbackOnlyNamespace and .chainId == "mintcandy_990014-1" and
-            (.committedMedia | .status == "PASS" and .version == 1 and .kind == "erc20-reserveless" and .alteredMetadataRejected)' "$report"
+            (.committedMedia | .status == "PASS" and .version == 1 and .kind == "erc20-reserveless" and
+              .alteredMetadataRejected and .httpsVerified and .restoredObjects == 2)' "$report"
       - name: Install the previous published daemon
         if: inputs.scenario == 'release-switch' || inputs.scenario == 'release-restore' || inputs.scenario == 'release-restore-ibc'
         env:
