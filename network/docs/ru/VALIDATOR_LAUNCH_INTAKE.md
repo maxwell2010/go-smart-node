@@ -172,7 +172,7 @@ python3 -B network/tools/verify_public_launch_genesis.py \
 | Состав | `N`, список подтверждённых операторов, распределение мощности и максимальное число активных валидаторов. |
 | Экономика | Supply, полный ledger, владельцы стартовых стейков, gas и relayer бюджеты, получатели свободных MSP, модель контроля казны. Имя MintCandy и тикер MSP уже выбраны. [Распределение](FOUNDER_BOOTSTRAP_DRAFT.md). |
 | Параметры | Cosmos/EVM chain IDs, время genesis UTC, block gas cap, сроки вывода/заморозки, evidence window, штрафы/jail, комиссии, governance и IBC. |
-| Контракты | Фактические адреса, роли, код и storage системных контрактов, native/EVM bindings и сверка MSP/WDEL без двойного учёта. |
+| Контракты | Фактические адреса, роли, код и storage системных контрактов, native/EVM bindings и сверка MSP/WMSP без двойного учёта. |
 | Выпуск | Точный бинарник, итоговые байты genesis, SHA256, отчёт проверки, способ подписи genesis-манифеста и независимый канал подтверждения. |
 | Подключение | Проверенные P2P endpoints с владельцами, RPC и при необходимости seed/snapshot; дата проверки и окна истории. До готовности endpoints остаются `null`. |
 
@@ -242,9 +242,9 @@ P2P-подключений. Для sentry берите ID из его собст
 
 ## Доверие к программе и окончательному genesis
 
-Программа `mcnd` **1.1.4 опубликована**. В JSON-разделе `release.software`
+Программа `mcnd` **1.1.5 опубликована**. В JSON-разделе `release.software`
 указаны известные source SHA, SHA256 и GitHub OIDC signer.
-[Установка без Go](https://github.com/maxwell2010/go-smart-node/releases/download/v1.1.4/INSTALL_RU.md),
+[Установка без Go](https://github.com/maxwell2010/go-smart-node/releases/download/v1.1.5/INSTALL_RU.md),
 [строгая проверка GitHub-аттестации](SOFTWARE_RELEASE_VERIFICATION.md).
 Постоянный личный GPG-ключ не требуется для этой software-аттестации.
 
@@ -257,7 +257,7 @@ P2P-подключений. Для sentry берите ID из его собст
 
 На Linux из проверенной копии репозитория организатор собирает манифест после
 сверки заявок и холодного `InitChain`. `MCND_BINARY` указывает на файл `mcnd`
-из аттестованного выпуска 1.1.4. `CANDIDATE_GENESIS` и `INIT_CHAIN_REPORT`
+из аттестованного выпуска 1.1.5. `CANDIDATE_GENESIS` и `INIT_CHAIN_REPORT`
 берутся из одной проверки. Команда повторно сверяет каждую запись с реестром,
 проверяет SHA256 бинарника и создаёт новый JSON со временем UTC, двумя chain ID,
 SHA256 genesis и программного выпуска, суммой MSP и числом валидаторов.

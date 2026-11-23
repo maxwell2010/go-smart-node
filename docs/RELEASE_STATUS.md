@@ -1,5 +1,23 @@
 # Software release verification
 
+## 1.1.5 software release
+
+[MintCandy Node 1.1.5](https://github.com/maxwell2010/go-smart-node/releases/tag/v1.1.5)
+uses MintCandy and MSP in a fresh `mcnd init` genesis while the bank
+base denom remains `del`. The packaged binary passed the CLI genesis
+validation and metadata assertions. The public genesis approval tools
+check the WMSP name and ticker in the EVM storage and match the ticker
+against the cold rehearsal report.
+
+The attested Linux amd64 binary passed quorum recovery, follower replay,
+systemd restart, snapshot restore, block retention, ten Hermes scenarios
+and signed media publication on isolated networks.
+[Packaging and attestation](https://github.com/maxwell2010/go-smart-node/actions/runs/45122760631) ·
+[Binary rehearsal](https://github.com/maxwell2010/go-smart-node/actions/runs/45124076770) ·
+[Signed media](https://github.com/maxwell2010/go-smart-node/actions/runs/45124389500) ·
+[Public genesis checks](https://github.com/maxwell2010/go-smart-node/actions/runs/45124032353) ·
+[Release evidence](../network/docs/ru/evidence/software-release-1.1.5.json).
+
 ## 1.1.4 software release
 
 [MintCandy Node 1.1.4](https://github.com/maxwell2010/go-smart-node/releases/tag/v1.1.4)

@@ -13,7 +13,7 @@ import re
 DEFAULT_DRAFT = Path(__file__).resolve().parents[1] / 'docs/ru/public-genesis.draft.json'
 DEFAULT_PLAN = DEFAULT_DRAFT.with_name('public-launch-allocation.draft.json')
 DEFAULT_INTAKE = DEFAULT_DRAFT.with_name('operator-launch-intake.example.json')
-PUBLISHED_SOFTWARE_RECORD = DEFAULT_DRAFT.parent / 'evidence/software-release-1.1.4.json'
+PUBLISHED_SOFTWARE_RECORD = DEFAULT_DRAFT.parent / 'evidence/software-release-1.1.5.json'
 ATOMS_PER_DEL = 10**18
 APPROVED_CHAIN_ID = 'mintcandy_9905401-1'
 APPROVED_EVM_CHAIN_ID = '9905401'

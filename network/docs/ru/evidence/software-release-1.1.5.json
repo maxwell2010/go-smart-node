@@ -1,0 +1,134 @@
+{
+  "archiveSha256": "38dcd15eb7ff2ac6445f3b20af222f46332732b646e7f1e6f6318a889d9dd6c8",
+  "binarySha256": "016943857fd4c9a929b1922c540a222afb93e4e5bcbd1ac74f3ccaf78f41cd0d",
+  "ci": {
+    "attestedBinaryRehearsal": "https://github.com/maxwell2010/go-smart-node/actions/runs/45124076770",
+    "committedMedia": "https://github.com/maxwell2010/go-smart-node/actions/runs/45124389500",
+    "publicGenesisApprovalChecks": "https://github.com/maxwell2010/go-smart-node/actions/runs/45124032353",
+    "software": "https://github.com/maxwell2010/go-smart-node/actions/runs/45122760631"
+  },
+  "includesGenesis": false,
+  "minimumNativeValidatorCommission": "0.05",
+  "networkLaunchApproved": false,
+  "releaseVersion": "1.1.5",
+  "reportsSha256": {
+    "allocation.json": "71c7e5fab8411fccddc8e770f875269bd8b460f62b180bb3e7e9437c9fd7f803",
+    "assembly.json": "ec6a2c302df43ae8fe4c061d1338af957cd03b134235e4417d035a9b02981ca0",
+    "blockstore.json": "7508ab7b46b9af863c48b787a45cdc2920fcefb76d291b2cda96565f49038983",
+    "default-launch-parameters.json": "abcbac84f97371d2a4854942156e8b6cba8e10c27e626060468656233f9d9ed5",
+    "ibc.json": "7299f32d9b9bfa77eabf9d6d4ba92cb65f4a1f24790b832a505fab234c5743ec",
+    "init-metadata.json": "a17fcf0a2f50e2d495e4f90ce263410edc183add6c62699a2facbccf60410f74",
+    "install.json": "cd968435b37a17fe235823d07443c23705d1bff64a6c9499deafed0404b47374",
+    "media.json": "a43b6451496febcaa5d37ff226c7a7558e8c78494d490fe8a6641de8a44cc7b8",
+    "quorum.json": "ef172bcd5d395fd68a15595708adf9e4e04f143b5fff35c15ef88ba76f28c00c",
+    "systemd.json": "c17ac888f346e927177b85dd7019a56051e6fbdff420335038072ade5cddbb31",
+    "validator-install.json": "5cd785fbe13920713e1b12c126415454885d4814052a44ba19027f60ee2de17d"
+  },
+  "sourceRef": "refs/heads/feat/native-duplicate-vote-master-20261112",
+  "sourceRevision": "4becaf3d78a74e7b4e19300f6df5d8b4946576df",
+  "status": "software-release",
+  "testNetwork": {
+    "blockstoreRetention": {
+      "appHash": "FCA9D995D9AE6D04750581E66A36E971103DED0AF80831BE444F03D6E10218FF",
+      "earliestAfterRestart": 13,
+      "earliestBeforeRestart": 8,
+      "evidenceWindowBlocks": 24,
+      "historicalBlockStillAvailableOnArchive": true,
+      "loadedHeightAfterRestart": 32,
+      "minRetainBlocks": 10,
+      "sameAppHashOnFiveReplicas": true,
+      "verifiedHeight": 37
+    },
+    "chainId": "mintcandy_990014-1",
+    "finalIbcConsensus": {
+      "app_hash": "90F7F444F990D2075A8272AF79EF6A5697F2E4D84BD0863BDF11CF96AC3E1688",
+      "block_hash": "07BCC91347F6FE289631788889B301201346064AF02C50E6F80CA9DEDCC1D1E8",
+      "height": 58,
+      "next_validators_hash": "5E64B64EACD3280CFD968D20000ED20771841FF364173822530FF05FFE059C49",
+      "power": {
+        "a": 10000,
+        "b": 10000,
+        "c": 10000,
+        "d": 10000
+      },
+      "proposer_address": "3449A0F6AE0D44305EFAB9264906E4E92E4C296E",
+      "signers": [
+        "a",
+        "b",
+        "c",
+        "d"
+      ],
+      "validators_hash": "5E64B64EACD3280CFD968D20000ED20771841FF364173822530FF05FFE059C49"
+    },
+    "genesisSha256": "60b11d4b5721d42b78095c8b2ac07dd3809acaa5a0f59f14dbe6595900e84136",
+    "observedIbcPhases": {
+      "client_connection_channel_handshake": "PASS",
+      "daemon_live_relay": "PASS",
+      "daemon_restart_backlog": "PASS",
+      "error_ack_refund": "PASS",
+      "foreign_bank_voucher": "PASS",
+      "foreign_bank_voucher_return": "PASS",
+      "native_send": "PASS",
+      "pending_packet_restart": "PASS",
+      "timeout_refund": "PASS",
+      "voucher_return": "PASS"
+    },
+    "stateSync": {
+      "appHash": "595762D1664C6944CFD1780EE057FEA1EF7E8F4BDF5E246FA44B0EC309ECA12C",
+      "catchingUp": false,
+      "checkpointPreflight": {
+        "appHash": "49EE0E0473EF5992604EC01AD4BF177D379FB0EA476430ACFAA19B512DAA0137",
+        "chainId": "mintcandy_990014-1",
+        "headerTimeUtc": "2026-11-23T06:36:20.867298+00:00",
+        "peers": [
+          {
+            "earliestBlockHeight": 1,
+            "latestBlockHeight": 43,
+            "nodeId": "b1bbe19a904429c11889de5daa192777839605bf"
+          },
+          {
+            "earliestBlockHeight": 1,
+            "latestBlockHeight": 43,
+            "nodeId": "eaaa8801cb59c5b10486660a8b71fbf35c71037d"
+          }
+        ],
+        "status": "STATE_SYNC_CHECKPOINT_MATCH",
+        "trustHash": "EA963EEB88B8F4D01D62CB9ED702193303E8B13385C01C783DDC0BE9321E2A34",
+        "trustHeight": 42,
+        "trustPeriodSeconds": 3600
+      },
+      "delAtomic": "5000000000000000000000000",
+      "earliestBlockHeight": 41,
+      "observerDiagnostics": {
+        "appHeight": 45,
+        "cometHeight": 45,
+        "logMarkers": {
+          "accepted": 1,
+          "blockSyncFinished": 1,
+          "chunkApplied": 1,
+          "discovered": 2,
+          "discovery": 1,
+          "offered": 1,
+          "restored": 1,
+          "verified": 1
+        },
+        "peerCount": 1
+      },
+      "observerNodeId": "cca1aad53fdcc2a624db22c004cdf6718703bdbe",
+      "observerVotingPower": 0,
+      "restoredAppHash": "048C2A084486189498EBF43FA65B4DA6BED4A8DA9F0E851AEE5F99960FD0E10F",
+      "restoredHeight": 40,
+      "sourceNodeId": "b1bbe19a904429c11889de5daa192777839605bf",
+      "sourceSnapshotHeight": 40,
+      "trustHash": "EA963EEB88B8F4D01D62CB9ED702193303E8B13385C01C783DDC0BE9321E2A34",
+      "trustHeight": 42,
+      "trustRpcServers": [
+        "http://127.0.0.1:28657",
+        "http://127.0.0.1:32657"
+      ],
+      "verifiedHeight": 44,
+      "witnessNodeId": "eaaa8801cb59c5b10486660a8b71fbf35c71037d"
+    },
+    "wrappedTokenSymbol": "WMSP"
+  }
+}
