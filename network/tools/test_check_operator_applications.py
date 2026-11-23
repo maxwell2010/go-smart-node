@@ -6,7 +6,10 @@ import sys
 import tempfile
 import unittest
 
-from check_operator_applications import ED25519_TYPE, check_applications, public_bootstrap, strict_native_address
+from check_operator_applications import (
+    ADDRESS_FIELDS, ED25519_TYPE, check_applications, evm_report, native_address_from_evm, public_bootstrap,
+    strict_native_address,
+)
 from check_public_launch_draft import DEFAULT_INTAKE, DEFAULT_PLAN, read_json
 
 
@@ -33,6 +36,7 @@ class OperatorApplicationTests(unittest.TestCase):
         self.draft = read_json(DEFAULT_INTAKE)
         self.plan = read_json(DEFAULT_PLAN)
         self.document = copy.deepcopy(self.draft)
+        self.document['schema_version'] = 2
         # Use an isolated founder identity in the test plan as well.
         self.plan['founder_evm_address'] = TEST_IDENTITIES[0][1]
         founder_account = TEST_IDENTITIES[0][2]
@@ -78,10 +82,56 @@ class OperatorApplicationTests(unittest.TestCase):
         operator, evm, account, *_ = TEST_IDENTITIES[0]
         self.assertEqual(strict_native_address(account, 'd0'), evm)
         self.assertEqual(strict_native_address(operator, 'd0valoper'), evm)
+        self.assertEqual(native_address_from_evm(evm, 'd0'), account)
+        self.assertEqual(native_address_from_evm(evm, 'd0valoper'), operator)
         with self.assertRaisesRegex(ValueError, 'checksum'):
             strict_native_address(operator[:-1] + 'q', 'd0valoper')
         with self.assertRaisesRegex(ValueError, 'shape'):
             strict_native_address(operator, 'd0')
+
+    def evm_document(self):
+        document = copy.deepcopy(self.document)
+        document['schema_version'] = 3
+        for row in document['validators']:
+            del row['evm_operator_address']
+            for field, (_, prefix) in ADDRESS_FIELDS.items():
+                row[field] = strict_native_address(row[field], prefix)
+        return document
+
+    def test_evm_intake_produces_the_same_genesis_inputs_and_evm_only_report(self):
+        document = self.evm_document()
+        report = check_applications(document, self.plan)
+        self.assertEqual(report, check_applications(self.document, self.plan))
+        public_report = evm_report(report)
+        for row in public_report['operators']:
+            self.assertNotIn('operatorEvmAddress', row)
+            for field, _ in ADDRESS_FIELDS.values():
+                self.assertRegex(row[field], r'^0x[0-9a-f]{40}$')
+        self.assertEqual(public_report['operators'][0]['operatorAddress'], TEST_IDENTITIES[0][1])
+
+    def test_evm_intake_rejects_legacy_addresses_before_other_fields_are_complete(self):
+        for field in ADDRESS_FIELDS:
+            with self.subTest(field=field):
+                document = self.evm_document()
+                document['validators'][0].update(
+                    operator_contact=None, **{field: self.document['validators'][0][field]},
+                )
+                with self.assertRaisesRegex(ValueError, field + ': invalid EVM address'):
+                    check_applications(document, self.plan)
+        document = self.evm_document()
+        document['validators'][0]['evm_operator_address'] = TEST_IDENTITIES[0][1]
+        with self.assertRaisesRegex(ValueError, 'use only operator_address'):
+            check_applications(document, self.plan)
+
+    def test_evm_intake_rejects_zero_and_duplicate_operator_in_mixed_case(self):
+        document = self.evm_document()
+        document['validators'][0]['reward_address'] = '0x' + '0' * 40
+        with self.assertRaisesRegex(ValueError, 'nonzero'):
+            check_applications(document, self.plan)
+        document = self.evm_document()
+        document['validators'][1]['operator_address'] = '0x' + TEST_IDENTITIES[0][1][2:].upper()
+        with self.assertRaisesRegex(ValueError, 'duplicate operatorAddress'):
+            check_applications(document, self.plan)
 
     def test_rejects_ownership_and_account_inconsistency(self):
         for field, value, reason in (

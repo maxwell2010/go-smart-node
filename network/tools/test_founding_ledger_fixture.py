@@ -6,7 +6,7 @@ import os
 from pathlib import Path
 import unittest
 
-from check_operator_applications import ED25519_TYPE, check_applications
+from check_operator_applications import ED25519_TYPE, check_applications, strict_native_address
 from check_public_launch_draft import ATOMS_PER_DEL, DEFAULT_DRAFT, DEFAULT_INTAKE, DEFAULT_PLAN, read_json
 from prepare_founding_ledger import prepare_ledger
 from verify_public_launch_genesis import verify_candidate
@@ -30,21 +30,22 @@ def prepared_fixture(source, deployment=None):
     for index, operator in enumerate(expected['validators'], 1):
         row = copy.deepcopy(sample)
         row.update(
-            application_id=f'CI-{index}', operator_address=operator['operator'],
-            evm_operator_address=operator['evm'],
+            application_id=f'CI-{index}', operator_address=operator['evm'],
             consensus_pubkey={'@type': ED25519_TYPE, 'key': operator['publicKey']},
-            reward_address=initial_reward_wallets[(index - 1) % len(initial_reward_wallets)],
+            reward_address=strict_native_address(initial_reward_wallets[(index - 1) % len(initial_reward_wallets)], 'd0'),
             moniker=f"Ledger replay {operator['name']}",
-            commission_fraction='0.05', stake_owner_address=expected['actorNative'],
-            beneficiary_address=expected['actorNative'], stake_ownership_model='founder_owned_delegations',
-            stake_amount_atoms=str(10_000 * ATOMS_PER_DEL), gas_wallet_address=operator['rewardNative'],
+            commission_fraction='0.05', stake_owner_address=expected['actor'],
+            beneficiary_address=expected['actor'], stake_ownership_model='founder_owned_delegations',
+            stake_amount_atoms=str(10_000 * ATOMS_PER_DEL),
+            gas_wallet_address=strict_native_address(operator['rewardNative'], 'd0'),
             gas_budget_atoms=str(200 * ATOMS_PER_DEL), operator_contact='ci.example.invalid',
         )
         node_id = f'{index:040x}'
         row['connectivity'].update(node_id=node_id, p2p_address=f'{node_id}@peer{index}.example.invalid:26656',
                                    role='sentry')
         if index == 1:
-            row['gas_wallet_address'], relayers[0] = relayers[0], row['gas_wallet_address']
+            relayers[0] = operator['rewardNative']
+            row['gas_wallet_address'] = strict_native_address(initial_reward_wallets[0], 'd0')
         intake['validators'].append(row)
     applications = check_applications(intake, plan)
     if deployment is None:

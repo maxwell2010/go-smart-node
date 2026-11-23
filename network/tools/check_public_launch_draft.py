@@ -227,8 +227,8 @@ def check_intake(intake):
             asset['display_denom'] == 'MSP' and asset['denom'] == 'del' and asset['decimals'] == 18 and
             atomic(asset['atoms_per_native_token']) == ATOMS_PER_DEL,
             'validator intake MintCandy MSP identity differs')
-    require(intake['status'] == 'draft_unapproved' and intake['schema_version'] == 2,
-            'intake must remain an unapproved version two template')
+    require(intake['status'] == 'draft_unapproved' and intake['schema_version'] == 3,
+            'intake must remain an unapproved version three template')
     network = intake['network']
     require(type(network['approved_validator_count']) is int and network['approved_validator_count'] == 4,
             'intake selected validator count differs')

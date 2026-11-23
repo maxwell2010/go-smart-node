@@ -5,7 +5,7 @@ from decimal import Decimal
 import json
 from pathlib import Path
 
-from check_operator_applications import check_applications, read_intake, strict_native_address
+from check_operator_applications import address_for_genesis, check_applications, read_intake, strict_native_address
 from check_public_launch_draft import DEFAULT_DRAFT, DEFAULT_PLAN, check_plan, read_json, require
 from native_launch_allocation import evm_address
 
@@ -21,7 +21,7 @@ def bank_allocation(operators, plan, wrapped_wallet, relayer_wallets):
         (wrapped_wallet, amounts['initial_wdel_backing']),
     ]
     wallets.extend((row['gasWalletAddress'], row['gasBudgetAtoms']) for row in operators)
-    wallets.extend((wallet, amounts['ibc_relayer_fee_wallet']) for wallet in relayer_wallets)
+    wallets.extend((address_for_genesis(wallet, 'd0'), amounts['ibc_relayer_fee_wallet']) for wallet in relayer_wallets)
     evm_wallets = [strict_native_address(wallet, 'd0') for wallet, _ in wallets]
     require(len(set(evm_wallets)) == len(wallets), 'planned founder, backing and gas recipient addresses must be distinct')
     require(sum(int(amount) for _, amount in wallets) == int(plan['initial_supply_atoms']),
@@ -39,6 +39,7 @@ def prepare_ledger(applications, plan, wrapped_wallet, gateway, relayer_wallets)
             'operator roster differs from the launch signing domain')
     operators = sorted(applications['operators'], key=lambda row: row['operatorAddress'])
     require(len(operators) == plan['approved_validator_count'], 'operator roster differs from the launch plan')
+    wrapped_wallet = address_for_genesis(wrapped_wallet, 'd0')
     bank = bank_allocation(operators, plan, wrapped_wallet, relayer_wallets)
     wrapped = strict_native_address(wrapped_wallet, 'd0')
     gateway = evm_address(gateway)
@@ -93,9 +94,9 @@ def prepare_ledger(applications, plan, wrapped_wallet, gateway, relayer_wallets)
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--intake', required=True, type=Path, help='private copy of reviewed operator intake')
-    parser.add_argument('--wrapped-del-wallet', required=True, help='d0 account address of the deployed wrapper')
+    parser.add_argument('--wrapped-del-wallet', required=True, help='0x address of the deployed WMSP wrapper')
     parser.add_argument('--gateway', required=True, help='EVM address of the deployed Gateway')
-    parser.add_argument('--relayer-wallet', required=True, action='append', help='reviewed d0 gas wallet, repeat twice')
+    parser.add_argument('--relayer-wallet', required=True, action='append', help='reviewed 0x gas wallet, repeat twice')
     parser.add_argument('--output', required=True, type=Path, help='new JSON file for the founding ledger')
     args = parser.parse_args()
     try:

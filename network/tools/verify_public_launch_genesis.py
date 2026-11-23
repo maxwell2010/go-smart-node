@@ -149,7 +149,7 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--genesis', required=True, type=Path)
     parser.add_argument('--intake', required=True, type=Path, help='private copy of the reviewed operator intake')
-    parser.add_argument('--relayer-wallet', required=True, action='append', help='reviewed d0 gas wallet, repeat twice')
+    parser.add_argument('--relayer-wallet', required=True, action='append', help='reviewed 0x gas wallet, repeat twice')
     args = parser.parse_args()
     try:
         draft = read_json(DEFAULT_DRAFT)

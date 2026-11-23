@@ -80,10 +80,11 @@ class PublicGenesisLedgerTest(unittest.TestCase):
             pubkey = {'@type': ED25519_TYPE, 'key': key}
             node_id = f'{index:040x}'
             row = copy.deepcopy(template)
-            row.update(application_id=f'V{index}', operator_address=operator, evm_operator_address=evm_operator,
-                       consensus_pubkey=pubkey, reward_address=reward, stake_owner_address=founder,
-                       beneficiary_address=founder, stake_ownership_model='founder_owned_delegations',
-                       stake_amount_atoms=amount, gas_wallet_address=wallet, gas_budget_atoms='200000000000000000000',
+            row.update(application_id=f'V{index}', operator_address=evm_operator,
+                       consensus_pubkey=pubkey, reward_address=evm_operator,
+                       stake_owner_address=self.plan['founder_evm_address'],
+                       beneficiary_address=self.plan['founder_evm_address'], stake_ownership_model='founder_owned_delegations',
+                       stake_amount_atoms=amount, gas_wallet_address=evm(40 + index), gas_budget_atoms='200000000000000000000',
                        moniker=f'Test {index}', operator_contact='contact.example.invalid', commission_fraction='0.05')
             row['connectivity'].update(node_id=node_id, p2p_address=f'{node_id}@p{index}.example.invalid:26656',
                                        role='sentry')
@@ -142,6 +143,8 @@ class PublicGenesisLedgerTest(unittest.TestCase):
         self.applications['operators'].reverse()
         self.assertEqual(result, prepare_ledger(self.applications, self.plan, wrapped, profile['gateway'],
                                                self.relayer_wallets[::-1]))
+        self.assertEqual(result, prepare_ledger(self.applications, self.plan, profile['wrapped_del'], profile['gateway'],
+                                               [evm(51), evm(52)]))
         with self.assertRaisesRegex(ValueError, 'Gateway must differ'):
             prepare_ledger(self.applications, self.plan, wrapped, profile['wrapped_del'], self.relayer_wallets)
 

@@ -130,3 +130,38 @@ func TestLaunchConsentRejectsDuplicateFieldsAndMalleableSignature(t *testing.T) 
 		break
 	}
 }
+
+func TestLaunchConsentUsesEVMOperatorIdentityWithoutCountingAliasesTwice(t *testing.T) {
+	manifest, genesis, keys := consentFixture(t)
+	raw, err := json.Marshal(manifest)
+	require.NoError(t, err)
+	consent, err := NewLaunchConsent(raw, genesis, fmt.Sprintf("%x", sha256.Sum256(raw)))
+	require.NoError(t, err)
+	var evmSignatures, legacySignatures []OperatorConsent
+	for legacy, key := range keys {
+		evm := crypto.PubkeyToAddress(key.PublicKey).Hex()
+		body, err := consent.Payload(evm)
+		require.NoError(t, err)
+		require.Contains(t, string(body), "Operator: "+strings.ToLower(evm)+"\n")
+		require.NotContains(t, string(body), legacy)
+		sign, err := crypto.Sign(accounts.TextHash(body), key)
+		require.NoError(t, err)
+		evmSignatures = append(evmSignatures, OperatorConsent{evm, "0x" + hex.EncodeToString(sign)})
+
+		body, err = consent.Payload(legacy)
+		require.NoError(t, err)
+		sign, err = crypto.Sign(accounts.TextHash(body), key)
+		require.NoError(t, err)
+		legacySignatures = append(legacySignatures, OperatorConsent{legacy, "0x" + hex.EncodeToString(sign)})
+	}
+	report, err := consent.Verify(evmSignatures)
+	require.NoError(t, err)
+	require.Len(t, report.VerifiedOperators, 4)
+	for _, operator := range report.VerifiedOperators {
+		require.Regexp(t, "^0x[0-9a-f]{40}$", operator)
+	}
+	duplicate := slices.Clone(evmSignatures)
+	duplicate[1] = legacySignatures[0]
+	_, err = consent.Verify(duplicate)
+	require.ErrorContains(t, err, "duplicate confirmation")
+}

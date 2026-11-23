@@ -8,7 +8,9 @@ import re
 import subprocess
 import tempfile
 
-from check_operator_applications import check_applications, p2p_endpoint, public_bootstrap, read_intake
+from check_operator_applications import (
+    address_for_genesis, check_applications, p2p_endpoint, public_bootstrap, read_intake, strict_native_address,
+)
 from check_public_launch_draft import (
     DEFAULT_DRAFT, DEFAULT_PLAN, PUBLISHED_SOFTWARE_RECORD, check_contents, check_plan, read_json, require, unique_object,
 )
@@ -139,7 +141,7 @@ def main():
         command.add_argument('--binary', required=True, type=Path)
     for name in ('intake', 'init-chain-report', 'output'):
         commands.choices['prepare'].add_argument('--' + name, required=True, type=Path)
-    commands.choices['prepare'].add_argument('--relayer-wallet', required=True, action='append')
+    commands.choices['prepare'].add_argument('--relayer-wallet', required=True, action='append', help='reviewed 0x gas wallet')
     commands.choices['prepare'].add_argument('--include-public-p2p', action='store_true',
                                             help='bind the reviewed publishable P2P endpoints to the signed manifest')
     for command in (commands.choices[name] for name in ('verify', 'install', 'install-observer')):
@@ -148,7 +150,7 @@ def main():
         command.add_argument('--approved-manifest-sha256', required=True)
         command.add_argument('--signer-fingerprint', required=True)
     commands.choices['install'].add_argument('--home', required=True, type=Path)
-    commands.choices['install'].add_argument('--operator', required=True, help='reviewed d0valoper address')
+    commands.choices['install'].add_argument('--operator', required=True, help='reviewed 0x operator address')
     commands.choices['install-observer'].add_argument('--home', required=True, type=Path)
 
     args = parser.parse_args()
@@ -167,7 +169,9 @@ def main():
         else:
             result = verify_manifest(args, genesis, plan, draft, software)
             if args.command == 'install':
-                result = install_operator_genesis(args.binary, args.home, args.operator, genesis, result)
+                operator = address_for_genesis(args.operator, 'd0valoper')
+                result = install_operator_genesis(args.binary, args.home, operator, genesis, result)
+                result['operatorAddress'] = strict_native_address(operator, 'd0valoper')
             elif args.command == 'install-observer':
                 result = install_genesis(args.binary, args.home, genesis, result)
             print(json.dumps(result, sort_keys=True))

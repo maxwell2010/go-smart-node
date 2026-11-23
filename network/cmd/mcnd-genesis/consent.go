@@ -38,7 +38,7 @@ func launchConsentCommand() *cobra.Command {
 			_, err = cmd.OutOrStdout().Write(body)
 			return err
 		}}
-	payload.Flags().StringVar(&operator, "operator", "", "Operator d0valoper address from genesis")
+	payload.Flags().StringVar(&operator, "operator", "", "Operator 0x address from the launch application")
 	payload.Flags().StringVar(&output, "output", "", "Create a new message file instead of writing to stdout")
 	verify := &cobra.Command{Use: "verify", Short: "Verify one wallet signature from each founding operator", Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {

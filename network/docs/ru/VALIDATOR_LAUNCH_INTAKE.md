@@ -28,14 +28,19 @@
 
 ## Что передаёт каждый оператор
 
+В заявке версии 3 все адреса оператора и кошельков задаются как `0x` и 40
+шестнадцатеричных символов. При сборке genesis инструменты кодируют те же
+20 байт в формате полей Cosmos SDK. Публичный ключ консенсуса и P2P ID
+сохраняют собственные форматы.
+
 | Данные | Содержание и проверка |
 | --- | --- |
 | Заявка и связь | Идентификатор заявки, команда, moniker, контакт дежурного, окно доступности в UTC. Отдельно разрешение публиковать контакт. |
-| Адрес оператора | `operator_address` с префиксом `d0valoper` и EVM-адрес `0x...`; декодированные 20 байт должны совпадать. |
+| Адрес оператора | `operator_address` - EVM-адрес, которым оператор подписывает подтверждение и управляет валидатором. |
 | Consensus key | Публичный Ed25519-ключ в SDK JSON: `@type=/cosmos.crypto.ed25519.PubKey`, `key` в base64, после декодирования 32 байта. Ключ новый, уникальный для этой сети. |
 | Consensus address | `consensus_address_hex`, вычисленный проверяющим из публичного ключа. Его сверяют с записью валидатора; это не operator address и не P2P node ID. |
 | Подтверждение контроля | Подтверждение контроля operator/reward/beneficiary/gas адресов, метод, ссылка и проверяющий. Для consensus key - отдельно согласованный метод подтверждения. Сам публичный ключ не доказывает владение. При регистрации через governance применяется предусмотренный протоколом registration proof; произвольный текст в анкете его не заменяет. |
-| Награды | `reward_address` в формате `d0...` и комиссия десятичной строкой от `0` до `1`. Для обсуждения предлагается `0.05` (5%); согласованное значение в анкете пока `null`. |
+| Награды | EVM-адрес `reward_address` и комиссия десятичной строкой от `0` до `1`. В стартовой анкете укажите `0.05` (5%). |
 | Стартовый стейк | `stake_owner_address`, `beneficiary_address`, сумма `stake_amount_atoms`, модель владения и подтверждение владельца. Возможны собственные средства, передача средств оператору или делегация основателя. Требуется точно установить, кто получает возврат и права делегатора. |
 | Газ | `gas_wallet_address` и отдельный свободный бюджет `gas_budget_atoms`. Средства в стейке не являются свободными средствами на комиссии. |
 | P2P и сервисы | `node_id`, `NODE_ID@HOST:PORT`, роль валидатора/sentry/peer/seed и разрешение анонсировать endpoint. RPC у самого валидатора не обязателен; публичные Comet/EVM/REST/gRPC и snapshots перечисляются отдельно. |
@@ -63,10 +68,11 @@ python3 -B network/tools/check_operator_applications.py /путь/к/заявк�
 ```
 
 Отчёт показывает пропущенные поля и число свободных мест. Для полных заявок
-он проверяет checksum Bech32, соответствие EVM-адресу, формат Ed25519 и
+он проверяет формат EVM-адресов, формат Ed25519 и
 consensus address, уникальность операторов и P2P ID, суммы делегаций и газа,
 владельца стейка и формат адреса подключения. `--require-four` возвращает
 код 2, пока четырёх полных заявок нет. Ошибки формата возвращают код 1.
+Адреса в отчёте выводятся в формате EVM.
 
 Отчёт предназначен для организатора: он содержит указанные P2P-адреса,
 включая частные. Контакты дежурных в него не копируются. Проверка выполняется
@@ -144,22 +150,21 @@ v1.1.5 её ещё нет.
 содержит путь к бинарнику `mcnd-genesis`.
 [Загрузка и проверка офлайн-пакета](INSTALL_LAUNCH_TOOLS.md).
 
-Перед внесением адресов релееров в реестр попросите каждого оператора
-сверить, что Hermes показывает тот же адрес `d0...`, который он передаёт
-организатору. В CI проверена конфигурация с нативным ключом Cosmos
-`secp256k1` и путём деривации `m/44'/60'/0'/0/0`. Оператор хранит ключ
-самостоятельно и передаёт только открытый адрес. На каждый из двух адресов
+Оператор релеера передаёт организатору 20 байт адреса, который показывает
+Hermes, в представлении `0x…`. Сравните этот адрес с результатом декодирования
+Bech32-адреса Hermes. В CI проверена конфигурация с нативным ключом Cosmos
+`secp256k1` и путём деривации `m/44'/60'/0'/0/0`. На каждый из двух адресов
 выделено по 100 MSP на комиссии.
 [Установка и конфигурация Hermes](HERMES_RELAYER.md).
 
 ```sh
 "$MCND_GENESIS" addresses --chain-id mintcandy_9905401-1 --evm-chain-id 9905401 > "$SYSTEM_ROLES_JSON"
 GATEWAY_EVM=$(jq -er '.gateway' "$SYSTEM_ROLES_JSON")
-WDEL_D0=$(jq -er '.wrappedDelWallet' "$SYSTEM_ROLES_JSON")
+WMSP_EVM=$(jq -er '.wrappedDelWallet' "$SYSTEM_ROLES_JSON")
 python3 -B network/tools/prepare_founding_ledger.py \
   --intake "$REVIEWED_INTAKE" --gateway "$GATEWAY_EVM" \
-  --wrapped-del-wallet "$WDEL_D0" \
-  --relayer-wallet "$RELAYER_1_D0" --relayer-wallet "$RELAYER_2_D0" \
+  --wrapped-del-wallet "$WMSP_EVM" \
+  --relayer-wallet "$RELAYER_1_EVM" --relayer-wallet "$RELAYER_2_EVM" \
   --output "$FOUNDING_LEDGER_JSON"
 ```
 
@@ -210,7 +215,7 @@ python3 -B network/tools/prepare_founding_ledger.py \
 ```sh
 python3 -B network/tools/verify_public_launch_genesis.py \
   --genesis "$CANDIDATE_GENESIS" --intake "$REVIEWED_INTAKE" \
-  --relayer-wallet "$RELAYER_1_D0" --relayer-wallet "$RELAYER_2_D0"
+  --relayer-wallet "$RELAYER_1_EVM" --relayer-wallet "$RELAYER_2_EVM"
 ```
 
 Сверка проверяет восемь получателей банковского распределения и сумму каждого
@@ -277,7 +282,7 @@ P2P-подключений. Для sentry берите ID из его собст
 ## Согласование и допуск к запуску
 
 1. Организатор проверяет отсутствие повторных operator-адресов и consensus keys,
-   соответствие Bech32/EVM адресов, подтверждения владельцев и учёт каждого MSP
+   совпадение адресов с подтверждениями владельцев и учёт каждого MSP
    ровно один раз. Начальный набор в этом профиле определяется активным MSP
    в `InitChain`. Предварительный холодный genesis ограничен 16 исходными
    позициями; runtime-лимит 1000 записей на валидатора не расширяет этот предел.
@@ -359,7 +364,7 @@ SHA256 genesis и программного выпуска, суммой MSP и �
 python3 -B network/tools/public_genesis_manifest.py prepare \
   --genesis "$CANDIDATE_GENESIS" --binary "$MCND_BINARY" \
   --intake "$REVIEWED_INTAKE" --init-chain-report "$INIT_CHAIN_REPORT" \
-  --relayer-wallet "$RELAYER_1_D0" --relayer-wallet "$RELAYER_2_D0" \
+  --relayer-wallet "$RELAYER_1_EVM" --relayer-wallet "$RELAYER_2_EVM" \
   --include-public-p2p --output public-genesis-manifest.json
 ```
 
@@ -407,14 +412,15 @@ python3 -B network/tools/public_genesis_manifest.py verify \
 ### Подтверждения операторов перед стартом
 
 После установки оператор может подтвердить готовность сообщением `personal_sign`
-из своего EVM-кошелька. Утилита `mcnd-genesis` связывает сообщение с адресом
-`d0valoper...`, публичным ключом консенсуса, обоими chain ID, временем UTC и
+из своего EVM-кошелька. Утилита `mcnd-genesis` связывает сообщение с EVM-адресом
+оператора, публичным ключом консенсуса, обоими chain ID, временем UTC и
 точными SHA256 genesis и манифеста. Приватный ключ консенсуса остаётся у ноды.
 Подпись сообщения выполняется офлайн и не тратит MSP. [Стандарт EIP-191](https://eips.ethereum.org/EIPS/eip-191).
 
 Возьмите те же `DOWNLOADED_GENESIS` и `APPROVED_MANIFEST_SHA256`, которые прошли
 проверку OpenPGP выше. `MCND_GENESIS` указывает на собранную через Linux CI
-утилиту. Создайте сообщение для своей строки в составе.
+утилиту с поддержкой версии 3 заявки. Укажите свой EVM-адрес из
+`operator_address` в `OPERATOR_ADDRESS` и создайте сообщение для своей строки в составе.
 
 ```sh
 "$MCND_GENESIS" launch-consent payload \

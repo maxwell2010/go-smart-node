@@ -67,7 +67,6 @@
     {
       "application_id": null,
       "operator_address": null,
-      "evm_operator_address": null,
       "consensus_pubkey": {
         "@type": "/cosmos.crypto.ed25519.PubKey",
         "key": null
@@ -187,5 +186,5 @@
       "approved_at_utc": null
     }
   },
-  "schema_version": 2
+  "schema_version": 3
 }

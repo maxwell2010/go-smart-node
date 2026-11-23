@@ -36,7 +36,7 @@ type consentManifest struct {
 type LaunchConsent struct {
 	manifest     consentManifest
 	manifestHash string
-	operators    map[string]validatorDeclaration
+	operators    map[common.Address]validatorDeclaration
 }
 
 type OperatorConsent struct {
@@ -113,27 +113,45 @@ func NewLaunchConsent(manifestBytes, genesis []byte, approvedManifestHash string
 			staked[row.Validator] = true
 		}
 	}
-	operators := make(map[string]validatorDeclaration, foundingValidatorCount)
+	operators := make(map[common.Address]validatorDeclaration, foundingValidatorCount)
 	keys := make(map[string]bool)
 	for _, row := range appState.Validator.Validators {
-		if _, err := nativeAddress(row.Operator, "d0valoper"); err != nil {
+		operator, err := nativeAddress(row.Operator, "d0valoper")
+		if err != nil {
 			return result, err
 		}
-		_, duplicate := operators[row.Operator]
+		_, duplicate := operators[operator]
 		key := string(row.PubKey.Key)
 		if duplicate || keys[key] || !row.Online || !staked[row.Operator] ||
 			row.PubKey.Type != "/cosmos.crypto.ed25519.PubKey" || len(row.PubKey.Key) != 32 {
 			return result, fmt.Errorf("genesis contains an invalid, duplicate or inactive operator")
 		}
-		operators[row.Operator], keys[key] = row, true
+		operators[operator], keys[key] = row, true
 	}
 	return LaunchConsent{manifest: manifest, manifestHash: manifestHash, operators: operators}, nil
 }
 
+func consentOperatorAddress(operator string) (common.Address, error) {
+	if !strings.HasPrefix(operator, "0x") {
+		return nativeAddress(operator, "d0valoper")
+	}
+	if !common.IsHexAddress(operator) || common.HexToAddress(operator) == (common.Address{}) {
+		return common.Address{}, fmt.Errorf("invalid EVM operator address")
+	}
+	return common.HexToAddress(operator), nil
+}
+
 func (c LaunchConsent) Payload(operator string) ([]byte, error) {
-	row, found := c.operators[operator]
+	address, err := consentOperatorAddress(operator)
+	if err != nil {
+		return nil, err
+	}
+	row, found := c.operators[address]
 	if !found {
 		return nil, fmt.Errorf("operator is outside the verified genesis roster")
+	}
+	if strings.HasPrefix(operator, "0x") {
+		operator = strings.ToLower(operator)
 	}
 	return fmt.Appendf(nil, "MintCandy Network - genesis acknowledgment v1\n"+
 		"I reviewed this genesis and confirm readiness for launch coordination.\n"+
@@ -161,8 +179,13 @@ func (c LaunchConsent) Verify(signatures []OperatorConsent) (ConsentReport, erro
 		return ConsentReport{}, fmt.Errorf("one confirmation from each of the four founding operators is required")
 	}
 	verified := make([]string, 0, foundingValidatorCount)
+	seen := make(map[common.Address]bool, foundingValidatorCount)
 	for _, row := range signatures {
-		if slices.Contains(verified, row.OperatorAddress) {
+		operator, err := consentOperatorAddress(row.OperatorAddress)
+		if err != nil {
+			return ConsentReport{}, err
+		}
+		if seen[operator] {
 			return ConsentReport{}, fmt.Errorf("duplicate confirmation for operator %s", row.OperatorAddress)
 		}
 		body, err := c.Payload(row.OperatorAddress)
@@ -172,7 +195,8 @@ func (c LaunchConsent) Verify(signatures []OperatorConsent) (ConsentReport, erro
 		if err := verifyOperatorSignature(row, body); err != nil {
 			return ConsentReport{}, err
 		}
-		verified = append(verified, row.OperatorAddress)
+		seen[operator] = true
+		verified = append(verified, strings.ToLower(operator.Hex()))
 	}
 	slices.Sort(verified)
 	return ConsentReport{Status: "FOUR_OPERATOR_ACKNOWLEDGMENTS_VERIFIED", ChainID: c.manifest.ChainID,
@@ -185,7 +209,7 @@ func verifyOperatorSignature(row OperatorConsent, body []byte) error {
 	if err != nil {
 		return err
 	}
-	address, err := nativeAddress(row.OperatorAddress, "d0valoper")
+	address, err := consentOperatorAddress(row.OperatorAddress)
 	if err != nil || signer != address {
 		return fmt.Errorf("signature does not match operator %s for this genesis and manifest", row.OperatorAddress)
 	}

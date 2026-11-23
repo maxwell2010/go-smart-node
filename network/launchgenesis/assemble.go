@@ -76,7 +76,7 @@ type DeploymentAddresses struct {
 	ChainID          string         `json:"chainId"`
 	EVMChainID       uint64         `json:"evmChainId,string"`
 	Gateway          common.Address `json:"gateway"`
-	WrappedDELWallet string         `json:"wrappedDelWallet"`
+	WrappedDELWallet common.Address `json:"wrappedDelWallet"`
 }
 
 // DiscoverAddresses runs the same in-memory constructors as Build and reports
@@ -91,8 +91,7 @@ func DiscoverAddresses(chainID string, evmID uint64) (report DeploymentAddresses
 	if err != nil {
 		return report, err
 	}
-	return DeploymentAddresses{chainID, evmID, deployment.profile.Gateway,
-		sdk.AccAddress(deployment.profile.WrappedDEL.Bytes()).String()}, nil
+	return DeploymentAddresses{chainID, evmID, deployment.profile.Gateway, deployment.profile.WrappedDEL}, nil
 }
 
 // Build assembles unsigned CometBFT genesis bytes from a prepared launch ledger

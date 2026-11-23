@@ -6,6 +6,7 @@ import tempfile
 import unittest
 from unittest.mock import patch
 
+from check_operator_applications import strict_native_address
 from configure_history import validate_fresh_home
 from install_validator_genesis import COMET_PATHS, install_genesis, install_operator_genesis, run_offline, validate_prepared_home
 from native_launch_allocation import allocation_report
@@ -98,11 +99,12 @@ class PublishedValidatorInstallTest(unittest.TestCase):
                 output_file = root / 'operator-message.txt'
                 commonly = ['--manifest', str(args.manifest), '--genesis', str(fixture / 'genesis.json'),
                             '--approved-manifest-sha256', args.approved_manifest_sha256]
+                evm_operator = strict_native_address(operator, 'd0valoper')
                 subprocess.run([assembler, 'launch-consent', 'payload', *commonly,
-                                '--operator', operator, '--output', str(output_file)], check=True, timeout=30)
+                                '--operator', evm_operator, '--output', str(output_file)], check=True, timeout=30)
                 message = output_file.read_text(encoding='utf8')
                 self.assertIn(f'Manifest SHA256: {args.approved_manifest_sha256}\n', message)
-                self.assertIn(f'Operator: {operator}\n', message)
+                self.assertIn(f'Operator: {evm_operator}\n', message)
                 self.assertTrue(message.endswith(validator['consensusPublicKeyBase64']))
             home = root / 'validator'
             run_offline(binary, home, root, 'init', 'validator-install-ci', '--chain-id', chain_id, '--evm.evm-chain-id', evm_id)
