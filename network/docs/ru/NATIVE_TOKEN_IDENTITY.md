@@ -10,23 +10,32 @@ DEL Decimal и обеспеченный им voucher моста остаются
 | Тикер / symbol | MSP |
 | Отображаемая единица bank metadata | MSP |
 | Знаков после запятой | 18 |
-| Внутренний bank denom | `del` |
-| Пересчёт | `1 MSP = 1000000000000000000 del` |
+| Внутренний bank denom | `msp` |
+| Пересчёт | `1 MSP = 1000000000000000000 msp` |
 | ERC-20 обёртка в новом genesis | MintCandy Wrapped MSP (`WMSP`), 18 знаков |
 
-В проекте genesis `coin.params.base_title` задан как `MintCandy`, а
+В кандидате майнета `coin.params.base_title` задан как `MintCandy`, а
 `bank.denom_metadata` содержит `name=MintCandy`, `symbol=MSP`, `display=MSP`,
-`base=del` и две единицы: `del` с exponent 0, `MSP` с exponent 18.
+`base=msp` и две единицы: `msp` с exponent 0, `MSP` с exponent 18.
 Утверждены название, тикер, начальный выпуск и схема распределения.
-Для итогового genesis ещё нужны заявки операторов и окно запуска.
+Публикация требует итогового genesis, подписанного манифеста и подтверждённого
+окна запуска.
 
-## Совместимость учёта
+## Сетевые профили
 
-`del` остаётся техническим идентификатором в bank/EVM/staking/mint/validator,
-комиссиях и суммах genesis. Это не означает использование актива Decimal.
+`msp` используется в расчётах bank/EVM/staking/mint/validator и комиссиях
+для `mintcandy_9905401-1` (EVM `9905401`). Новый тестовый профиль
+`mintcandy_990098-1` (EVM `990098`) использует `tmsp`, `tMSP` и `WtMSP`.
+Майнет отклоняет входящие ICS-20 ваучеры с базовым denom тестовых активов,
+включая пути через промежуточные каналы. Опубликованные сборки до разделения
+профилей и нагрузочный стенд `mintcandy_990097-1` используют `del`.
+[Параметры подготовки ноды](OPERATOR_LAUNCH.md#подготовка-для-майнета-msp).
+
+## Совместимость контрактов
+
 Строки `wrapped_del`, ключ реестра `wdel`, `delegateDEL`, `enable_del_delegation`,
-`initial_del_delegations` и `atoms_per_del` сохраняют значение идентификаторов
-текущей реализации. Новый сборщик genesis записывает в ERC-20 metadata
+`initial_del_delegations` сохраняют значения идентификаторов API и контрактов.
+Новый сборщик genesis записывает в ERC-20 metadata
 имя `MintCandy Wrapped MSP` и тикер `WMSP`. Каждый WMSP обеспечен одним
 нативным MSP. Опубликованные genesis и офлайн-комплект v1.1.3 используют
 прежний тикер `WDEL` для той же обёртки MSP.
@@ -45,10 +54,10 @@ DEL Decimal и обеспеченный им voucher моста остаются
 Эти доказательства, хеши и бинарники сохраняются без изменений. Текущая
 публичная документация использует MSP для будущего нативного актива.
 
-В будущих wallet/Explorer/Console metadata используйте MintCandy / MSP / 18.
-Native currency для EVM-кошелька настраивается отдельно от bank metadata;
-публичные chain ID и реальные RPC ещё должны пройти согласование запуска.
+Для майнета в Wallet, Explorer и Console используйте MintCandy / MSP / 18
+и EVM ID `9905401`. Native currency EVM-кошелька настраивается отдельно
+от bank metadata. Реальные RPC публикуются после проверки работающей сети.
 
-[Проект genesis](public-genesis.draft.json),
-[распределение](public-launch-allocation.draft.json),
+[Исторический проект genesis с `del`](public-genesis.draft.json),
+[исторический проект распределения](public-launch-allocation.draft.json),
 [оставшиеся решения](LAUNCH_APPROVAL.md).

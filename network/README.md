@@ -1,6 +1,7 @@
 # MintCandy Network - отдельная сеть `mcnd`
 
-Нативная монета: **MintCandy (MSP)**, 18 знаков, внутренний denom `del`.
+Кандидат майнета использует **MintCandy (MSP)**, 18 знаков и базовый denom `msp`.
+В отдельной сборке тестнета используются `tmsp` и тикер `tMSP`.
 [Название, metadata и техническая совместимость](docs/ru/NATIVE_TOKEN_IDENTITY.md).
 
 [Русская инструкция: установка, зависимости, сервер, синхронизация, пиры и хранение истории](docs/ru/README.md).
@@ -35,8 +36,8 @@ hold и изолированные NFT, ручной/автоматически�
 | Decimal bridge | Внутренний прототип; обратный release и вложенный mint bridge-controller не являются готовыми разрешёнными пользовательскими маршрутами. |
 
 DEX, инвестиционный vesting, собственный stablecoin, DePIN и MEV-сервис
-не входят в первый согласованный выпуск. Публичные genesis, число операторов,
-пиры/RPC и постоянный production publisher key ещё не утверждены.
+не входят в первый согласованный выпуск. Для публичного старта нужны подписанный
+genesis, проверенные пиры и отдельное разрешение на запуск.
 
 ## Отдельные подтверждённые проверки
 
@@ -56,7 +57,9 @@ process/Hermes-путь прошёл [повторный прогон](https://g
 
 Работающие ноды не используются для испытаний. При ограниченном локальном
 диске тяжёлые сборки выполняйте GitHub CI; для установки готового Linux-пакета
-не нужны Go и GCC. Команды ниже предназначены для отдельного development-стенда.
+не нужны Go и GCC. Команды ниже предназначены для отдельного development-стенда
+с denom `del`. Параметры майнета и установка проверенного бинарника описаны в
+[руководстве оператора](docs/ru/OPERATOR_LAUNCH.md#подготовка-для-майнета-msp).
 
 ## Стек и проверки исходников
 
@@ -78,7 +81,7 @@ GOTOOLCHAIN=local go test -mod=readonly -p 1 -count=1 -tags=test ./app -run '^Te
 GOTOOLCHAIN=local go run -mod=readonly ./cmd/family-check
 ```
 
-The production application tests exercise a signed EVM transfer, exact charged fees, signing-domain rejection and bounded financial rollback. The `test` tag enables independent in-process EVM configurations solely for the two-chain ICS20 harness. Installable daemons must use the default production build and actual separate processes.
+The application tests exercise a signed EVM transfer, exact charged fees, signing-domain rejection and bounded financial rollback. The `test` tag enables independent in-process EVM configurations solely for the two-chain ICS20 harness. Installable daemons run in separate processes. Build the mainnet and testnet binaries with `mintcandy_mainnet` and `mintcandy_testnet`, respectively. Untagged builds keep the historical `del` denomination.
 
 Generic SDK staking does not establish Decimal feature parity. Selected native validator, delegation, fee-reward, coin and NFT routes are wired under the authenticated profile and have dedicated state/EVM tests. Signed `COINBASE`, daemon and Hermes checks prove their recorded revisions. See the release evidence for integrated process, migration, rollback and package checks; full Decimal parity is not claimed.
 
@@ -88,7 +91,7 @@ The older `family-manifest.json` preserves the SDK `0.54` / EVM `0.7` bootstrap 
 
 The `mcnd` command uses stateless codecs and genesis defaults, then constructs one application when starting. It validates the actual home's genesis signing domains before configuration writes and application creation, including restarts. Its separate default home is `~/.mcnd`; listeners default to loopback and peer discovery is disabled.
 
-Build with Go `1.26.11`, GCC and CGO enabled. Use the default production build, without the `test` tag:
+Build the disposable compatibility lab with Go `1.26.11`, GCC and CGO enabled. Use the untagged build:
 
 ```sh
 go mod download
@@ -130,8 +133,8 @@ The owned application mounts native `coin` and `nft` stores and their read-only
 protobuf/gRPC/AutoCLI queries. Direct native coin/NFT Cosmos financial message
 routes remain disabled; supported signed Gateway/token/NFT routes project
 their attested EVM execution into native keepers under the enabled profile.
-The native coin `Params.BaseVolume` declares genesis allocation; base MSP (`del` in bank records)
-balances and current monetary supply remain the SDK bank ledger. Custom coin
+The native coin `Params.BaseVolume` declares the genesis allocation for the compiled denomination.
+Native balances and current monetary supply remain in the SDK bank ledger. Custom coin
 queries currently return validated stored metadata, not an authoritative live
 EVM reserve quote. The separate bounded `coin/evmview` is required for monetary
 valuation once an authenticated deployment binding is installed. There is no
@@ -139,7 +142,7 @@ silent fallback from a failed monetary view to stale metadata.
 
 After all genesis account allocations, explicitly run
 `mcnd genesis reconcile-native-allocation --home ...` before validation/start.
-This fresh-home builder sums actual genesis bank MSP balances (internal denom `del`) and writes the
+This fresh-home builder sums actual genesis bank balances for the compiled denomination and writes the
 same amount into declared native allocation, with an exclusive backup. Startup
 rejects mismatches rather than inventing or minting supply. Changing genesis
 accounts again requires rebuilding/reviewing that declaration and its backup.
