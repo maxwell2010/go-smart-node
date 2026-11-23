@@ -284,7 +284,6 @@ jobs:
     defaults:
       run:
         shell: bash
-        working-directory: ${{ runner.temp }}/candidate
     env:
       ARCHIVE: mintcandy-${{ matrix.profile }}-candidate-linux-amd64.tar.gz
     steps:
@@ -293,6 +292,7 @@ jobs:
           name: mintcandy-${{ matrix.profile }}-candidate-${{ github.run_attempt }}
           path: ${{ runner.temp }}/candidate
       - name: Verify the tested archive checksum
+        working-directory: ${{ runner.temp }}/candidate
         run: sha256sum --check --strict --quiet "$ARCHIVE.sha256"
       - uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6
         id: provenance
@@ -300,6 +300,7 @@ jobs:
           subject-path: ${{ runner.temp }}/candidate/${{ env.ARCHIVE }}
           create-storage-record: false
       - name: Verify the provenance against this commit and workflow
+        working-directory: ${{ runner.temp }}/candidate
         env:
           GH_TOKEN: ${{ github.token }}
           ATTESTATION_BUNDLE: ${{ steps.provenance.outputs.bundle-path }}

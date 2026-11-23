@@ -69,7 +69,7 @@ jobs:
           case "$NATIVE_DENOM" in
             del) build_tag=; chain=990013; symbol=MSP; token_name=MintCandy ;;
             msp) build_tag=mintcandy_mainnet; chain=9905401; symbol=MSP; token_name=MintCandy ;;
-            tmsp) build_tag=mintcandy_testnet; chain=990098; symbol=tMSP; token_name='MintCandy Testnet' ;;
+            tmsp) build_tag=mintcandy_testnet; chain=990098; symbol=tMSP; token_name='MintCandy Test MSP' ;;
             *) echo 'Unsupported native denomination.' >&2; exit 1 ;;
           esac
           printf 'BUILD_TAG=%s\nEVM_CHAIN_ID=%s\nTOKEN_SYMBOL=%s\nTOKEN_NAME=%s\n' "$build_tag" "$chain" "$symbol" "$token_name" >> "$GITHUB_ENV"
