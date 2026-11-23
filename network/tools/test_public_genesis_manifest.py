@@ -10,7 +10,7 @@ from types import SimpleNamespace
 import unittest
 from unittest.mock import patch
 
-from public_genesis_manifest import encode, prepare_manifest, release_for, verify_manifest
+from public_genesis_manifest import encode, prepare_manifest, release_for, verify_manifest, verify_public_p2p
 import test_verify_public_launch_genesis as ledger_fixture
 
 
@@ -52,10 +52,44 @@ class PublicGenesisManifestTest(unittest.TestCase):
                      'bankBalances': report['checkedBankRecipients'], 'validators': report['checkedValidators'],
                      'wrappedTokenSymbol': 'WMSP'}
 
-    def prepare(self):
+    def prepare(self, *, include_public_p2p=False):
         fixture = self.fixture
         return prepare_manifest(fixture.data(), fixture.applications, fixture.plan, fixture.draft,
-                                fixture.relayer_wallets, self.software, self.cold)
+                                fixture.relayer_wallets, self.software, self.cold, include_public_p2p=include_public_p2p)
+
+    def test_manifest_includes_only_approved_public_bootstrap_endpoints(self):
+        rows = self.fixture.applications['operators']
+        with self.assertRaisesRegex(ValueError, 'at least one publishable persistent peer'):
+            self.prepare(include_public_p2p=True)
+        rows[0]['endpointPublicationAllowed'] = True
+        rows[1].update(endpointPublicationAllowed=True, p2pRole='seed')
+        expected = {'persistent_peers': rows[0]['p2pAddress'], 'seeds': rows[1]['p2pAddress']}
+        result = self.prepare(include_public_p2p=True)
+        self.assertEqual(result['publicP2P'], expected)
+        self.assertNotIn(rows[2]['p2pAddress'].encode(), encode(result))
+        self.assertNotIn('publicP2P', self.prepare())
+        with self.assertRaisesRegex(ValueError, 'repeated public P2P'):
+            verify_public_p2p({**expected, 'seeds': expected['persistent_peers']}, 4)
+        with self.assertRaisesRegex(ValueError, 'globally routable'):
+            verify_public_p2p({**expected, 'seeds': '2' * 40 + '@10.0.0.1:26656'}, 4)
+
+    @unittest.skipUnless(sys.platform == 'linux' and shutil.which('gpg') and shutil.which('gpgv'), 'requires Linux and OpenPGP')
+    def test_signed_public_bootstrap_rejects_endpoint_substitution(self):
+        fixture = self.fixture
+        fixture.applications['operators'][0]['endpointPublicationAllowed'] = True
+        expected = self.prepare(include_public_p2p=True)
+        with tempfile.TemporaryDirectory(prefix='mcnd-public-bootstrap-test-') as directory:
+            with signed_fixture(Path(directory), expected) as args:
+                verified = verify_manifest(args, self.genesis, fixture.plan, fixture.draft, self.software)
+                self.assertEqual(verified['publicP2P'], expected['publicP2P'])
+                substituted = copy.deepcopy(expected)
+                node_id = expected['publicP2P']['persistent_peers'].split('@')[0]
+                substituted['publicP2P']['persistent_peers'] = f'{node_id}@changed.example.invalid:26656'
+                raw = encode(substituted)
+                args.manifest.write_bytes(raw)
+                args.approved_manifest_sha256 = hashlib.sha256(raw).hexdigest()
+                with self.assertRaisesRegex(ValueError, 'OpenPGP signature'):
+                    verify_manifest(args, self.genesis, fixture.plan, fixture.draft, self.software)
 
     def test_repeatable_manifest_binds_release_genesis_and_allocation_without_private_intake(self):
         result = self.prepare()

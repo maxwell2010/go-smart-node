@@ -71,9 +71,10 @@ class PublishedValidatorInstallTest(unittest.TestCase):
             software = release_for(binary)
         artifacts = fixture.parent
         _, applications, plan, relayers = prepared_fixture(artifacts / 'fixture', read_json(artifacts / 'roles.json'))
+        applications['operators'][0]['endpointPublicationAllowed'] = True
         draft = read_json(DEFAULT_DRAFT)
         cold = read_json(artifacts / 'evidence/assembly.json')
-        manifest = prepare_manifest(genesis, applications, plan, draft, relayers, software, cold)
+        manifest = prepare_manifest(genesis, applications, plan, draft, relayers, software, cold, include_public_p2p=True)
         key = next(path.read_bytes() for path in fixture.glob('priv_validator_key_*.json')
                    if json.loads(path.read_bytes())['pub_key']['value'] == validator['consensusPublicKeyBase64'])
 
@@ -151,6 +152,7 @@ class PublishedValidatorInstallTest(unittest.TestCase):
             self.assertEqual(observer_report['status'], 'OBSERVER_GENESIS_INSTALLED')
             self.assertEqual(observer_report['genesisSha256'], report['genesisSha256'])
             self.assertEqual(observer_report['manifestSha256'], report['manifestSha256'])
+            self.assertEqual(observer_report['publicP2P'], manifest['publicP2P'])
             self.assertTrue(observer_report['changed'])
             self.assertFalse(observer_report['networkLaunchAuthorized'])
             self.assertEqual(observer_genesis.read_bytes(), genesis)

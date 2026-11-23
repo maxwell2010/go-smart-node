@@ -8,7 +8,7 @@ import re
 import subprocess
 import tempfile
 
-from check_operator_applications import check_applications, read_intake
+from check_operator_applications import check_applications, p2p_endpoint, public_bootstrap, read_intake
 from check_public_launch_draft import (
     DEFAULT_DRAFT, DEFAULT_PLAN, PUBLISHED_SOFTWARE_RECORD, check_contents, check_plan, read_json, require, unique_object,
 )
@@ -63,7 +63,7 @@ def manifest_for(genesis, plan, draft, software, first_block_app_hash):
     }
 
 
-def prepare_manifest(genesis, applications, plan, draft, relayers, software, cold):
+def prepare_manifest(genesis, applications, plan, draft, relayers, software, cold, *, include_public_p2p=False):
     reviewed = verify_candidate(genesis, applications, plan, draft, relayers)
     expected = {
         'status': 'CANDIDATE_INIT_CHAIN_VERIFIED',
@@ -77,7 +77,30 @@ def prepare_manifest(genesis, applications, plan, draft, relayers, software, col
     }
     require(all(cold.get(key) == value for key, value in expected.items()),
             'cold InitChain report differs from the reviewed genesis')
-    return manifest_for(genesis, plan, draft, software, cold.get('firstBlockAppHash'))
+    manifest = manifest_for(genesis, plan, draft, software, cold.get('firstBlockAppHash'))
+    if include_public_p2p:
+        bootstrap = public_bootstrap(applications)
+        require(bootstrap['status'] == 'PUBLIC_BOOTSTRAP_CANDIDATE', 'at least one publishable persistent peer is required')
+        manifest['publicP2P'] = verify_public_p2p(bootstrap['p2p'], manifest['validators'])
+    return manifest
+
+
+def verify_public_p2p(config, validator_count):
+    require(isinstance(config, dict) and set(config) == {'persistent_peers', 'seeds'} and
+            all(isinstance(value, str) for value in config.values()) and config['persistent_peers'],
+            'invalid public P2P configuration')
+    nodes, services = set(), set()
+    for value in config.values():
+        endpoints = value.split(',') if value else []
+        require(len(endpoints) <= validator_count and endpoints == sorted(endpoints), 'invalid public P2P endpoint list')
+        for endpoint in endpoints:
+            node, _, service = endpoint.partition('@')
+            require(endpoint == p2p_endpoint(endpoint, node, public=True), 'noncanonical public P2P endpoint')
+            require(node not in nodes and service not in services, 'repeated public P2P node ID or service')
+            nodes.add(node)
+            services.add(service)
+    require(len(nodes) <= validator_count, 'public P2P endpoint count differs from the reviewed intake')
+    return config
 
 
 def encode(manifest):
@@ -100,6 +123,8 @@ def verify_manifest(args, genesis, plan, draft, software):
     document = json.loads(signed, object_pairs_hook=unique_object)
     require(document['genesisSha256'] == hashlib.sha256(genesis).hexdigest(), 'genesis SHA256 differs from the signed manifest')
     expected = manifest_for(genesis, plan, draft, software, document['coldTestFirstBlockAppHash'])
+    if 'publicP2P' in document:
+        expected['publicP2P'] = verify_public_p2p(document['publicP2P'], expected['validators'])
     require(signed == encode(expected), 'signed manifest metadata differs from the release or genesis')
     return {**expected, 'status': 'PUBLIC_GENESIS_SIGNATURE_VERIFIED', 'signerFingerprint': signer,
             'manifestSha256': approved_hash, 'networkLaunchAuthorized': False}
@@ -115,6 +140,8 @@ def main():
     for name in ('intake', 'init-chain-report', 'output'):
         commands.choices['prepare'].add_argument('--' + name, required=True, type=Path)
     commands.choices['prepare'].add_argument('--relayer-wallet', required=True, action='append')
+    commands.choices['prepare'].add_argument('--include-public-p2p', action='store_true',
+                                            help='bind the reviewed publishable P2P endpoints to the signed manifest')
     for command in (commands.choices[name] for name in ('verify', 'install', 'install-observer')):
         for name in ('manifest', 'signature', 'trusted-keyring'):
             command.add_argument('--' + name, required=True, type=Path)
@@ -133,7 +160,8 @@ def main():
         if args.command == 'prepare':
             applications = check_applications(read_intake(args.intake), plan)
             cold = json.loads(read_bounded(args.init_chain_report, MANIFEST_LIMIT), object_pairs_hook=unique_object)
-            manifest = prepare_manifest(genesis, applications, plan, draft, args.relayer_wallet, software, cold)
+            manifest = prepare_manifest(genesis, applications, plan, draft, args.relayer_wallet, software, cold,
+                                        include_public_p2p=args.include_public_p2p)
             with args.output.open('xb') as stream:
                 stream.write(encode(manifest))
         else:

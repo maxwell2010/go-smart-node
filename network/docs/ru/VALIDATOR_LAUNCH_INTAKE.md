@@ -127,7 +127,10 @@ python3 -B network/tools/check_operator_applications.py "$REVIEWED_INTAKE" \
 команда возвращает код 2. Два P2P ID для одного хоста и порта дают код 1.
 
 Выгрузка работает офлайн. Перед публикацией оператор проверяет доступность
-адресов, соответствие P2P ID и выдачу блоков. Отдельно согласуются адреса RPC,
+адресов, соответствие P2P ID и выдачу блоков. При подготовке подписанного
+манифеста флаг `--include-public-p2p` добавляет эти настройки в поле
+`publicP2P`. Настройки для ноды берите из отчёта после проверки
+подписи манифеста. Отдельно согласуются адреса RPC,
 REST, gRPC и снапшотов. Опция доступна в репозитории, в архиве утилит
 v1.1.5 её ещё нет.
 
@@ -357,8 +360,13 @@ python3 -B network/tools/public_genesis_manifest.py prepare \
   --genesis "$CANDIDATE_GENESIS" --binary "$MCND_BINARY" \
   --intake "$REVIEWED_INTAKE" --init-chain-report "$INIT_CHAIN_REPORT" \
   --relayer-wallet "$RELAYER_1_D0" --relayer-wallet "$RELAYER_2_D0" \
-  --output public-genesis-manifest.json
+  --include-public-p2p --output public-genesis-manifest.json
 ```
+
+Для флага `--include-public-p2p` используйте актуальный checkout утилит.
+Флаг требует хотя бы одного разрешённого к публикации постоянного пира.
+Если адреса меняются до старта, организатор утверждает новый SHA256 манифеста
+и собирает подтверждения операторов для этой версии.
 
 После утверждения файла уполномоченный подписант создаёт подпись в своей
 офлайн-среде. Публичный ключ экспортируется в бинарный keyring, пригодный

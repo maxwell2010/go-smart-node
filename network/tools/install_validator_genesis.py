@@ -138,4 +138,6 @@ def install_genesis(binary, home, genesis, verified, *, operator=None):
     if operator is not None:
         report.update(status='VALIDATOR_GENESIS_INSTALLED', operatorAddress=operator,
                       consensusAddressHex=validator['consensusAddressHex'])
+    if 'publicP2P' in verified:
+        report['publicP2P'] = verified['publicP2P']
     return report

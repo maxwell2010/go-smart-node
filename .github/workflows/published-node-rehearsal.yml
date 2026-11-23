@@ -374,7 +374,8 @@ jobs:
             .chainId == "mintcandy_990014-1" and .idempotent and .rejectsForeignKey and .rejectsExistingState and .consentPayloadVerified and
             (.preservedHomeFiles >= 5) and (.networkLaunchAuthorized | not) and
             (.observer | .status == "OBSERVER_GENESIS_INSTALLED" and .genesisSha256 == $sha and .binarySha256 == $binary
-              and .idempotent and .rejectsFoundingKey and .preservedHomeFiles >= 5 and (.networkLaunchAuthorized | not))' "$report"
+              and .idempotent and .rejectsFoundingKey and .preservedHomeFiles >= 5 and (.networkLaunchAuthorized | not)) and
+            .observer.publicP2P == .publicP2P and (.publicP2P.persistent_peers | endswith(".example.invalid:26656"))' "$report"
       - name: Verify all four offline operator signatures against the installed genesis
         if: inputs.scenario == 'approvals'
         shell: bash
