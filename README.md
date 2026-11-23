@@ -8,9 +8,9 @@
 собственная сеть с новым genesis, EVM, нативный консенсус и IBC.
 
 Готовый бинарник Linux amd64 доступен в
-[выпуске v1.1.3](https://github.com/maxwell2010/go-smart-node/releases/tag/v1.1.3).
+[выпуске v1.1.4](https://github.com/maxwell2010/go-smart-node/releases/tag/v1.1.4).
 Публичный genesis, состав операторов и адреса подключения ещё готовятся.
-[Однострочник установки](https://github.com/maxwell2010/go-smart-node/releases/download/v1.1.3/INSTALL_RU.md) ·
+[Однострочник установки](https://github.com/maxwell2010/go-smart-node/releases/download/v1.1.4/INSTALL_RU.md) ·
 [Проверка издателя](network/docs/ru/SOFTWARE_RELEASE_VERIFICATION.md) ·
 [Офлайн-комплект](network/docs/ru/INSTALL_LAUNCH_TOOLS.md).
 
@@ -57,6 +57,7 @@ DePIN и торговый MEV-сервис не входят в первый с�
 
 | Проверка | Ревизия и результат |
 | --- | --- |
+| v1.1.4: WMSP через EVM, проверка RPC перед снапшотом и 10 сценариев Hermes | [CI 45117195355](https://github.com/maxwell2010/go-smart-node/actions/runs/45117195355), success |
 | v1.1.3: кворум, синхронизация, systemd, snapshot и 10 сценариев Hermes | [`8c8b844`, CI 45012997466](https://github.com/maxwell2010/go-smart-node/actions/runs/45012997466), success |
 | v1.1.3: обрезка блоков с сохранением окна доказательств | [`8c8b844`, CI 45012994146](https://github.com/maxwell2010/go-smart-node/actions/runs/45012994146), success |
 | Имена токенов, создание активов после пустого genesis, права валидатора | [`bf78808`, CI 45003565408](https://github.com/maxwell2010/go-smart-node/actions/runs/45003565408), success |

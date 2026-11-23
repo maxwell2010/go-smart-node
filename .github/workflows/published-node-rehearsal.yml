@@ -44,12 +44,12 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 35
     env:
-      RELEASE_TAG: v1.1.3
-      RELEASE_VERSION: ${{ inputs.candidate_version || '1.1.3' }}
-      RELEASE_SOURCE: ${{ inputs.candidate_source || '8c8b844c9f70d09a0bafebfc02a261dc51a75c53' }}
+      RELEASE_TAG: v1.1.4
+      RELEASE_VERSION: ${{ inputs.candidate_version || '1.1.4' }}
+      RELEASE_SOURCE: ${{ inputs.candidate_source || 'dd43b1b87ab1f64ced9fd9ccc9472122ebbd6c21' }}
       RELEASE_REF: refs/heads/feat/native-duplicate-vote-master-20261112
-      RELEASE_ARCHIVE_SHA: ${{ inputs.candidate_archive_sha || '71924275a94953ede28e997a585598de3e994b67ca8f333a7b47584377a84f31' }}
-      RELEASE_BINARY_SHA: ${{ inputs.candidate_binary_sha || 'e7de87e4fd9e9825bf1d303c31717e5c87b479bd632a2897251c52a521d6031a' }}
+      RELEASE_ARCHIVE_SHA: ${{ inputs.candidate_archive_sha || 'b65a1f6cb4c2c945b51792177a9970fa7efcf824d25fa4140b3c39e7fe28fc94' }}
+      RELEASE_BINARY_SHA: ${{ inputs.candidate_binary_sha || '7d93ee792934b0c7e85019f9be8c8fe4146c8fde824bec952c5ae1bfc457b9f3' }}
       RELEASE_PACKAGE_RUN: ${{ inputs.candidate_run }}
       RELEASE_PACKAGE_ATTEMPT: ${{ inputs.candidate_attempt }}
       GOENV: 'off'
@@ -257,10 +257,11 @@ jobs:
           mkdir -m 700 -- "$kit" "$output"
           test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
           test -z "$(git status --porcelain)"
-          inputs=(LICENSE network/docs/ru/{INSTALL_LAUNCH_TOOLS.md,public-genesis.draft.json,public-launch-allocation.draft.json,operator-launch-intake.example.json,evidence/software-release-1.1.3.json})
+          inputs=(LICENSE network/docs/ru/{INSTALL_LAUNCH_TOOLS.md,public-genesis.draft.json,public-launch-allocation.draft.json,operator-launch-intake.example.json,evidence/software-release-1.1.4.json})
           for script in check_operator_applications check_public_launch_draft configure_history install_validator_genesis \
                         mcnd_process_smoke native_launch_allocation native_launch_package prepare_founding_ledger \
-                        public_genesis_manifest verify_public_launch_genesis withdrawal_genesis_smoke; do
+                        public_genesis_manifest verify_public_launch_genesis withdrawal_genesis_smoke \
+                        consensus_health verify_state_sync_checkpoint; do
             inputs+=("network/tools/$script.py")
           done
           mapfile -d '' notices < <(git ls-files -z -- network/LICENSE ':(glob)network/systemcontracts/LICENSE*' \
@@ -294,7 +295,7 @@ jobs:
             python3 -B network/tools/check_public_launch_draft.py > "$root/evidence/packaged-tools-draft.json"
             python3 -B network/tools/check_operator_applications.py network/docs/ru/operator-launch-intake.example.json \
               | jq -e '.status == "APPLICATIONS_PENDING" and .checkedOperators == 0 and .missingSlots == 4'
-            for script in prepare_founding_ledger verify_public_launch_genesis public_genesis_manifest; do
+            for script in prepare_founding_ledger verify_public_launch_genesis public_genesis_manifest verify_state_sync_checkpoint; do
               python3 -B "network/tools/$script.py" --help >/dev/null
             done
             cmp bin/mcnd-genesis "$root/mcnd-genesis"
@@ -315,8 +316,9 @@ jobs:
           mkdir -m 700 "$root/tools-assets" "$root/published-tools"
           cd "$root/tools-assets"
           name=mintcandy-launch-tools-linux-amd64.tar.gz
-          source=3a619192cdd40bc12574b57b4874404feb2e7d37
-          digest=a6fdb40432b8ec5a49c9ba51907706c7ffc5162ab4e380d85c39670160c373be
+          record="$GITHUB_WORKSPACE/launch-assembly/network/docs/ru/evidence/launch-tools-$RELEASE_VERSION.json"
+          source=$(jq -er '.sourceRevision | select(test("^[a-f0-9]{40}$"))' "$record")
+          digest=$(jq -er '.archiveSha256 | select(test("^[a-f0-9]{64}$"))' "$record")
           gh release download "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" \
             --pattern "$name" --pattern "$name.sha256" --pattern launch-tools.sigstore.json
           printf '%s  %s\n' "$digest" "$name" | cmp - "$name.sha256"

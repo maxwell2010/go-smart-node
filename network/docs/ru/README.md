@@ -7,7 +7,7 @@
 Версионные программные пакеты перечислены в
 [GitHub Releases](https://github.com/maxwell2010/go-smart-node/releases).
 Для установки готового пакета без Go и кэшей сборки используйте
-[готовую инструкцию 1.1.3 с однострочником](https://github.com/maxwell2010/go-smart-node/releases/download/v1.1.3/INSTALL_RU.md)
+[готовую инструкцию 1.1.4 с однострочником](https://github.com/maxwell2010/go-smart-node/releases/download/v1.1.4/INSTALL_RU.md)
 и [правила проверки GitHub OIDC](SOFTWARE_RELEASE_VERIFICATION.md). Для подготовки
 и проверки genesis есть [офлайн-комплект](INSTALL_LAUNCH_TOOLS.md).
 Публичный запуск сети требует отдельно утверждённых genesis и операторов.

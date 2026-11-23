@@ -1,5 +1,19 @@
 # Software release verification
 
+## 1.1.4 software release
+
+[MintCandy Node 1.1.4](https://github.com/maxwell2010/go-smart-node/releases/tag/v1.1.4)
+reserves the WMSP name and ticker in DRC20 registration. The founding genesis
+assembler sets the ERC-20 wrapper name to MintCandy Wrapped MSP and its ticker
+to WMSP. The exact attested binary returned this metadata through EVM RPC.
+
+The rehearsal verified the RPC checkpoint before snapshot restoration and
+passed quorum recovery, systemd restart, block retention and ten Hermes
+scenarios on the isolated genesis. A separate run checked committed token media.
+[Binary rehearsal](https://github.com/maxwell2010/go-smart-node/actions/runs/45117195355) ·
+[Signed media](https://github.com/maxwell2010/go-smart-node/actions/runs/45118559306) ·
+[Release evidence](../network/docs/ru/evidence/software-release-1.1.4.json).
+
 ## 1.1.3 software release
 
 [MintCandy Node 1.1.3](https://github.com/maxwell2010/go-smart-node/releases/tag/v1.1.3)
