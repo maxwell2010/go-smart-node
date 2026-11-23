@@ -236,7 +236,8 @@ def create_replica(binary, root, label, index, genesis, key, env, *, chain_id=CH
     run_command(binary, home, ['init', f'native-consensus-{label}', '--chain-id', chain_id,
                                '--evm.evm-chain-id', str(evm_chain_id)], env, secret=True)
     validate_fresh_home(home)
-    private_write(home / 'config/genesis.json', genesis)
+    if genesis is not None:
+        private_write(home / 'config/genesis.json', genesis)
     if key is not None:
         private_write(home / 'config/priv_validator_key.json', key)
     node_id = run_command(binary, home, ['comet', 'show-node-id'], env, secret=True).strip()

@@ -409,17 +409,21 @@ jobs:
         run: |
           set -euo pipefail
           python3 -B -m unittest discover -s launch-assembly/network/tools -p 'test_verify_state_sync_checkpoint.py' -v
+          bootstrap_hosts="$RELEASE_WORK/bootstrap-hosts"
+          printf '127.0.0.1 localhost peer-bootstrap.example.invalid\n' > "$bootstrap_hosts"
           run_rehearsal() {
             local name="$1"
             shift
             local status=0 report="$RELEASE_WORK/evidence/$name.json"
-            sudo -n unshare --net -- bash -euc '
+            sudo -n unshare --net --mount --propagation private -- bash -euc '
               ip link set lo up
+              mount --bind "$1" /etc/hosts
+              shift
               # Keep the late-starting snapshot observer P2P and RPC ports out of the client port pool.
               reserved=$(sysctl -n net.ipv4.ip_local_reserved_ports)
               sysctl -qw "net.ipv4.ip_local_reserved_ports=${reserved:+$reserved,}33656-33657"
               exec "$@"
-            ' _ \
+            ' _ "$bootstrap_hosts" \
               env TMPDIR="$RELEASE_WORK" "$(command -v python3)" -B "$GITHUB_WORKSPACE/launch-assembly/network/tools/native_launch_rehearsal.py" \
               --binary "$RELEASE_WORK/bin/mcnd" --binary-sha256 "$RELEASE_BINARY_SHA" \
               --archive-sha256 "$RELEASE_ARCHIVE_SHA" --source-commit "$RELEASE_SOURCE" \
@@ -432,13 +436,16 @@ jobs:
             fi
             return "$status"
           }
-          run_rehearsal quorum --quorum-loss-recovery --commit-probe "$RELEASE_WORK/comet-commit-probe"
+          run_rehearsal quorum --quorum-loss-recovery --signed-bootstrap --commit-probe "$RELEASE_WORK/comet-commit-probe"
           run_rehearsal systemd --package-genesis "$RELEASE_WORK/assembled/public/genesis.json" \
             --systemd-follower --restart-and-snapshot
           genesis_sha=$(sha256sum "$RELEASE_WORK/assembled/public/genesis.json" | cut -d' ' -f1)
           jq -e --arg sha "$genesis_sha" '.status == "PASS" and .loopbackOnlyNamespace and .offlineAssembledGenesis and
             .genesisSha256 == $sha and .followerVotingPower == 0 and .quorumRecovery.verifiedEd25519Signatures == 3 and
             .fourSignerRecovery.verifiedEd25519Signatures == 4 and
+            .signedBootstrap.appHash == .appHash and
+            (.signedBootstrap | .status == "OBSERVER_GENESIS_INSTALLED" and .genesisSha256 == $sha and
+              .changed and .outboundPeers == [.nodeId] and (.networkLaunchAuthorized | not)) and
             (.foundingCommitProof | .status == "FOUNDING_COMMIT_VERIFIED" and .genesisSha256 == $sha and
               .height == 1 and .matchingEndpoints == 2 and .modifiedAppHashRejected and .totalPower == 40000 and
               .signedPower >= 30000)' "$RELEASE_WORK/evidence/quorum.json"

@@ -94,11 +94,16 @@ def load_fixture(directory, *, four_validators=False, empty_user_assets=False, a
     return genesis, expected, keys
 
 
-def configure_peers(node, peers):
-    addresses = [f"{peer.node_id}@127.0.0.1:{peer.p2p}" for peer in peers]
+def configure_peers(node, peers, *, signed_p2p=None):
+    if signed_p2p is None:
+        addresses = [f"{peer.node_id}@127.0.0.1:{peer.p2p}" for peer in peers]
+        seeds = ""
+    else:
+        addresses = signed_p2p["persistent_peers"].split(",")
+        seeds = signed_p2p["seeds"]
     write_config(node.home, "config.toml", {
         ("p2p", "persistent_peers"): json.dumps(",".join(addresses)),
-        ("p2p", "allow_duplicate_ip"): "true", ("p2p", "pex"): "false", ("p2p", "seeds"): '""',
+        ("p2p", "allow_duplicate_ip"): "true", ("p2p", "pex"): "false", ("p2p", "seeds"): json.dumps(seeds),
         ("statesync", "enable"): "false",
     })
     return addresses
@@ -543,7 +548,7 @@ def verify_systemd_upgrade(systemd, follower, validators, expected, genesis, upg
 
 def run_launch(binary, root, genesis, expected, keys, env, owner, report, *, four_validators=False, treasury=None,
                systemd=None, restart_snapshot=False, upgrade_binary=None, quorum_loss_recovery=False, commit_probe=None,
-               verify_history=False, media_fixture=None):
+               verify_history=False, media_fixture=None, signed_bootstrap=None):
     rows = expected["validators"]
     powers = tuple(row["initialPower"] for row in rows)
     options = {"chain_id": expected["chainId"], "evm_chain_id": expected["evmChainId"]}
@@ -554,7 +559,8 @@ def run_launch(binary, root, genesis, expected, keys, env, owner, report, *, fou
         report["phase"] = "systemd-follower-install"
         follower_binary, follower_root, follower_owner = systemd.binary, systemd.root, systemd
         check(not (follower_root / "follower").exists(), "systemd follower installation requires an absent node home")
-    follower = create_replica(follower_binary, follower_root, "follower", len(validators), genesis, None, env, **options)
+    follower_genesis = None if signed_bootstrap else genesis
+    follower = create_replica(follower_binary, follower_root, "follower", len(validators), follower_genesis, None, env, **options)
     nodes = [*validators, follower]
     check(len({node.node_id for node in nodes}) == len(nodes), "duplicate launch P2P identity")
     stopped = validators[-1] if four_validators else None
@@ -564,7 +570,16 @@ def run_launch(binary, root, genesis, expected, keys, env, owner, report, *, fou
 
         configure_snapshot_source(live_validators[0])
     configured = {node.label: configure_peers(node, [peer for peer in validators if peer is not node]) for node in validators}
-    configured[follower.label] = configure_peers(follower, live_validators)
+    signed_p2p = None
+    if signed_bootstrap:
+        from native_launch_bootstrap import install_signed_test_bootstrap
+
+        report["phase"] = "signed-observer-bootstrap-install"
+        report["signedBootstrap"] = install_signed_test_bootstrap(
+            binary, root, genesis, rows[0], validators[0], follower, signed_bootstrap, report,
+        )
+        signed_p2p = report["signedBootstrap"]["publicP2P"]
+    configured[follower.label] = configure_peers(follower, live_validators, signed_p2p=signed_p2p)
     if quorum_loss_recovery:
         # Fixed test-only timers make the halt observation longer than several
         # complete propose/prevote/precommit timeout budgets. Genesis and voting
@@ -649,6 +664,10 @@ def run_launch(binary, root, genesis, expected, keys, env, owner, report, *, fou
         check(str(first_balance) == expected["founderBalanceAtomic"], "founder balance differs from the launch plan")
     report["rpc"] = {"historicalHeight": 1, "verifiedHeight": height, "delAtomic": str(first_balance)}
     report.update(verify_network(nodes, follower, configured, env, stopped=stopped))
+    if signed_bootstrap:
+        outbound = [peer["nodeId"] for peer in report["observedPeers"][follower.label] if peer["outbound"]]
+        check(outbound == [validators[0].node_id], "observer dialed a peer outside its signed bootstrap")
+        report["signedBootstrap"].update(outboundPeers=outbound, verifiedHeight=height, appHash=report["appHash"])
     if systemd is not None:
         report["phase"] = "systemd-follower-evidence"
         evidence = systemd.evidence()
@@ -692,6 +711,7 @@ def main(argv=None, signals=None):
     parser.add_argument("--assembly-report", type=Path, help="cold verification report for the offline-assembled isolated genesis")
     parser.add_argument("--quorum-loss-recovery", action="store_true", help="halt safely with two of four validators and recover original signers")
     parser.add_argument("--commit-probe", type=Path, help="owned Comet Ed25519 commit verifier")
+    parser.add_argument("--signed-bootstrap", action="store_true", help="start the fresh test observer using the signed P2P manifest")
     parser.add_argument("--media-fixture", type=Path, help="private test-only signed avatar fixture")
     parser.add_argument("--treasury-transfer", action="store_true", help="check the signed transfer pair on the four-validator fixture")
     parser.add_argument("--package-genesis", type=Path, help="use genesis extracted from the verified launch package")
@@ -714,6 +734,8 @@ def main(argv=None, signals=None):
         parser.error("--commit-probe requires --quorum-loss-recovery")
     if args.quorum_loss_recovery and (args.systemd_follower or args.treasury_transfer or args.upgrade_package):
         parser.error("quorum recovery must run independently of treasury and systemd upgrade scenarios")
+    if args.signed_bootstrap and (not args.quorum_loss_recovery or not args.assembly_report):
+        parser.error("--signed-bootstrap requires the isolated offline-assembled quorum scenario")
     if args.treasury_transfer and not args.four_validators:
         parser.error("--treasury-transfer requires --four-validators")
     if args.systemd_follower and not args.package_genesis:
@@ -788,7 +810,8 @@ def main(argv=None, signals=None):
                                        restart_snapshot=args.restart_and_snapshot, upgrade_binary=upgrade_binary,
                                        quorum_loss_recovery=args.quorum_loss_recovery, commit_probe=args.commit_probe,
                                        verify_history=bool(args.assembly_report and args.restart_and_snapshot and not upgrade_binary),
-                                       media_fixture=args.media_fixture)
+                                       media_fixture=args.media_fixture,
+                                       signed_bootstrap=(Path(args.fixture), args.assembly_report) if args.signed_bootstrap else None)
                 finally:
                     owner.close()
             report.update(status="PASS", phase="complete")
