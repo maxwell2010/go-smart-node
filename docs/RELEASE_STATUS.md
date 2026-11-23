@@ -16,6 +16,11 @@ after signed DRC20 creation.
 [Signed media](https://github.com/maxwell2010/go-smart-node/actions/runs/45013060357) ·
 [Release evidence](../network/docs/ru/evidence/software-release-1.1.3.json).
 
+The rehearsal from the published archive verified the same binary digest,
+restored a height-40 snapshot, and confirmed all four validator signatures
+at height 58 after Hermes testing.
+[Published archive rehearsal](https://github.com/maxwell2010/go-smart-node/actions/runs/45110885039).
+
 The release includes separately attested offline launch tools for v1.1.3.
 CI checked the unpacked tools and installed a signed test genesis with the
 published daemon in a fresh validator home.
