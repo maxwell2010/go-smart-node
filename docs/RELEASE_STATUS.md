@@ -94,6 +94,15 @@ and signer are in the operator guide. A fresh download from GitHub
 Releases passed both the archive SHA256 and pinned provenance verification.
 [Download and verify the release toolkit](../network/docs/ru/INSTALL_LAUNCH_TOOLS.md#комплект-ci-для-наблюдающей-ноды).
 
+The source tools can bind the opt-in persistent peer and seed configuration
+to the same signed genesis manifest. With the published v1.1.5 daemon, the
+validator and observer installers both returned the authenticated test
+peer. The published consent binary verified four operator acknowledgments
+for those exact manifest bytes. Linux OpenPGP tests rejected a substituted
+peer even when the replacement file had a recomputed digest.
+[Signed installer and approvals rehearsal](https://github.com/maxwell2010/go-smart-node/actions/runs/45157485725) ·
+[Manifest checks](https://github.com/maxwell2010/go-smart-node/actions/runs/45157486104).
+
 The isolated media gateway passed TLS 1.2 and TLS 1.3 publication and CID
 reads with Nginx and Gunicorn. Clients refused an untrusted certificate
 and a mismatched hostname. The gateway rejected plaintext on the HTTPS
