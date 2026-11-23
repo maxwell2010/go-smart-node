@@ -14,6 +14,11 @@ scenarios on the isolated genesis. A separate run checked committed token media.
 [Signed media](https://github.com/maxwell2010/go-smart-node/actions/runs/45118559306) ·
 [Release evidence](../network/docs/ru/evidence/software-release-1.1.4.json).
 
+The separately attested offline toolkit cold-verified the WMSP genesis
+and installed it in a disposable validator home using the published v1.1.4 daemon.
+[Toolkit and instructions](../network/docs/ru/INSTALL_LAUNCH_TOOLS.md) ·
+[Toolkit rehearsal](https://github.com/maxwell2010/go-smart-node/actions/runs/45119625770).
+
 ## 1.1.3 software release
 
 [MintCandy Node 1.1.3](https://github.com/maxwell2010/go-smart-node/releases/tag/v1.1.3)

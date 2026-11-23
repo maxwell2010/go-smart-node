@@ -21,15 +21,17 @@ GitHub CLI. Go для установки не требуется.
 [Выпуски MintCandy](https://github.com/maxwell2010/go-smart-node/releases) ·
 [Проверка аттестаций GitHub CLI](https://cli.github.com/manual/gh_attestation_verify).
 
-Для v1.1.3 задайте значения ниже и выполните команду загрузки и проверки.
-[Архив v1.1.3](https://github.com/maxwell2010/go-smart-node/releases/download/v1.1.3/mintcandy-launch-tools-linux-amd64.tar.gz) ·
-[Отчёт с хешами](https://github.com/maxwell2010/go-smart-node/releases/download/v1.1.3/LAUNCH_TOOLS_VALIDATION.json) ·
-[Проверка Linux CI](https://github.com/maxwell2010/go-smart-node/actions/runs/45110885140).
+Для v1.1.4 задайте значения ниже и выполните команду загрузки и проверки.
+Сборщик формирует genesis с нативным MSP и ERC-20 обёрткой WMSP. В комплект
+входит проверка контрольной высоты для state sync.
+[Архив v1.1.4](https://github.com/maxwell2010/go-smart-node/releases/download/v1.1.4/mintcandy-launch-tools-linux-amd64.tar.gz) ·
+[Отчёт с хешами](https://github.com/maxwell2010/go-smart-node/releases/download/v1.1.4/LAUNCH_TOOLS_VALIDATION.json) ·
+[Проверка Linux CI](https://github.com/maxwell2010/go-smart-node/actions/runs/45119625770).
 
 ```sh
-RELEASE_TAG=v1.1.3
-TOOLS_SOURCE_SHA=3a619192cdd40bc12574b57b4874404feb2e7d37
-TOOLS_ARCHIVE_SHA256=a6fdb40432b8ec5a49c9ba51907706c7ffc5162ab4e380d85c39670160c373be
+RELEASE_TAG=v1.1.4
+TOOLS_SOURCE_SHA=138cc53a2982b3f991507917c9308c09301d5cb2
+TOOLS_ARCHIVE_SHA256=f8da69da9ef8d6a0b7cb088057468158ac816c9026f84e11faa9d34e3b4b151f
 ```
 
 ```sh
