@@ -223,7 +223,8 @@ jobs:
           root="$RELEASE_WORK"
           mkdir -m 700 -p "$root/assembled/public"
           go test -mod=readonly -p 2 -count=1 -timeout 2m ./tools/comet_commit_probe
-          go test -mod=readonly -p 2 -count=1 -timeout 2m -run '^TestLaunchConsent' ./launchgenesis
+          go test -mod=readonly -p 2 -count=1 -timeout 2m -run '^Test(LaunchConsent|FounderOwnership)' \
+            ./launchgenesis ./cmd/mcnd-genesis
           go build -mod=readonly -p 2 -trimpath -o "$root/comet-commit-probe" ./tools/comet_commit_probe
           go build -mod=readonly -p 2 -trimpath -o "$root/mcnd-genesis" ./cmd/mcnd-genesis
           "$root/mcnd-genesis" addresses --chain-id mintcandy_990014-1 --evm-chain-id 990014 > "$root/roles.json"
@@ -301,6 +302,7 @@ jobs:
               python3 -B "network/tools/$script.py" --help >/dev/null
             done
             cmp bin/mcnd-genesis "$root/mcnd-genesis"
+            bin/mcnd-genesis founder-proof --help >/dev/null
             cmp bin/comet-commit-probe "$root/comet-commit-probe"
             bin/comet-commit-probe --help 2>&1 | grep -F -- '-founding-genesis' >/dev/null
             python3 -B network/tools/public_genesis_manifest.py install-observer --help >/dev/null

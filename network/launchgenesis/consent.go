@@ -15,6 +15,7 @@ import (
 	cmttypes "github.com/cometbft/cometbft/types"
 	sdk "github.com/cosmos/cosmos-sdk/types"
 	"github.com/ethereum/go-ethereum/accounts"
+	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/crypto"
 	"github.com/maxwell2010/go-smart-node/network/identity"
 )
@@ -180,26 +181,34 @@ func (c LaunchConsent) Verify(signatures []OperatorConsent) (ConsentReport, erro
 }
 
 func verifyOperatorSignature(row OperatorConsent, body []byte) error {
-	if len(row.Signature) != 132 || !strings.HasPrefix(row.Signature, "0x") {
-		return fmt.Errorf("a 65-byte 0x-prefixed EIP-191 signature is required")
-	}
-	signature, err := hex.DecodeString(row.Signature[2:])
+	signer, err := recoverMessageSigner(body, row.Signature)
 	if err != nil {
-		return fmt.Errorf("invalid operator signature encoding")
+		return err
+	}
+	address, err := nativeAddress(row.OperatorAddress, "d0valoper")
+	if err != nil || signer != address {
+		return fmt.Errorf("signature does not match operator %s for this genesis and manifest", row.OperatorAddress)
+	}
+	return nil
+}
+
+func recoverMessageSigner(body []byte, encoded string) (common.Address, error) {
+	if len(encoded) != 132 || !strings.HasPrefix(encoded, "0x") {
+		return common.Address{}, fmt.Errorf("a 65-byte 0x-prefixed EIP-191 signature is required")
+	}
+	signature, err := hex.DecodeString(encoded[2:])
+	if err != nil {
+		return common.Address{}, fmt.Errorf("invalid message signature encoding")
 	}
 	if signature[64] == 27 || signature[64] == 28 {
 		signature[64] -= 27
 	}
 	if !crypto.ValidateSignatureValues(signature[64], new(big.Int).SetBytes(signature[:32]), new(big.Int).SetBytes(signature[32:64]), true) {
-		return fmt.Errorf("invalid or noncanonical operator signature")
+		return common.Address{}, fmt.Errorf("invalid or noncanonical message signature")
 	}
 	public, err := crypto.SigToPub(accounts.TextHash(body), signature)
 	if err != nil {
-		return fmt.Errorf("invalid operator message signature: %w", err)
+		return common.Address{}, fmt.Errorf("invalid message signature: %w", err)
 	}
-	address, err := nativeAddress(row.OperatorAddress, "d0valoper")
-	if err != nil || crypto.PubkeyToAddress(*public) != address {
-		return fmt.Errorf("signature does not match operator %s for this genesis and manifest", row.OperatorAddress)
-	}
-	return nil
+	return crypto.PubkeyToAddress(*public), nil
 }

@@ -73,6 +73,39 @@ consensus address, уникальность операторов и P2P ID, су
 без RPC и подтверждает структуру данных. Контроль ключей, доступность пиров,
 согласие операторов и утверждение итогового genesis проверяются отдельно.
 
+### Подтверждение контроля кошелька основателя
+
+Организатор фиксирует SHA256 проверенной версии
+[плана распределения](public-launch-allocation.draft.json) и создаёт новый
+одноразовый код командой `openssl rand -hex 32`. Хеш утверждённого плана и
+код проверки записываются у организатора. Для повторной проверки нужен
+новый код. `MCND_GENESIS` указывает на актуальную утилиту из Linux CI.
+
+```sh
+"$MCND_GENESIS" founder-proof payload \
+  --plan "$REVIEWED_PLAN" --approved-plan-sha256 "$APPROVED_PLAN_SHA256" \
+  --challenge "$FOUNDER_CHALLENGE" --output founder-message.txt
+```
+
+Владелец сверяет кошелёк, оба chain ID, хеш плана и полученный код, затем
+подписывает точный текст сообщения через `personal_sign` в своём кошельке.
+При использовании зашифрованного хранилища Foundry подпись можно сохранить
+командой `cast wallet sign --account "$FOUNDER_KEYSTORE" "$(cat founder-message.txt)" > founder-signature.txt`.
+Организатор получает только файл подписи. Для подписи сообщения не нужны
+RPC и MSP. [Стандарт подписи сообщения EIP-191](https://eips.ethereum.org/EIPS/eip-191).
+
+```sh
+"$MCND_GENESIS" founder-proof verify \
+  --plan "$REVIEWED_PLAN" --approved-plan-sha256 "$APPROVED_PLAN_SHA256" \
+  --challenge "$FOUNDER_CHALLENGE" --signature founder-signature.txt
+```
+
+`FOUNDER_WALLET_OWNERSHIP_VERIFIED` подтверждает контроль обычного EVM-аккаунта
+для этих байтов плана и этого кода. Сохраните JSON-отчёт с проверенной заявкой
+и закройте код. Для изменённого плана подпись нужна заново. Подтверждения
+операторов, подпись манифеста и отдельное разрешение на запуск остаются
+условиями публикации.
+
 ### Публичные пиры и сиды
 
 Из актуального checkout получите отдельный файл для сверки настроек CometBFT.
