@@ -22,8 +22,8 @@ GitHub CLI. Go для установки не требуется.
 [Проверка аттестаций GitHub CLI](https://cli.github.com/manual/gh_attestation_verify).
 
 Для первого комплекта v1.1.5 задайте значения ниже. Для установки наблюдателя,
-проверки первого блока и подписи основателя используйте [комплект ревизии
-`bad9d2a`](#комплект-ci-для-наблюдающей-ноды).
+проверки первого блока, подписи основателя и подписанного списка пиров
+используйте [комплект ревизии `52f67be`](#комплект-ci-для-наблюдающей-ноды).
 Сборщик формирует genesis с нативным MSP и ERC-20 обёрткой WMSP. В комплект
 входит проверка контрольной высоты для state sync.
 [Архив v1.1.5](https://github.com/maxwell2010/go-smart-node/releases/download/v1.1.5/mintcandy-launch-tools-linux-amd64.tar.gz) ·
@@ -74,22 +74,22 @@ printf '%s\n' "$work/tools"
 
 Этот комплект совместим с опубликованным `mcnd` v1.1.5 и содержит
 `install-observer`, готовый `bin/comet-commit-probe` и офлайн-команду
-`mcnd-genesis founder-proof`. Он доступен отдельным архивом с ревизией
-`bad9d2a` в имени файла на странице релиза v1.1.5. После распаковки примените команду
+`mcnd-genesis founder-proof`. Он поддерживает манифест с подписанными
+пирами и сидами. После распаковки примените команду
 [установки проверенного genesis](https://github.com/maxwell2010/go-smart-node/blob/feat/native-duplicate-vote-master-20261112/network/docs/ru/OPERATOR_LAUNCH.md#применение-подписанного-публичного-genesis).
-[Архив релиза](https://github.com/maxwell2010/go-smart-node/releases/download/v1.1.5/mintcandy-launch-tools-v1.1.5-bad9d2a-linux-amd64.tar.gz) ·
-[Отчёт CI](https://github.com/maxwell2010/go-smart-node/actions/runs/45148803166).
+[Архив релиза](https://github.com/maxwell2010/go-smart-node/releases/download/v1.1.5/mintcandy-launch-tools-v1.1.5-52f67be-linux-amd64.tar.gz) ·
+[Отчёт CI](https://github.com/maxwell2010/go-smart-node/actions/runs/45159268185).
 
 ```sh
 set -eu
 umask 077
 work=$(mktemp -d)
 repo=maxwell2010/go-smart-node
-asset=mintcandy-launch-tools-v1.1.5-bad9d2a-linux-amd64
+asset=mintcandy-launch-tools-v1.1.5-52f67be-linux-amd64
 archive="$asset.tar.gz"
 bundle="$asset.sigstore.json"
-source_sha=bad9d2a68b6295b83af63c0cbe707293b328ddb2
-archive_sha=e4e8cf6ec108c881e2ae3d229e4b133efed031f59d007dd1d17b7fc5f5f0ca16
+source_sha=52f67be9b18f266b044cbacf303cf5845eca6a2c
+archive_sha=735e1b5feac32495276511d48a9d54f1af9a45d06cc8a24dbc6e278adbc0e0e3
 gh release download v1.1.5 --repo "$repo" --dir "$work" \
   --pattern "$archive" --pattern "$archive.sha256" --pattern "$bundle"
 cd "$work"

@@ -103,6 +103,14 @@ peer even when the replacement file had a recomputed digest.
 [Signed installer and approvals rehearsal](https://github.com/maxwell2010/go-smart-node/actions/runs/45157485725) ·
 [Manifest checks](https://github.com/maxwell2010/go-smart-node/actions/runs/45157486104).
 
+The separately named v1.1.5 toolkit from revision `52f67be` includes these
+scripts. Linux CI ran the OpenPGP and validator and observer installation
+checks using modules loaded from the extracted archive. The published
+archive digest matches the attested CI archive. The operator guide pins
+this toolkit revision and SHA256.
+[Archive validation](https://github.com/maxwell2010/go-smart-node/actions/runs/45159268185) ·
+[Release toolkit installation](../network/docs/ru/INSTALL_LAUNCH_TOOLS.md#комплект-ci-для-наблюдающей-ноды).
+
 The isolated media gateway passed TLS 1.2 and TLS 1.3 publication and CID
 reads with Nginx and Gunicorn. Clients refused an untrusted certificate
 and a mismatched hostname. The gateway rejected plaintext on the HTTPS
