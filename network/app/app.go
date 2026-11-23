@@ -1226,9 +1226,9 @@ func DefaultGenesis(cdc codec.Codec) map[string]json.RawMessage {
 	var bankGenesis banktypes.GenesisState
 	cdc.MustUnmarshalJSON(genesis[banktypes.ModuleName], &bankGenesis)
 	bankGenesis.DenomMetadata = []banktypes.Metadata{{
-		Description: "Native token of the separate MintCandy network",
-		Base:        identity.BaseDenom, Display: "DEL", Name: "Native DEL", Symbol: "DEL",
-		DenomUnits: []*banktypes.DenomUnit{{Denom: identity.BaseDenom, Exponent: 0}, {Denom: "DEL", Exponent: 18}},
+		Description: "Native MintCandy coin of MintCandy Network",
+		Base:        identity.BaseDenom, Display: identity.NativeTokenSymbol, Name: identity.NativeTokenName, Symbol: identity.NativeTokenSymbol,
+		DenomUnits: []*banktypes.DenomUnit{{Denom: identity.BaseDenom, Exponent: 0}, {Denom: identity.NativeTokenSymbol, Exponent: 18}},
 	}}
 	genesis[banktypes.ModuleName] = cdc.MustMarshalJSON(&bankGenesis)
 	var govGenesis govv1.GenesisState

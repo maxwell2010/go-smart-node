@@ -22,7 +22,6 @@ import (
 	evm "github.com/cosmos/evm/x/vm/types"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/maxwell2010/go-smart-node/network/app"
-	cointypes "github.com/maxwell2010/go-smart-node/network/decimal/coin/types"
 	nfttypes "github.com/maxwell2010/go-smart-node/network/decimal/nft/types"
 	validatorkeeper "github.com/maxwell2010/go-smart-node/network/decimal/validator/keeper"
 	validatortypes "github.com/maxwell2010/go-smart-node/network/decimal/validator/types"
@@ -163,18 +162,7 @@ func assembleState(a *app.App, deployment seedDeployment, ledger Ledger, paramet
 		return nil, err
 	}
 	bank.Supply, bank.Balances = ledger.Bank.Supply, ledger.Bank.Balances
-	bank.DenomMetadata = []banktypes.Metadata{{
-		Description: "Native MintCandy coin of MintCandy Network",
-		Base:        identity.BaseDenom, Display: "MSP", Name: "MintCandy", Symbol: "MSP",
-		DenomUnits: []*banktypes.DenomUnit{{Denom: identity.BaseDenom, Exponent: 0}, {Denom: "MSP", Exponent: 18}},
-	}}
 	state[banktypes.ModuleName] = cdc.MustMarshalJSON(&bank)
-	var coin cointypes.GenesisState
-	if err := cdc.UnmarshalJSON(state[cointypes.ModuleName], &coin); err != nil {
-		return nil, err
-	}
-	coin.Params.BaseTitle = "MintCandy"
-	state[cointypes.ModuleName] = cdc.MustMarshalJSON(&coin)
 
 	var validators validatortypes.GenesisState
 	if err := cdc.UnmarshalJSON(exported[validatortypes.ModuleName], &validators); err != nil {

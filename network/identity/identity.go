@@ -10,6 +10,8 @@ import (
 
 const (
 	BaseDenom            = "del"
+	NativeTokenName      = "MintCandy"
+	NativeTokenSymbol    = "MSP"
 	WrappedMSPName       = "MintCandy Wrapped MSP"
 	WrappedMSPSymbol     = "WMSP"
 	Bech32Prefix         = "d0"

@@ -15,7 +15,7 @@ import (
 // Coin params default values.
 var (
 	DefaultBaseDenom  string      = cmdconfig.BaseDenom
-	DefaultBaseTitle  string      = "MintCandy native coin"
+	DefaultBaseTitle  string      = cmdconfig.NativeTokenName
 	DefaultBaseVolume sdkmath.Int = sdkmath.ZeroInt()
 )
 

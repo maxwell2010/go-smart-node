@@ -25,6 +25,7 @@ import (
 	"github.com/ethereum/go-ethereum/common"
 	ethtypes "github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/crypto"
+	cointypes "github.com/maxwell2010/go-smart-node/network/decimal/coin/types"
 	"github.com/maxwell2010/go-smart-node/network/identity"
 	"github.com/stretchr/testify/require"
 )
@@ -114,6 +115,23 @@ func TestStaticEncodingAndGenesisWithoutApplication(t *testing.T) {
 		}
 		genesis := DefaultGenesis(config.Codec)
 		require.NoError(t, NewBasicModuleManager().ValidateGenesis(config.Codec, config.TxConfig, genesis))
+		var bank banktypes.GenesisState
+		config.Codec.MustUnmarshalJSON(genesis[banktypes.ModuleName], &bank)
+		require.Len(t, bank.DenomMetadata, 1)
+		metadata := bank.DenomMetadata[0]
+		require.Equal(t, "MintCandy", metadata.Name)
+		require.Equal(t, "MSP", metadata.Symbol)
+		require.Equal(t, "MSP", metadata.Display)
+		require.Equal(t, "del", metadata.Base)
+		require.Len(t, metadata.DenomUnits, 2)
+		require.Equal(t, "del", metadata.DenomUnits[0].Denom)
+		require.Zero(t, metadata.DenomUnits[0].Exponent)
+		require.Equal(t, "MSP", metadata.DenomUnits[1].Denom)
+		require.EqualValues(t, 18, metadata.DenomUnits[1].Exponent)
+		var coin cointypes.GenesisState
+		config.Codec.MustUnmarshalJSON(genesis[cointypes.ModuleName], &coin)
+		require.Equal(t, "MintCandy", coin.Params.BaseTitle)
+		require.Equal(t, "del", coin.Params.BaseDenom)
 	}
 	require.True(t, before == evmtypes.GetChainConfig(), "stateless CLI configuration must never initialize or replace the EVM keeper chain singleton")
 }

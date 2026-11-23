@@ -107,6 +107,17 @@ jobs:
           test -z "$(git status --porcelain)"
           python3 -B tools/source_inventory.py --source "$GITHUB_WORKSPACE" --output "$RUNNER_TEMP/software-source-inputs.json"
           go build -mod=readonly -tags= -p 2 -trimpath -ldflags "-X main.buildCommit=$GITHUB_SHA -X main.buildVersion=$RELEASE_VERSION" -o "$RUNNER_TEMP/mcnd-software" ./cmd/mcnd
+          init_home=$(mktemp -d "$RUNNER_TEMP/mcnd-init.XXXXXXXX")
+          "$RUNNER_TEMP/mcnd-software" init software-metadata-check --home "$init_home" --chain-id mintcandy_990013-1 --evm.evm-chain-id 990013
+          "$RUNNER_TEMP/mcnd-software" genesis validate-genesis --home "$init_home" --evm.evm-chain-id 990013
+          jq -e '
+            .app_state as $state |
+            ($state.bank.denom_metadata | length == 1) and
+            ($state.bank.denom_metadata[0] | .name == "MintCandy" and .display == "MSP" and .symbol == "MSP" and .base == "del" and
+              (.denom_units | map([.denom, (.exponent | tonumber)]) == [["del", 0], ["MSP", 18]])) and
+            ($state.coin.params | .base_title == "MintCandy" and .base_denom == "del") and
+            ($state.bank.balances | length == 0)
+          ' "$init_home/config/genesis.json" > "$RUNNER_TEMP/software-evidence/init-metadata.json"
           python3 -B tools/package_mcnd.py --binary "$RUNNER_TEMP/mcnd-software" --source "$GITHUB_WORKSPACE" --revision "$GITHUB_SHA" --release-version "$RELEASE_VERSION" --source-inputs "$RUNNER_TEMP/software-source-inputs.json" --output "$RUNNER_TEMP/software-package/mcnd-$RELEASE_VERSION-linux-amd64.tar.gz"
           python3 -B tools/verify_software_package.py --archive "$RUNNER_TEMP/software-package/mcnd-$RELEASE_VERSION-linux-amd64.tar.gz" --revision "$GITHUB_SHA" --release-version "$RELEASE_VERSION" > "$RUNNER_TEMP/software-evidence/package.json"
       - name: Validate SBOM and audit exact source and binary
