@@ -12,6 +12,8 @@ import re
 
 DEFAULT_DRAFT = Path(__file__).resolve().parents[1] / 'docs/ru/public-genesis.draft.json'
 DEFAULT_PLAN = DEFAULT_DRAFT.with_name('public-launch-allocation.draft.json')
+MAINNET_DRAFT = DEFAULT_DRAFT.with_name('public-genesis-msp.draft.json')
+MAINNET_PLAN = DEFAULT_DRAFT.with_name('public-launch-allocation-msp.draft.json')
 DEFAULT_INTAKE = DEFAULT_DRAFT.with_name('operator-launch-intake.example.json')
 PUBLISHED_SOFTWARE_RECORD = DEFAULT_DRAFT.parent / 'evidence/software-release-1.1.5.json'
 ATOMS_PER_DEL = 10**18
@@ -65,8 +67,9 @@ def check_contents(value, *, forbid_public_material=True):
                 'key or code material in draft')
 
 
-def check_draft(doc):
+def check_draft(doc, denom='del'):
     check_contents(doc)
+    require(denom in ('del', 'msp'), 'invalid public native denomination')
     for path in UNRESOLVED_PATHS:
         value = doc
         for part in path:
@@ -93,25 +96,27 @@ def check_draft(doc):
             state['staking']['delegations'] == [] and state['staking']['last_total_power'] == '0',
             'native profile cannot import SDK consensus stake or genesis transactions')
     require(state['coin']['params']['base_denom'] == state['evm']['params']['evm_denom'] ==
-            state['staking']['params']['bond_denom'] == state['bank']['supply'][0]['denom'] == 'del',
+            state['evm']['params']['extended_denom_options']['extended_denom'] ==
+            state['staking']['params']['bond_denom'] == state['validator']['params']['base_denom'] ==
+            state['bank']['supply'][0]['denom'] == denom,
             'native denomination differs')
     metadata = state['bank']['denom_metadata']
     require(len(metadata) == 1 and state['coin']['params']['base_title'] == 'MintCandy' and
             metadata[0]['name'] == 'MintCandy' and metadata[0]['symbol'] == 'MSP' and
-            metadata[0]['base'] == 'del' and metadata[0]['display'] == 'MSP' and
+            metadata[0]['base'] == denom and metadata[0]['display'] == 'MSP' and
             metadata[0]['denom_units'] == [
-                {'denom': 'del', 'exponent': 0, 'aliases': []},
+                {'denom': denom, 'exponent': 0, 'aliases': []},
                 {'denom': 'MSP', 'exponent': 18, 'aliases': []}],
             'MintCandy MSP metadata or denomination scale differs')
     mint = state['mint']
-    require(mint['params']['mint_denom'] == 'del' and all(value == '0.000000000000000000' for value in (
+    require(mint['params']['mint_denom'] == denom and all(value == '0.000000000000000000' for value in (
         mint['minter']['inflation'], mint['minter']['annual_provisions'],
         mint['params']['inflation_max'], mint['params']['inflation_min'])), 'emission enabled in draft')
     require(state['withdrawal_settlement']['enable_native_consensus'] is True and
             state['withdrawal_settlement']['enable_native_fee_rewards'] is True,
             'draft requires the native consensus and fee reward profile')
     return {'status': 'DRAFT_NOT_RUNNABLE', 'nativeName': 'MintCandy', 'nativeSymbol': 'MSP',
-            'baseDenom': 'del', 'displayExponent': 18, 'approvedChainId': doc['chain_id'],
+            'baseDenom': denom, 'displayExponent': 18, 'approvedChainId': doc['chain_id'],
             'blockGasProposal': '24000000', 'unresolvedInputs': len(UNRESOLVED_PATHS),
             'checks': ['unapproved inputs remain null', 'no concrete keys or addresses',
                        'no declared supply or concrete validator roster', 'zero inflation',
@@ -151,8 +156,12 @@ def check_plan(plan, draft):
     require(plan['chain_id'] == draft['chain_id'] and
             plan['evm_chain_id'] == draft['app_state']['validator']['binding_domain']['evm_chain_id'],
             'plan signing domains differ from the genesis proposal')
-    require(plan['denom'] == 'del' and type(plan['decimals']) is int and plan['decimals'] == 18 and
-            atomic(plan['atoms_per_del']) == ATOMS_PER_DEL, 'invalid MSP denomination scale')
+    denom = plan['denom']
+    legacy = denom == 'del'
+    require(denom in ('del', 'msp') and denom == draft['app_state']['coin']['params']['base_denom'] and
+            type(plan['decimals']) is int and plan['decimals'] == 18 and
+            (atomic(plan['atoms_per_del']) == ATOMS_PER_DEL if legacy else 'atoms_per_del' not in plan),
+            'invalid MSP denomination scale')
     total = atomic(plan['initial_supply_atoms'])
     require(plan['initial_supply_is_proposal'] is False, 'record the approved supply')
     allocations = plan['bank_allocation']
@@ -172,7 +181,9 @@ def check_plan(plan, draft):
             'bank recipients remain unresolved in the proposal')
     founder = plan['founder_evm_address']
     require(re.fullmatch(r'0x[0-9a-fA-F]{40}', founder) is not None, 'invalid proposed founder address')
-    delegations = plan['initial_delegations_within_wdel_backing']
+    delegation_field = ('initial_delegations_within_wdel_backing' if legacy else
+                        'initial_delegations_within_wrapped_native_backing')
+    delegations = plan[delegation_field]
     count = plan['proposed_rehearsal_validator_count']
     require(type(count) is int and count == plan['approved_validator_count'] and len(delegations) == count and
             len({row['validator_slot'] for row in delegations}) == count,
@@ -184,10 +195,11 @@ def check_plan(plan, draft):
                 'initial delegation recipient or proposed owner differs')
         require(atomic(row['expected_voting_power']) == amount // ATOMS_PER_DEL,
                 'delegation voting power differs from whole MSP principal')
-    backing = [row for row in allocations if row['purpose'] == 'initial_wdel_backing']
+    wrapper_purpose = 'initial_wdel_backing' if legacy else 'initial_wrapped_native_backing'
+    backing = [row for row in allocations if row['purpose'] == wrapper_purpose]
     require(len(backing) == 1 and atomic(backing[0]['amount_atoms']) ==
             sum(atomic(row['amount_atoms']) for row in delegations),
-            'WDEL backing differs from proposed delegation total')
+            'wrapper backing differs from proposed delegation total')
     require(all(atomic(row['amount_atoms']) == atomic(plan['approved_initial_stake_per_validator_atoms'])
                 for row in delegations), 'selected equal validator stake size differs')
     require(plan['allocation_is_additional_to_delegations'] is False,
@@ -210,7 +222,7 @@ def check_plan(plan, draft):
     require(len(allocations) == 8, 'unexpected bank allocation entry')
     require(plan['release_requirements'] and all(value == 'pending' for value in plan['release_requirements'].values()),
             'new user asset release requirements have not been demonstrated yet')
-    require(plan['reward_emission'] is False and plan['reward_source'] == 'collected_del_transaction_fees' and
+    require(plan['reward_emission'] is False and plan['reward_source'] == f'collected_{denom}_transaction_fees' and
             atomic(plan['fee_collector_atoms']) == atomic(plan['isolated_position_vault_atoms']) == 0,
             'fee rewards require zero initial collector and vault balances and no emission')
     return {'status': 'PLAN_DRAFT_UNAPPROVED', 'initialSupplyAtoms': str(total),
@@ -275,6 +287,13 @@ def read_json(path):
     return json.loads(path.read_text(encoding='utf8'), object_pairs_hook=unique_object)
 
 
+def read_reviewed_inputs(draft_path, plan_path):
+    draft, plan = read_json(draft_path), read_json(plan_path)
+    check_draft(draft, plan['denom'])
+    check_plan(plan, draft)
+    return draft, plan
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--draft', type=Path, default=DEFAULT_DRAFT)
@@ -283,8 +302,9 @@ def main():
     args = parser.parse_args()
     try:
         doc = read_json(args.draft)
+        plan = read_json(args.plan)
         report = {'validationScope': 'draft_structure_and_integer_arithmetic_only',
-                  'genesis': check_draft(doc), 'allocation': check_plan(read_json(args.plan), doc),
+                  'genesis': check_draft(doc, plan['denom']), 'allocation': check_plan(plan, doc),
                   'intake': check_intake(read_json(args.intake))}
         print(json.dumps(report, indent=2))
     except (OSError, KeyError, IndexError, TypeError, ValueError) as error:

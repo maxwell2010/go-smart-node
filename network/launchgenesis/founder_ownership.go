@@ -18,6 +18,8 @@ type founderAllocationPlan struct {
 	ChainID        string `json:"chain_id"`
 	EVMChainID     uint64 `json:"evm_chain_id,string"`
 	FounderAddress string `json:"founder_evm_address"`
+	Denom          string `json:"denom"`
+	DisplayDenom   string `json:"display_denom"`
 	Decisions      struct {
 		AllocationApproved     bool   `json:"allocation_approved"`
 		ChainIDApproved        bool   `json:"chain_id_approved"`
@@ -40,6 +42,7 @@ type FounderOwnershipReport struct {
 	EVMChainID              uint64 `json:"evmChainId,string"`
 	FounderAddress          string `json:"founderAddress"`
 	PlanSHA256              string `json:"planSha256"`
+	NativeDenom             string `json:"nativeDenom,omitempty"`
 	Challenge               string `json:"challenge"`
 	NetworkLaunchAuthorized bool   `json:"networkLaunchAuthorized"`
 }
@@ -68,6 +71,9 @@ func NewFounderOwnership(raw []byte, approvedPlanSHA256, challenge string) (Foun
 	if err := identity.ValidateChainIDs(plan.ChainID, plan.EVMChainID); err != nil {
 		return FounderOwnership{}, err
 	}
+	if plan.Denom != identity.BaseDenom || (plan.Denom != "del" && plan.DisplayDenom != identity.NativeTokenSymbol) {
+		return FounderOwnership{}, fmt.Errorf("allocation plan native denomination differs from this binary")
+	}
 	address := common.HexToAddress(plan.FounderAddress)
 	if !strings.HasPrefix(plan.FounderAddress, "0x") || !common.IsHexAddress(plan.FounderAddress) ||
 		address == (common.Address{}) {
@@ -82,6 +88,12 @@ func NewFounderOwnership(raw []byte, approvedPlanSHA256, challenge string) (Foun
 }
 
 func (f FounderOwnership) Payload() []byte {
+	if f.plan.Denom != "del" {
+		return fmt.Appendf(nil, "MintCandy Network - founder wallet control v2\n"+
+			"This message proves control of the wallet for the reviewed allocation plan.\n"+
+			"Chain ID: %s\nEVM chain ID: %d\nNative coin: %s (%s)\nFounder wallet: %s\nAllocation plan SHA256: %s\nChallenge: %s",
+			f.plan.ChainID, f.plan.EVMChainID, f.plan.DisplayDenom, f.plan.Denom, f.address.Hex(), f.digest, f.challenge)
+	}
 	return fmt.Appendf(nil, "MintCandy Network - founder wallet control v1\n"+
 		"This message proves control of the wallet for the reviewed allocation plan.\n"+
 		"Chain ID: %s\nEVM chain ID: %d\nFounder wallet: %s\nAllocation plan SHA256: %s\nChallenge: %s",
@@ -108,8 +120,12 @@ func (f FounderOwnership) Verify(signature string) (FounderOwnershipReport, erro
 	if signer != f.address {
 		return FounderOwnershipReport{}, fmt.Errorf("signature does not match the founder wallet for this allocation and challenge")
 	}
-	return FounderOwnershipReport{
+	report := FounderOwnershipReport{
 		Status: "FOUNDER_WALLET_OWNERSHIP_VERIFIED", ChainID: f.plan.ChainID,
 		EVMChainID: f.plan.EVMChainID, FounderAddress: f.address.Hex(), PlanSHA256: f.digest, Challenge: f.challenge,
-	}, nil
+	}
+	if f.plan.Denom != "del" {
+		report.NativeDenom = f.plan.Denom
+	}
+	return report, nil
 }

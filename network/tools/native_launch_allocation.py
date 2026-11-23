@@ -1,4 +1,4 @@
-"""Report the public DEL allocation and validator declarations of a launch genesis."""
+"""Report the native allocation and validator declarations of a launch genesis."""
 
 import argparse
 import base64
@@ -13,6 +13,7 @@ from withdrawal_genesis_smoke import ADDRESS, bech32_payload, check
 
 ATOMS_PER_DEL = 10**18
 MAX_GENESIS_BYTES = 64 * 1024 * 1024
+NATIVE_DOMAINS = {'msp': 'mintcandy_9905401-1', 'tmsp': 'mintcandy_990098-1'}
 RESERVE_ROLES = {
     'wrapped_del': 'wrapped_del_backing',
     'position_vault': 'isolated_nft_vault',
@@ -39,10 +40,14 @@ def evm_address(value):
     return value.lower()
 
 
-def del_amount(coins):
-    amounts = [uint(coin['amount'], 'bank DEL amount') for coin in coins if coin['denom'] == 'del']
-    check(len(amounts) <= 1, 'bank coin list contains duplicate DEL')
+def native_amount(coins, denom):
+    amounts = [uint(coin['amount'], 'bank native coin amount') for coin in coins if coin['denom'] == denom]
+    check(len(amounts) <= 1, 'bank coin list contains duplicate native denomination')
     return sum(amounts)
+
+
+def wrapper_category(denom):
+    return 'wrapped_del_backing' if denom == 'del' else 'wrapped_native_backing'
 
 
 def allocation_report(data):
@@ -59,8 +64,11 @@ def summarize_allocation(doc, genesis_sha256):
     check(isinstance(doc['genesis_time'], str) and doc['genesis_time'], 'launch genesis must declare its timestamp')
     state = doc['app_state']
     profile, bank, coin, validator = (state[key] for key in ('withdrawal_settlement', 'bank', 'coin', 'validator'))
+    denom = coin['params']['base_denom']
+    check(denom == 'del' or NATIVE_DOMAINS.get(denom) == chain_id,
+          'native denomination differs from the launch domain')
     check(profile.get('enable_native_consensus') is True and profile.get('enable_del_delegation') is True,
-          'launch audit requires the native DEL consensus profile')
+          'launch audit requires the native consensus profile')
     binding = validator['binding_domain']
     check(binding['chain_id'] == chain_id and uint(binding['evm_chain_id'], 'binding EVM ID') == evm_id,
           'validator binding domain differs from the genesis signing domains')
@@ -68,6 +76,8 @@ def summarize_allocation(doc, genesis_sha256):
     role_addresses = {key: evm_address(profile[key]) for key in (*RESERVE_ROLES, *SYSTEM_ROLES) if key in profile}
     role_addresses = {key: value for key, value in role_addresses.items() if int(value, 16) != 0}
     categories = {value: RESERVE_ROLES.get(key, 'system_contracts') for key, value in role_addresses.items()}
+    if 'wrapped_del' in role_addresses:
+        categories[role_addresses['wrapped_del']] = wrapper_category(denom)
     categories['0x' + '0' * 40] = 'zero_address_balance'
     for account in state.get('auth', {}).get('accounts') or []:
         if account.get('@type') == '/cosmos.auth.v1beta1.ModuleAccount':
@@ -86,19 +96,19 @@ def summarize_allocation(doc, genesis_sha256):
     for account in bank['balances']:
         address = bech32_payload(account['address'])
         check(address not in balances, 'genesis repeats a bank account')
-        amount = balances[address] = del_amount(account['coins'])
+        amount = balances[address] = native_amount(account['coins'], denom)
         if not amount:
             continue
         category = categories.get(address, 'other_bank_balances')
         totals[category] = totals.get(category, 0) + amount
         allocations.append({'address': account['address'], 'amountAtomic': str(amount), 'category': category})
     total = sum(totals.values())
-    check(0 < total <= 10**33 and coin['params']['base_denom'] == 'del' and
-          total == uint(coin['params']['base_volume'], 'native base volume'), 'native DEL total differs from bank allocation')
+    check(0 < total <= 10**33 and total == uint(coin['params']['base_volume'], 'native base volume'),
+          'native supply differs from bank allocation')
     if bank.get('supply'):
-        check(total == del_amount(bank['supply']), 'declared bank DEL supply differs from bank allocation')
+        check(total == native_amount(bank['supply'], denom), 'declared bank supply differs from bank allocation')
     check(all(balances.get(address, 0) == amount for address, amount in drc20.items()),
-          'DRC20 declared reserves differ from bank DEL allocation')
+          'DRC20 declared reserves differ from native bank allocation')
 
     operators, seen_keys = {}, set()
     for row in validator['validators']:
@@ -125,13 +135,13 @@ def summarize_allocation(doc, genesis_sha256):
     delegations = []
     for row in validator['delegations']:
         amount = row['stake']['stake']
-        check(row['validator'] in operators and amount['denom'] == 'del', 'invalid initial native DEL delegation')
+        check(row['validator'] in operators and amount['denom'] == denom, 'invalid initial native delegation')
         value = uint(amount['amount'], 'initial delegation')
         bech32_payload(row['delegator'])
         operators[row['validator']]['initialStakeAtomic'] += value
         delegations.append({'delegator': row['delegator'], 'validator': row['validator'], 'amountAtomic': str(value)})
     total_stake = sum(row['initialStakeAtomic'] for row in operators.values())
-    check(0 < total_stake <= balances.get(role_addresses['wrapped_del'], 0), 'initial delegated DEL lacks bank backing')
+    check(0 < total_stake <= balances.get(role_addresses['wrapped_del'], 0), 'initial delegated native coin lacks bank backing')
     for row in operators.values():
         row['initialStakeAtomic'] = str(row['initialStakeAtomic'])
 
@@ -142,8 +152,8 @@ def summarize_allocation(doc, genesis_sha256):
         'genesisHeight': 1,
         'genesisTime': doc['genesis_time'],
         'genesisSha256': genesis_sha256,
-        'denom': 'del',
-        'atomsPerDel': str(ATOMS_PER_DEL),
+        'denom': denom,
+        ('atomsPerDel' if denom == 'del' else 'atomsPerNativeToken'): str(ATOMS_PER_DEL),
         'initialSupplyAtomic': str(total),
         'allocationTotalsAtomic': {key: str(value) for key, value in totals.items()},
         'bankAllocations': sorted(allocations, key=lambda row: row['address']),
@@ -156,12 +166,16 @@ def summarize_allocation(doc, genesis_sha256):
 
 def verify_launch_plan(report, plan):
     """Check the economic plan independently of the fixture signing domain."""
-    check(report['denom'] == plan['denom'] and int(report['atomsPerDel']) == 10**plan['decimals'],
+    denom = report['denom']
+    scale = 'atomsPerDel' if denom == 'del' else 'atomsPerNativeToken'
+    check(denom == plan['denom'] and int(report[scale]) == 10**plan['decimals'],
           'allocation plan denomination differs from the launch genesis')
-    total = uint(plan['initial_supply_atoms'], 'planned DEL supply')
-    check(int(report['initialSupplyAtomic']) == total, 'launch DEL supply differs from the plan')
+    total = uint(plan['initial_supply_atoms'], 'planned native supply')
+    check(int(report['initialSupplyAtomic']) == total, 'launch native supply differs from the plan')
+    wrapper = wrapper_category(denom)
     reserve_categories = {
-        'initial_wdel_backing': 'wrapped_del_backing',
+        'initial_wdel_backing': wrapper,
+        'initial_wrapped_native_backing': wrapper,
         'approved_drc20_reserve': 'drc20_backing',
         'approved_erc1155_origin_reserve': 'nft_origin_backing',
     }
@@ -171,10 +185,12 @@ def verify_launch_plan(report, plan):
     actual = {key: int(value) for key, value in report['allocationTotalsAtomic'].items()}
     check(dict(planned) == actual and sum(planned.values()) == total, 'launch reserve and wallet balances differ from the plan')
 
-    expected_stakes = Counter(uint(row['amount_atoms'], 'planned stake') for row in plan['initial_delegations_within_wdel_backing'])
+    delegations = plan.get('initial_delegations_within_wrapped_native_backing',
+                           plan.get('initial_delegations_within_wdel_backing'))
+    expected_stakes = Counter(uint(row['amount_atoms'], 'planned stake') for row in delegations)
     expected_backing = sum(expected_stakes.elements())
-    check(expected_backing == planned['wrapped_del_backing'] == int(report['initialStakingAtomicAlreadyInBankSupply']),
-          'launch initial stake must use exactly the planned WDEL backing')
+    check(expected_backing == planned[wrapper] == int(report['initialStakingAtomicAlreadyInBankSupply']),
+          'launch initial stake must use exactly the planned wrapper backing')
     check(expected_stakes == Counter(int(row['amountAtomic']) for row in report['genesisDelegations']) and
           expected_stakes == Counter(int(row['initialStakeAtomic']) for row in report['validators']),
           'launch delegation and validator stakes differ from the plan')
@@ -186,7 +202,7 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--genesis', required=True, type=Path, help='Public genesis previously validated by mcnd')
     parser.add_argument('--output', required=True, type=Path, help='Create a new public allocation report')
-    parser.add_argument('--allocation-plan', type=Path, help='Compare the fixture with a draft DEL allocation plan')
+    parser.add_argument('--allocation-plan', type=Path, help='Compare the fixture with a draft native allocation plan')
     args = parser.parse_args()
     try:
         with args.genesis.open('rb') as source:

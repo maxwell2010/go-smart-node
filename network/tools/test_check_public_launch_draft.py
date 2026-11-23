@@ -3,7 +3,8 @@ import json
 import unittest
 
 from check_public_launch_draft import (
-    DEFAULT_DRAFT, DEFAULT_INTAKE, DEFAULT_PLAN, check_draft, check_intake, check_plan, unique_object,
+    DEFAULT_DRAFT, DEFAULT_INTAKE, DEFAULT_PLAN, MAINNET_DRAFT, MAINNET_PLAN,
+    check_draft, check_intake, check_plan, read_reviewed_inputs, unique_object,
 )
 
 
@@ -76,6 +77,17 @@ class PublicLaunchPlanTests(unittest.TestCase):
         self.assertEqual(check_plan(self.plan, self.draft)['status'], 'PLAN_DRAFT_UNAPPROVED')
         self.assertEqual(check_intake(self.intake)['status'], 'INTAKE_DRAFT_UNAPPROVED')
 
+    def test_mainnet_plan_uses_msp_without_changing_economics(self):
+        draft, plan = read_reviewed_inputs(MAINNET_DRAFT, MAINNET_PLAN)
+        self.assertEqual(plan['denom'], 'msp')
+        self.assertEqual(plan['initial_supply_atoms'], self.plan['initial_supply_atoms'])
+        self.assertEqual(check_draft(draft, 'msp')['baseDenom'], 'msp')
+        with self.assertRaisesRegex(ValueError, 'denomination scale'):
+            check_plan(plan, self.draft)
+        draft['app_state']['validator']['params']['base_denom'] = 'del'
+        with self.assertRaisesRegex(ValueError, 'native denomination'):
+            check_draft(draft, 'msp')
+
     def test_selected_validator_count_cannot_drift_or_approve_genesis(self):
         self.assertEqual(check_plan(self.plan, self.draft)['approvedValidatorCount'], 4)
         self.assertFalse(check_intake(self.intake)['publicGenesisApproved'])
@@ -114,7 +126,7 @@ class PublicLaunchPlanTests(unittest.TestCase):
     def test_correct_bank_total_cannot_hide_unbacked_delegations(self):
         self.plan['initial_delegations_within_wdel_backing'][0]['amount_atoms'] = str(
             int(self.plan['initial_delegations_within_wdel_backing'][0]['amount_atoms']) + 1)
-        with self.assertRaisesRegex(ValueError, 'WDEL backing'):
+        with self.assertRaisesRegex(ValueError, 'wrapper backing'):
             check_plan(self.plan, self.draft)
 
     def test_balanced_supply_cannot_hide_unwanted_initial_assets(self):

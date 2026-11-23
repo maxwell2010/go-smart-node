@@ -10,18 +10,21 @@ import tempfile
 
 from check_operator_applications import check_applications, p2p_endpoint, public_bootstrap, read_intake
 from check_public_launch_draft import (
-    DEFAULT_DRAFT, DEFAULT_PLAN, PUBLISHED_SOFTWARE_RECORD, check_contents, check_plan, read_json, require, unique_object,
+    DEFAULT_DRAFT, DEFAULT_PLAN, PUBLISHED_SOFTWARE_RECORD, check_contents, read_reviewed_inputs, require, unique_object,
 )
 from install_validator_genesis import install_genesis, install_operator_genesis
 from native_launch_allocation import MAX_GENESIS_BYTES, summarize_allocation, verify_launch_plan
 from native_launch_package import BINARY, LIMITS, fingerprint, sha256, verify_detached_signature
+from prepare_founding_ledger import sdk_relayer_wallets
 from verify_public_launch_genesis import verify_candidate, verify_cold_launch_profile
 
 
 RELEASE = PUBLISHED_SOFTWARE_RECORD
 MANIFEST_LIMIT = 8192
 PGP_LIMIT = 65536
+RELEASE_RECORD_LIMIT = 65536
 HEX256 = re.compile(r'[0-9a-f]{64}')
+REVISION = re.compile(r'[0-9a-f]{40}')
 
 
 def read_bounded(path, limit):
@@ -31,8 +34,18 @@ def read_bounded(path, limit):
     return data
 
 
-def release_for(binary):
-    published = read_json(RELEASE)
+def release_for(binary, denom='del', record=None, approved_hash=None):
+    require((record is None) == (approved_hash is None),
+            'a software record and its independently approved SHA256 must be supplied together')
+    require(record is not None or denom == 'del', 'the native profile requires its own approved software record')
+    raw = read_bounded(RELEASE if record is None else record, RELEASE_RECORD_LIMIT)
+    if record is not None:
+        require(HEX256.fullmatch(approved_hash) and hashlib.sha256(raw).hexdigest() == approved_hash,
+                'software record SHA256 differs from the independently approved value')
+    published = json.loads(raw, object_pairs_hook=unique_object)
+    require(published.get('nativeDenom', 'del') == denom, 'software record native denomination differs')
+    require(REVISION.fullmatch(published['sourceRevision']) and HEX256.fullmatch(published['archiveSha256']) and
+            HEX256.fullmatch(published['binarySha256']), 'invalid software record revision or checksums')
     require(binary.is_file() and 0 < binary.stat().st_size <= LIMITS[BINARY], 'invalid mcnd binary byte count')
     require(sha256(binary) == published['binarySha256'], 'mcnd binary SHA256 differs from the published release')
     return {key: published[key] for key in ('releaseVersion', 'sourceRevision', 'archiveSha256', 'binarySha256')}
@@ -44,10 +57,10 @@ def manifest_for(genesis, plan, draft, software, first_block_app_hash):
     document = json.loads(genesis, object_pairs_hook=unique_object)
     check_contents(document, forbid_public_material=False)
     require(document['chain_id'] == plan['chain_id'], 'genesis must use the approved public chain ID')
-    verify_cold_launch_profile(document, draft)
+    verify_cold_launch_profile(document, draft, plan['denom'])
     report = summarize_allocation(document, hashlib.sha256(genesis).hexdigest())
     verify_launch_plan(report, plan)
-    return {
+    result = {
         'schemaVersion': 1,
         'scope': 'mintcandy-public-genesis',
         'chainId': report['chainId'],
@@ -61,6 +74,9 @@ def manifest_for(genesis, plan, draft, software, first_block_app_hash):
         'bankRecipients': len(report['bankAllocations']),
         'software': software,
     }
+    if report['denom'] != 'del':
+        result['nativeDenom'] = report['denom']
+    return result
 
 
 def prepare_manifest(genesis, applications, plan, draft, relayers, software, cold, *, include_public_p2p=False):
@@ -75,6 +91,8 @@ def prepare_manifest(genesis, applications, plan, draft, relayers, software, col
         'initialSupplyAtoms': reviewed['initialSupplyAtomic'],
         'wrappedTokenSymbol': reviewed['wrappedTokenSymbol'],
     }
+    if plan['denom'] != 'del':
+        expected['nativeDenom'] = plan['denom']
     require(all(cold.get(key) == value for key, value in expected.items()),
             'cold InitChain report differs from the reviewed genesis')
     manifest = manifest_for(genesis, plan, draft, software, cold.get('firstBlockAppHash'))
@@ -137,6 +155,10 @@ def main():
         command = commands.add_parser(name)
         command.add_argument('--genesis', required=True, type=Path)
         command.add_argument('--binary', required=True, type=Path)
+        command.add_argument('--draft', type=Path, default=DEFAULT_DRAFT)
+        command.add_argument('--plan', type=Path, default=DEFAULT_PLAN)
+        command.add_argument('--software-record', type=Path)
+        command.add_argument('--approved-software-record-sha256')
     for name in ('intake', 'init-chain-report', 'output'):
         commands.choices['prepare'].add_argument('--' + name, required=True, type=Path)
     commands.choices['prepare'].add_argument('--relayer-wallet', required=True, action='append')
@@ -148,19 +170,19 @@ def main():
         command.add_argument('--approved-manifest-sha256', required=True)
         command.add_argument('--signer-fingerprint', required=True)
     commands.choices['install'].add_argument('--home', required=True, type=Path)
-    commands.choices['install'].add_argument('--operator', required=True, help='reviewed d0valoper address')
+    commands.choices['install'].add_argument('--operator', required=True, help='reviewed operator address')
     commands.choices['install-observer'].add_argument('--home', required=True, type=Path)
 
     args = parser.parse_args()
     try:
-        draft, plan = read_json(DEFAULT_DRAFT), read_json(DEFAULT_PLAN)
-        check_plan(plan, draft)
+        draft, plan = read_reviewed_inputs(args.draft, args.plan)
         genesis = read_bounded(args.genesis, MAX_GENESIS_BYTES)
-        software = release_for(args.binary)
+        software = release_for(args.binary, plan['denom'], args.software_record, args.approved_software_record_sha256)
         if args.command == 'prepare':
             applications = check_applications(read_intake(args.intake), plan)
             cold = json.loads(read_bounded(args.init_chain_report, MANIFEST_LIMIT), object_pairs_hook=unique_object)
-            manifest = prepare_manifest(genesis, applications, plan, draft, args.relayer_wallet, software, cold,
+            relayers = sdk_relayer_wallets(args.relayer_wallet, plan)
+            manifest = prepare_manifest(genesis, applications, plan, draft, relayers, software, cold,
                                         include_public_p2p=args.include_public_p2p)
             with args.output.open('xb') as stream:
                 stream.write(encode(manifest))

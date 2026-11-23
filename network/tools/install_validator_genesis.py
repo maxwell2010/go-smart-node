@@ -10,7 +10,7 @@ import tomllib
 
 from check_public_launch_draft import require, unique_object
 from configure_history import validate_fresh_home
-from native_launch_allocation import MAX_GENESIS_BYTES, allocation_report
+from native_launch_allocation import MAX_GENESIS_BYTES, allocation_report, evm_address
 from native_launch_package import sha256
 
 
@@ -67,9 +67,13 @@ def install_genesis(binary, home, genesis, verified, *, operator=None):
     allocation = allocation_report(genesis)
     require(all(verified[key] == allocation[key] for key in ('chainId', 'evmChainId', 'genesisSha256')),
             'verified genesis bytes or signing domain differ')
+    require(verified.get('nativeDenom', 'del') == allocation['denom'], 'verified genesis native denomination differs')
     validators = allocation['validators']
     if operator is not None:
-        matches = [row for row in validators if row['operatorAddress'] == operator]
+        address_field = 'operatorAddress' if allocation['denom'] == 'del' else 'operatorEvmAddress'
+        if address_field == 'operatorEvmAddress':
+            operator = evm_address(operator)
+        matches = [row for row in validators if row[address_field] == operator]
         require(len(matches) == 1 and matches[0]['declaredOnline'] is True and int(matches[0]['initialStakeAtomic']) > 0,
                 'operator has no active starting stake in the verified genesis')
         validator = matches[0]

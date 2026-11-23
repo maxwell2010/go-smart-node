@@ -108,6 +108,52 @@ class PublicGenesisLedgerTest(unittest.TestCase):
     def verify(self):
         return verify_candidate(self.data(), self.applications, self.plan, self.draft, self.relayer_wallets)
 
+    def set_native_profile(self, denom):
+        testnet = denom == 'tmsp'
+        name, symbol = ('MintCandy Test MSP', 'tMSP') if testnet else ('MintCandy', 'MSP')
+        evm_id = '990098' if testnet else '9905401'
+        chain_id = f'mintcandy_{evm_id}-1'
+        self.document['chain_id'] = chain_id
+        self.plan.update(denom=denom, chain_id=chain_id, evm_chain_id=evm_id)
+        self.applications.update(chainId=chain_id, evmChainId=evm_id)
+        state = self.document['app_state']
+        state['validator']['binding_domain'].update(chain_id=chain_id, evm_chain_id=evm_id)
+        coin_lists = [row['coins'] for row in state['bank']['balances']]
+        coin_lists.extend([row['stake']['stake']] for row in state['validator']['delegations'])
+        for coins in [state['bank']['supply'], *coin_lists]:
+            coins[0]['denom'] = denom
+        metadata = state['bank']['denom_metadata'][0]
+        metadata.update(base=denom, display=symbol, name=name, symbol=symbol)
+        metadata['denom_units'][0]['denom'] = denom
+        metadata['denom_units'][1]['denom'] = symbol
+        state['coin']['params'].update(base_denom=denom, base_title=name)
+        state['validator']['params']['base_denom'] = denom
+        state['staking']['params']['bond_denom'] = denom
+        state['mint']['params']['mint_denom'] = denom
+        vm = state['evm']['params']
+        vm['evm_denom'] = vm['extended_denom_options']['extended_denom'] = denom
+        state['gov'] = {'params': {'min_deposit': [{'denom': denom, 'amount': '1'}],
+                                   'expedited_min_deposit': [{'denom': denom, 'amount': '2'}]}}
+        if testnet:
+            storage = state['evm']['accounts'][0]['storage']
+            storage[0]['value'] = storage_string(b'MintCandy Wrapped Test MSP')
+            storage[1]['value'] = storage_string(b'WtMSP')
+
+    def test_tagged_profiles_require_one_denom_across_state_and_their_own_signing_domain(self):
+        for denom, wrapper in (('msp', 'WMSP'), ('tmsp', 'WtMSP')):
+            with self.subTest(denom=denom):
+                self.setUp()
+                self.set_native_profile(denom)
+                report = self.verify()
+                self.assertEqual((report['nativeDenom'], report['wrappedTokenSymbol']), (denom, wrapper))
+                self.assertEqual(prepare_ledger(self.applications, self.plan,
+                                                account(self.document['app_state']['withdrawal_settlement']['wrapped_del']),
+                                                self.document['app_state']['withdrawal_settlement']['gateway'],
+                                                self.relayer_wallets)['bank']['supply'][0]['denom'], denom)
+                self.document['app_state']['gov']['params']['expedited_min_deposit'][0]['denom'] = 'del'
+                with self.assertRaisesRegex(ValueError, 'governance deposit denomination'):
+                    self.verify()
+
     def test_wrapper_ticker_must_match_the_msp_launch(self):
         self.assertEqual(self.verify()['wrappedTokenSymbol'], 'WMSP')
         storage = self.document['app_state']['evm']['accounts'][0]['storage']

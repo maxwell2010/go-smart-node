@@ -8,7 +8,6 @@ import sys
 import tempfile
 from types import SimpleNamespace
 import unittest
-from unittest.mock import patch
 
 from public_genesis_manifest import encode, prepare_manifest, release_for, verify_manifest, verify_public_p2p
 import test_verify_public_launch_genesis as ledger_fixture
@@ -116,14 +115,29 @@ class PublicGenesisManifestTest(unittest.TestCase):
 
     def test_release_check_reads_the_binary_instead_of_trusting_its_filename(self):
         with tempfile.TemporaryDirectory() as directory:
-            binary = Path(directory, 'mcnd')
+            binary, record = Path(directory, 'mcnd'), Path(directory, 'software-record.json')
             binary.write_bytes(b'fixture binary')
             software = {**self.software, 'binarySha256': hashlib.sha256(binary.read_bytes()).hexdigest()}
-            with patch('public_genesis_manifest.read_json', return_value=software):
-                self.assertEqual(release_for(binary), software)
-                binary.write_bytes(b'different binary')
-                with self.assertRaisesRegex(ValueError, 'binary SHA256 differs'):
-                    release_for(binary)
+            record.write_bytes(encode({**software, 'nativeDenom': 'msp'}))
+            digest = hashlib.sha256(record.read_bytes()).hexdigest()
+            self.assertEqual(release_for(binary, 'msp', record, digest), software)
+            with self.assertRaisesRegex(ValueError, 'own approved software record'):
+                release_for(binary, 'msp')
+            with self.assertRaisesRegex(ValueError, 'record SHA256 differs'):
+                release_for(binary, 'msp', record, '0' * 64)
+            with self.assertRaisesRegex(ValueError, 'record native denomination differs'):
+                release_for(binary, 'tmsp', record, digest)
+            binary.write_bytes(b'different binary')
+            with self.assertRaisesRegex(ValueError, 'binary SHA256 differs'):
+                release_for(binary, 'msp', record, digest)
+
+    def test_msp_manifest_requires_the_native_denomination_in_the_cold_report(self):
+        self.fixture.set_native_profile('msp')
+        self.cold['genesisSha256'] = hashlib.sha256(self.fixture.data()).hexdigest()
+        with self.assertRaisesRegex(ValueError, 'cold InitChain report differs'):
+            self.prepare()
+        self.cold['nativeDenom'] = 'msp'
+        self.assertEqual(self.prepare()['nativeDenom'], 'msp')
 
     @unittest.skipUnless(sys.platform == 'linux' and shutil.which('gpg') and shutil.which('gpgv'), 'requires Linux and OpenPGP')
     def test_openpgp_requires_exact_signer_approval_genesis_and_release(self):

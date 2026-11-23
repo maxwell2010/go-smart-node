@@ -72,7 +72,7 @@ class LaunchAllocationTest(unittest.TestCase):
 
     def test_rejects_mismatched_supply(self):
         self.doc['app_state']['bank']['supply'] = [coin(142)]
-        with self.assertRaisesRegex(ValueError, 'bank DEL supply'):
+        with self.assertRaisesRegex(ValueError, 'bank supply'):
             allocation_report(self.encode())
 
     def test_rejects_inconsistent_reserve_and_signing_domain(self):

@@ -5,9 +5,16 @@ from decimal import Decimal
 import json
 from pathlib import Path
 
+import check_operator_applications as operator_intake
 from check_operator_applications import check_applications, read_intake, strict_native_address
-from check_public_launch_draft import DEFAULT_DRAFT, DEFAULT_PLAN, check_plan, read_json, require
+from check_public_launch_draft import DEFAULT_DRAFT, DEFAULT_PLAN, read_reviewed_inputs, require
 from native_launch_allocation import evm_address
+
+
+def sdk_relayer_wallets(wallets, plan):
+    if plan['denom'] == 'msp':
+        return [operator_intake.native_address_from_evm(wallet) for wallet in wallets]
+    return wallets
 
 
 def bank_allocation(operators, plan, wrapped_wallet, relayer_wallets):
@@ -18,7 +25,7 @@ def bank_allocation(operators, plan, wrapped_wallet, relayer_wallets):
             'founder wallet differs from the approved plan')
     wallets = [
         (founder, amounts['founder_free_balance_for_distribution_or_sale']),
-        (wrapped_wallet, amounts['initial_wdel_backing']),
+        (wrapped_wallet, amounts.get('initial_wrapped_native_backing', amounts.get('initial_wdel_backing'))),
     ]
     wallets.extend((row['gasWalletAddress'], row['gasBudgetAtoms']) for row in operators)
     wallets.extend((wallet, amounts['ibc_relayer_fee_wallet']) for wallet in relayer_wallets)
@@ -93,16 +100,19 @@ def prepare_ledger(applications, plan, wrapped_wallet, gateway, relayer_wallets)
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--intake', required=True, type=Path, help='private copy of reviewed operator intake')
-    parser.add_argument('--wrapped-del-wallet', required=True, help='d0 account address of the deployed wrapper')
+    parser.add_argument('--draft', type=Path, default=DEFAULT_DRAFT)
+    parser.add_argument('--plan', type=Path, default=DEFAULT_PLAN)
+    parser.add_argument('--wrapped-native-wallet', '--wrapped-del-wallet', required=True,
+                        help='wrapper account from mcnd-genesis addresses')
     parser.add_argument('--gateway', required=True, help='EVM address of the deployed Gateway')
-    parser.add_argument('--relayer-wallet', required=True, action='append', help='reviewed d0 gas wallet, repeat twice')
+    parser.add_argument('--relayer-wallet', required=True, action='append', help='reviewed relayer gas wallet, repeat twice')
     parser.add_argument('--output', required=True, type=Path, help='new JSON file for the founding ledger')
     args = parser.parse_args()
     try:
-        plan = read_json(DEFAULT_PLAN)
-        check_plan(plan, read_json(DEFAULT_DRAFT))
+        _, plan = read_reviewed_inputs(args.draft, args.plan)
         applications = check_applications(read_intake(args.intake), plan)
-        ledger = prepare_ledger(applications, plan, args.wrapped_del_wallet, args.gateway, args.relayer_wallet)
+        relayers = sdk_relayer_wallets(args.relayer_wallet, plan)
+        ledger = prepare_ledger(applications, plan, args.wrapped_native_wallet, args.gateway, relayers)
         with args.output.open('x', encoding='utf-8') as stream:
             json.dump(ledger, stream, indent=2, sort_keys=True, ensure_ascii=False)
             stream.write('\n')

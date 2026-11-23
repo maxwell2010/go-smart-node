@@ -1,0 +1,137 @@
+{
+  "status": "draft_unapproved",
+  "chain_id": "mintcandy_9905401-1",
+  "evm_chain_id": "9905401",
+  "denom": "msp",
+  "decimals": 18,
+  "initial_supply_atoms": "5041000000000000000000000",
+  "approved_validator_count": 4,
+  "proposed_rehearsal_validator_count": 4,
+  "founder_evm_address": "0x40900a48273644768c09183e00e43528c17a29f6",
+  "founder_address_ownership_confirmed": false,
+  "decisions": {
+    "allocation_approved": true,
+    "chain_id_approved": true,
+    "stake_ownership_approved": true,
+    "proposed_stake_ownership": "founder_owned_delegations",
+    "treasury_control_approved": true,
+    "initial_asset_profile_approved": true,
+    "initial_asset_creation_approved": false,
+    "selected_stake_ownership": "founder_owned_delegations",
+    "selected_stake_owner_evm_address": "0x40900a48273644768c09183e00e43528c17a29f6",
+    "selected_initial_asset_profile": "empty_user_assets_with_later_user_creation"
+  },
+  "bank_allocation": [
+    {
+      "purpose": "founder_free_balance_for_distribution_or_sale",
+      "amount_atoms": "5000000000000000000000000",
+      "evm_address": "0x40900a48273644768c09183e00e43528c17a29f6",
+      "bank_address": null
+    },
+    {
+      "purpose": "initial_wrapped_native_backing",
+      "amount_atoms": "40000000000000000000000",
+      "bank_address": null,
+      "contract_address": null
+    },
+    {
+      "purpose": "validator_fee_wallet",
+      "validator_slot": "V1",
+      "amount_atoms": "200000000000000000000",
+      "bank_address": null
+    },
+    {
+      "purpose": "validator_fee_wallet",
+      "validator_slot": "V2",
+      "amount_atoms": "200000000000000000000",
+      "bank_address": null
+    },
+    {
+      "purpose": "validator_fee_wallet",
+      "validator_slot": "V3",
+      "amount_atoms": "200000000000000000000",
+      "bank_address": null
+    },
+    {
+      "purpose": "validator_fee_wallet",
+      "validator_slot": "V4",
+      "amount_atoms": "200000000000000000000",
+      "bank_address": null
+    },
+    {
+      "purpose": "ibc_relayer_fee_wallet",
+      "relayer_slot": "R1",
+      "amount_atoms": "100000000000000000000",
+      "bank_address": null
+    },
+    {
+      "purpose": "ibc_relayer_fee_wallet",
+      "relayer_slot": "R2",
+      "amount_atoms": "100000000000000000000",
+      "bank_address": null
+    }
+  ],
+  "initial_delegations_within_wrapped_native_backing": [
+    {
+      "validator_slot": "V1",
+      "operator_address": null,
+      "beneficiary_address": null,
+      "proposed_owner_evm_address": "0x40900a48273644768c09183e00e43528c17a29f6",
+      "amount_atoms": "10000000000000000000000",
+      "expected_voting_power": "10000"
+    },
+    {
+      "validator_slot": "V2",
+      "operator_address": null,
+      "beneficiary_address": null,
+      "proposed_owner_evm_address": "0x40900a48273644768c09183e00e43528c17a29f6",
+      "amount_atoms": "10000000000000000000000",
+      "expected_voting_power": "10000"
+    },
+    {
+      "validator_slot": "V3",
+      "operator_address": null,
+      "beneficiary_address": null,
+      "proposed_owner_evm_address": "0x40900a48273644768c09183e00e43528c17a29f6",
+      "amount_atoms": "10000000000000000000000",
+      "expected_voting_power": "10000"
+    },
+    {
+      "validator_slot": "V4",
+      "operator_address": null,
+      "beneficiary_address": null,
+      "proposed_owner_evm_address": "0x40900a48273644768c09183e00e43528c17a29f6",
+      "amount_atoms": "10000000000000000000000",
+      "expected_voting_power": "10000"
+    }
+  ],
+  "initial_nft_reserve_atoms": "0",
+  "initial_drc20_reserve_atoms": "0",
+  "validator_commission_fraction": "0.050000000000000000",
+  "fee_collector_atoms": "0",
+  "isolated_position_vault_atoms": "0",
+  "reward_source": "collected_msp_transaction_fees",
+  "reward_emission": false,
+  "allocation_is_additional_to_delegations": false,
+  "native_token_name": "MintCandy",
+  "native_token_symbol": "MSP",
+  "display_denom": "MSP",
+  "atoms_per_native_token": "1000000000000000000",
+  "founder_requested_free_balance_atoms": "5000000000000000000000000",
+  "initial_supply_is_proposal": false,
+  "treasury_policy": {
+    "selection": "founder_single_account",
+    "selected_by_founder": true,
+    "evm_address": "0x40900a48273644768c09183e00e43528c17a29f6",
+    "multisig_required": false,
+    "separate_allocation_atoms": "0",
+    "purpose": "initial_distribution_contests_and_project_spending_from_founder_balance"
+  },
+  "approved_initial_stake_per_validator_atoms": "10000000000000000000000",
+  "release_requirements": {
+    "empty_user_asset_bootstrap_ci": "pending",
+    "public_backed_token_creation_ci": "pending",
+    "public_nft_creation_ci": "pending",
+    "avatar_metadata_storage_restore_ci": "pending"
+  }
+}
