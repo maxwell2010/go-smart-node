@@ -6,7 +6,7 @@ import sys
 import tempfile
 import unittest
 
-from check_operator_applications import ED25519_TYPE, check_applications, strict_native_address
+from check_operator_applications import ED25519_TYPE, check_applications, public_bootstrap, strict_native_address
 from check_public_launch_draft import DEFAULT_INTAKE, DEFAULT_PLAN, read_json
 
 
@@ -139,12 +139,51 @@ class OperatorApplicationTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, 'secret field'):
             check_applications(self.document, self.plan)
 
+    def test_bootstrap_emits_only_explicitly_public_endpoints_and_separates_seeds(self):
+        sentry, seed, denied, absent = [row['connectivity'] for row in self.document['validators']]
+        sentry['endpoint_publication_allowed'] = True
+        seed.update(role='seed', endpoint_publication_allowed=True)
+        del absent['endpoint_publication_allowed']
+        result = public_bootstrap(check_applications(self.document, self.plan))
+        self.assertEqual(result['status'], 'PUBLIC_BOOTSTRAP_CANDIDATE')
+        self.assertEqual(result['p2p'], {'persistent_peers': sentry['p2p_address'], 'seeds': seed['p2p_address']})
+        self.assertFalse(result['endpointsReachabilityVerified'])
+        self.assertFalse(result['publicGenesisApproved'])
+        for secret in (denied['p2p_address'], absent['p2p_address'], TEST_IDENTITIES[0][0], TEST_IDENTITIES[0][3]):
+            self.assertNotIn(secret, json.dumps(result))
+        self.document['validators'].reverse()
+        self.assertEqual(public_bootstrap(check_applications(self.document, self.plan)), result)
+
+    def test_bootstrap_requires_a_full_roster_and_an_address_providing_blocks(self):
+        seed = self.document['validators'][0]['connectivity']
+        seed.update(role='seed', endpoint_publication_allowed=True)
+        result = public_bootstrap(check_applications(self.document, self.plan))
+        self.assertEqual(result['status'], 'BOOTSTRAP_PEERS_PENDING')
+        self.assertNotIn(seed['p2p_address'], json.dumps(result))
+        self.document['validators'].pop()
+        result = public_bootstrap(check_applications(self.document, self.plan))
+        self.assertEqual(result['status'], 'APPLICATIONS_PENDING')
+        self.assertNotIn('p2p', result)
+
+    def test_bootstrap_rejects_conflicting_public_ids_on_the_same_endpoint(self):
+        first, second = [row['connectivity'] for row in self.document['validators'][:2]]
+        first['endpoint_publication_allowed'] = True
+        second.update(endpoint_publication_allowed=True,
+                      p2p_address=f"{second['node_id']}@PEER1.EXAMPLE.INVALID:26656")
+        with self.assertRaisesRegex(ValueError, 'same host and port'):
+            public_bootstrap(check_applications(self.document, self.plan))
+
     def test_cli_pending_gate_and_duplicate_json(self):
         tool = Path(__file__).with_name('check_operator_applications.py')
         result = subprocess.run([sys.executable, '-B', str(tool), str(DEFAULT_INTAKE), '--require-four'],
                                 capture_output=True, text=True, check=False)
         self.assertEqual(result.returncode, 2, result.stderr)
         self.assertEqual(json.loads(result.stdout)['missingSlots'], 4)
+        public = subprocess.run([sys.executable, '-B', str(tool), str(DEFAULT_INTAKE), '--public-bootstrap'],
+                                capture_output=True, text=True, check=False)
+        self.assertEqual(public.returncode, 2, public.stderr)
+        self.assertEqual(json.loads(public.stdout)['status'], 'APPLICATIONS_PENDING')
+        self.assertNotIn('operators', json.loads(public.stdout))
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory, 'invalid.json')
             path.write_text('{"duplicate":1,"duplicate":2}', encoding='utf-8')

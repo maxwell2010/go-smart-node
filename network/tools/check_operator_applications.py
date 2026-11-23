@@ -210,18 +210,49 @@ def read_intake(path):
         raise ValueError('invalid UTF-8 JSON or duplicate intake fields') from error
 
 
+def public_bootstrap(applications):
+    report = {key: applications[key] for key in (
+        'chainId', 'evmChainId', 'checkedOperators', 'requiredOperators',
+        'endpointsReachabilityVerified', 'publicGenesisApproved',
+    )}
+    if applications['status'] != 'PRECHECK_PASSED':
+        return {**report, 'status': 'APPLICATIONS_PENDING'}
+
+    peers, seeds, services = [], [], set()
+    for operator in applications['operators']:
+        if operator['endpointPublicationAllowed'] is not True:
+            continue
+        endpoint = operator['p2pAddress']
+        service = endpoint.split('@', 1)[1]
+        require(service not in services, 'multiple public P2P IDs use the same host and port')
+        services.add(service)
+        group = seeds if operator['p2pRole'] == 'seed' else peers
+        group.append(endpoint)
+
+    if not peers:
+        return {**report, 'status': 'BOOTSTRAP_PEERS_PENDING'}
+    peer_config = {'persistent_peers': ','.join(sorted(peers)), 'seeds': ','.join(sorted(seeds))}
+    return {**report, 'status': 'PUBLIC_BOOTSTRAP_CANDIDATE', 'p2p': peer_config}
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('intake', type=Path, help='private copy of operator-launch-intake.example.json')
     parser.add_argument('--require-four', action='store_true', help='return a failing exit status until four applications pass preflight')
+    parser.add_argument('--public-bootstrap', action='store_true',
+                        help='emit only the candidate P2P configuration from explicitly publishable endpoints')
     args = parser.parse_args()
     try:
         plan = read_json(DEFAULT_PLAN)
         check_plan(plan, read_json(DEFAULT_DRAFT))
         report = check_applications(read_intake(args.intake), plan)
+        if args.public_bootstrap:
+            report = public_bootstrap(report)
     except (OSError, ValueError, RecursionError) as error:
         parser.exit(1, f'operator applications: {error}\n')
     print(json.dumps(report, sort_keys=True, indent=2))
+    if args.public_bootstrap:
+        return 0 if report['status'] == 'PUBLIC_BOOTSTRAP_CANDIDATE' else 2
     return 2 if args.require_four and report['status'] != 'PRECHECK_PASSED' else 0
 
 
