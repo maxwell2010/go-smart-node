@@ -182,7 +182,7 @@ genesis с тем же SHA256. Релеер получил 50 тестовых M
 - [Проверка формата программного пакета](SOFTWARE_RELEASE_VERIFICATION.md),
   [установка 1.1.5](https://github.com/maxwell2010/go-smart-node/releases/download/v1.1.5/INSTALL_RU.md),
   [синхронизация и хранение](SYNCHRONIZATION_AND_STORAGE.md).
-- [Проверенный офлайн-комплект v1.1.4](INSTALL_LAUNCH_TOOLS.md) с готовым
+- [Проверенный офлайн-комплект v1.1.5](INSTALL_LAUNCH_TOOLS.md) с готовым
   `mcnd-genesis` и утилитой установки подписанного genesis в новый каталог.
 
 Нужны открытые operator/reward/beneficiary/gas адреса, новый Ed25519 consensus

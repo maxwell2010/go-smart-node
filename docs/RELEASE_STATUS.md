@@ -18,6 +18,12 @@ and signed media publication on isolated networks.
 [Public genesis checks](https://github.com/maxwell2010/go-smart-node/actions/runs/45124032353) ·
 [Release evidence](../network/docs/ru/evidence/software-release-1.1.5.json).
 
+The separately attested launch toolkit was unpacked, cold-verified and
+used to install a signed WMSP test genesis in a disposable validator home
+with the published v1.1.5 daemon.
+[Toolkit and verification](../network/docs/ru/INSTALL_LAUNCH_TOOLS.md) ·
+[Toolkit rehearsal](https://github.com/maxwell2010/go-smart-node/actions/runs/45126815779).
+
 ## 1.1.4 software release
 
 [MintCandy Node 1.1.4](https://github.com/maxwell2010/go-smart-node/releases/tag/v1.1.4)

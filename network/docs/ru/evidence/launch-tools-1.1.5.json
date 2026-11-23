@@ -1,0 +1,30 @@
+{
+  "actionsArtifact": 14796601038,
+  "actionsArtifactDigest": "sha256:bfd416c4cb70cb997184877c48e51873d165827d42bd2ba7a71922dadcb28df1",
+  "actionsRun": "https://github.com/maxwell2010/go-smart-node/actions/runs/45126815779",
+  "actionsRunAttempt": 1,
+  "archiveBytes": 76951826,
+  "archiveName": "mintcandy-launch-tools-linux-amd64.tar.gz",
+  "archiveSha256": "34b79eb5c2e120342580a7024c20fe28bcdab841f7939ab320d7b2196c7f585b",
+  "assemblerSha256": "90225d7d41f0974e0f5942b1c959ab432a47b0f4161088646dc857e1a58ae018",
+  "compatibleMcndSha256": "016943857fd4c9a929b1922c540a222afb93e4e5bcbd1ac74f3ccaf78f41cd0d",
+  "compatibleMcndVersion": "1.1.5",
+  "includesRunnableGenesis": false,
+  "includesValidatorKeys": false,
+  "networkLaunchAuthorized": false,
+  "platform": "linux/amd64",
+  "reportsSha256": {
+    "allocation.json": "71c7e5fab8411fccddc8e770f875269bd8b460f62b180bb3e7e9437c9fd7f803",
+    "assembly.json": "ec6a2c302df43ae8fe4c061d1338af957cd03b134235e4417d035a9b02981ca0",
+    "default-launch-parameters.json": "abcbac84f97371d2a4854942156e8b6cba8e10c27e626060468656233f9d9ed5",
+    "install.json": "7cf79ddadaab9f4bbf6cfd48823a765ccf7d7780c06220dd759b2ffb1cc74315",
+    "packaged-tools-draft.json": "02354439e39d1f2ce45a33d98f259dc32df7104a5bdba55f468c70185d1c93f6",
+    "validator-install.json": "a45c5e048fff665ee8249b88201bde52b27e2b9eddc17fe9bcea3a52cbb59827"
+  },
+  "schemaVersion": 1,
+  "scope": "offline-launch-tools",
+  "signerWorkflow": "maxwell2010/go-smart-node/.github/workflows/published-node-rehearsal.yml",
+  "sourceRef": "refs/heads/feat/native-duplicate-vote-master-20261112",
+  "sourceRevision": "60eeb4fcd8774764a237a8020b9769f88587504c",
+  "wrappedTokenSymbol": "WMSP"
+}
