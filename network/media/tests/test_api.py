@@ -1,11 +1,11 @@
 import base64
 from contextlib import closing
-import http.client
 import io
 import json
 import os
 from pathlib import Path
 import socket
+import ssl
 import subprocess
 import sys
 from tempfile import TemporaryDirectory
@@ -16,7 +16,7 @@ from unittest.mock import patch
 from mcnd_media.api import BODY_LIMIT, create_app
 from mcnd_media.store import Asset, MediaStore, canonical, cid, prepare_media
 from test_commitment import CHAIN, CREATOR, META, TOKEN
-from test_gateway import NGINX, gateway
+from test_gateway import NGINX, gateway, request
 
 
 MEDIA_ROOT = Path(__file__).resolve().parents[1]
@@ -110,19 +110,18 @@ def fail_if_called(*_):
     raise AssertionError('malformed requests must never hit RPC')
 
 
-@unittest.skipUnless(NGINX and os.environ.get('MCND_MEDIA_TEST_FULL') == '1', 'requires real HTTP stack')
-class HttpApiChecks(unittest.TestCase):
+@unittest.skipUnless(NGINX and os.environ.get('MCND_MEDIA_TEST_FULL') == '1', 'requires real HTTPS stack')
+class HttpsApiChecks(unittest.TestCase):
     def test_prepare_publish_and_serve_through_nginx_and_gunicorn(self):
         from PIL import Image
 
-        def request(port, path, method='GET', data=None, headers=None):
-            with closing(http.client.HTTPConnection('127.0.0.1', port, timeout=4)) as conn:
-                conn.request(method, path, body=data, headers=headers or {})
-                response = conn.getresponse()
-                return response.status, response.headers, response.read()
-
         with TemporaryDirectory() as directory:
             root = Path(directory)
+            cert, key = root / 'cert.pem', root / 'key.pem'
+            subprocess.run(['openssl', 'req', '-x509', '-newkey', 'rsa:2048', '-nodes', '-days', '1',
+                            '-subj', '/CN=media-test.invalid', '-addext', 'subjectAltName=IP:127.0.0.1',
+                            '-keyout', str(key), '-out', str(cert)], check=True, capture_output=True, timeout=10)
+            trusted = ssl.create_default_context(cafile=str(cert))
             picture = io.BytesIO()
             Image.new('RGB', (5, 5), '#0055ee').save(picture, format='PNG')
             raw = picture.getvalue()
@@ -150,33 +149,50 @@ class HttpApiChecks(unittest.TestCase):
                             time.sleep(0.1)
                     else:
                         self.fail('Gunicorn did not listen')
-                    with gateway(root / 'proxy', root, live, MEDIA_ROOT / 'nginx-media-limits.conf') as port:
+                    with gateway(root / 'proxy', root, live, MEDIA_ROOT / 'nginx-media-limits.conf',
+                                 certificate=(cert, key)) as port:
+                        with self.assertRaises(ssl.SSLCertVerificationError):
+                            request(port, '/', context=ssl.create_default_context())
+                        with socket.create_connection(('127.0.0.1', port), timeout=4) as connection:
+                            with self.assertRaises(ssl.SSLCertVerificationError):
+                                trusted.wrap_socket(connection, server_hostname='wrong-media-host.invalid')
+                        for version in (ssl.TLSVersion.TLSv1_2, ssl.TLSVersion.TLSv1_3):
+                            context = ssl.create_default_context(cafile=str(cert))
+                            context.minimum_version = context.maximum_version = version
+                            self.assertEqual(request(port, '/', context=context)[0], 404)
+                        self.assertEqual(request(port, '/v1/publish', method='POST')[0], 400)
+
+                        def secure(path, method='GET', data=None, headers=None):
+                            return request(port, path, method, data, headers, context=trusted)
+
                         headers = {'Content-Type': 'application/json'}
                         body = upload(raw)
-                        code, _, result = request(port, '/v1/prepare', 'POST', canonical(body), headers)
+                        code, _, result = secure('/v1/prepare', 'POST', canonical(body), headers)
                         self.assertEqual(code, 200)
                         self.assertEqual(json.loads(result)['metadata_uri'], uri)
                         metadata_path = '/ipfs/' + cid(metadata)
-                        self.assertEqual(request(port, metadata_path)[0], 404)
+                        self.assertEqual(secure(metadata_path)[0], 404)
                         publish = {**body, 'contract': TOKEN, 'token_id': '0'}
                         altered = {**publish, 'metadata': {'name': 'Unauthorized alternative'}}
-                        self.assertEqual(request(port, '/v1/publish', 'POST', canonical(altered), headers)[0], 422)
-                        code, _, result = request(port, '/v1/publish', 'POST', canonical(publish), headers)
+                        self.assertEqual(secure('/v1/publish', 'POST', canonical(altered), headers)[0], 422)
+                        code, _, result = secure('/v1/publish', 'POST', canonical(publish), headers)
                         self.assertEqual(code, 200)
                         self.assertEqual(json.loads(result)['version'], 1)
-                        self.assertEqual(request(port, '/v1/publish', 'POST', canonical(publish), headers)[2], result)
+                        self.assertEqual(secure('/v1/publish', 'POST', canonical(publish), headers)[2], result)
                         for path, expected, mime in ((metadata_path, metadata, 'application/json'),
                                                        ('/ipfs/' + cid(normalized), normalized, 'image/png')):
-                            code, response_headers, payload = request(port, path)
+                            code, response_headers, payload = secure(path)
                             self.assertEqual((code, payload), (200, expected))
                             self.assertEqual(response_headers['Content-Type'], mime)
+                            self.assertEqual(response_headers['Access-Control-Allow-Origin'], '*')
                             self.assertIn('immutable', response_headers['Cache-Control'])
-                            self.assertEqual(request(port, path, 'HEAD')[2], b'')
-                        self.assertEqual(request(port, '/index.sqlite3')[0], 404)
-                        self.assertEqual(request(port, '/v1/prepare', 'POST', b'', {
+                            self.assertEqual(secure(path, 'HEAD')[2], b'')
+                        self.assertEqual(secure('/index.sqlite3')[0], 404)
+                        self.assertEqual(secure('/key.pem')[0], 404)
+                        self.assertEqual(secure('/v1/prepare', 'POST', b'', {
                             **headers, 'Content-Length': str(BODY_LIMIT + 1),
                         })[0], 413)
-                        attempts = [request(port, '/v1/prepare', 'POST', b'{}', headers)[0] for _ in range(7)]
+                        attempts = [secure('/v1/prepare', 'POST', b'{}', headers)[0] for _ in range(7)]
                         self.assertIn(429, attempts)
                     with closing(MediaStore(store_root)) as store:
                         self.assertEqual(len(store.verify()[0]), 1)

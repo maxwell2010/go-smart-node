@@ -47,9 +47,10 @@ jobs:
           tar --extract --gzip --file "$directory/kubo.tar.gz" --directory "$directory" kubo/ipfs
           "$directory/kubo/ipfs" version
           echo "MCND_MEDIA_KUBO=$directory/kubo/ipfs" >> "$GITHUB_ENV"
-      - name: Test decoding, quotas and HTTP delivery from restored media
+      - name: Test decoding, HTTPS publication and delivery from restored media
         run: |
           set -euo pipefail
+          command -v openssl
           sudo -n unshare --net -- bash -euc 'ip link set lo up; exec runuser -u "$SUDO_USER" -- "$@"' _ \
             env PYTHONPATH="$GITHUB_WORKSPACE/network/media" MCND_MEDIA_TEST_FULL=1 \
               MCND_MEDIA_NGINX="$MCND_MEDIA_NGINX" MCND_MEDIA_KUBO="$MCND_MEDIA_KUBO" \

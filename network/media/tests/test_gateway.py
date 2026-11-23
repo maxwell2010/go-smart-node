@@ -7,6 +7,7 @@ import os
 from pathlib import Path
 import random
 import socket
+import ssl
 import subprocess
 import sys
 import tempfile
@@ -25,10 +26,11 @@ AVATAR = Asset('mintcandy_9905401-1', '0x' + '22' * 20, 'erc20')
 NFT = Asset('mintcandy_9905401-1', '0x' + '33' * 20, 'erc1155', '1024')
 
 
-def request(port, path, method='GET'):
-    conn = http.client.HTTPConnection('127.0.0.1', port, timeout=2)
+def request(port, path, method='GET', data=None, headers=None, *, context=None):
+    conn = (http.client.HTTPConnection('127.0.0.1', port, timeout=4) if context is None
+            else http.client.HTTPSConnection('127.0.0.1', port, timeout=4, context=context))
     try:
-        conn.request(method, path)
+        conn.request(method, path, body=data, headers=headers or {})
         response = conn.getresponse()
         return response.status, response.headers, response.read()
     finally:
@@ -36,13 +38,23 @@ def request(port, path, method='GET'):
 
 
 @contextmanager
-def gateway(root, public, rules=NGINX_RULES, http_rules=None):
+def gateway(root, public, rules=NGINX_RULES, http_rules=None, *, certificate=None):
     root.mkdir()
     with socket.socket() as listener:
         listener.bind(('127.0.0.1', 0))
         port = listener.getsockname()[1]
     config = root / 'nginx.conf'
     http_include = f'include "{http_rules}";' if http_rules else ''
+    tls_options = ''
+    tls_identity = ''
+    listen_suffix = ''
+    context = None
+    if certificate is not None:
+        cert, key = certificate
+        tls_options = 'ssl_protocols TLSv1.2 TLSv1.3;'
+        tls_identity = f'ssl_certificate "{cert}"; ssl_certificate_key "{key}";'
+        listen_suffix = ' ssl'
+        context = ssl.create_default_context(cafile=str(cert))
     config.write_text(f'''daemon off;
 master_process off;
 pid "{root}/nginx.pid";
@@ -51,6 +63,7 @@ error_log stderr;
 events {{ worker_connections 32; }}
 http {{
     {http_include}
+    {tls_options}
     access_log off;
     client_body_temp_path client-body;
     proxy_temp_path proxy;
@@ -58,7 +71,8 @@ http {{
     uwsgi_temp_path uwsgi;
     scgi_temp_path scgi;
     server {{
-        listen 127.0.0.1:{port};
+        listen 127.0.0.1:{port}{listen_suffix};
+        {tls_identity}
         root "{public}";
         include "{rules}";
     }}
@@ -72,7 +86,7 @@ http {{
                 if process.poll() is not None:
                     raise RuntimeError(process.stderr.read().decode(errors='replace'))
                 try:
-                    request(port, '/')
+                    request(port, '/', context=context)
                     break
                 except OSError:
                     time.sleep(0.1)

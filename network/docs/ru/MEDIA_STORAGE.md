@@ -150,9 +150,25 @@ sudo journalctl -u mcnd-media.service -n 50
 
 Подключите [настройки лимитов](../../media/nginx-media-limits.conf) один раз в
 блоке `http` и [маршруты API](../../media/nginx-live.conf) в блоке `server`
-выделенного HTTPS-домена. Используйте абсолютные пути в `include`. Проверьте
-конфигурацию командой `nginx -t` до её применения. Nginx отправляет запросы
-на loopback Gunicorn. Хранилище, SQLite и RPC не нужны в публичном каталоге.
+выделенного HTTPS-домена. В `http` задайте
+`ssl_protocols TLSv1.2 TLSv1.3;`. Замените тестовое имя и пути в примере
+на согласованный домен, полную цепочку сертификата и закрытый ключ.
+
+```nginx
+server {
+    listen 443 ssl;
+    server_name media.example.com;
+    ssl_certificate /etc/nginx/media/fullchain.pem;
+    ssl_certificate_key /etc/nginx/media/privkey.pem;
+    include /etc/nginx/media/nginx-live.conf;
+}
+```
+
+Используйте абсолютные пути в `include` и проверьте конфигурацию командой
+`nginx -t` до её применения. Nginx отправляет запросы на Gunicorn по loopback.
+Данные, SQLite и RPC остаются во внутреннем контуре. Проверьте с отдельного
+клиента сертификат домена и выдачу известного CID по HTTPS.
+[Настройка HTTPS в Nginx](https://nginx.org/en/docs/http/configuring_https_servers.html).
 
 1. В `POST /v1/prepare` передайте JSON с полями `kind`, `metadata`,
    `image_base64` и `mime`. Ответ содержит `metadata_uri` и `image_uri`.
