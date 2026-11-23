@@ -559,6 +559,36 @@ def prepare_native_owned(lab, mcnd, fixture, *, assembly_report=None, donor_file
         require(all(checkpoint[key] == value for key, value in header.items()),
                 "the native committed block before restart must remain unchanged")
 
+    def restore_observer(replacement, probe, channel, pending, value):
+        from native_consensus_smoke import create_replica, wait_peer_pair
+        from native_launch_rehearsal import configure_peers, verify_first_block, verify_systemd_upgrade
+        from native_launch_systemd import SystemdFollower
+
+        report = lab.report
+        report["resourceUsage"]["validatorsBeforeRestart"] = measure_validators()
+        report["binarySha256"] = report["binaries"]["mcnd"]["sha256"]
+        report["upgradePackage"] = {"binarySha256": report["binaries"]["replacement"]["sha256"]}
+
+        def verify_packet(follower):
+            port = follower.p2p + 1
+            lab.wait(lambda: commitments(port, channel) == pending and escrow(port, "del") == value,
+                     "observer must see the exact pending commitment and escrow")
+            return {"commitments": pending, "escrowAtomic": str(value)}
+
+        with SystemdFollower(mcnd, report["binarySha256"], signals=lab.signals, iavl_schema_probe=probe) as systemd:
+            follower = create_replica(systemd.binary, systemd.root, "follower", len(replicas), genesis, None,
+                                      lab.env, chain_id=chain_id, evm_chain_id=expected["evmChainId"])
+            configure_peers(follower, replicas)
+            systemd.prepare(follower.home)
+            follower.start(systemd.binary, lab.env, systemd, "ibc-observer")
+            wait_peer_pair(replicas[0], follower, 60, report)
+            verify_packet(follower)
+            require(int(follower.rpc("status")["validator_info"]["voting_power"]) == 0,
+                    "the restored observer must have no consensus votes")
+            report["block1Hash"] = verify_first_block([*replicas, follower])
+            verify_systemd_upgrade(systemd, follower, replicas, expected, genesis, replacement, report,
+                                   verify_state=verify_packet)
+
     start_all("ibc-initial", mcnd)
     snapshot = verify_replicas(height + 1)
     if assembly_report is not None:
@@ -574,6 +604,7 @@ def prepare_native_owned(lab, mcnd, fixture, *, assembly_report=None, donor_file
     print(f"{len(replicas)} native consensus daemons with matching app hashes: PASS", flush=True)
     return {**owned, "chain": chain_id, "restart": restart_all, "verify_replicas": verify_replicas,
             "verify_pending": verify_pending, "verify_checkpoint": verify_checkpoint,
+            "restore_observer": restore_observer if assembly_report is not None else None,
             "measure_validators": measure_validators if assembly_report is not None else None}
 
 
@@ -758,7 +789,7 @@ def clear_packets(run, chain_id, channel):
 
 
 def full_suite(lab, mcnd, reference, hermes, native_fixture=None, *, assembly_report=None, donor_file=None,
-               replacement=None):
+               replacement=None, observer_schema_probe=None):
     a, b, run, a_channel, b_channel = connect_transfer(lab, mcnd, reference, hermes, native_fixture=native_fixture,
                                                        assembly_report=assembly_report, donor_file=donor_file)
     chain_id = a.get("chain", A_ID)
@@ -818,7 +849,9 @@ def full_suite(lab, mcnd, reference, hermes, native_fixture=None, *, assembly_re
         a["verify_pending"](a_channel, pending, value)
         before_restart = a["verify_replicas"](heights[0])
     lab.stop(b["process"])
-    if replacement is not None:
+    if observer_schema_probe is not None:
+        a["restore_observer"](replacement, observer_schema_probe, a_channel, pending, value)
+    elif replacement is not None:
         original_signing = a["restart"](replacement, "ibc-release-successor", check_signing=True)
         successor = a["verify_replicas"](before_restart["height"] + 1)
         a["verify_checkpoint"](before_restart)
@@ -851,7 +884,10 @@ def full_suite(lab, mcnd, reference, hermes, native_fixture=None, *, assembly_re
         acknowledgments = [event for event in new_events(a, before["a_tx"], "acknowledge_packet")
                            if event.get("packet_sequence") == sequence and event.get("packet_src_channel") == a_channel]
         require(len(acknowledgments) == 1, "the preserved packet must be acknowledged exactly once")
-        lab.report["publishedReleaseSwitch"].update(acknowledgedSequence=sequence, ackCount=len(acknowledgments))
+        if observer_schema_probe is not None:
+            lab.report["observerRestoreIBC"] = {"acknowledgedSequence": sequence, "ackCount": len(acknowledgments)}
+        else:
+            lab.report["publishedReleaseSwitch"].update(acknowledgedSequence=sequence, ackCount=len(acknowledgments))
     lab.report["phases"]["pending_packet_restart"]["preserved_packets"] = pending
     if native_fixture:
         lab.report["phases"]["pending_packet_restart"].update(
@@ -908,7 +944,9 @@ def full_suite(lab, mcnd, reference, hermes, native_fixture=None, *, assembly_re
         lab.report["status"] = "TWO_PROCESS_HERMES_PASS"
         lab.report["scope"] = "Actual owned/reference IBC interoperability only; native Decimal economic parity is a separate gate."
     lab.report["release_gate"] = True
-    if replacement is None:
+    if observer_schema_probe is not None:
+        lab.report["upgrade_scope"] = "Two published binaries migrated the IAVL bank store and restored the non-signing observer while a real packet remained pending."
+    elif replacement is None:
         lab.report["upgrade_scope"] = "Same-binary disk reopen only; no module migration, client upgrade or SDK major upgrade is verified."
     else:
         lab.report["upgrade_scope"] = "Two published binaries switched on the same homes; module migration and database restore were outside this scenario."
@@ -1091,6 +1129,7 @@ def main(argv=None, signals=None):
     parser.add_argument("--replacement-binary")
     parser.add_argument("--replacement-sha256")
     parser.add_argument("--replacement-source-commit")
+    parser.add_argument("--observer-schema-probe", type=Path)
     parser.add_argument("--native-fixture", type=Path)
     parser.add_argument("--assembly-report", type=Path)
     parser.add_argument("--fixture-donor-key", type=Path)
@@ -1131,6 +1170,8 @@ def main(argv=None, signals=None):
             require(replacement_hash != mcnd_hash, "rehearsal executable must differ from the default daemon")
             report["binaries"]["replacement"] = {"sha256": replacement_hash, "source_commit": args.mcnd_source_commit,
                                                 "scope": "same-family lab-only handler"}
+        require(args.observer_schema_probe is None or args.replacement_source_commit is not None,
+                "observer restore requires two distinct published binaries")
         with tempfile.TemporaryDirectory(prefix="mintcandy-hermes-lab-") as temp:
             root = Path(temp)
             env = private_environment(root)
@@ -1140,7 +1181,7 @@ def main(argv=None, signals=None):
                 if args.mode in ("full", "native-full"):
                     full_suite(lab, mcnd, reference, hermes, native_fixture=args.native_fixture,
                                assembly_report=args.assembly_report, donor_file=args.fixture_donor_key,
-                               replacement=replacement)
+                               replacement=replacement, observer_schema_probe=args.observer_schema_probe)
                 elif args.mode == "client-upgrade":
                     client_upgrade_suite(lab, mcnd, replacement, reference, hermes)
                 else:

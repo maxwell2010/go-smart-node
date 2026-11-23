@@ -480,7 +480,7 @@ def verify_systemd_restart(systemd, follower, validators, expected, report):
     return synced["verifiedHeight"]
 
 
-def verify_systemd_upgrade(systemd, follower, validators, expected, genesis, upgrade_binary, report):
+def verify_systemd_upgrade(systemd, follower, validators, expected, genesis, upgrade_binary, report, *, verify_state=None):
     report["phase"] = "systemd-follower-upgrade"
     before = int(follower.rpc("abci_info")["response"]["last_block_height"])
     previous_handshakes = len(log_records(follower.log, "ABCI Handshake App Info"))
@@ -496,6 +496,8 @@ def verify_systemd_upgrade(systemd, follower, validators, expected, genesis, upg
         check(upgraded["iavlBefore"]["committedHeight"] == synced["loadedHeight"],
               "upgraded daemon did not load the measured IAVL backup height")
     report["systemdUpgrade"] = {**upgraded, "beforeHeight": before, **synced}
+    if verify_state is not None:
+        report["systemdUpgrade"]["applicationState"] = verify_state(follower)
 
     report["phase"] = "systemd-follower-rollback"
     previous_handshakes = len(log_records(follower.log, "ABCI Handshake App Info"))
@@ -508,6 +510,8 @@ def verify_systemd_upgrade(systemd, follower, validators, expected, genesis, upg
     check((restored["loadedHeight"], restored["loadedAppHash"]) == (synced["loadedHeight"], synced["loadedAppHash"]),
           "rollback did not load the offline backup checkpoint")
     report["systemdRollback"] = {**rollback, **restored}
+    if verify_state is not None:
+        report["systemdRollback"]["applicationState"] = verify_state(follower)
     if "iavlBefore" in upgraded:
         check(rollback["iavlAfterUpgrade"]["committedHeight"] >= synced["verifiedHeight"] and
               rollback["iavlAfterUpgrade"]["fastStorageHeight"] >= synced["loadedHeight"] and

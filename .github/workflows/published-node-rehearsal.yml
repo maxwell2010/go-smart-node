@@ -5,7 +5,7 @@ on:
     inputs:
       scenario:
         type: choice
-        options: [all, node, ibc, tools, media, retention, approvals, release-switch, release-restore]
+        options: [all, node, ibc, tools, media, retention, approvals, release-switch, release-restore, release-restore-ibc]
         default: all
       candidate_run:
         description: Successful software packaging run ID (empty uses the pinned release)
@@ -489,7 +489,7 @@ jobs:
           jq -e '.status == "PASS" and .loopbackOnlyNamespace and .chainId == "mintcandy_990014-1" and
             (.committedMedia | .status == "PASS" and .version == 1 and .kind == "erc20-reserveless" and .alteredMetadataRejected)' "$report"
       - name: Install the previous published daemon
-        if: inputs.scenario == 'release-switch' || inputs.scenario == 'release-restore'
+        if: inputs.scenario == 'release-switch' || inputs.scenario == 'release-restore' || inputs.scenario == 'release-restore-ibc'
         env:
           GH_TOKEN: ${{ github.token }}
         shell: bash
@@ -560,7 +560,7 @@ jobs:
               .iavlRestored == $upgrade.iavlBefore and .iavlAfterSync.storageVersion == "1.0.0")
           ' "$report"
       - name: Verify Hermes interoperability on the same assembled genesis
-        if: github.event_name == 'push' || inputs.scenario == 'all' || inputs.scenario == 'ibc' || inputs.scenario == 'release-switch'
+        if: github.event_name == 'push' || inputs.scenario == 'all' || inputs.scenario == 'ibc' || inputs.scenario == 'release-switch' || inputs.scenario == 'release-restore-ibc'
         shell: bash
         working-directory: launch-assembly/network
         run: |
@@ -583,10 +583,14 @@ jobs:
           report="$root/evidence/ibc.json"
           daemon=(--mcnd-binary "$root/bin/mcnd" --mcnd-sha256 "$RELEASE_BINARY_SHA" --mcnd-source-commit "$RELEASE_SOURCE")
           base_hash="$RELEASE_BINARY_SHA"
-          if [[ "$REHEARSAL_SCENARIO" == release-switch ]]; then
+          if [[ "$REHEARSAL_SCENARIO" == release-switch || "$REHEARSAL_SCENARIO" == release-restore-ibc ]]; then
             base_hash="$PREDECESSOR_BINARY_SHA"
             daemon=(--mcnd-binary "$root/predecessor/mcnd" --mcnd-sha256 "$base_hash" --mcnd-source-commit "$PREDECESSOR_SOURCE"
                     --replacement-binary "$root/bin/mcnd" --replacement-sha256 "$RELEASE_BINARY_SHA" --replacement-source-commit "$RELEASE_SOURCE")
+          fi
+          if [[ "$REHEARSAL_SCENARIO" == release-restore-ibc ]]; then
+            go build -mod=readonly -p 2 -trimpath -o "$root/iavl-schema-probe" ./tools/iavl_schema_probe
+            daemon+=(--observer-schema-probe "$root/iavl-schema-probe")
           fi
           status=0
           sudo -n unshare --net -- bash -euc 'ip link set lo up; exec "$@"' _ \
@@ -624,6 +628,21 @@ jobs:
               .publishedReleaseSwitch.acknowledgedSequence == (.phases.pending_packet_restart.preserved_packets[0].sequence | tostring) and
               (.publishedReleaseSwitch | .ackCount == 1 and .successorCheckpoint.signers == ["a","b","c","d"] and
                 (.beforeSignerHeights | length == 4) and (.successorSignerHeights | length == 4))
+            ' "$report"
+          fi
+          if [[ "$REHEARSAL_SCENARIO" == release-restore-ibc ]]; then
+            jq -e --arg old "$PREDECESSOR_BINARY_SHA" --arg new "$RELEASE_BINARY_SHA" '
+              .phases.pending_packet_restart.preserved_packets as $packets |
+              .systemdUpgrade as $upgrade | .systemdRollback as $rollback |
+              ($packets | length == 1) and .observerRestoreIBC.ackCount == 1 and
+              .observerRestoreIBC.acknowledgedSequence == ($packets[0].sequence | tostring) and
+              $upgrade.binarySha256 == $new and $rollback.binarySha256 == $old and
+              $upgrade.backupHomeSha256 == $rollback.backupHomeSha256 and
+              $upgrade.loadedHeight == $rollback.loadedHeight and $upgrade.loadedAppHash == $rollback.loadedAppHash and
+              $upgrade.applicationState == $rollback.applicationState and
+              $upgrade.applicationState.commitments == $packets and $upgrade.applicationState.escrowAtomic == "1000000000000000000" and
+              $upgrade.iavlBefore.storageVersion == "1.0.0" and $rollback.iavlAfterUpgrade.storageVersion == "1.1.0" and
+              $rollback.iavlRestored == $upgrade.iavlBefore and $rollback.iavlAfterSync.storageVersion == "1.0.0"
             ' "$report"
           fi
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
