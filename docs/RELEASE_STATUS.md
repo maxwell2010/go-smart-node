@@ -41,6 +41,16 @@ The exercise covers binary replacement with intact state for this pair.
 [Release-switch run](https://github.com/maxwell2010/go-smart-node/actions/runs/45131811346) ·
 [Report artifact](https://github.com/maxwell2010/go-smart-node/actions/runs/45131811346#artifacts).
 
+The independently attested v1.1.4 and v1.1.5 archives also passed the
+systemd backup and restore rehearsal on a non-signing observer. With the
+observer stopped, the bank IAVL store at height 22 used format 1.0.0.
+The v1.1.5 observer enabled the fast index and persisted format 1.1.0.
+It synchronized with the validators through height 25. The original
+binary and byte-checked backup reopened height 22 with the original
+AppHash and format 1.0.0. The restored observer synchronized through
+height 26 and persisted the original format at height 27.
+[Systemd restore run and report](https://github.com/maxwell2010/go-smart-node/actions/runs/45134099952).
+
 ## 1.1.4 software release
 
 [MintCandy Node 1.1.4](https://github.com/maxwell2010/go-smart-node/releases/tag/v1.1.4)
