@@ -12,7 +12,7 @@ from check_public_launch_draft import DEFAULT_DRAFT, DEFAULT_INTAKE, DEFAULT_PLA
 from native_launch_allocation import allocation_report, verify_launch_plan
 from prepare_founding_ledger import prepare_ledger
 from test_check_operator_applications import TEST_IDENTITIES
-from verify_public_launch_genesis import verify_candidate
+from verify_public_launch_genesis import WRAPPER_METADATA, verify_candidate
 from withdrawal_genesis_smoke import ALPHABET
 
 
@@ -41,6 +41,10 @@ def coin(amount):
     return {'denom': 'del', 'amount': amount}
 
 
+def storage_string(value):
+    return f'0x{value.hex():0<62}{2 * len(value):02x}'
+
+
 class PublicGenesisLedgerTest(unittest.TestCase):
     def setUp(self):
         self.draft = read_json(DEFAULT_DRAFT)
@@ -56,6 +60,10 @@ class PublicGenesisLedgerTest(unittest.TestCase):
         state['auth'] = {'accounts': []}
         state['ibc'] = {}
         state['transfer'] = {}
+        state['evm']['accounts'] = [{
+            'address': profile['wrapped_del'],
+            'storage': [{'key': key, 'value': storage_string(value)} for key, value in WRAPPER_METADATA.items()],
+        }]
         state['nft'].update(collections=[{'addressDRC': profile['position_vault'], 'supply': '0', 'tokens': []}],
                             isolated_positions=[], external_bindings=[])
         state['coin']['params']['base_volume'] = self.plan['initial_supply_atoms']
@@ -99,6 +107,18 @@ class PublicGenesisLedgerTest(unittest.TestCase):
 
     def verify(self):
         return verify_candidate(self.data(), self.applications, self.plan, self.draft, self.relayer_wallets)
+
+    def test_wrapper_ticker_must_match_the_msp_launch(self):
+        self.assertEqual(self.verify()['wrappedTokenSymbol'], 'WMSP')
+        storage = self.document['app_state']['evm']['accounts'][0]['storage']
+        brand, ticker = [entry.copy() for entry in storage]
+        storage[0]['value'] = storage_string(b'MintCandy Wrapped DEL')
+        storage[1]['value'] = storage_string(b'WDEL')
+        with self.assertRaisesRegex(ValueError, 'candidate wrapper name or symbol differs'):
+            self.verify()
+        storage[:] = [brand, ticker, ticker.copy()]
+        with self.assertRaisesRegex(ValueError, 'duplicate wrapper metadata slots'):
+            self.verify()
 
     def test_prepares_deterministic_ledger_and_separate_contract_funding(self):
         profile = self.document['app_state']['withdrawal_settlement']

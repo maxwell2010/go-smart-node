@@ -14,6 +14,29 @@ from native_launch_allocation import MAX_GENESIS_BYTES, evm_address, summarize_a
 from prepare_founding_ledger import bank_allocation
 
 
+# The pinned ERC20Upgradeable _name and _symbol slots used by
+# network/launchgenesis/wrapped_metadata.go. Both MSP values fit one word.
+WRAPPER_METADATA = {
+    '0x52c63247e1f47db19d5ce0460030c497f067ca4cebf71ba98eeadabe20bace03': b'MintCandy Wrapped MSP',
+    '0x52c63247e1f47db19d5ce0460030c497f067ca4cebf71ba98eeadabe20bace04': b'WMSP',
+}
+
+
+def verify_wrapper_metadata(evm, wrapper_address):
+    accounts = [account for account in evm.get('accounts', [])
+                if evm_address(account['address']) == wrapper_address]
+    require(len(accounts) == 1, 'candidate requires one WMSP wrapper account')
+    storage = {}
+    for entry in accounts[0]['storage']:
+        key = entry['key'].lower()
+        if key in WRAPPER_METADATA:
+            require(key not in storage, 'candidate has duplicate wrapper metadata slots')
+            storage[key] = entry['value'].lower()
+    expected = {key: '0x' + (value.ljust(31, b'\0') + bytes([2 * len(value)])).hex()
+                for key, value in WRAPPER_METADATA.items()}
+    require(storage == expected, 'candidate wrapper name or symbol differs from MintCandy Wrapped MSP / WMSP')
+
+
 def verify_cold_launch_profile(doc, draft):
     state = doc['app_state']
     require(not doc.get('validators') and not doc.get('app_hash'),
@@ -45,6 +68,7 @@ def verify_cold_launch_profile(doc, draft):
     roles = {role: evm_address(profile[role]) for role in SYSTEM_ROLES}
     require(len(set(roles.values())) == len(roles) and all(int(value, 16) for value in roles.values()),
             'candidate requires distinct nonzero system contract addresses')
+    verify_wrapper_metadata(state['evm'], roles['wrapped_del'])
 
     nft = state['nft']
     collections = nft.get('collections') or []
@@ -114,6 +138,7 @@ def verify_candidate(data, applications, plan, draft, relayer_wallets):
         'checkedValidators': len(operators),
         'checkedBankRecipients': len(report['bankAllocations']),
         'checkedDelegations': len(report['genesisDelegations']),
+        'wrappedTokenSymbol': 'WMSP',
         'runtimeInitChainVerified': False,
         'ownershipProofsVerified': False,
         'publicGenesisApproved': False,

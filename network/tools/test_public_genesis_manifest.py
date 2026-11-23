@@ -49,7 +49,8 @@ class PublicGenesisManifestTest(unittest.TestCase):
         self.cold = {'status': 'CANDIDATE_INIT_CHAIN_VERIFIED', 'firstBlockAppHash': '6' * 64,
                      'genesisSha256': report['genesisSha256'], 'chainId': report['chainId'],
                      'evmChainId': str(report['evmChainId']), 'initialSupplyAtoms': report['initialSupplyAtomic'],
-                     'bankBalances': report['checkedBankRecipients'], 'validators': report['checkedValidators']}
+                     'bankBalances': report['checkedBankRecipients'], 'validators': report['checkedValidators'],
+                     'wrappedTokenSymbol': 'WMSP'}
 
     def prepare(self):
         fixture = self.fixture
@@ -72,6 +73,11 @@ class PublicGenesisManifestTest(unittest.TestCase):
             self.prepare()
         self.fixture.document['app_state']['bank']['balances'][0]['address'] = ledger_fixture.account(ledger_fixture.evm(99))
         with self.assertRaisesRegex(ValueError, 'bank recipients'):
+            self.prepare()
+
+    def test_cold_launch_must_confirm_the_wrapper_symbol(self):
+        self.cold['wrappedTokenSymbol'] = 'WDEL'
+        with self.assertRaisesRegex(ValueError, 'cold InitChain report differs'):
             self.prepare()
 
     def test_release_check_reads_the_binary_instead_of_trusting_its_filename(self):

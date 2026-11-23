@@ -73,6 +73,7 @@ def prepare_manifest(genesis, applications, plan, draft, relayers, software, col
         'validators': reviewed['checkedValidators'],
         'bankBalances': reviewed['checkedBankRecipients'],
         'initialSupplyAtoms': reviewed['initialSupplyAtomic'],
+        'wrappedTokenSymbol': reviewed['wrappedTokenSymbol'],
     }
     require(all(cold.get(key) == value for key, value in expected.items()),
             'cold InitChain report differs from the reviewed genesis')
