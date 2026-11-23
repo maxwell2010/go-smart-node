@@ -87,6 +87,13 @@ passed the repeat observer, quorum, snapshot, block retention and Hermes gates.
 [Founder proof tests and toolkit](https://github.com/maxwell2010/go-smart-node/actions/runs/45148803166) ·
 [Repeat published-daemon rehearsal](https://github.com/maxwell2010/go-smart-node/actions/runs/45148747172).
 
+The attested toolkit from revision `bad9d2a` is also available as a
+separately named v1.1.5 release asset with its SHA256 file and Sigstore
+bundle. The expected archive SHA256 and steps to verify both source
+and signer are in the operator guide. A fresh download from GitHub
+Releases passed both the archive SHA256 and pinned provenance verification.
+[Download and verify the release toolkit](../network/docs/ru/INSTALL_LAUNCH_TOOLS.md#комплект-ci-для-наблюдающей-ноды).
+
 The isolated media gateway passed TLS 1.2 and TLS 1.3 publication and CID
 reads with Nginx and Gunicorn. Clients refused an untrusted certificate
 and a mismatched hostname. The gateway rejected plaintext on the HTTPS
@@ -99,7 +106,8 @@ on-chain CID through an observer RPC, rejected modified metadata and
 returned the same version on retry over HTTPS. With the original API and
 store offline, a separate HTTPS export served both the restored PNG and
 JSON with their original CIDs and bytes.
-[Signed EVM to HTTPS restore rehearsal](https://github.com/maxwell2010/go-smart-node/actions/runs/45152969534).
+[Signed EVM to HTTPS restore rehearsal](https://github.com/maxwell2010/go-smart-node/actions/runs/45152969534) ·
+[Repeat quorum, snapshot, retention and Hermes run](https://github.com/maxwell2010/go-smart-node/actions/runs/45152968810).
 
 ## 1.1.4 software release
 
