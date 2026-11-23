@@ -12,6 +12,7 @@ import (
 
 	"github.com/ethereum/go-ethereum/accounts"
 	"github.com/ethereum/go-ethereum/crypto"
+	"github.com/maxwell2010/go-smart-node/network/identity"
 	"github.com/maxwell2010/go-smart-node/network/launchgenesis"
 	"github.com/stretchr/testify/require"
 )
@@ -24,7 +25,10 @@ func TestFounderOwnershipCommand(t *testing.T) {
 	require.NoError(t, err)
 	var allocation map[string]any
 	require.NoError(t, json.Unmarshal(plan, &allocation))
-	allocation["chain_id"], allocation["evm_chain_id"] = "mintcandy_990014-1", "990014"
+	evmID := map[string]string{"del": "990014", "msp": "9905401", "tmsp": "990098"}[identity.BaseDenom]
+	chainID := "mintcandy_" + evmID + "-1"
+	allocation["chain_id"], allocation["evm_chain_id"] = chainID, evmID
+	allocation["denom"], allocation["display_denom"] = identity.BaseDenom, identity.NativeTokenSymbol
 	allocation["founder_evm_address"] = founder
 	allocation["decisions"].(map[string]any)["selected_stake_owner_evm_address"] = founder
 	plan, err = json.Marshal(allocation)
@@ -51,7 +55,12 @@ func TestFounderOwnershipCommand(t *testing.T) {
 	require.NoError(t, err)
 	message, err := os.ReadFile(messageFile)
 	require.NoError(t, err)
-	require.Contains(t, string(message), "Chain ID: mintcandy_990014-1\nEVM chain ID: 990014")
+	require.Contains(t, string(message), "Chain ID: "+chainID+"\nEVM chain ID: "+evmID)
+	if identity.BaseDenom == "del" {
+		require.NotContains(t, string(message), "Native coin:")
+	} else {
+		require.Contains(t, string(message), "Native coin: "+identity.NativeTokenSymbol+" ("+identity.BaseDenom+")")
+	}
 	require.Contains(t, string(message), "Founder wallet: "+founder)
 	require.Contains(t, string(message), "Allocation plan SHA256: "+digest)
 	require.True(t, strings.HasSuffix(string(message), "Challenge: "+challenge))
@@ -71,6 +80,9 @@ func TestFounderOwnershipCommand(t *testing.T) {
 	require.Equal(t, founder, report.FounderAddress)
 	require.Equal(t, digest, report.PlanSHA256)
 	require.Equal(t, challenge, report.Challenge)
+	if identity.BaseDenom != "del" {
+		require.Equal(t, identity.BaseDenom, report.NativeDenom)
+	}
 	require.False(t, report.NetworkLaunchAuthorized)
 
 	_, err = run("verify", "--signature", signatureFile, "--challenge", strings.Repeat("e4", 32))
@@ -95,4 +107,11 @@ func TestFounderOwnershipCommand(t *testing.T) {
 	require.NoError(t, os.WriteFile(signatureFile, fmt.Appendf(nil, "0x%x\n", signature), 0o600))
 	_, err = run("verify", "--signature", signatureFile)
 	require.ErrorContains(t, err, "does not match the founder wallet")
+
+	allocation["denom"] = "wrongdenom"
+	wrongProfile, err := json.Marshal(allocation)
+	require.NoError(t, err)
+	require.NoError(t, os.WriteFile(planFile, wrongProfile, 0o600))
+	_, err = run("payload", "--approved-plan-sha256", fmt.Sprintf("%x", sha256.Sum256(wrongProfile)))
+	require.ErrorContains(t, err, "native denomination differs from this binary")
 }
