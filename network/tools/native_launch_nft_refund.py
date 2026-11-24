@@ -2,10 +2,12 @@
 
 import argparse
 import base64
+from contextlib import ExitStack
 import hashlib
 import json
 from pathlib import Path
 import re
+import shutil
 import subprocess
 import tempfile
 import time
@@ -188,7 +190,28 @@ def rehearse_observers(args, root, genesis, expected, env, owner, report, nodes,
     return [*nodes, snapshot]
 
 
-def rehearse(args, root, env, genesis, expected, keys, owner, report):
+def restore_ibc_observer(args, backup, env, owner, report, nodes, packet, target):
+    report['phase'] = 'restore-pre-upgrade-observer-with-packet'
+    observer = nodes[-1]
+    after_upgrade = committed_height(observer)
+    original_home = observer.home
+    owner.stop(observer.child)
+    check(observer.child.returncode == 0, 'observer must stop cleanly before restoring its offline copy')
+    observer.home = backup
+    state = json.loads(private_bytes(backup / 'data/priv_validator_state.json', 4096))
+    check(int(state['height']) == 0, 'only a non-signing observer may restore the pre-upgrade copy')
+    observer.start(str(args.successor), env, owner, 'restore-ibc-backup')
+    height = wait_replicas(nodes, after_upgrade + 1, 90, report) - 1
+    check(original_home != observer.home and applied_height(observer, height) == target and
+          int(observer.rpc('status')['validator_info']['voting_power']) == 0,
+          'restored observer must replay the approved plan without signing')
+    header = committed_header(nodes, target + 1)
+    check(header['app_hash'] == report['upgrade']['appHashAfter'], 'restored observer changed the upgrade AppHash')
+    packet.report['observerRestore'] = dict(packet.check_pending(nodes), backupHeight=target - 1,
+                                           verifiedHeight=height, appHash=header['app_hash'])
+
+
+def rehearse(args, root, env, genesis, expected, keys, owner, report, packet=None):
     rows = expected['validators']
     powers = tuple(row['initialPower'] for row in rows)
     validators = [create_replica(str(args.predecessor), root, row['name'], i, genesis, key, env,
@@ -206,12 +229,19 @@ def rehearse(args, root, env, genesis, expected, keys, owner, report):
     wait_replicas(nodes, 8, 105, report)
     effective_set(nodes, rows, 4, powers)
 
+    first_nonce = 0
+    if packet is not None:
+        report['phase'] = 'submit-ibc-packet-on-predecessor'
+        packet.start(str(args.predecessor), nodes)
+        # The fixture NFT creator sent the one funding transaction for Hermes.
+        first_nonce = 1
+
     report['phase'] = 'create-backed-nfts-on-predecessor'
     nfts = [{'family': 'erc721'}, {'family': 'erc1155'}]
     for i, nft in enumerate(nfts):
-        nft['mint'] = prove_mint(args, root, env, nodes, report, nft, 2 * i)
+        nft['mint'] = prove_mint(args, root, env, nodes, report, nft, first_nonce + 2 * i)
     for i, nft in enumerate(nfts):
-        nft['beforeUpgrade'] = prove_burn(args, root, env, nodes, report, nft, 4 + i, accept=False)
+        nft['beforeUpgrade'] = prove_burn(args, root, env, nodes, report, nft, first_nonce + 4 + i, accept=False)
 
     report['phase'] = 'signed-validator-upgrade-votes'
     source = validators[0]
@@ -235,8 +265,18 @@ def rehearse(args, root, env, genesis, expected, keys, owner, report):
     wait_predecessor_halt(validators, action, report)
     checkpoint = committed_header(validators, target - 1)
     boundary = committed_header(validators, target)
+    if packet is not None:
+        wait_replicas(nodes, target - 1, 35, report)
+        check(committed_height(observer) == target - 1 and
+              int(observer.rpc('status')['validator_info']['voting_power']) == 0,
+              'pre-upgrade backup requires an observer at the old committed boundary')
+        packet.report['beforeMigration'] = packet.check_pending(nodes)
     for node in nodes:
         owner.stop(node.child)
+    if packet is not None:
+        check(observer.child.returncode == 0, 'pre-upgrade snapshot requires a closed observer home')
+        backup = root / 'observer-pre-upgrade-backup'
+        shutil.copytree(observer.home, backup)
     if args.observer_sync:
         configure_snapshot_source(source)
     for node in nodes:
@@ -248,8 +288,15 @@ def rehearse(args, root, env, genesis, expected, keys, owner, report):
     report['upgrade'] = {'height': target, 'before': checkpoint, 'boundary': boundary,
                          'appHashAfter': committed_header(nodes, target + 1)['app_hash']}
 
+    if packet is not None:
+        report['phase'] = 'verify-ibc-packet-after-migration'
+        packet.report['afterMigration'] = packet.check_pending(nodes)
+        restore_ibc_observer(args, backup, env, owner, report, nodes, packet, target)
+        report['phase'] = 'relay-the-preserved-ibc-packet'
+        packet.settle(target, nodes)
+
     report['phase'] = 'refund-and-replay-on-updated-replicas'
-    nonce = 6 + sum(voter == native_address_from_evm(nfts[0]['wallet']) for voter in signer_addresses)
+    nonce = first_nonce + 6 + sum(voter == native_address_from_evm(nfts[0]['wallet']) for voter in signer_addresses)
     if native_address_from_evm(nfts[0]['wallet']) == signer_addresses[0]:
         nonce += 1
     for nft in nfts:
@@ -277,7 +324,13 @@ def main(signals):
         parser.add_argument('--' + flag, required=True)
     parser.add_argument('--successor-archive-sha256')
     parser.add_argument('--observer-sync', action='store_true')
+    for flag in ('ibc-hermes', 'ibc-reference', 'ibc-fixture-donor'):
+        parser.add_argument('--' + flag, type=Path)
+    parser.add_argument('--ibc-reference-sha256')
     args = parser.parse_args()
+    ibc = (args.ibc_hermes, args.ibc_reference, args.ibc_fixture_donor, args.ibc_reference_sha256)
+    if any(ibc) and not all(ibc):
+        parser.error('the isolated pending packet scenario requires Hermes, a reference binary and hash, and a fixture donor')
     report = {'status': 'FAIL', 'phase': 'verify-disposable-domain', 'initialHeight': 1}
     with args.report.open('x', encoding='utf8') as stream:
         try:
@@ -313,11 +366,16 @@ def main(signals):
                 if args.successor_archive_sha256:
                     check(re.fullmatch(SHA256, args.successor_archive_sha256), 'invalid successor archive hash')
                     report['successor']['archiveSha256'] = args.successor_archive_sha256
-                owner = ProcessOwner(signals)
-                try:
-                    rehearse(args, root, env, genesis, expected, keys, owner, report)
-                finally:
-                    owner.close()
+                with ExitStack() as cleanup:
+                    owner = ProcessOwner(signals)
+                    cleanup.callback(owner.close)
+                    packet = None
+                    if all(ibc):
+                        from native_launch_upgrade_ibc import GovernedUpgradeTransfer
+
+                        packet = GovernedUpgradeTransfer(args, root / 'ibc', env, report, signals)
+                        cleanup.callback(packet.close)
+                    rehearse(args, root, env, genesis, expected, keys, owner, report, packet=packet)
             report.update(status='PASS', phase='complete')
         except (TimeoutError, ValueError) as error:
             report['error'] = ' '.join(str(error).split())[:360]
