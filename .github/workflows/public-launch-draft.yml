@@ -122,7 +122,6 @@ jobs:
           upgrade_guide="$GITHUB_WORKSPACE/network/docs/ru/GOVERNED_UPGRADE_1_2_2.md"
           export MCND_HOME="$home" KEYRING_BACKEND=test PROPOSER_KEY=review-only
           export UPGRADE_HEIGHT=123456 DEPOSIT_ATOMIC=10000000000000000000
-          export ACCOUNT_NUMBER=4 ACCOUNT_SEQUENCE=2
           binary="$HOME/.local/opt/mcnd/1.2.1-msp/mcnd"
           "$binary" keys add "$PROPOSER_KEY" --home "$MCND_HOME" --keyring-backend test >/dev/null 2>&1
           proposer=$("$binary" keys show "$PROPOSER_KEY" --home "$MCND_HOME" --keyring-backend test -a)
@@ -135,7 +134,7 @@ jobs:
               .["@type"] == "/cosmos.gov.v1.MsgSubmitProposal" and .proposer == $proposer and
               .messages == [] and .expedited == false and
               .initial_deposit == [{"amount":"10000000000000000000","denom":"msp"}] and
-              .metadata == "mintcandy-sdk-upgrade/v1:{\"name\":\"mintcandy-native-sdk-migrations-v1\",\"height\":123456}")' unsigned.json >/dev/null
+              .metadata == "mintcandy-sdk-upgrade/v1:{\"name\":\"mintcandy-native-sdk-migrations-v1\",\"height\":123456}")' unsigned.json >/dev/null || { cat unsigned.json; exit 1; }
           cp unsigned.json "$evidence/unsigned-upgrade-example.json"
       - name: Execute the public MSP and tMSP 1.2.2 one-line installers
         if: inputs.published_install_122

@@ -58,11 +58,11 @@ PY
 В том же каталоге укажите `PROPOSER_KEY` (локальное имя учётной записи
 инициатора в keyring) и `MCND_HOME` (каталог клиента с установленным
 подписанным genesis майнета в `config/genesis.json`). Даже офлайн
-бинарник читает этот файл и сверяет сетевой профиль. Задайте
-`ACCOUNT_NUMBER` и `ACCOUNT_SEQUENCE` согласно данным аккаунта инициатора,
-полученным с доверенной ноды. По умолчанию
+бинарник читает этот файл и сверяет сетевой профиль. По умолчанию
 используется keyring `file`. Команда формирует неподписанную транзакцию и
-печатает её в терминал. Для проверки не нужен запущенный RPC.
+печатает её в терминал. Для просмотра используется `--generate-only`
+с фиксированным демонстрационным лимитом газа и неиспользуемым локальным
+адресом RPC. Эта команда работает при выключенной ноде.
 
 ```sh
 (
@@ -70,8 +70,8 @@ set -eu
 printf '%s  %s\n' cbb4e0c1a060b09e9fb45204c1f2de16d4be37d67753378b06782abeaebf8117 \
   "${MCND_HOME:?}/config/genesis.json" | sha256sum --check --status
 "$HOME/.local/opt/mcnd/1.2.1-msp/mcnd" tx gov submit-proposal proposal.json \
-  --generate-only --offline --chain-id mintcandy_9905401-1 --evm.evm-chain-id 9905401 \
-  --account-number "${ACCOUNT_NUMBER:?}" --sequence "${ACCOUNT_SEQUENCE:?}" \
+  --generate-only --gas 200000 --node tcp://127.0.0.1:1 \
+  --chain-id mintcandy_9905401-1 --evm.evm-chain-id 9905401 \
   --home "${MCND_HOME:?}" --from "${PROPOSER_KEY:?}" --keyring-backend "${KEYRING_BACKEND:-file}"
 )
 ```
