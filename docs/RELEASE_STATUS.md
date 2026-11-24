@@ -31,6 +31,14 @@ binary validated the installed genesis. CI checked the genesis hash, the
 signed bootstrap peer and a zero signing height.
 [Published onboarding and signed genesis evidence](https://github.com/maxwell2010/go-smart-node/actions/runs/45320962959).
 
+The published v1.2.1 MSP binary also passed twelve Hermes ICS-20 scenarios.
+For each inbound test asset (`tmsp`, `wtmsp`), the receiving chain recorded
+an error acknowledgement and issued zero vouchers. The sending chain
+processed the acknowledgement once and refunded the full principal. The same
+channel accepted a separate reference asset and returned it successfully.
+All four validators signed the final checkpoint at height 64.
+[Test asset admission evidence](https://github.com/maxwell2010/go-smart-node/actions/runs/45321817918).
+
 ## 1.2.0 software release
 
 [MintCandy Node 1.2.0](https://github.com/maxwell2010/go-smart-node/releases/tag/v1.2.0)
