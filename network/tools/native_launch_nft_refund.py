@@ -8,8 +8,10 @@ from pathlib import Path
 import re
 import subprocess
 import tempfile
+import time
 
 from check_operator_applications import native_address_from_evm
+from configure_history import validate_fresh_home
 from del_delegation_smoke import balance, read_words, write_config
 from mcnd_process_smoke import ProcessOwner, SignalGuard, private_environment, private_namespace, run_command
 from native_consensus_smoke import ATOMS, committed_header, create_replica, decode_pubkey, effective_set, wait_replicas
@@ -18,7 +20,8 @@ from native_governance_upgrade_smoke import (
     find_four_signature_commit, query_proposal, submit_governance_tx, wait_predecessor_halt, wait_tally,
 )
 from native_launch_media import commit_media_transaction, read_media_fixture
-from native_launch_rehearsal import configure_peers, load_fixture
+from native_launch_rehearsal import configure_peers, load_fixture, verify_first_block
+from native_launch_snapshot import configure_snapshot_source, rehearse_snapshot
 from withdrawal_genesis_smoke import SHA256, bech32_payload, check, native, private_bytes, safe_diagnostic
 
 
@@ -126,6 +129,65 @@ def governance_tx(args, source, root, env, report, action, index, signer, label)
     return submit_governance_tx(source, signed, label, report)
 
 
+def rehearse_observers(args, root, genesis, expected, env, owner, report, nodes, nft, action):
+    report['phase'] = 'fresh-observer-replay-before-upgrade'
+    source, witness = nodes[0], nodes[-1]
+    target = action['planHeight']
+    replay = create_replica(str(args.predecessor), root, 'replay-observer', len(nodes), genesis, None, env,
+                            chain_id=CHAIN, evm_chain_id=EVM_ID)
+    configure_peers(replay, nodes[:-1])
+    validate_fresh_home(replay.home)
+    join_height = committed_height(source)
+    check(join_height > target, 'the replay observer must start after the live upgrade')
+    replay.start(str(args.predecessor), env, owner, 'replay-predecessor')
+
+    # Block sync may return an error on PreBlock without keeping the RPC
+    # listener alive. The SDK writes the approved upgrade hint either way.
+    hint_path = replay.home / 'data/upgrade-info.json'
+    deadline = time.monotonic() + 95
+    while not hint_path.exists():
+        check(replay.child.poll() is None and time.monotonic() < deadline,
+              'historical replay did not reach the approved upgrade boundary')
+        time.sleep(0.25)
+    owner.stop(replay.child)
+    hint = json.loads(private_bytes(hint_path, 4096))
+    info = json.dumps({'schema': SCHEMA, 'proposal_id': action['passedID']}, separators=(',', ':'))
+    check((hint['name'], int(hint['height']), hint['info']) == (PLAN, target, info),
+          'historical replay wrote a different upgrade hint')
+    report['observerReplay'] = {'startedAfterUpgradeAt': join_height, 'oldBinaryUpgradeHint': hint}
+
+    report['phase'] = 'fresh-observer-replay-after-upgrade'
+    replay.start(str(args.successor), env, owner, 'replay-successor')
+    nodes = [*nodes, replay]
+    height = wait_replicas(nodes, join_height + 1, 95, report) - 1
+    boundary = committed_header(nodes, target + 1)
+    check(boundary['app_hash'] == report['upgrade']['appHashAfter'] and
+          applied_height(replay, height) == target and current_plan(replay, height) is None,
+          'replayed observer did not apply the exact governed upgrade')
+    status = replay.rpc('status')
+    signing_state = json.loads(private_bytes(replay.home / 'data/priv_validator_state.json', 4096))
+    check(int(status['validator_info']['voting_power']) == 0 and int(signing_state['height']) == 0,
+          'historical replay observer has signing activity')
+    pending = nft_state(source, height, nft)
+    check(pending[1:3] == (UNIT, [2]) and nft_state(replay, height, nft) == pending,
+          'historical replay observer differs from the validator NFT reserve')
+    report['observerReplay'].update(block1Hash=verify_first_block(nodes), appliedUpgradeHeight=target,
+                                    verifiedHeight=height, appHash=committed_header(nodes, height + 1)['app_hash'],
+                                    observerVotingPower=0, signingHeight=0, pendingAtomic=str(pending[1]))
+
+    snapshot = rehearse_snapshot(str(args.successor), root, genesis, expected, env, owner, report, source=source,
+                                witness=witness, replicas=nodes, minimum_height=height)
+    state_sync = report['stateSync']
+    height = state_sync['verifiedHeight']
+    check(target < state_sync['restoredHeight'] and applied_height(snapshot, height) == target and
+          current_plan(snapshot, height) is None, 'snapshot did not preserve the applied upgrade')
+    pending = nft_state(source, height, nft)
+    check(pending[1:3] == (UNIT, [2]) and nft_state(snapshot, height, nft) == pending,
+          'snapshot observer differs from the validator NFT reserve')
+    state_sync.update(appliedUpgradeHeight=target, pendingAtomic=str(pending[1]))
+    return [*nodes, snapshot]
+
+
 def rehearse(args, root, env, genesis, expected, keys, owner, report):
     rows = expected['validators']
     powers = tuple(row['initialPower'] for row in rows)
@@ -175,6 +237,8 @@ def rehearse(args, root, env, genesis, expected, keys, owner, report):
     boundary = committed_header(validators, target)
     for node in nodes:
         owner.stop(node.child)
+    if args.observer_sync:
+        configure_snapshot_source(source)
     for node in nodes:
         node.start(str(args.successor), env, owner, 'successor')
     wait_replicas(nodes, target + 5, 125, report)
@@ -191,6 +255,9 @@ def rehearse(args, root, env, genesis, expected, keys, owner, report):
     for nft in nfts:
         nft['refunds'] = []
         for _ in range(nft['minted']):
+            if args.observer_sync and nft['family'] == 'erc1155' and nft['refunds']:
+                nodes = rehearse_observers(args, root, genesis, expected, env, owner, report, nodes, nft, action)
+                report['phase'] = 'release-the-restored-nft-reserve'
             nft['refunds'].append(prove_burn(args, root, env, nodes, report, nft, nonce, accept=True))
             nonce += 1
         nft['repeat'] = prove_burn(args, root, env, nodes, report, nft, nonce, accept=False)
@@ -199,6 +266,7 @@ def rehearse(args, root, env, genesis, expected, keys, owner, report):
     last = nfts[-1]['repeat']['height']
     report['finalCommit'] = find_four_signature_commit(nodes, rows, args.commit_probe, last + 1, last + 10, report)
     report['finalCommit']['appHash'] = committed_header(nodes, report['finalCommit']['height'])['app_hash']
+    report['finalCommit']['matchingNodes'] = len(nodes)
 
 
 def main(signals):
@@ -208,6 +276,7 @@ def main(signals):
     for flag in ('predecessor-sha256', 'successor-sha256', 'predecessor-source', 'successor-source'):
         parser.add_argument('--' + flag, required=True)
     parser.add_argument('--successor-archive-sha256')
+    parser.add_argument('--observer-sync', action='store_true')
     args = parser.parse_args()
     report = {'status': 'FAIL', 'phase': 'verify-disposable-domain', 'initialHeight': 1}
     with args.report.open('x', encoding='utf8') as stream:
@@ -250,8 +319,10 @@ def main(signals):
                 finally:
                     owner.close()
             report.update(status='PASS', phase='complete')
+        except (TimeoutError, ValueError) as error:
+            report['error'] = ' '.join(str(error).split())[:360]
         except Exception as error:
-            report['error'] = safe_diagnostic(str(error))
+            report['error'] = f'{type(error).__name__}: {safe_diagnostic(str(error))}'
         finally:
             json.dump(report, stream, indent=2)
             stream.write('\n')

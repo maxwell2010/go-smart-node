@@ -22,6 +22,10 @@ on:
         description: Upgrade four disposable validators from published MSP with signed NFT reserve refunds
         type: boolean
         default: false
+      governed_observer_sync:
+        description: Verify fresh replay and post-upgrade snapshots with the released MSP 1.2.1 and 1.2.2 binaries
+        type: boolean
+        default: false
       testnet_package_run:
         description: Verify an attested tMSP package from a completed release build at this source revision
         type: string
@@ -223,10 +227,10 @@ jobs:
              .signedBootstrap.appHash == .appHash and .signedBootstrap.outboundPeers == [.signedBootstrap.nodeId] and
              (.signedBootstrap.networkLaunchAuthorized | not)' "$report" >/dev/null
       - name: Install the published MSP release using the operator guide
-        if: (inputs.published_ibc || inputs.published_node || inputs.published_media || inputs.governed_nft_refund) && matrix.profile == 'mainnet' && github.repository == 'maxwell2010/go-smart-node' && (!inputs.mainnet_package_run || inputs.governed_nft_refund)
+        if: matrix.profile == 'mainnet' && github.repository == 'maxwell2010/go-smart-node' && (inputs.governed_observer_sync || inputs.governed_nft_refund || (!inputs.mainnet_package_run && (inputs.published_ibc || inputs.published_node || inputs.published_media)))
         env:
           GH_TOKEN: ${{ github.token }}
-          SEPARATE_PREDECESSOR: ${{ inputs.governed_nft_refund && inputs.mainnet_package_run != '' }}
+          SEPARATE_PREDECESSOR: ${{ inputs.governed_observer_sync || (inputs.governed_nft_refund && inputs.mainnet_package_run != '') }}
         run: |
           set -euo pipefail
           umask 077
@@ -259,6 +263,31 @@ jobs:
             printf 'PUBLISHED_SOURCE=%s\nPUBLISHED_ARCHIVE_SHA=%s\nPUBLISHED_BINARY_SHA=%s\n' \
               "$source" "$archive_sha" "$binary_sha" >> "$GITHUB_ENV"
           fi
+      - name: Install the published MSP successor for observer recovery
+        if: inputs.governed_observer_sync && matrix.profile == 'mainnet' && github.repository == 'maxwell2010/go-smart-node'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          MAINNET_PACKAGE_RUN: ${{ inputs.mainnet_package_run }}
+        run: |
+          set -euo pipefail
+          umask 077
+          [[ -z "$MAINNET_PACKAGE_RUN" ]] || { echo 'Choose the published successor or the same-source package run.' >&2; exit 1; }
+          work="$PROFILE_WORK"
+          release='https://github.com/maxwell2010/go-smart-node/releases/download/v1.2.2'
+          source=c7c1331a201cd2141cf9d90493fbed539bf62642
+          archive_sha=ab7fb1563a544da1b0963134daff833bf49251cd1864c86e2f6a383db7f2b5a4
+          binary_sha=b098a5174fd7df151dfaf7740362e1c1c782726b925f1439340eec112338d1d2
+          printf '%s  %s\n' a18b765cf2f2a384dc819642f8a0872a9bd85bbf12b4bac6edf75c62d3f0d3a1 +            "$work/install_software.py" | sha256sum --check --strict
+          curl -fsSL --retry 3 --proto '=https' --proto-redir '=https' \
+            "$release/provenance.sigstore.json" -o "$work/successor-provenance.sigstore.json"
+          python3 -I -B "$work/install_software.py" --source-sha "$source" \
+            --source-ref refs/heads/release/mintcandy-1.2.2 --release-version 1.2.2 --native-denom msp \
+            --archive-sha "$archive_sha" --archive-url "$release/mcnd-1.2.2-linux-amd64.tar.gz" \
+            --bundle "$work/successor-provenance.sigstore.json" --destination "$work/published/mcnd" \
+            > "$work/evidence/published-install.json"
+          printf '%s  %s\n' "$binary_sha" "$work/published/mcnd" | sha256sum --check --strict
+          printf 'PUBLISHED_SOURCE=%s\nPUBLISHED_ARCHIVE_SHA=%s\nPUBLISHED_BINARY_SHA=%s\n' \
+            "$source" "$archive_sha" "$binary_sha" >> "$GITHUB_ENV"
       - name: Install the attested release candidate and reject the other signing domain
         if: ((inputs.mainnet_package_run && matrix.profile == 'mainnet') || (inputs.testnet_package_run && matrix.profile == 'testnet')) && github.repository == 'maxwell2010/go-smart-node'
         env:
@@ -418,17 +447,23 @@ jobs:
               ' "$report" >/dev/null
           done
       - name: Apply the NFT refund update to four isolated validators on published MSP
-        if: inputs.governed_nft_refund && matrix.profile == 'mainnet' && github.repository == 'maxwell2010/go-smart-node'
+        if: (inputs.governed_nft_refund || inputs.governed_observer_sync) && matrix.profile == 'mainnet' && github.repository == 'maxwell2010/go-smart-node'
         env:
           MAINNET_PACKAGE_RUN: ${{ inputs.mainnet_package_run }}
+          OBSERVER_SYNC: ${{ inputs.governed_observer_sync }}
         run: |
           set -euo pipefail
           umask 077
           work="$PROFILE_WORK"
           successor="$work/mcnd-nft-refund"
+          successor_source="$GITHUB_SHA"
           report="$work/evidence/published-governed-nft-refund.json"
           package=()
-          if [[ -n "$MAINNET_PACKAGE_RUN" ]]; then
+          if [[ "$OBSERVER_SYNC" == true ]]; then
+            successor="$work/published/mcnd"
+            successor_source="$PUBLISHED_SOURCE"
+            package=(--successor-archive-sha256 "$PUBLISHED_ARCHIVE_SHA" --observer-sync)
+          elif [[ -n "$MAINNET_PACKAGE_RUN" ]]; then
             successor="$work/published/mcnd"
             package=(--successor-archive-sha256 "$PUBLISHED_ARCHIVE_SHA")
             [[ "$PUBLISHED_SOURCE" == "$GITHUB_SHA" && "$successor" != "$MSP_PREDECESSOR" ]]
@@ -442,20 +477,27 @@ jobs:
           sudo -n unshare --net -- bash -euc 'ip link set lo up; exec "$@"' _ \
             env TMPDIR="$work" python3 -B tools/native_launch_nft_refund.py \
             --predecessor "$MSP_PREDECESSOR" --predecessor-sha256 "$MSP_PREDECESSOR_SHA" --predecessor-source "$MSP_PREDECESSOR_SOURCE" \
-            --successor "$successor" --successor-sha256 "$successor_sha" --successor-source "$GITHUB_SHA" "${package[@]}" \
+            --successor "$successor" --successor-sha256 "$successor_sha" --successor-source "$successor_source" "${package[@]}" \
             --fixture "$work/assembled" --assembly-report "$work/evidence/assembly.json" --signer "$work/nft-upgrade-signers.test" \
             --commit-probe "$work/comet-commit-probe" --home-parent "$work" --report "$report" || status=$?
           if [[ -f "$report" ]]; then sudo -n chown "$(id -u):$(id -g)" "$report"; fi
           (( status == 0 ))
-          jq -e --arg old "$MSP_PREDECESSOR_SHA" --arg new "$successor_sha" --arg run "$MAINNET_PACKAGE_RUN" \
+          jq -e --arg old "$MSP_PREDECESSOR_SHA" --arg new "$successor_sha" --arg source "$successor_source" \
+            --arg run "$MAINNET_PACKAGE_RUN" --arg sync "$OBSERVER_SYNC" \
             --arg archive "${PUBLISHED_ARCHIVE_SHA:-}" '
             .status == "PASS" and .loopbackOnlyNamespace and .chainId == "mintcandy_9905401-1" and .nativeDenom == "msp" and
-            .predecessor.sha256 == $old and .successor.sha256 == $new and
-            (if $run == "" then .successor.archiveSha256 == null else .successor.archiveSha256 == $archive end) and
+            .predecessor.sha256 == $old and .successor.sha256 == $new and .successor.source == $source and
+            (if $run == "" and $sync != "true" then .successor.archiveSha256 == null else .successor.archiveSha256 == $archive end) and
             .proposal.tally.yes_count == "40000000000000000000000" and
             .finalCommit.verifiedEd25519Signatures == 4 and .finalCommit.height > .upgrade.height and
             ([.nfts[].refunds[] | .paidAtomic] == ["2000000000000000000","2000000000000000000","2000000000000000000"]) and
-            all(.nfts[]; .beforeUpgrade.paidAtomic == "0" and .repeat.paidAtomic == "0" and .repeat.remainingAtomic == "0")
+            all(.nfts[]; .beforeUpgrade.paidAtomic == "0" and .repeat.paidAtomic == "0" and .repeat.remainingAtomic == "0") and
+            (if $sync == "true" then
+              .observerReplay.appliedUpgradeHeight == .upgrade.height and .observerReplay.signingHeight == 0 and
+              .stateSync.appliedUpgradeHeight == .upgrade.height and .stateSync.restoredHeight > .upgrade.height and
+              .observerReplay.pendingAtomic == "2000000000000000000" and .stateSync.pendingAtomic == "2000000000000000000" and
+              .finalCommit.matchingNodes == 7
+            else .finalCommit.matchingNodes == 5 end)
             ' "$report" >/dev/null
       - name: Relay ICS-20 packets with the versioned binary
         if: (((inputs.published_ibc || inputs.mainnet_package_run) && matrix.profile == 'mainnet') || (inputs.testnet_package_run && matrix.profile == 'testnet')) && github.repository == 'maxwell2010/go-smart-node'

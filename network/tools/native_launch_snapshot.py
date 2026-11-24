@@ -119,3 +119,4 @@ def rehearse_snapshot(binary, root, genesis, expected, env, owner, report, *,
         from node_resource_usage import replica_usage
 
         report['resourceUsage'] = {'height': height, 'snapshotObserver': replica_usage(observer)}
+    return observer
