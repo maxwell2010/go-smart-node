@@ -15,7 +15,10 @@ on:
         type: boolean
         default: false
       testnet_package_run:
-        description: Verify the attested tMSP 1.2.0 Linux package from this completed workflow run
+        description: Verify an attested tMSP package from a completed release build at this source revision
+        type: string
+      mainnet_package_run:
+        description: Verify an attested MSP package from a completed release build at this source revision
         type: string
 
 permissions:
@@ -38,12 +41,14 @@ jobs:
         include:
           - profile: mainnet
             evm_id: '9905401'
+            other_evm_id: '990098'
             denom: msp
             other_denom: tmsp
             symbol: MSP
             wrapper: WMSP
           - profile: testnet
             evm_id: '990098'
+            other_evm_id: '9905401'
             denom: tmsp
             other_denom: msp
             symbol: tMSP
@@ -61,6 +66,7 @@ jobs:
       GOMAXPROCS: '2'
       PROFILE: ${{ matrix.profile }}
       EVM_ID: ${{ matrix.evm_id }}
+      OTHER_EVM_ID: ${{ matrix.other_evm_id }}
       DENOM: ${{ matrix.denom }}
       OTHER_DENOM: ${{ matrix.other_denom }}
       SYMBOL: ${{ matrix.symbol }}
@@ -209,7 +215,7 @@ jobs:
              .signedBootstrap.appHash == .appHash and .signedBootstrap.outboundPeers == [.signedBootstrap.nodeId] and
              (.signedBootstrap.networkLaunchAuthorized | not)' "$report" >/dev/null
       - name: Install the published MSP release using the operator guide
-        if: (inputs.published_ibc || inputs.published_node) && matrix.profile == 'mainnet' && github.repository == 'maxwell2010/go-smart-node'
+        if: (inputs.published_ibc || inputs.published_node) && !inputs.mainnet_package_run && matrix.profile == 'mainnet' && github.repository == 'maxwell2010/go-smart-node'
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
@@ -235,53 +241,52 @@ jobs:
           printf '%s  %s\n' "$binary_sha" "$work/published/mcnd" | sha256sum --check --strict
           printf 'PUBLISHED_SOURCE=%s\nPUBLISHED_ARCHIVE_SHA=%s\nPUBLISHED_BINARY_SHA=%s\n' \
             "$source" "$archive_sha" "$binary_sha" >> "$GITHUB_ENV"
-      - name: Install the attested tMSP package and reject the mainnet signing domain
-        if: inputs.testnet_package_run && matrix.profile == 'testnet' && github.repository == 'maxwell2010/go-smart-node'
+      - name: Install the attested release candidate and reject the other signing domain
+        if: ((inputs.mainnet_package_run && matrix.profile == 'mainnet') || (inputs.testnet_package_run && matrix.profile == 'testnet')) && github.repository == 'maxwell2010/go-smart-node'
         env:
           GH_TOKEN: ${{ github.token }}
-          PACKAGE_RUN: ${{ inputs.testnet_package_run }}
+          PACKAGE_RUN: ${{ (matrix.profile == 'testnet' && inputs.testnet_package_run) || inputs.mainnet_package_run }}
         run: |
           set -euo pipefail
           umask 077
           [[ "$PACKAGE_RUN" =~ ^[1-9][0-9]{0,19}$ ]]
           work="$PROFILE_WORK"
-          source='fcfe88732af1b96315826f39a2b2bf04f9ef54f8'
-          branch='release/mintcandy-tmsp-1.2.0'
+          source="$GITHUB_SHA"
+          branch="${GITHUB_REF#refs/heads/}"
           attempt=$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$PACKAGE_RUN" | jq -er \
             --arg source "$source" --arg branch "$branch" --arg repo "$GITHUB_REPOSITORY" '
             select(.status == "completed" and .conclusion == "success" and .event == "workflow_dispatch" and
               .head_sha == $source and .head_branch == $branch and .head_repository.full_name == $repo and
               .path == ".github/workflows/modern-network-development.yml") | .run_attempt')
           for kind in package attestation; do
-            gh run download "$PACKAGE_RUN" --repo "$GITHUB_REPOSITORY" --dir "$work/tmsp-archive" \
+            gh run download "$PACKAGE_RUN" --repo "$GITHUB_REPOSITORY" --dir "$work/software-archive" \
               --name "mcnd-software-$kind-$source-$attempt"
           done
-          archive="$work/tmsp-archive/mcnd-1.2.0-linux-amd64.tar.gz"
-          read -r archive_sha _ < "$archive.sha256"
-          binary_sha=$(jq -er --arg sha "$archive_sha" --arg source "$source" '
-            select(.status == "software-release" and .archiveSha256 == $sha and .sourceRevision == $source and
-              .releaseVersion == "1.2.0" and .nativeDenom == "tmsp" and .includesGenesis == false) | .binarySha256
-            ' "$work/tmsp-archive/software-verified.json")
-          curl -fsSL --retry 3 --proto '=https' --proto-redir '=https' \
-            "https://raw.githubusercontent.com/maxwell2010/go-smart-node/$source/network/tools/install_software.py" \
-            -o "$work/install_software.py"
-          printf '%s  %s\n' a18b765cf2f2a384dc819642f8a0872a9bd85bbf12b4bac6edf75c62d3f0d3a1 \
-            "$work/install_software.py" | sha256sum --check --strict
-          python3 -I -B "$work/install_software.py" --source-sha "$source" \
-            --source-ref "refs/heads/$branch" --release-version 1.2.0 --native-denom tmsp \
-            --archive-sha "$archive_sha" --archive "$archive" --bundle "$work/tmsp-archive/provenance.sigstore.json" \
+          verification="$work/software-archive/software-verified.json"
+          jq -e --arg source "$source" --arg denom "$DENOM" '
+            .status == "software-release" and .sourceRevision == $source and
+              .nativeDenom == $denom and .includesGenesis == false and .networkLaunchApproved == false
+            ' "$verification" >/dev/null
+          version=$(jq -er .releaseVersion "$verification")
+          [[ "$version" =~ ^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]]
+          archive="$work/software-archive/mcnd-$version-linux-amd64.tar.gz"
+          archive_sha=$(jq -er .archiveSha256 "$verification")
+          binary_sha=$(jq -er .binarySha256 "$verification")
+          python3 -I -B tools/install_software.py --source-sha "$source" \
+            --source-ref "$GITHUB_REF" --release-version "$version" --native-denom "$DENOM" \
+            --archive-sha "$archive_sha" --archive "$archive" --bundle "$work/software-archive/provenance.sigstore.json" \
             --destination "$work/published/mcnd" > "$work/evidence/published-install.json"
           printf '%s  %s\n' "$binary_sha" "$work/published/mcnd" | sha256sum --check --strict
           if "$work/published/mcnd" init wrong-profile --home "$work/wrong-profile" \
-            --chain-id mintcandy_9905401-1 --evm.evm-chain-id 9905401 > "$work/wrong-profile.log" 2>&1; then
-            echo 'The tMSP executable unexpectedly accepted the MSP domain.' >&2
+            --chain-id "mintcandy_${OTHER_EVM_ID}-1" --evm.evm-chain-id "$OTHER_EVM_ID" > "$work/wrong-profile.log" 2>&1; then
+            echo 'The executable unexpectedly accepted the other signing domain.' >&2
             exit 1
           fi
-          grep -F 'tmsp profile requires chain ID "mintcandy_990098-1"' "$work/wrong-profile.log"
+          grep -F -- "$DENOM profile requires chain ID \"mintcandy_${EVM_ID}-1\"" "$work/wrong-profile.log"
           printf 'PUBLISHED_SOURCE=%s\nPUBLISHED_ARCHIVE_SHA=%s\nPUBLISHED_BINARY_SHA=%s\n' \
             "$source" "$archive_sha" "$binary_sha" >> "$GITHUB_ENV"
       - name: Verify systemd restart, snapshot sync and pruning with the versioned binary
-        if: ((inputs.published_node && matrix.profile == 'mainnet') || (inputs.testnet_package_run && matrix.profile == 'testnet')) && github.repository == 'maxwell2010/go-smart-node'
+        if: (((inputs.published_node || inputs.mainnet_package_run) && matrix.profile == 'mainnet') || (inputs.testnet_package_run && matrix.profile == 'testnet')) && github.repository == 'maxwell2010/go-smart-node'
         run: |
           set -euo pipefail
           umask 077
@@ -318,7 +323,7 @@ jobs:
               .freshProofMatchesArchive and (.verifiedHeight > .loadedHeightAfterRestart))
             ' "$report" >/dev/null
       - name: Relay ICS-20 packets with the versioned binary
-        if: ((inputs.published_ibc && matrix.profile == 'mainnet') || (inputs.testnet_package_run && matrix.profile == 'testnet')) && github.repository == 'maxwell2010/go-smart-node'
+        if: (((inputs.published_ibc || inputs.mainnet_package_run) && matrix.profile == 'mainnet') || (inputs.testnet_package_run && matrix.profile == 'testnet')) && github.repository == 'maxwell2010/go-smart-node'
         run: |
           set -euo pipefail
           umask 077
