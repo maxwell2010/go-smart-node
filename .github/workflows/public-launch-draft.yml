@@ -122,6 +122,7 @@ jobs:
           upgrade_guide="$GITHUB_WORKSPACE/network/docs/ru/GOVERNED_UPGRADE_1_2_2.md"
           export MCND_HOME="$home" KEYRING_BACKEND=test PROPOSER_KEY=review-only
           export UPGRADE_HEIGHT=123456 DEPOSIT_ATOMIC=10000000000000000000
+          export ACCOUNT_NUMBER=4 ACCOUNT_SEQUENCE=2
           binary="$HOME/.local/opt/mcnd/1.2.1-msp/mcnd"
           "$binary" keys add "$PROPOSER_KEY" --home "$MCND_HOME" --keyring-backend test >/dev/null 2>&1
           proposer=$("$binary" keys show "$PROPOSER_KEY" --home "$MCND_HOME" --keyring-backend test -a)
