@@ -35,6 +35,16 @@ ERC1155 reserve. The refund was paid once at height 109. At height 114, all
 seven nodes matched AppHash and all four validator signatures verified.
 [Fresh observer recovery report](https://github.com/maxwell2010/go-smart-node/actions/runs/45346495072).
 
+With a pending 1 MSP ICS-20 packet, the exact published MSP binaries crossed
+the voted migration at height 97. The commitment and escrow matched across
+five nodes before and after migration. The observer restored a closed backup
+at height 96, reapplied the upgrade on 1.2.2 and matched the four validators'
+AppHash at header 98. The counterparty verified header 104, recorded one
+success acknowledgment and returned the voucher. The source credited 1 MSP
+on return, with zero escrow and zero outstanding voucher supply. All five
+nodes matched AppHash and four signatures verified at height 128.
+[Pending packet migration and observer restore](https://github.com/maxwell2010/go-smart-node/actions/runs/45351481993).
+
 ## 1.2.1 software release
 
 The `msp` and `tmsp` Linux amd64 packages use the same source revision,
