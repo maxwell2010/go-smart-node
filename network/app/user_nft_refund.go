@@ -23,7 +23,7 @@ func (c *withdrawalController) admitUserNFTRefund(ctx sdk.Context, msg core.Mess
 	owner := sdk.AccAddress(msg.From[:])
 	evm := c.customCollateral.evm
 	if msg.Value.Sign() != 0 || c.delRecipientAllowed == nil || !c.delRecipientAllowed(owner) ||
-		len(evm.GetCode(ctx, msg.From, evm.GetCodeHash(ctx, msg.From))) != 0 {
+		len(evm.GetCode(ctx, evm.GetCodeHash(ctx, msg.From))) != 0 {
 		return errors.New("NFT refund requires a signed ordinary wallet and zero call value")
 	}
 	flags, err := c.userNFTRead(ctx, target, asset, "getRefundable")

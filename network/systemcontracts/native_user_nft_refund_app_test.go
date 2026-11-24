@@ -1,8 +1,9 @@
-//go:build appstate && mcnd_native_sdk_migration_v1
+//go:build appstate
 
 package systemcontracts_test
 
 import (
+	"crypto/sha256"
 	"fmt"
 	"math/big"
 	"os"
@@ -27,25 +28,44 @@ import (
 
 const userNFTRefundTestPhase = "MCND_USER_NFT_REFUND_TEST_PHASE"
 
+type nftRefundFixtureAsset struct {
+	Address common.Address
+	Burn    []byte
+	ID      string
+}
+
 type nftRefundCheckpoint struct {
-	NativeIDs []string
-	Owner     string
+	Assets        []nftRefundFixtureAsset
+	BeforeUpgrade []byte
+	Height        int64
 }
 
 func TestOwnedAppNativeUserNFTRefundLifecycle(t *testing.T) {
 	phase := os.Getenv(userNFTRefundTestPhase)
 	if phase == "" {
+		predecessor := os.Getenv("MCND_USER_NFT_REFUND_PREDECESSOR")
+		if predecessor == "" {
+			t.Skip("requires a separately built predecessor and successor")
+		}
 		binary, err := os.Executable()
 		require.NoError(t, err)
 		dir := t.TempDir()
 		require.NoError(t, os.Chmod(dir, 0700))
-		for _, phase := range []string{"seed", "run", "restart"} {
+		for _, phase := range []string{"seed", "prepare", "apply", "restart"} {
 			filter := "^TestOwnedAppNativeUserNFTRefundLifecycle$"
+			program := binary
+			emptyPhase := "restart"
 			if phase == "seed" {
 				filter = "^TestOwnedAppSignedRegistryBootstrap$/^authenticated_isolated_position_reader$"
+				emptyPhase = "seed"
+			} else if phase == "prepare" {
+				emptyPhase = "run"
 			}
-			child := exec.CommandContext(t.Context(), binary, "-test.v", "-test.timeout=4m", "-test.run="+filter)
-			child.Env = append(os.Environ(), emptyUserAssetsPhaseEnv+"="+phase, userNFTRefundTestPhase+"="+phase,
+			if phase == "seed" || phase == "prepare" {
+				program = predecessor
+			}
+			child := exec.CommandContext(t.Context(), program, "-test.v", "-test.timeout=4m", "-test.run="+filter)
+			child.Env = append(os.Environ(), emptyUserAssetsPhaseEnv+"="+emptyPhase, userNFTRefundTestPhase+"="+phase,
 				nativeConsensusDaemonFixtureEnv+"="+dir)
 			output, err := child.CombinedOutput()
 			require.NoError(t, err, "phase %s: %s", phase, output)
@@ -55,24 +75,25 @@ func TestOwnedAppNativeUserNFTRefundLifecycle(t *testing.T) {
 	}
 
 	dir := os.Getenv(nativeConsensusDaemonFixtureEnv)
-	l, profile := openEmptyUserAssets(t, dir, phase, true)
+	l, profile := openEmptyUserAssets(t, dir, os.Getenv(emptyUserAssetsPhaseEnv), true)
 	checkpoint := filepath.Join(dir, "refund-checkpoint.json")
-	if phase == "restart" {
-		var saved nftRefundCheckpoint
-		readNativeHistoricalJSON(t, checkpoint, &saved)
-		require.Len(t, saved.NativeIDs, 2)
-		for i, id := range saved.NativeIDs {
-			assertRefundedUnits(t, l, id, saved.Owner, uint32(i+1), uint32(i+1))
-		}
-		return
-	}
-	require.Equal(t, "run", phase)
 	govKey, err := registryFixtureKey(3, true)
 	require.NoError(t, err)
 	key, err := registryFixtureKey(4, true)
 	require.NoError(t, err)
 	owner := sdk.AccAddress(key.PubKey().Address())
 	ownerEVM := common.BytesToAddress(owner)
+	var saved nftRefundCheckpoint
+	if phase != "prepare" {
+		readNativeHistoricalJSON(t, checkpoint, &saved)
+		require.Len(t, saved.Assets, 3)
+	}
+	if phase == "restart" {
+		for i, item := range saved.Assets[:2] {
+			assertRefundedUnits(t, l, item.ID, owner.String(), uint32(i+1), uint32(i+1))
+		}
+		return
+	}
 	unit := sdkmath.NewIntWithDecimal(2, 18)
 	price := big.NewInt(1_000_000_000_000)
 	send := func(signer *ethsecp256k1.PrivKey, to common.Address, value sdkmath.Int, input []byte, pass bool) ([]byte, sdkmath.Int) {
@@ -99,12 +120,7 @@ func TestOwnedAppNativeUserNFTRefundLifecycle(t *testing.T) {
 	}
 	center, err := contracts.CompiledABI("NewNetworkNFTCenter")
 	require.NoError(t, err)
-	type asset struct {
-		address common.Address
-		burn    []byte
-		id      string
-	}
-	mint := func(multi, refundable bool) asset {
+	mint := func(multi, refundable bool) nftRefundFixtureAsset {
 		t.Helper()
 		factoryMethod, implementation := "createDRC721", "NewNetworkDRC721"
 		id := big.NewInt(1)
@@ -138,40 +154,51 @@ func TestOwnedAppNativeUserNFTRefundLifecycle(t *testing.T) {
 		burn := packNFTRefundBurn(t, contract, id, multi)
 		nativeID, err := nfttypes.FreshExternalTokenID(l.doc.ChainID, 990001, address.Bytes(), common.BigToHash(id).Bytes())
 		require.NoError(t, err)
-		return asset{address: address, id: nativeID, burn: burn}
+		return nftRefundFixtureAsset{Address: address, ID: nativeID, Burn: burn}
 	}
-	assets := []asset{mint(false, true), mint(true, true)}
-	noRefund := mint(false, false)
 	balance := func(address common.Address) sdkmath.Int {
 		return l.app.BankKeeper.GetBalance(l.snapshot(), sdk.AccAddress(address.Bytes()), identity.BaseDenom).Amount
 	}
-	assertBurn := func(item asset, signer *ethsecp256k1.PrivKey, minted, burnt uint32, expectedRefund sdkmath.Int, pass bool) {
+	assertBurn := func(item nftRefundFixtureAsset, signer *ethsecp256k1.PrivKey, minted, burnt uint32, expectedRefund sdkmath.Int, pass bool) {
 		t.Helper()
 		supply := l.supply()
-		custody := balance(item.address)
+		custody := balance(item.Address)
 		wallet := balance(ownerEVM)
-		_, fee := send(signer, item.address, sdkmath.ZeroInt(), item.burn, pass)
+		_, fee := send(signer, item.Address, sdkmath.ZeroInt(), item.Burn, pass)
 		require.Equal(t, supply.String(), l.supply().String())
-		require.Equal(t, custody.Sub(expectedRefund).String(), balance(item.address).String())
+		require.Equal(t, custody.Sub(expectedRefund).String(), balance(item.Address).String())
 		if owner.Equals(sdk.AccAddress(signer.PubKey().Address())) {
 			require.Equal(t, wallet.Add(expectedRefund).Sub(fee).String(), balance(ownerEVM).String())
 		} else {
 			require.Equal(t, wallet.String(), balance(ownerEVM).String())
 		}
-		assertRefundedUnits(t, l, item.id, owner.String(), minted, burnt)
+		assertRefundedUnits(t, l, item.ID, owner.String(), minted, burnt)
 	}
 
-	assertBurn(assets[0], key, 1, 0, sdkmath.ZeroInt(), false)
-	assertBurn(assets[1], key, 2, 0, sdkmath.ZeroInt(), false)
-	applyRefundUpgrade(t, l, govKey)
-	assertBurn(noRefund, key, 1, 0, sdkmath.ZeroInt(), false)
+	if phase == "prepare" {
+		saved.Assets = []nftRefundFixtureAsset{mint(false, true), mint(true, true), mint(false, false)}
+		assertBurn(saved.Assets[0], key, 1, 0, sdkmath.ZeroInt(), false)
+		assertBurn(saved.Assets[1], key, 2, 0, sdkmath.ZeroInt(), false)
+		saved.Height = scheduleRefundUpgrade(t, l, govKey)
+		saved.BeforeUpgrade = l.app.LastCommitID().Hash
+		writeNativeHistoricalJSON(t, checkpoint, saved)
+		return
+	}
+	require.Equal(t, "apply", phase)
+	require.Equal(t, saved.Height-1, l.app.LastBlockHeight())
+	require.Equal(t, saved.BeforeUpgrade, l.app.LastCommitID().Hash)
+	l.commit(l.finalize(nil, nil))
+	done, err := l.app.UpgradeKeeper.GetDoneHeight(l.snapshot(), nftRefundUpgradePlan)
+	require.NoError(t, err)
+	require.Equal(t, saved.Height, done)
+	assets := saved.Assets
+	assertBurn(assets[2], key, 1, 0, sdkmath.ZeroInt(), false)
 	assertBurn(assets[0], govKey, 1, 0, sdkmath.ZeroInt(), false)
 	assertBurn(assets[0], key, 1, 1, unit, true)
 	assertBurn(assets[0], key, 1, 1, sdkmath.ZeroInt(), false)
 	assertBurn(assets[1], key, 2, 1, unit, true)
 	assertBurn(assets[1], key, 2, 2, unit, true)
 	assertBurn(assets[1], key, 2, 2, sdkmath.ZeroInt(), false)
-	writeNativeHistoricalJSON(t, checkpoint, nftRefundCheckpoint{NativeIDs: []string{assets[0].id, assets[1].id}, Owner: owner.String()})
 }
 
 func packNFTRefundBurn(t *testing.T, contract abi.ABI, id *big.Int, multi bool) []byte {
@@ -185,15 +212,16 @@ func packNFTRefundBurn(t *testing.T, contract abi.ABI, id *big.Int, multi bool) 
 	return burn
 }
 
-func applyRefundUpgrade(t *testing.T, l nativeHistoricalLifecycle, voterKey *ethsecp256k1.PrivKey) {
+const nftRefundUpgradePlan = "mintcandy-native-sdk-migrations-v1"
+
+func scheduleRefundUpgrade(t *testing.T, l nativeHistoricalLifecycle, voterKey *ethsecp256k1.PrivKey) int64 {
 	t.Helper()
-	const name = "mintcandy-native-sdk-migrations-v1"
 	deposit := sdk.NewCoins(sdk.NewCoin(identity.BaseDenom, sdkmath.NewIntWithDecimal(1, 18)))
 	voter := sdk.AccAddress(voterKey.PubKey().Address())
 	height := l.app.LastBlockHeight() + 10
 	id, err := l.app.GovKeeper.ProposalID.Peek(l.snapshot())
 	require.NoError(t, err)
-	metadata := fmt.Sprintf(`mintcandy-sdk-upgrade/v1:{"name":"%s","height":%d}`, name, height)
+	metadata := fmt.Sprintf(`mintcandy-sdk-upgrade/v1:{"name":"%s","height":%d}`, nftRefundUpgradePlan, height)
 	submit, err := govv1.NewMsgSubmitProposal(nil, deposit, voter.String(), metadata,
 		"Native NFT refund", "Apply the registered update to project wallet refunds.", false)
 	require.NoError(t, err)
@@ -205,11 +233,8 @@ func applyRefundUpgrade(t *testing.T, l nativeHistoricalLifecycle, voterKey *eth
 	plan, err := l.app.UpgradeKeeper.GetUpgradePlan(l.snapshot())
 	require.NoError(t, err)
 	require.Equal(t, height, plan.Height)
-	require.Equal(t, name, plan.Name)
-	l.commit(l.finalize(nil, nil))
-	done, err := l.app.UpgradeKeeper.GetDoneHeight(l.snapshot(), name)
-	require.NoError(t, err)
-	require.Equal(t, height, done)
+	require.Equal(t, nftRefundUpgradePlan, plan.Name)
+	return height
 }
 
 func assertRefundedUnits(t *testing.T, l nativeHistoricalLifecycle, id, owner string, minted, burnt uint32) {
