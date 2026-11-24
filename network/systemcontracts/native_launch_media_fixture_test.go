@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"strings"
 	"testing"
 
 	cmttypes "github.com/cometbft/cometbft/types"
@@ -36,7 +37,7 @@ func TestExportLaunchMediaCreation(t *testing.T) {
 	if kind == "" {
 		kind = "erc20"
 	}
-	require.Contains(t, []string{"erc20", "erc721", "erc1155"}, kind)
+	require.Contains(t, []string{"erc20", "erc721", "erc1155", "erc721-backed", "erc1155-backed"}, kind)
 	genesis, err := os.ReadFile(os.Getenv("MCND_MEDIA_GENESIS"))
 	require.NoError(t, err)
 	doc, err := cmttypes.GenesisDocFromJSON(genesis)
@@ -53,6 +54,7 @@ func TestExportLaunchMediaCreation(t *testing.T) {
 		evmID = identity.MainnetEVMChainID
 	} else {
 		require.Equal(t, nativeSponsoredLaunchChainID, doc.ChainID)
+		require.False(t, strings.HasSuffix(kind, "-backed"))
 	}
 	var state struct {
 		Withdrawal struct {
@@ -64,7 +66,7 @@ func TestExportLaunchMediaCreation(t *testing.T) {
 	key, err := crypto.ToECDSA(nativeLaunchAccountKey(1, spec).Bytes())
 	require.NoError(t, err)
 	creator := crypto.PubkeyToAddress(key.PublicKey)
-	target, payload, event, nonce := launchMediaTransaction(t, kind, creator, uri,
+	target, payload, event, nonce, value := launchMediaTransaction(t, kind, creator, uri,
 		state.Withdrawal.TokenCenter, state.Withdrawal.NFTCenter)
 	require.NotEqual(t, common.Address{}, target)
 	gas := uint64(3_000_000)
@@ -72,7 +74,7 @@ func TestExportLaunchMediaCreation(t *testing.T) {
 		gas = 12_000_000
 	}
 	tx := ethtypes.NewTx(&ethtypes.LegacyTx{To: &target, Nonce: nonce, Gas: gas,
-		GasPrice: big.NewInt(1_000_000_000_000), Data: payload})
+		GasPrice: big.NewInt(1_000_000_000_000), Data: payload, Value: value})
 	signed, err := ethtypes.SignTx(tx, ethtypes.NewEIP155Signer(new(big.Int).SetUint64(evmID)), key)
 	require.NoError(t, err)
 	raw, err := signed.MarshalBinary()
@@ -91,37 +93,75 @@ func TestExportLaunchMediaCreation(t *testing.T) {
 
 func launchMediaTransaction(t *testing.T, kind string, creator common.Address, uri string,
 	tokenCenter, nftCenter common.Address,
-) (common.Address, []byte, common.Hash, uint64) {
+) (common.Address, []byte, common.Hash, uint64, *big.Int) {
 	t.Helper()
 	collection := os.Getenv("MCND_MEDIA_COLLECTION")
+	refund := os.Getenv("MCND_MEDIA_REFUND")
+	value := new(big.Int)
 	if kind == "erc20" {
 		require.Empty(t, collection)
+		require.Empty(t, refund)
 		factory, err := contracts.CompiledABI("NewNetworkTokenCenter")
 		require.NoError(t, err)
 		payload, err := factory.Pack("createTokenReserveless", "LAUNCH AVATAR TOKEN", "media", false, true,
 			big.NewInt(10), new(big.Int), uri)
 		require.NoError(t, err)
-		return tokenCenter, payload, factory.Events["TokenReservelessDeployed"].ID, 0
+		return tokenCenter, payload, factory.Events["TokenReservelessDeployed"].ID, 0, value
 	}
+	multi := strings.HasPrefix(kind, "erc1155")
+	backed := strings.HasSuffix(kind, "-backed")
 	if collection != "" {
 		require.True(t, common.IsHexAddress(collection))
 		contract, event := "DRC721Reserveless", "Transfer"
-		args := []interface{}{creator, uri, new(big.Int), common.Address{}}
-		if kind == "erc1155" {
+		args := []interface{}{creator, uri}
+		if multi {
 			contract, event = "DRC1155Reserveless", "TransferSingle"
-			args = []interface{}{creator, big.NewInt(123), big.NewInt(2), uri, new(big.Int), common.Address{}}
+			args = []interface{}{creator, big.NewInt(123), big.NewInt(2), uri}
+		}
+		method, nonce := "mint", uint64(1)
+		if backed {
+			contract = "NewNetworkDRC721"
+			if multi {
+				contract = "MintCandyIsolatedDRC1155"
+			}
+			method = "mintByDEL"
+			value.SetInt64(2_000_000_000_000_000_000)
+			if multi {
+				value.Mul(value, big.NewInt(2))
+			}
+		} else {
+			args = append(args, new(big.Int), common.Address{})
+		}
+		if refund != "" {
+			require.True(t, backed)
+			require.Contains(t, []string{"first", "last"}, refund)
+			method, nonce = "burn", 2
+			value.SetInt64(0)
+			args = []interface{}{big.NewInt(1)}
+			if multi {
+				args = []interface{}{big.NewInt(123), big.NewInt(1)}
+				if refund == "last" {
+					nonce++
+				}
+			} else {
+				require.Equal(t, "first", refund)
+			}
 		}
 		asset, err := contracts.CompiledABI(contract)
 		require.NoError(t, err)
-		payload, err := asset.Pack("mint", args...)
+		payload, err := asset.Pack(method, args...)
 		require.NoError(t, err)
-		return common.HexToAddress(collection), payload, asset.Events[event].ID, 1
+		return common.HexToAddress(collection), payload, asset.Events[event].ID, nonce, value
 	}
+	require.Empty(t, refund)
 	factory, err := contracts.CompiledABI("NewNetworkNFTCenter")
 	require.NoError(t, err)
-	method := "createDRC721Reserveless"
-	if kind == "erc1155" {
-		method = "createDRC1155Reserveless"
+	method := "createDRC721"
+	if multi {
+		method = "createDRC1155"
+	}
+	if !backed {
+		method += "Reserveless"
 	}
 	metadata := struct {
 		Creator     common.Address
@@ -133,5 +173,5 @@ func launchMediaTransaction(t *testing.T, kind string, creator common.Address, u
 	}{creator, "MEDIA", "Media rehearsal collection", uri, true, true}
 	payload, err := factory.Pack(method, metadata)
 	require.NoError(t, err)
-	return nftCenter, payload, factory.Events["NFTCreated"].ID, 0
+	return nftCenter, payload, factory.Events["NFTCreated"].ID, 0, value
 }

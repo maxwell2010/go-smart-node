@@ -351,17 +351,18 @@ jobs:
           from sys import argv
           from PIL import Image
 
-          for kind, color in (('erc20', '#12ccaa'), ('erc721', '#cc1212'), ('erc1155', '#1921cc')):
+          for kind, color in (('erc20', '#12ccaa'), ('erc721', '#cc1212'), ('erc1155', '#1921cc'),
+                              ('erc721-backed', '#951ac7'), ('erc1155-backed', '#b2dc2d')):
               root = Path(argv[1]) / f'media-{kind}'
               root.mkdir(mode=0o700)
               (root / 'metadata.json').write_text('{"name":"' + kind + ' media rehearsal"}')
               Image.new('RGB', (6, 6), color).save(root / 'avatar.png')
           PY
           go test -mod=readonly -p 2 -c -o "$work/media-fixture.test" ./systemcontracts
-          for kind in erc20 erc721 erc1155; do
+          for kind in erc20 erc721 erc1155 erc721-backed erc1155-backed; do
             fixture="$work/media-$kind"
             PYTHONPATH="$PWD/media" "$py" -B -m mcnd_media.commitment prepare \
-              --chain-id "mintcandy_${EVM_ID}-1" --kind "$kind" --mime image/png \
+              --chain-id "mintcandy_${EVM_ID}-1" --kind "${kind%-backed}" --mime image/png \
               --metadata "$fixture/metadata.json" --image "$fixture/avatar.png" > "$fixture/prepare.json"
             report="$work/evidence/published-media-$kind.json"
             status=0
@@ -382,12 +383,25 @@ jobs:
               --report "$report" || status=$?
             if [[ -f "$report" ]]; then sudo -n chown "$(id -u):$(id -g)" "$report"; fi
             (( status == 0 ))
-            jq -e --arg sha "$PUBLISHED_BINARY_SHA" --arg kind "$kind" '
+            jq -e --arg sha "$PUBLISHED_BINARY_SHA" --arg kind "${kind%-backed}" --arg profile "$kind" '
               .status == "PASS" and .loopbackOnlyNamespace and .chainId == "mintcandy_9905401-1" and .binarySha256 == $sha and
-              (.committedMedia | .status == "PASS" and .version == 1 and .kind == ($kind + "-reserveless") and
+              (.committedMedia | .status == "PASS" and .version == 1 and
+                .kind == (if $profile == $kind then $kind + "-reserveless" else $profile end) and
                 .assetTokenId == {erc20: "0", erc721: "1", erc1155: "123"}[$kind] and
                 (if $kind == "erc20" then true else .collectionHeight < .receiptHeight end) and
-                .alteredMetadataRejected and .httpsVerified and .restoredObjects == 2)
+                .alteredMetadataRejected and .httpsVerified and .restoredObjects == 2 and
+                (if $profile == $kind then true else
+                  .receiptHeight < .reserveRefund.steps[0].height and
+                  (.reserveRefund | .denom == "msp" and .bankSupplyUnchanged and .observerMatched and
+                    all(.steps[]; .refundedAtomic == "2000000000000000000") and
+                    (if $kind == "erc721" then
+                      .mintedUnits == 1 and .lockedAtomic == "2000000000000000000" and
+                      [.steps[] | [.remainingUnits, .custodyAtomic]] == [[0, "0"]]
+                    else
+                      .mintedUnits == 2 and .lockedAtomic == "4000000000000000000" and
+                      [.steps[] | [.remainingUnits, .custodyAtomic]] == [[1, "2000000000000000000"], [0, "0"]]
+                    end))
+                end))
               ' "$report" >/dev/null
           done
       - name: Relay ICS-20 packets with the versioned binary

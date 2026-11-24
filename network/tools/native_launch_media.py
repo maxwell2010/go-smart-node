@@ -12,7 +12,8 @@ import sys
 import time
 
 from native_consensus_smoke import committed_header, wait_replicas
-from withdrawal_genesis_smoke import ADDRESS, WORD, check, ethereum, private_bytes
+from del_delegation_smoke import read_words
+from withdrawal_genesis_smoke import ADDRESS, WORD, check, ethereum, native, private_bytes
 
 
 MEDIA = Path(__file__).resolve().parents[1] / 'media'
@@ -28,8 +29,11 @@ def rehearse_media(root, expected, nodes, fixture_path, report, env, owner):
 
     report['phase'] = 'media-signed-token-creation'
     fixture = read_media_fixture(fixture_path, report)
-    kind = fixture['kind']
+    kind = fixture['kind'].removesuffix('-backed')
     check(kind in ('erc20', 'erc721', 'erc1155'), 'unknown media asset kind')
+    backed = fixture['kind'] != kind
+    check(not backed or (kind != 'erc20' and expected['chainId'] == 'mintcandy_9905401-1' and
+                         expected['nativeDenom'] == 'msp'), 'invalid backing domain')
     if kind != 'erc20':
         report['phase'] = 'media-signed-nft-collection'
     metadata = strict(private_bytes(fixture_path.parent / 'metadata.json', 64 << 10))
@@ -49,15 +53,7 @@ def rehearse_media(root, expected, nodes, fixture_path, report, env, owner):
     extra = {}
     if kind != 'erc20':
         report['phase'] = 'media-signed-nft-mint'
-        mint_path = fixture_path.with_name('mint.json')
-        signer_env = dict(env, MCND_MEDIA_KIND=kind, MCND_MEDIA_URI=fixture['uri'], MCND_MEDIA_COLLECTION=contract,
-                          MCND_MEDIA_GENESIS=str(source.home / 'config/genesis.json'), MCND_MEDIA_FIXTURE=str(mint_path))
-        signer = str(Path(os.environ['MCND_MEDIA_SIGNER']).resolve(strict=True))
-        subprocess.run([signer, '-test.run', '^TestExportLaunchMediaCreation$', '-test.timeout', '30s'],
-                       cwd=root, env=signer_env, check=True, timeout=35)
-        mint = read_media_fixture(mint_path, report)
-        check(tuple(mint[key] for key in ('kind', 'creator', 'uri', 'target')) ==
-              (kind, fixture['creator'], fixture['uri'], contract), 'mint fixture differs from the committed collection')
+        mint = sign_media_action(root, fixture_path, fixture, asset, source, env, report, refund='')
         extra['collectionHeight'] = int(receipt['blockNumber'], 16)
         receipt = commit_media_transaction(source, nodes, mint, 1, report)
         recipient = '0x' + fixture['creator'][2:].rjust(64, '0')
@@ -76,10 +72,74 @@ def rehearse_media(root, expected, nodes, fixture_path, report, env, owner):
     source_reader = CommittedReader(asset.chain_id, LocalRPC(f'http://127.0.0.1:{source.p2p + 1}'), LocalRPC(source.evm))
     check(source_reader(asset, fixture['uri']) == fixture['creator'], 'validator returned a different media authority')
     publication = rehearse_https(root, asset, fixture, metadata, image, witness, env, owner, report)
-    report['committedMedia'] = {'status': 'PASS', 'kind': kind + '-reserveless', 'assetTokenId': asset.token_id,
+    if backed:
+        extra['reserveRefund'] = rehearse_refunds(root, fixture_path, fixture, asset, nodes, env, report, receipt)
+    report['committedMedia'] = {'status': 'PASS', 'kind': kind + ('-backed' if backed else '-reserveless'),
+                                'assetTokenId': asset.token_id,
                                 'receiptHeight': int(receipt['blockNumber'], 16), 'txHash': receipt['transactionHash'],
                                 'alteredMetadataRejected': True, 'httpsVerified': True, 'restoredObjects': 2,
                                 **extra, **publication}
+
+
+def sign_media_action(root, fixture_path, fixture, asset, source, env, report, *, refund):
+    output = fixture_path.with_name(f'refund-{refund}.json' if refund else 'mint.json')
+    signer_env = dict(env, MCND_MEDIA_KIND=fixture['kind'], MCND_MEDIA_URI=fixture['uri'],
+                      MCND_MEDIA_COLLECTION=asset.contract, MCND_MEDIA_REFUND=refund,
+                      MCND_MEDIA_GENESIS=str(source.home / 'config/genesis.json'), MCND_MEDIA_FIXTURE=str(output))
+    signer = str(Path(os.environ['MCND_MEDIA_SIGNER']).resolve(strict=True))
+    subprocess.run([signer, '-test.run', '^TestExportLaunchMediaCreation$', '-test.timeout', '30s'],
+                   cwd=root, env=signer_env, check=True, timeout=35)
+    signed = read_media_fixture(output, report)
+    check(tuple(signed[key] for key in ('kind', 'creator', 'uri', 'target')) ==
+          (fixture['kind'], fixture['creator'], fixture['uri'], asset.contract),
+          'signed action differs from the committed collection')
+    return signed
+
+
+def rehearse_refunds(root, fixture_path, fixture, asset, nodes, env, report, mint):
+    report['phase'] = 'media-refund-backed-nft'
+    source, witness = nodes[0], nodes[-1]
+    creator, contract = fixture['creator'], asset.contract
+    actor_word = creator[2:].rjust(64, '0')
+    token_word = f'{int(asset.token_id):064x}'
+    multi = asset.kind == 'erc1155'
+    minted = 2 if multi else 1
+    unit = 2 * 10**18
+    steps = []
+
+    def snapshot(node, height):
+        owner_balance, custody = (int(ethereum('eth_getBalance', [address, hex(height)], base=node.evm), 16)
+                                  for address in (creator, contract))
+        calldata = ('0x00fdd58e' + actor_word + token_word) if multi else ('0x70a08231' + actor_word)
+        units = read_words(contract, calldata, height, 1, node.evm)[0]
+        supply = native('/cosmos/bank/v1beta1/supply/by_denom?denom=msp', height, base=node.rest)['amount']
+        check(supply['denom'] == 'msp', 'refundable NFT supply query returned the wrong denom')
+        return owner_balance, custody, units, int(supply['amount'])
+
+    mint_height = int(mint['blockNumber'], 16)
+    before, after = (snapshot(source, height) for height in (mint_height - 1, mint_height))
+    fee = int(mint['gasUsed'], 16) * int(mint['effectiveGasPrice'], 16)
+    check(before[1:3] == (0, 0) and after == (before[0] - minted * unit - fee, minted * unit, minted, before[3])
+          and after == snapshot(witness, mint_height), 'NFT mint did not lock the exact MSP reserve')
+    for index, stage in enumerate(('first', 'last') if multi else ('first',)):
+        signed = sign_media_action(root, fixture_path, fixture, asset, source, env, report, refund=stage)
+        receipt = commit_media_transaction(source, nodes, signed, 2 + index, report)
+        height = int(receipt['blockNumber'], 16)
+        before, after = (snapshot(source, at) for at in (height - 1, height))
+        fee = int(receipt['gasUsed'], 16) * int(receipt['effectiveGasPrice'], 16)
+        remaining = minted - index - 1
+        check(before[1:3] == ((remaining + 1) * unit, remaining + 1) and
+              after == (before[0] + unit - fee, remaining * unit, remaining, before[3]) and
+              after == snapshot(witness, height), 'burn did not refund the exact MSP reserve on both replicas')
+        actor = '0x' + actor_word
+        zero = '0x' + '0' * 64
+        topics = [signed['event'], actor, actor, zero] if multi else [signed['event'], actor, zero, '0x' + token_word]
+        event_data = f'0x{token_word}{1:064x}' if multi else '0x'
+        check(sum(entry['address'].lower() == contract and entry['topics'] == topics and
+                  entry['data'] == event_data for entry in receipt['logs']) == 1, 'refund receipt is missing the exact NFT burn')
+        steps.append({'height': height, 'refundedAtomic': str(unit), 'custodyAtomic': str(after[1]), 'remainingUnits': remaining})
+    return {'denom': 'msp', 'mintedUnits': minted, 'lockedAtomic': str(minted * unit),
+            'bankSupplyUnchanged': True, 'observerMatched': True, 'steps': steps}
 
 
 def read_media_fixture(path, report):
