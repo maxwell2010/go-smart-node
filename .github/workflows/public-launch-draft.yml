@@ -120,7 +120,7 @@ jobs:
             ([.. | objects | select(has("enable_native_upgrade_governance")) |
               .enable_native_upgrade_governance] == [true])' "$home/config/genesis.json" >/dev/null
           upgrade_guide="$GITHUB_WORKSPACE/network/docs/ru/GOVERNED_UPGRADE_1_2_2.md"
-          export MCND_HOME="$work/proposal-client" KEYRING_BACKEND=test PROPOSER_KEY=review-only
+          export MCND_HOME="$home" KEYRING_BACKEND=test PROPOSER_KEY=review-only
           export UPGRADE_HEIGHT=123456 DEPOSIT_ATOMIC=10000000000000000000
           binary="$HOME/.local/opt/mcnd/1.2.1-msp/mcnd"
           "$binary" keys add "$PROPOSER_KEY" --home "$MCND_HOME" --keyring-backend test >/dev/null 2>&1

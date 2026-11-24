@@ -56,19 +56,28 @@ PY
 ## Проверка предложения бинарником 1.2.1
 
 В том же каталоге укажите `PROPOSER_KEY` (локальное имя учётной записи
-инициатора в keyring) и `MCND_HOME` (каталог её клиента). По умолчанию
+инициатора в keyring) и `MCND_HOME` (каталог клиента с установленным
+подписанным genesis майнета в `config/genesis.json`). Даже офлайн
+бинарник читает этот файл и сверяет сетевой профиль. По умолчанию
 используется keyring `file`. Команда формирует неподписанную транзакцию и
 печатает её в терминал. Для проверки не нужен запущенный RPC.
 
 ```sh
+(
+set -eu
+printf '%s  %s\n' cbb4e0c1a060b09e9fb45204c1f2de16d4be37d67753378b06782abeaebf8117 \
+  "${MCND_HOME:?}/config/genesis.json" | sha256sum --check --status
 "$HOME/.local/opt/mcnd/1.2.1-msp/mcnd" tx gov submit-proposal proposal.json \
   --generate-only --offline --chain-id mintcandy_9905401-1 --evm.evm-chain-id 9905401 \
   --home "${MCND_HOME:?}" --from "${PROPOSER_KEY:?}" --keyring-backend "${KEYRING_BACKEND:-file}"
+)
 ```
 
 Перед отдельным решением о подписи сверьте инициатора, депозит, название
 и высоту в единственном сообщении `MsgSubmitProposal`, а также пустые
-`messages` внутри него. Формирование черновика не назначает высоту в сети.
+`messages` внутри него. Для фактической подписи отдельно проверяются
+chain ID, номер и sequence аккаунта, газ и комиссия. Формирование
+черновика не назначает высоту в сети.
 
 ## До принятой высоты
 
