@@ -39,6 +39,13 @@ channel accepted a separate reference asset and returned it successfully.
 All four validators signed the final checkpoint at height 64.
 [Test asset admission evidence](https://github.com/maxwell2010/go-smart-node/actions/runs/45321817918).
 
+The published MSP binary also committed a signed reserveless DRC20 creation
+at block 23 of the isolated launch. The media gateway verified its CID and
+owner through an observer RPC. HTTPS publication rejected altered metadata
+and repeated the accepted upload without a new version. A separate HTTPS
+gateway served the original PNG and JSON by CID after backup restoration.
+[Committed token avatar and restore evidence](https://github.com/maxwell2010/go-smart-node/actions/runs/45324521369).
+
 ## 1.2.0 software release
 
 [MintCandy Node 1.2.0](https://github.com/maxwell2010/go-smart-node/releases/tag/v1.2.0)
