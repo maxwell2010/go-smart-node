@@ -1,16 +1,20 @@
 # MintCandy Network
 
-Нативная монета: **MintCandy (MSP)**, 18 знаков, внутренний denom `del`.
+Нативная монета майнета **MintCandy (MSP)** имеет 18 знаков и базовый denom `msp`.
+Chain ID майнета - `mintcandy_9905401-1`, EVM chain ID - `9905401`.
 [Название, metadata и техническая совместимость](network/docs/ru/NATIVE_TOKEN_IDENTITY.md).
 
 Независимый интеграционный форк Decimal `go-smart-node`. Основная разработка
 ведётся в [отдельном модуле `network/`](network/README.md): нода `mcnd`,
 собственная сеть с новым genesis, EVM, нативный консенсус и IBC.
 
-Готовый бинарник Linux amd64 доступен в
-[выпуске v1.1.5](https://github.com/maxwell2010/go-smart-node/releases/tag/v1.1.5).
-Публичный genesis, состав операторов и адреса подключения ещё готовятся.
-[Однострочник установки](https://github.com/maxwell2010/go-smart-node/releases/download/v1.1.5/INSTALL_RU.md) ·
+Четыре валидатора подписали первый блок майнета. Для установки нужны
+Linux-бинарник и подписанный genesis. Переход с 1.2.1 на 1.2.2 выполняется
+на высоте, принятой голосованием. [Выпуск v1.2.2](https://github.com/maxwell2010/go-smart-node/releases/tag/v1.2.2) ·
+[Подписанный genesis v1.2.0](https://github.com/maxwell2010/go-smart-node/releases/tag/v1.2.0) ·
+[Порядок обновления и синхронизации](network/docs/ru/GOVERNED_UPGRADE_1_2_2.md).
+
+[Однострочник установки](https://github.com/maxwell2010/go-smart-node/releases/download/v1.2.2/INSTALL_RU.md) ·
 [Проверка издателя](network/docs/ru/SOFTWARE_RELEASE_VERIFICATION.md) ·
 [Офлайн-комплект](network/docs/ru/INSTALL_LAUNCH_TOOLS.md).
 
@@ -57,6 +61,8 @@ DePIN и торговый MEV-сервис не входят в первый с�
 
 | Проверка | Ревизия и результат |
 | --- | --- |
+| 1.2.2, миграция с пакетом ICS-20 на 1 MSP, восстановление наблюдателя и обратный перевод | [Прогон CI](https://github.com/maxwell2010/go-smart-node/actions/runs/45351481993) |
+| 1.2.2, подключение новой ноды из genesis и снапшота после миграции | [Прогон CI](https://github.com/maxwell2010/go-smart-node/actions/runs/45346495072) |
 | v1.1.5: MSP в новом `mcnd init`, WMSP в genesis и 10 сценариев Hermes | [CI 45124076770](https://github.com/maxwell2010/go-smart-node/actions/runs/45124076770), success |
 | v1.1.4: WMSP через EVM, проверка RPC перед снапшотом и 10 сценариев Hermes | [CI 45117195355](https://github.com/maxwell2010/go-smart-node/actions/runs/45117195355), success |
 | v1.1.3: кворум, синхронизация, systemd, snapshot и 10 сценариев Hermes | [`8c8b844`, CI 45012997466](https://github.com/maxwell2010/go-smart-node/actions/runs/45012997466), success |
