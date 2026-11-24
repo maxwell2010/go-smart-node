@@ -26,6 +26,15 @@ the network's signed genesis and uses the height approved by governance.
 [Upgrade report](https://github.com/maxwell2010/go-smart-node/actions/runs/45340801528) ·
 [Operator procedure](../network/docs/ru/GOVERNED_UPGRADE_1_2_2.md).
 
+A new observer joined the isolated MSP chain after the upgrade. It replayed
+from block 1 on the published 1.2.1 binary, matched the approved upgrade hint
+at height 64 and continued on the published 1.2.2 binary using the same home.
+A second observer restored snapshot 100 with trust height 102 verified by two
+RPC peers. Both observers retained the applied upgrade and the pending 2 MSP
+ERC1155 reserve. The refund was paid once at height 109. At height 114, all
+seven nodes matched AppHash and all four validator signatures verified.
+[Fresh observer recovery report](https://github.com/maxwell2010/go-smart-node/actions/runs/45346495072).
+
 ## 1.2.1 software release
 
 The `msp` and `tmsp` Linux amd64 packages use the same source revision,
