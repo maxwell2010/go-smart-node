@@ -514,8 +514,9 @@ def verify_follower_resume(follower, validators, expected, report, previous_hand
           "systemd restart changed the follower's peer identity or voting power")
     check(verify_first_block(nodes) == report["block1Hash"], "systemd restart did not preserve block 1")
     app_hash = committed_header(nodes, height + 1)["app_hash"]
-    values = {balance(expected["actor"], expected["actorNative"], height, node.evm, node.rest) for node in nodes}
-    check(len(values) == 1 and next(iter(values)) > 0, "restarted follower disagrees on the committed DEL balance")
+    denom = expected.get("nativeDenom", "del")
+    values = {balance(expected["actor"], expected["actorNative"], height, node.evm, node.rest, denom=denom) for node in nodes}
+    check(len(values) == 1 and next(iter(values)) > 0, "restarted follower disagrees on the committed native balance")
     return {"loadedHeight": loaded, "loadedAppHash": loaded_hash, "verifiedHeight": height,
             "appHash": app_hash, "sameNodeId": True, "catchingUp": False}
 

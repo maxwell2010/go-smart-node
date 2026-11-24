@@ -1,6 +1,6 @@
 # Установка и эксплуатация отдельной сети MintCandy
 
-Нативная монета кандидата майнета - **MintCandy (MSP)**, 18 знаков,
+Нативная монета майнета - **MintCandy (MSP)**, 18 знаков,
 внутренний denom `msp`.
 [Выбранные имя, тикер и совместимость](NATIVE_TOKEN_IDENTITY.md).
 
@@ -8,12 +8,10 @@
 Версионные программные пакеты перечислены в
 [GitHub Releases](https://github.com/maxwell2010/go-smart-node/releases).
 Для установки майнета без Go и кэшей сборки используйте
-[параметры профиля MSP](OPERATOR_LAUNCH.md#подготовка-для-майнета-msp) и
-[проверку происхождения выпуска](SOFTWARE_RELEASE_VERIFICATION.md).
-[Инструкция версии 1.1.5 с однострочником](https://github.com/maxwell2010/go-smart-node/releases/download/v1.1.5/INSTALL_RU.md)
-относится к исторической сборке с `del`. Для подготовки и проверки genesis
-есть [офлайн-комплект](INSTALL_LAUNCH_TOOLS.md).
-Публичный запуск требует подписанного genesis и согласованного набора валидаторов.
+[инструкцию v1.2.0 с однострочником](https://github.com/maxwell2010/go-smart-node/releases/download/v1.2.0/INSTALL_RU.md).
+Программный архив, аттестация и подписанный genesis доступны на
+[странице выпуска v1.2.0](https://github.com/maxwell2010/go-smart-node/releases/tag/v1.2.0).
+Для нового каталога ноды см. [подготовку профиля MSP](OPERATOR_LAUNCH.md#подготовка-для-майнета-msp).
 Корневой модуль
 и `dscd` относятся к отдельной legacy-сборке/replay. Нельзя заменять
 действующую Decimal mainnet-ноду этим бинарником или переносить её базу.
@@ -24,7 +22,7 @@
 [Подробно о синхронизации и хранении](SYNCHRONIZATION_AND_STORAGE.md).
 [Установка и конфигурация релеера Hermes](HERMES_RELAYER.md).
 [Черновик запуска и сбор публичных данных операторов](OPERATOR_LAUNCH.md).
-[Публичный запуск: решения на утверждение](LAUNCH_APPROVAL.md) и
+[Параметры запущенного майнета и оставшиеся решения](LAUNCH_APPROVAL.md) и
 [единый проект genesis и распределения](PUBLIC_LAUNCH_DRAFT.md).
 [Начальное распределение и баланс основателя: параметры для согласования](FOUNDER_BOOTSTRAP_DRAFT.md).
 [Нативная монета, мост, оплата комиссий и gas-price oracle](TOKEN_AND_FEE_MODEL.md).

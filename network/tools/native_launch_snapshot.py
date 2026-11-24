@@ -104,12 +104,17 @@ def rehearse_snapshot(binary, root, genesis, expected, env, owner, report, *,
     wait_replicas(nodes, height + 1, 60, report)
     snapshot_hash = committed_header(trust_peers, restored_height + 1)["app_hash"]
     header = committed_header(nodes, height + 1)
-    balances = {balance(expected["actor"], expected["actorNative"], height, node.evm, node.rest) for node in nodes}
+    denom = expected.get("nativeDenom", "del")
+    balances = {balance(expected["actor"], expected["actorNative"], height, node.evm, node.rest, denom=denom) for node in nodes}
     check(len(balances) == 1 and next(iter(balances)) > 0, "snapshot observer balance differs from its peers")
     state_sync.update(restoredHeight=restored_height, restoredAppHash=snapshot_hash,
                       earliestBlockHeight=earliest_height, observerNodeId=observer.node_id,
                       observerVotingPower=0, catchingUp=False, verifiedHeight=height,
-                      appHash=header["app_hash"], delAtomic=str(next(iter(balances))))
+                      appHash=header["app_hash"])
+    if "nativeDenom" in expected:
+        state_sync.update(nativeDenom=denom, nativeAtomic=str(next(iter(balances))))
+    else:
+        state_sync["delAtomic"] = str(next(iter(balances)))
     if measure_resources:
         from node_resource_usage import replica_usage
 

@@ -1,5 +1,30 @@
 # Software release verification
 
+## 1.2.0 software release
+
+[MintCandy Node 1.2.0](https://github.com/maxwell2010/go-smart-node/releases/tag/v1.2.0)
+is the published Linux amd64 daemon for MintCandy mainnet, with bank and EVM
+denom `msp` and wrapped token `WMSP`. The release contains the attestation
+bundle, the signed founding genesis package and the Russian installation guide.
+[Software build and attestation](https://github.com/maxwell2010/go-smart-node/actions/runs/45216915360) ·
+[Installation](https://github.com/maxwell2010/go-smart-node/releases/download/v1.2.0/INSTALL_RU.md).
+
+The profile rehearsal independently validated `msp` and `tmsp` with cold genesis
+assembly, four-validator startup, three-of-four quorum recovery and synchronization
+of a non-signing observer from the signed bootstrap peer. The mainnet launch
+verified all four signatures at height 1 and the same AppHash across the four
+validators and observer at height 21.
+[Native profile rehearsal](https://github.com/maxwell2010/go-smart-node/actions/runs/45215008520) ·
+[Public launch evidence](https://github.com/maxwell2010/go-smart-node/releases/tag/v1.2.0#публичный-запуск).
+
+CI downloaded the published Linux archive and verified its SHA256 and GitHub
+attestation with the documented installer. Hermes then passed ten ICS-20
+scenarios with that exact binary on an isolated `msp` network and an independent
+reference chain. The scenarios covered both directions, acknowledgements,
+refunds, daemon restart and recovery of an in-flight packet. Four validators
+agreed on the AppHash and signed the final checkpoint at height 58.
+[Published MSP IBC run](https://github.com/maxwell2010/go-smart-node/actions/runs/45308038431).
+
 ## 1.1.5 software release
 
 [MintCandy Node 1.1.5](https://github.com/maxwell2010/go-smart-node/releases/tag/v1.1.5)

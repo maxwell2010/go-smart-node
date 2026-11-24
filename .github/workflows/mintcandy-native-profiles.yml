@@ -10,6 +10,10 @@ on:
         description: Rehearse Hermes with the published MSP daemon and disposable validators
         type: boolean
         default: false
+      published_node:
+        description: Rehearse systemd restart, snapshot sync and pruning with the published MSP daemon
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -198,8 +202,8 @@ jobs:
              .quorumRecovery.verifiedEd25519Signatures == 3 and .fourSignerRecovery.verifiedEd25519Signatures == 4 and
              .signedBootstrap.appHash == .appHash and .signedBootstrap.outboundPeers == [.signedBootstrap.nodeId] and
              (.signedBootstrap.networkLaunchAuthorized | not)' "$report" >/dev/null
-      - name: Relay ICS-20 packets with the published MSP release
-        if: inputs.published_ibc && matrix.profile == 'mainnet' && github.repository == 'maxwell2010/go-smart-node'
+      - name: Install the published MSP release using the operator guide
+        if: (inputs.published_ibc || inputs.published_node) && matrix.profile == 'mainnet' && github.repository == 'maxwell2010/go-smart-node'
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
@@ -223,6 +227,50 @@ jobs:
             --bundle "$work/provenance.sigstore.json" --destination "$work/published/mcnd" \
             > "$work/evidence/published-install.json"
           printf '%s  %s\n' "$binary_sha" "$work/published/mcnd" | sha256sum --check --strict
+          printf 'PUBLISHED_SOURCE=%s\nPUBLISHED_ARCHIVE_SHA=%s\nPUBLISHED_BINARY_SHA=%s\n' \
+            "$source" "$archive_sha" "$binary_sha" >> "$GITHUB_ENV"
+      - name: Verify systemd restart, snapshot sync and pruning with the published MSP release
+        if: inputs.published_node && matrix.profile == 'mainnet' && github.repository == 'maxwell2010/go-smart-node'
+        run: |
+          set -euo pipefail
+          umask 077
+          work="$PROFILE_WORK"
+          report="$work/evidence/published-node.json"
+          status=0
+          sudo -n unshare --net -- bash -euc '
+            ip link set lo up
+            reserved=$(sysctl -n net.ipv4.ip_local_reserved_ports)
+            sysctl -qw "net.ipv4.ip_local_reserved_ports=${reserved:+$reserved,}33656-33657"
+            exec "$@"
+          ' _ env TMPDIR="$work" "$(command -v python3)" -B "$PWD/tools/native_launch_rehearsal.py" \
+            --binary "$work/published/mcnd" --binary-sha256 "$PUBLISHED_BINARY_SHA" \
+            --archive-sha256 "$PUBLISHED_ARCHIVE_SHA" --source-commit "$PUBLISHED_SOURCE" \
+            --fixture "$work/assembled" --home-parent "$work" --assembly-report "$work/evidence/assembly.json" \
+            --report "$report" --network-profile mainnet --four-validators --empty-user-assets \
+            --package-genesis "$work/verified/genesis.json" --systemd-follower --restart-and-snapshot || status=$?
+          if [[ -f "$report" ]]; then
+            sudo -n chown "$(id -u):$(id -g)" "$report"
+          fi
+          if (( status != 0 )); then
+            jq -r '[.phase, (.error // .status)] | join(": ")' "$report" >&2
+            exit "$status"
+          fi
+          jq -e --arg sha "$PUBLISHED_BINARY_SHA" --arg genesis "$(jq -er .genesisSha256 "$work/evidence/assembly.json")" '
+            .status == "PASS" and .loopbackOnlyNamespace and .binarySha256 == $sha and .genesisSha256 == $genesis and
+            .rpc.nativeDenom == "msp" and .systemdFollower.genesisSha256 == $genesis and .systemdRestart.sameHome and
+            (.stateSync | .nativeDenom == "msp" and .restoredHeight > 1 and .observerVotingPower == 0 and
+              (.catchingUp | not) and .checkpointPreflight.status == "STATE_SYNC_CHECKPOINT_MATCH" and
+              .checkpointPreflight.trustHash == .trustHash and .checkpointPreflight.trustHeight == .trustHeight) and
+            (.historyRetention | .nativeDenom == "msp" and .retainedBlockHeight == 1 and .archivedSupplyProofAvailable and
+              .prunedSupplyProofUnavailable and .historicalABCIResponsesDisabled and .transactionSearchDisabled and
+              .freshProofMatchesArchive and (.verifiedHeight > .loadedHeightAfterRestart))
+            ' "$report" >/dev/null
+      - name: Relay ICS-20 packets with the published MSP release
+        if: inputs.published_ibc && matrix.profile == 'mainnet' && github.repository == 'maxwell2010/go-smart-node'
+        run: |
+          set -euo pipefail
+          umask 077
+          work="$PROFILE_WORK"
           curl -fsSL --retry 3 --proto '=https' --proto-redir '=https' \
             'https://github.com/informalsystems/hermes/releases/download/v1.13.3/hermes-v1.13.3-x86_64-unknown-linux-gnu.tar.gz' \
             -o "$work/hermes.tar.gz"
@@ -238,7 +286,7 @@ jobs:
           sudo -n unshare --net -- bash -euc 'ip link set lo up; exec "$@"' _ \
             env TMPDIR="$work" "$(command -v python3)" -B "$PWD/internal/ibclab/hermes_lab.py" \
             --mode native-full --network-profile mainnet \
-            --mcnd-binary "$work/published/mcnd" --mcnd-sha256 "$binary_sha" --mcnd-source-commit "$source" \
+            --mcnd-binary "$work/published/mcnd" --mcnd-sha256 "$PUBLISHED_BINARY_SHA" --mcnd-source-commit "$PUBLISHED_SOURCE" \
             --reference-binary "$work/ibcreference" --reference-source-commit "$GITHUB_SHA" \
             --reference-sha256 "$(sha256sum "$work/ibcreference" | cut -d' ' -f1)" \
             --hermes-binary "$work/hermes" --native-fixture "$work/assembled" \
@@ -251,7 +299,7 @@ jobs:
             jq -r '.error // .status' "$report" >&2
             exit "$status"
           fi
-          jq -e --arg sha "$binary_sha" --arg source "$source" \
+          jq -e --arg sha "$PUBLISHED_BINARY_SHA" --arg source "$PUBLISHED_SOURCE" \
             --arg genesis "$(jq -er .genesisSha256 "$work/evidence/assembly.json")" '
               .status == "NATIVE_CONSENSUS_HERMES_PASS" and .release_gate and
               .binaries.mcnd == {sha256: $sha, source_commit: $source} and

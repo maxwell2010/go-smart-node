@@ -15,20 +15,19 @@ KEEP_STATE = 20
 STATE_INTERVAL = 10
 KEEP_BLOCKS = 10
 BLOCK_TEST_EVIDENCE_WINDOW = 24
-SUPPLY_KEY = b'\x00del'
 
 
-def supply_query(node, height):
-    params = urlencode({'path': '"/store/bank/key"', 'data': '0x' + SUPPLY_KEY.hex(),
+def supply_query(node, height, supply_key):
+    params = urlencode({'path': '"/store/bank/key"', 'data': '0x' + supply_key.hex(),
                         'height': height, 'prove': 'true'})
     return node.rpc('abci_query?' + params)['response']
 
 
-def supply_proof(response, height):
+def supply_proof(response, height, supply_key):
     check(int(response.get('code', 0)) == 0 and int(response['height']) == height,
           'bank proof query did not use the requested height')
-    check(base64.b64decode(response['key'], validate=True) == SUPPLY_KEY and
-          int(base64.b64decode(response['value'], validate=True)) > 0, 'missing positive MSP supply proof value')
+    check(base64.b64decode(response['key'], validate=True) == supply_key and
+          int(base64.b64decode(response['value'], validate=True)) > 0, 'missing positive native supply proof value')
     proof = (response.get('proof_ops') or response.get('proofOps') or {}).get('ops', [])
     check(len(proof) == 2 and all(op['data'] for op in proof), 'missing IAVL or multistore proof')
     return response['value'], proof
@@ -117,11 +116,13 @@ def rehearse_blockstore(binary, root, genesis, expected, keys, env, owner, repor
 def rehearse_history(binary, root, genesis, expected, env, owner, report, *, replicas, archive):
     report['phase'] = 'retention-profile-catchup'
     initial = report['initialHeight']
+    denom = expected.get('nativeDenom', 'del')
+    supply_key = b'\x00' + denom.encode('ascii')
     historical_height = initial + 1  # BaseApp accepts proof queries above height one.
     check(int(archive.rpc('block_results?height=1')['height']) == initial, 'archive lacks block 1 results')
     query = 'tx_search?' + urlencode({'query': '"tx.height=1"'})
     check('total_count' in archive.rpc(query), 'archive does not expose transaction search')
-    supply_proof(supply_query(archive, historical_height), historical_height)
+    supply_proof(supply_query(archive, historical_height, supply_key), historical_height, supply_key)
 
     # The snapshot observer already uses index len(validators) + 1.
     observer = create_replica(binary, root, 'retention-observer', len(expected['validators']) + 2,
@@ -150,7 +151,7 @@ def rehearse_history(binary, root, genesis, expected, env, owner, report, *, rep
     check(first_block['block_hash'] == report['block1Hash'], 'retention observer replaced historical block 1')
     require_rpc_error(observer, 'block_results?height=1', 'node is not persisting finalize block responses')
     require_rpc_error(observer, query, 'transaction indexing is disabled')
-    old = supply_query(observer, historical_height)
+    old = supply_query(observer, historical_height, supply_key)
     check(int(old.get('code', 0)) != 0 and not old.get('proof_ops') and not old.get('proofOps') and not old.get('value') and
           'ensure height has not been pruned' in old.get('log', ''),
           'retention profile did not prune the historical IAVL version: ' + str(old.get('log', ''))[:180])
@@ -166,13 +167,14 @@ def rehearse_history(binary, root, genesis, expected, env, owner, report, *, rep
     info = observer.rpc('status')['validator_info']
     check(int(info['voting_power']) == 0, 'observer gained voting power')
     header = committed_header(nodes, height + 1)
-    current = supply_proof(supply_query(observer, height), height)
-    check(current == supply_proof(supply_query(archive, height), height), 'fresh bank proof differs from archive witness')
-    old_after = supply_query(observer, historical_height)
+    current = supply_proof(supply_query(observer, height, supply_key), height, supply_key)
+    check(current == supply_proof(supply_query(archive, height, supply_key), height, supply_key),
+          'fresh bank proof differs from archive witness')
+    old_after = supply_query(observer, historical_height, supply_key)
     check(int(old_after.get('code', 0)) == int(old['code']) and not old_after.get('proof_ops') and
           not old_after.get('proofOps') and not old_after.get('value'), 'old state reappeared after restart')
-    del_atomic = balance(expected['actor'], expected['actorNative'], height, observer.evm, observer.rest)
-    check(del_atomic == balance(expected['actor'], expected['actorNative'], height, archive.evm, archive.rest),
+    native_atomic = balance(expected['actor'], expected['actorNative'], height, observer.evm, observer.rest, denom=denom)
+    check(native_atomic == balance(expected['actor'], expected['actorNative'], height, archive.evm, archive.rest, denom=denom),
           'archive and retention observer disagree on recent balance')
 
     report['historyRetention'] = {
@@ -182,5 +184,8 @@ def rehearse_history(binary, root, genesis, expected, env, owner, report, *, rep
         'transactionSearchDisabled': True, 'loadedHeightAfterRestart': int(handshakes[0]['height']),
         'verifiedHeight': height, 'appHash': header['app_hash'], 'freshProofMatchesArchive': True,
         'freshProofSha256': hashlib.sha256(json.dumps(current, sort_keys=True).encode()).hexdigest(),
-        'delAtomic': str(del_atomic),
     }
+    if 'nativeDenom' in expected:
+        report['historyRetention'].update(nativeDenom=denom, nativeAtomic=str(native_atomic))
+    else:
+        report['historyRetention']['delAtomic'] = str(native_atomic)
