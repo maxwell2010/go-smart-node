@@ -62,6 +62,22 @@ func TestOwnedAppEmptyUserAssetsLifecycle(t *testing.T) {
 }
 
 func runEmptyUserAssetsLifecycle(t *testing.T, dir, phase string) {
+	l, profile := openEmptyUserAssets(t, dir, phase, false)
+	if os.Getenv(userNFTNativePhaseEnv) != "" {
+		runNativeUserNFTLifecycle(t, l, dir, phase)
+		return
+	}
+	if phase == "run" {
+		assertNativeBackedTokenLifecycle(t, l, profile, dir, "")
+	} else {
+		assertNativeBackedTokenRestart(t, l, dir)
+	}
+	assertEmptySeedReservelessLifecycle(t, l, profile, dir, phase)
+	runNativeUserNFTLifecycle(t, l, dir, phase)
+}
+
+func openEmptyUserAssets(t *testing.T, dir, phase string, upgradeGovernance bool) (nativeHistoricalLifecycle, ownedapp.WithdrawalProfile) {
+	t.Helper()
 	doc, err := cmttypes.GenesisDocFromFile(filepath.Join(dir, "genesis.json"))
 	require.NoError(t, err)
 	require.Equal(t, int64(1), doc.InitialHeight)
@@ -83,6 +99,15 @@ func runEmptyUserAssetsLifecycle(t *testing.T, dir, phase string) {
 	app := ownedapp.NewApp(log.NewNopLogger(), database, true, appOptions{flags.FlagHome: filepath.Join(dir, "home"),
 		flags.FlagChainID: doc.ChainID, srvflags.EVMChainID: uint64(990001)})
 	t.Cleanup(func() { require.NoError(t, app.Close()) })
+	if upgradeGovernance {
+		profile.EnableNativeGovernance = true
+		profile.EnableNativeUpgradeGovernance = true
+		state[ownedapp.WithdrawalGenesisKey], err = json.Marshal(profile)
+		require.NoError(t, err)
+		configureNativeRegistrationGovernance(t, isolatedBackendEnv{app: app}, state)
+		doc.AppState, err = json.Marshal(state)
+		require.NoError(t, err)
+	}
 	var coins cointypes.GenesisState
 	require.NoError(t, app.AppCodec().UnmarshalJSON(state[cointypes.ModuleName], &coins))
 	require.Empty(t, coins.Coins)
@@ -108,17 +133,7 @@ func runEmptyUserAssetsLifecycle(t *testing.T, dir, phase string) {
 	} else {
 		require.Equal(t, "restart", phase)
 	}
-	if os.Getenv(userNFTNativePhaseEnv) != "" {
-		runNativeUserNFTLifecycle(t, l, dir, phase)
-		return
-	}
-	if phase == "run" {
-		assertNativeBackedTokenLifecycle(t, l, profile, dir, "")
-	} else {
-		assertNativeBackedTokenRestart(t, l, dir)
-	}
-	assertEmptySeedReservelessLifecycle(t, l, profile, dir, phase)
-	runNativeUserNFTLifecycle(t, l, dir, phase)
+	return l, profile
 }
 
 func assertEmptySeedReservelessLifecycle(t *testing.T, l nativeHistoricalLifecycle, profile ownedapp.WithdrawalProfile, dir, phase string) {

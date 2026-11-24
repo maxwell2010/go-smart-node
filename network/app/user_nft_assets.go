@@ -155,9 +155,8 @@ func (c *withdrawalController) authenticateUserNFT(ctx sdk.Context, target commo
 	return asset.ABI, nil
 }
 
-// admitUserNFT deliberately excludes callbacks, batch calls, custom collateral,
-// arbitrary metadata mutation and financial burn. Each additional route needs
-// independent signed receipt and native-accounting coverage.
+// admitUserNFT restricts user operations to signed calls with an authenticated
+// native projection.
 func (c *withdrawalController) admitUserNFT(ctx sdk.Context, sender common.Address, msg core.Message, receipt *ethtypes.Receipt) (bool, error) {
 	if !c.profile.EnableNFTDelegation || c.customCollateral == nil || msg.To == nil {
 		return false, nil
@@ -345,9 +344,12 @@ func (c *withdrawalController) admitUserNFTOperation(ctx sdk.Context, msg core.M
 		return c.assets.ProjectWalletTransfer(ctx, receipt, target, c.profile.Gateway, c.profile.PositionVault)
 	case "mint", "mintByDEL":
 		return c.admitUserNFTMint(ctx, msg, receipt, asset, family, args, method.RawName)
-	default:
-		return errors.New("NFT route has no reviewed public native projection")
+	case "burn":
+		if family < 4 && bytes.Equal(ctx.KVStore(c.customCollateral.store).Get([]byte{userNFTRefundActivationKey}), []byte{1}) {
+			return c.admitUserNFTRefund(ctx, msg, receipt, asset, family, args)
+		}
 	}
+	return errors.New("NFT route has no reviewed public native projection")
 }
 func (c *withdrawalController) admitUserNFTMint(ctx sdk.Context, msg core.Message, receipt *ethtypes.Receipt, asset abi.ABI, family byte, args []interface{}, method string) error {
 	target := *msg.To
@@ -464,13 +466,7 @@ func (c *withdrawalController) admitUserNFTMint(ctx sdk.Context, msg core.Messag
 	}
 	var postSupply *big.Int
 	if reserved && is1155 {
-		supplyMethod := ""
-		for name, method := range asset.Methods {
-			if method.Sig == "totalSupply(uint256)" {
-				supplyMethod = name
-				break
-			}
-		}
+		supplyMethod := userNFTSupplyMethod(asset)
 		if supplyMethod == "" {
 			return errors.New("missing pinned ERC1155 supply getter")
 		}
@@ -488,4 +484,13 @@ func (c *withdrawalController) admitUserNFTMint(ctx sdk.Context, msg core.Messag
 		return err
 	}
 	return c.nft.AdmitUserMint(ctx, target, id, uri, sdk.AccAddress(recipient[:]).String(), quantity, reserve)
+}
+
+func userNFTSupplyMethod(asset abi.ABI) string {
+	for name, method := range asset.Methods {
+		if method.Sig == "totalSupply(uint256)" {
+			return name
+		}
+	}
+	return ""
 }

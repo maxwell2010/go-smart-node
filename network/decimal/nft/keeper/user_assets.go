@@ -2,10 +2,12 @@ package keeper
 
 import (
 	"errors"
+	"strings"
+
 	sdk "github.com/cosmos/cosmos-sdk/types"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/maxwell2010/go-smart-node/network/decimal/nft/types"
-	"strings"
+	"github.com/maxwell2010/go-smart-node/network/identity"
 )
 
 // AdmitUserCollection is called only after application verification of the
@@ -128,4 +130,48 @@ func (k *StateKeeper) AdmitUserMint(ctx sdk.Context, contract common.Address, to
 	}
 	write()
 	return nil
+}
+
+// RetireUserNFTUnits projects a proved wallet refund. The lifetime counters,
+// URI and binding remain so retired serial numbers cannot reappear.
+func (k *StateKeeper) RetireUserNFTUnits(ctx sdk.Context, nativeID string, owner sdk.AccAddress, quantity uint32) ([]uint32, error) {
+	token, err := k.GetToken(ctx, nativeID)
+	if err != nil {
+		return nil, err
+	}
+	before := token.Minted - token.Burnt
+	if quantity == 0 || quantity > 128 || quantity > before || token.ReserveLess || token.IsolatedReceipt ||
+		token.Reserve.Denom != identity.BaseDenom {
+		return nil, errors.New("invalid refundable native NFT units")
+	}
+	child, commit := ctx.CacheContext()
+	indexed, err := k.hasActiveSubTokenCounts(child)
+	if err != nil {
+		return nil, err
+	}
+	if !indexed {
+		return nil, ErrActiveSubTokenCountUnavailable
+	}
+	ids, err := k.selectUniformOriginUnits(child, token, owner, quantity)
+	if err != nil {
+		return nil, err
+	}
+	state := k.service.OpenKVStore(child)
+	for _, id := range ids {
+		if err := state.Delete(types.GetSubTokenKey(nativeID, id)); err != nil {
+			return nil, err
+		}
+		if err := state.Delete(types.GetSubTokenByOwnerKey(owner, nativeID, id)); err != nil {
+			return nil, err
+		}
+	}
+	token.Burnt += quantity
+	if err := k.put(child, types.GetTokenKey(nativeID), &token); err != nil {
+		return nil, err
+	}
+	if err := k.adjustActiveSubTokenCount(child, nativeID, owner, -int64(quantity), before, before-quantity); err != nil {
+		return nil, err
+	}
+	commit()
+	return ids, nil
 }
