@@ -391,15 +391,14 @@ jobs:
                 (if $kind == "erc20" then true else .collectionHeight < .receiptHeight end) and
                 .alteredMetadataRejected and .httpsVerified and .restoredObjects == 2 and
                 (if $profile == $kind then true else
-                  .receiptHeight < .reserveRefund.steps[0].height and
-                  (.reserveRefund | .denom == "msp" and .bankSupplyUnchanged and .observerMatched and
-                    all(.steps[]; .refundedAtomic == "2000000000000000000") and
+                  .receiptHeight < .reserveRefund.height and
+                  (.reserveRefund | .status == "REFUND_REJECTED" and
+                    .denom == "msp" and .bankSupplyUnchanged and .observerMatched and .refundedAtomic == "0" and
+                    .custodyAtomic == .lockedAtomic and .remainingUnits == .mintedUnits and
                     (if $kind == "erc721" then
-                      .mintedUnits == 1 and .lockedAtomic == "2000000000000000000" and
-                      [.steps[] | [.remainingUnits, .custodyAtomic]] == [[0, "0"]]
+                      .mintedUnits == 1 and .lockedAtomic == "2000000000000000000"
                     else
-                      .mintedUnits == 2 and .lockedAtomic == "4000000000000000000" and
-                      [.steps[] | [.remainingUnits, .custodyAtomic]] == [[1, "2000000000000000000"], [0, "0"]]
+                      .mintedUnits == 2 and .lockedAtomic == "4000000000000000000"
                     end))
                 end))
               ' "$report" >/dev/null

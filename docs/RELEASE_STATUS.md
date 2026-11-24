@@ -55,6 +55,13 @@ version 1 on repeat, and served the restored PNG and JSON by their original
 CIDs. The run also repeated the reserveless DRC20 scenario.
 [Token and NFT media evidence](https://github.com/maxwell2010/go-smart-node/actions/runs/45326271995).
 
+An extended v1.2.1 rehearsal minted an MSP-backed ERC721 and restored its
+media over HTTPS. The subsequent direct `burn(uint256)` transaction
+reverted. The public user NFT transaction handler admits mint, transfer and
+approval. It still requires a native projection for direct burn of the
+original NFT. The isolated staking receipt's `redeemPosition` has a separate
+native handler. [Backed ERC721 rehearsal](https://github.com/maxwell2010/go-smart-node/actions/runs/45329007420).
+
 ## 1.2.0 software release
 
 [MintCandy Node 1.2.0](https://github.com/maxwell2010/go-smart-node/releases/tag/v1.2.0)

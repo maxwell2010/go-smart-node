@@ -73,7 +73,7 @@ def rehearse_media(root, expected, nodes, fixture_path, report, env, owner):
     check(source_reader(asset, fixture['uri']) == fixture['creator'], 'validator returned a different media authority')
     publication = rehearse_https(root, asset, fixture, metadata, image, witness, env, owner, report)
     if backed:
-        extra['reserveRefund'] = rehearse_refunds(root, fixture_path, fixture, asset, nodes, env, report, receipt)
+        extra['reserveRefund'] = rehearse_refund_guard(root, fixture_path, fixture, asset, nodes, env, report, receipt)
     report['committedMedia'] = {'status': 'PASS', 'kind': kind + ('-backed' if backed else '-reserveless'),
                                 'assetTokenId': asset.token_id,
                                 'receiptHeight': int(receipt['blockNumber'], 16), 'txHash': receipt['transactionHash'],
@@ -96,7 +96,7 @@ def sign_media_action(root, fixture_path, fixture, asset, source, env, report, *
     return signed
 
 
-def rehearse_refunds(root, fixture_path, fixture, asset, nodes, env, report, mint):
+def rehearse_refund_guard(root, fixture_path, fixture, asset, nodes, env, report, mint):
     report['phase'] = 'media-refund-backed-nft'
     source, witness = nodes[0], nodes[-1]
     creator, contract = fixture['creator'], asset.contract
@@ -105,7 +105,6 @@ def rehearse_refunds(root, fixture_path, fixture, asset, nodes, env, report, min
     multi = asset.kind == 'erc1155'
     minted = 2 if multi else 1
     unit = 2 * 10**18
-    steps = []
 
     def snapshot(node, height):
         owner_balance, custody = (int(ethereum('eth_getBalance', [address, hex(height)], base=node.evm), 16)
@@ -121,25 +120,17 @@ def rehearse_refunds(root, fixture_path, fixture, asset, nodes, env, report, min
     fee = int(mint['gasUsed'], 16) * int(mint['effectiveGasPrice'], 16)
     check(before[1:3] == (0, 0) and after == (before[0] - minted * unit - fee, minted * unit, minted, before[3])
           and after == snapshot(witness, mint_height), 'NFT mint did not lock the exact MSP reserve')
-    for index, stage in enumerate(('first', 'last') if multi else ('first',)):
-        signed = sign_media_action(root, fixture_path, fixture, asset, source, env, report, refund=stage)
-        receipt = commit_media_transaction(source, nodes, signed, 2 + index, report)
-        height = int(receipt['blockNumber'], 16)
-        before, after = (snapshot(source, at) for at in (height - 1, height))
-        fee = int(receipt['gasUsed'], 16) * int(receipt['effectiveGasPrice'], 16)
-        remaining = minted - index - 1
-        check(before[1:3] == ((remaining + 1) * unit, remaining + 1) and
-              after == (before[0] + unit - fee, remaining * unit, remaining, before[3]) and
-              after == snapshot(witness, height), 'burn did not refund the exact MSP reserve on both replicas')
-        actor = '0x' + actor_word
-        zero = '0x' + '0' * 64
-        topics = [signed['event'], actor, actor, zero] if multi else [signed['event'], actor, zero, '0x' + token_word]
-        event_data = f'0x{token_word}{1:064x}' if multi else '0x'
-        check(sum(entry['address'].lower() == contract and entry['topics'] == topics and
-                  entry['data'] == event_data for entry in receipt['logs']) == 1, 'refund receipt is missing the exact NFT burn')
-        steps.append({'height': height, 'refundedAtomic': str(unit), 'custodyAtomic': str(after[1]), 'remainingUnits': remaining})
+    signed = sign_media_action(root, fixture_path, fixture, asset, source, env, report, refund='burn')
+    receipt = commit_media_transaction(source, nodes, signed, 2, report, status=0)
+    height = int(receipt['blockNumber'], 16)
+    before, after = (snapshot(source, at) for at in (height - 1, height))
+    fee = int(receipt['gasUsed'], 16) * int(receipt['effectiveGasPrice'], 16)
+    check(not receipt['logs'] and before[1:3] == (minted * unit, minted) and
+          after == (before[0] - fee, *before[1:]) and after == snapshot(witness, height),
+          'published burn rejection changed custody, NFT ownership, native supply or a non-fee balance')
     return {'denom': 'msp', 'mintedUnits': minted, 'lockedAtomic': str(minted * unit),
-            'bankSupplyUnchanged': True, 'observerMatched': True, 'steps': steps}
+            'bankSupplyUnchanged': True, 'observerMatched': True, 'status': 'REFUND_REJECTED',
+            'height': height, 'refundedAtomic': '0', 'custodyAtomic': str(after[1]), 'remainingUnits': after[2]}
 
 
 def read_media_fixture(path, report):
@@ -155,7 +146,7 @@ def read_media_fixture(path, report):
     return fixture
 
 
-def commit_media_transaction(source, nodes, fixture, nonce, report):
+def commit_media_transaction(source, nodes, fixture, nonce, report, *, status=1):
     check(int(ethereum('eth_getTransactionCount', [fixture['creator'], 'latest'], base=source.evm), 16) == nonce,
           'test media creator has an unexpected nonce')
     tx_hash = ethereum('eth_sendRawTransaction', [fixture['raw']], base=source.evm)
@@ -171,7 +162,7 @@ def commit_media_transaction(source, nodes, fixture, nonce, report):
         if receipt is None:
             time.sleep(0.25)
     check(receipt is not None, 'test token creation was not indexed')
-    check(int(receipt['status'], 16) == 1 and receipt['transactionHash'] == tx_hash and
+    check(int(receipt['status'], 16) == status and receipt['transactionHash'] == tx_hash and
           receipt['from'].lower() == fixture['creator'] and receipt['to'].lower() == fixture['target'],
           'signed media transaction failed or receipt does not match')
     height = int(receipt['blockNumber'], 16)

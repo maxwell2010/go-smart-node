@@ -134,17 +134,12 @@ func launchMediaTransaction(t *testing.T, kind string, creator common.Address, u
 		}
 		if refund != "" {
 			require.True(t, backed)
-			require.Contains(t, []string{"first", "last"}, refund)
+			require.Equal(t, "burn", refund)
 			method, nonce = "burn", 2
 			value.SetInt64(0)
 			args = []interface{}{big.NewInt(1)}
 			if multi {
 				args = []interface{}{big.NewInt(123), big.NewInt(1)}
-				if refund == "last" {
-					nonce++
-				}
-			} else {
-				require.Equal(t, "first", refund)
 			}
 		}
 		asset, err := contracts.CompiledABI(contract)
