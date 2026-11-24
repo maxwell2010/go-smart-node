@@ -23,6 +23,14 @@ was subsequently delivered and recorded exactly one acknowledgement.
 [Switch and rollback evidence](https://github.com/maxwell2010/go-smart-node/actions/runs/45318226553) ·
 [MSP release and installation](https://github.com/maxwell2010/go-smart-node/releases/tag/v1.2.1).
 
+An unauthenticated GitHub CLI session ran the documented MSP v1.2.0, MSP
+v1.2.1 and tMSP v1.2.1 installer commands against the released archives.
+The observer instructions installed the actual signed public genesis into a
+fresh home with the v1.2.0 binary bound to the OpenPGP manifest. The v1.2.1
+binary validated the installed genesis. CI checked the genesis hash, the
+signed bootstrap peer and a zero signing height.
+[Published onboarding and signed genesis evidence](https://github.com/maxwell2010/go-smart-node/actions/runs/45320962959).
+
 ## 1.2.0 software release
 
 [MintCandy Node 1.2.0](https://github.com/maxwell2010/go-smart-node/releases/tag/v1.2.0)
