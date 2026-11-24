@@ -46,6 +46,15 @@ and repeated the accepted upload without a new version. A separate HTTPS
 gateway served the original PNG and JSON by CID after backup restoration.
 [Committed token avatar and restore evidence](https://github.com/maxwell2010/go-smart-node/actions/runs/45324521369).
 
+The same published binary passed the HTTPS publication and restore flow for
+reserveless ERC721 and ERC1155. Each isolated network committed collection
+creation at height 23 and minting at height 27. The committed transfer logs
+credited ERC721 ID 1 and two ERC1155 units of ID 123 to their creator. The
+gateway validated original metadata, rejected changed content, preserved
+version 1 on repeat, and served the restored PNG and JSON by their original
+CIDs. The run also repeated the reserveless DRC20 scenario.
+[Token and NFT media evidence](https://github.com/maxwell2010/go-smart-node/actions/runs/45326271995).
+
 ## 1.2.0 software release
 
 [MintCandy Node 1.2.0](https://github.com/maxwell2010/go-smart-node/releases/tag/v1.2.0)
