@@ -14,6 +14,10 @@ on:
         description: Rehearse systemd restart, snapshot sync and pruning with the published MSP daemon
         type: boolean
         default: false
+      published_media:
+        description: Commit a token avatar, publish it via HTTPS and restore it with the published MSP daemon
+        type: boolean
+        default: false
       testnet_package_run:
         description: Verify an attested tMSP package from a completed release build at this source revision
         type: string
@@ -215,7 +219,7 @@ jobs:
              .signedBootstrap.appHash == .appHash and .signedBootstrap.outboundPeers == [.signedBootstrap.nodeId] and
              (.signedBootstrap.networkLaunchAuthorized | not)' "$report" >/dev/null
       - name: Install the published MSP release using the operator guide
-        if: (inputs.published_ibc || inputs.published_node) && !inputs.mainnet_package_run && matrix.profile == 'mainnet' && github.repository == 'maxwell2010/go-smart-node'
+        if: (inputs.published_ibc || inputs.published_node || inputs.published_media) && !inputs.mainnet_package_run && matrix.profile == 'mainnet' && github.repository == 'maxwell2010/go-smart-node'
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
@@ -321,6 +325,63 @@ jobs:
             (.historyRetention | .nativeDenom == $denom and .retainedBlockHeight == 1 and .archivedSupplyProofAvailable and
               .prunedSupplyProofUnavailable and .historicalABCIResponsesDisabled and .transactionSearchDisabled and
               .freshProofMatchesArchive and (.verifiedHeight > .loadedHeightAfterRestart))
+            ' "$report" >/dev/null
+      - name: Publish and restore an on-chain token avatar over isolated HTTPS
+        if: inputs.published_media && matrix.profile == 'mainnet' && github.repository == 'maxwell2010/go-smart-node'
+        run: |
+          set -euo pipefail
+          umask 077
+          work="$PROFILE_WORK"
+          fixture="$work/media"
+          nginx_home="$work/nginx-media-package"
+          mkdir -m 700 -- "$fixture" "$nginx_home"
+          (
+            cd "$nginx_home"
+            sudo apt-get update -qq
+            apt-get download nginx
+            dpkg-deb -x nginx_*.deb "$nginx_home/extracted"
+          )
+          nginx="$nginx_home/extracted/usr/sbin/nginx"
+          "$nginx" -v
+          python3 -m venv "$work/media-venv"
+          py="$work/media-venv/bin/python"
+          "$py" -m pip install --only-binary=:all: --require-hashes \
+            -r media/requirements-linux-cp312.lock -r media/requirements-api.lock
+          "$py" -B - "$fixture" <<'PY'
+          from pathlib import Path
+          from sys import argv
+          from PIL import Image
+
+          root = Path(argv[1])
+          (root / 'metadata.json').write_text('{"name":"Launch avatar fixture"}')
+          Image.new('RGB', (6, 6), '#12ccaa').save(root / 'avatar.png')
+          PY
+          PYTHONPATH="$PWD/media" "$py" -B -m mcnd_media.commitment prepare \
+            --chain-id "mintcandy_${EVM_ID}-1" --kind erc20 --mime image/png \
+            --metadata "$fixture/metadata.json" --image "$fixture/avatar.png" > "$fixture/prepare.json"
+          go test -mod=readonly -p 2 -c -o "$work/media-fixture.test" ./systemcontracts
+          report="$work/evidence/published-media.json"
+          status=0
+          sudo -n unshare --net -- bash -euc '
+            ip link set lo up
+            export MCND_MEDIA_URI="$1" MCND_MEDIA_GENESIS="$2" MCND_MEDIA_FIXTURE="$3"
+            "$4" -test.run "^TestExportLaunchMediaCreation$" -test.timeout 30s
+            shift 4
+            exec "$@"
+          ' _ "$(jq -er .metadata_uri "$fixture/prepare.json")" "$work/assembled/public/genesis.json" \
+            "$fixture/signed.json" "$work/media-fixture.test" \
+            env TMPDIR="$work" MCND_MEDIA_NGINX="$nginx" "$py" -B tools/native_launch_rehearsal.py \
+            --binary "$work/published/mcnd" --binary-sha256 "$PUBLISHED_BINARY_SHA" \
+            --archive-sha256 "$PUBLISHED_ARCHIVE_SHA" --source-commit "$PUBLISHED_SOURCE" \
+            --fixture "$work/assembled" --home-parent "$work" --assembly-report "$work/evidence/assembly.json" \
+            --network-profile mainnet --four-validators --empty-user-assets --media-fixture "$fixture/signed.json" \
+            --report "$report" || status=$?
+          if [[ -f "$report" ]]; then sudo -n chown "$(id -u):$(id -g)" "$report"; fi
+          (( status == 0 ))
+          jq -e --arg sha "$PUBLISHED_BINARY_SHA" '
+            .status == "PASS" and .loopbackOnlyNamespace and .chainId == "mintcandy_9905401-1" and .binarySha256 == $sha and
+            (.committedMedia | .status == "PASS" and .version == 1 and .kind == "erc20-reserveless" and
+              .alteredMetadataRejected and .httpsVerified and .restoredObjects == 2)
             ' "$report" >/dev/null
       - name: Relay ICS-20 packets with the versioned binary
         if: (((inputs.published_ibc || inputs.mainnet_package_run) && matrix.profile == 'mainnet') || (inputs.testnet_package_run && matrix.profile == 'testnet')) && github.repository == 'maxwell2010/go-smart-node'

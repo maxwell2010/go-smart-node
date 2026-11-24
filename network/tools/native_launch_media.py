@@ -17,7 +17,7 @@ MEDIA = Path(__file__).resolve().parents[1] / 'media'
 
 
 def rehearse_media(root, expected, nodes, fixture_path, report, env, owner):
-    check(expected['chainId'] == 'mintcandy_990014-1' and expected['evmChainId'] == 990014 and
+    check((expected['chainId'], expected['evmChainId']) in {('mintcandy_990014-1', 990014), ('mintcandy_9905401-1', 9905401)} and
           report['loopbackOnlyNamespace'] and report['offlineAssembledGenesis'],
           'media transaction fixture requires the private signing domain')
     sys.path[:0] = [str(MEDIA), str(MEDIA / 'tests')]
@@ -26,6 +26,8 @@ def rehearse_media(root, expected, nodes, fixture_path, report, env, owner):
 
     report['phase'] = 'media-signed-token-creation'
     fixture = json.loads(private_bytes(fixture_path, 4096))
+    check((fixture['chainId'], fixture['genesisSha256']) == (expected['chainId'], report['genesisSha256']),
+          'media fixture is bound to a different isolated genesis')
     for key in ('creator', 'factory'):
         check(re.fullmatch(ADDRESS, fixture[key]), 'invalid test fixture address')
         fixture[key] = fixture[key].lower()
