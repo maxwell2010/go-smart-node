@@ -493,7 +493,11 @@ jobs:
             go build -mod=readonly -p 2 -trimpath -tags mintcandy_mainnet \
               -ldflags "-X main.buildCommit=$GITHUB_SHA" -o "$successor" ./cmd/mcnd
           fi
-          if [[ "$OBSERVER_SYNC" == true ]]; then package+=(--observer-sync); fi
+          runner=(sudo -n)
+          if [[ "$OBSERVER_SYNC" == true ]]; then
+            package+=(--observer-sync --check-memory-limit 8000000000)
+            runner+=(systemd-run --scope --quiet --property=MemoryMax=8000000000 --property=MemorySwapMax=0)
+          fi
           if [[ "$PENDING_IBC" == true ]]; then
             package+=(--ibc-hermes "$work/hermes" --ibc-reference "$work/ibcreference"
               --ibc-reference-sha256 "$(sha256sum "$work/ibcreference" | cut -d ' ' -f 1)"
@@ -502,7 +506,7 @@ jobs:
           go test -mod=readonly -p 2 -tags mintcandy_mainnet -c -o "$work/nft-upgrade-signers.test" ./systemcontracts
           successor_sha=$(sha256sum "$successor" | cut -d ' ' -f 1)
           status=0
-          sudo -n unshare --net -- bash -euc 'ip link set lo up; exec "$@"' _ \
+          "${runner[@]}" unshare --net -- bash -euc 'ip link set lo up; exec "$@"' _ \
             env TMPDIR="$work" python3 -B tools/native_launch_nft_refund.py \
             --predecessor "$MSP_PREDECESSOR" --predecessor-sha256 "$MSP_PREDECESSOR_SHA" --predecessor-source "$MSP_PREDECESSOR_SOURCE" \
             --successor "$successor" --successor-sha256 "$successor_sha" --successor-source "$successor_source" "${package[@]}" \

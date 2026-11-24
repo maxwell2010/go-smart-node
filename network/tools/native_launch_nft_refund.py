@@ -24,6 +24,7 @@ from native_governance_upgrade_smoke import (
 from native_launch_media import commit_media_transaction, read_media_fixture
 from native_launch_rehearsal import configure_peers, load_fixture, verify_first_block
 from native_launch_snapshot import configure_snapshot_source, rehearse_snapshot
+from node_resource_usage import replica_usage
 from withdrawal_genesis_smoke import SHA256, bech32_payload, check, native, private_bytes, safe_diagnostic
 
 
@@ -316,6 +317,25 @@ def rehearse(args, root, env, genesis, expected, keys, owner, report, packet=Non
     report['finalCommit'] = find_four_signature_commit(nodes, rows, args.commit_probe, last + 1, last + 10, report)
     report['finalCommit']['appHash'] = committed_header(nodes, report['finalCommit']['height'])['app_hash']
     report['finalCommit']['matchingNodes'] = len(nodes)
+    if args.check_memory_limit:
+        membership = Path('/proc/self/cgroup').read_text().splitlines()
+        relative, = [line.removeprefix('0::/') for line in membership if line.startswith('0::/')]
+        group = Path('/sys/fs/cgroup') / relative
+        check(relative and int((group / 'memory.max').read_text()) == args.check_memory_limit and
+              int((group / 'memory.swap.max').read_text()) == 0, 'unexpected rehearsal memory or swap limit')
+        for node in nodes:
+            check(Path(f'/proc/{node.child.pid}/cgroup').read_text().splitlines() == membership,
+                  'replica outside measured cgroup')
+        events = {key: int(value) for key, value in
+                  (line.split() for line in (group / 'memory.events').read_text().splitlines())}
+        peak = int((group / 'memory.peak').read_text())
+        check(events['oom'] == events['oom_kill'] == 0 and 0 < peak <= args.check_memory_limit,
+              'rehearsal exceeded its memory budget')
+        report['memoryBudget'] = {
+            'limitBytes': args.check_memory_limit, 'peakBytes': peak, 'swapLimitBytes': 0, 'events': events,
+            'validators': [replica_usage(node) for node in validators],
+            'observers': [replica_usage(node) for node in nodes if node not in validators],
+        }
 
 
 def main(signals):
@@ -326,6 +346,7 @@ def main(signals):
         parser.add_argument('--' + flag, required=True)
     parser.add_argument('--successor-archive-sha256')
     parser.add_argument('--observer-sync', action='store_true')
+    parser.add_argument('--check-memory-limit', type=int)
     for flag in ('ibc-hermes', 'ibc-reference', 'ibc-fixture-donor'):
         parser.add_argument('--' + flag, type=Path)
     parser.add_argument('--ibc-reference-sha256')
