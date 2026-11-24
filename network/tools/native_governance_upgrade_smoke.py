@@ -343,15 +343,15 @@ def canonical_commit(replicas, height):
     signed = commits[0]['signed_header']
     check(all(entry['canonical'] is True and entry['signed_header'] == signed for entry in commits) and
           int(signed['commit']['height']) == height and int(signed['header']['height']) == height and
-          signed['header']['chain_id'] == CHAIN and
+          signed['header']['chain_id'] == replicas[0].chain_id and
           signed['commit']['block_id']['hash'] == committed_header(replicas, height)['block_hash'],
           'replicas disagree on a canonical signed commit')
     return signed['commit']
 
 
-def verify_four_signatures(commit, validators, probe):
+def verify_four_signatures(commit, validators, probe, *, chain_id=CHAIN):
     height = int(commit['height'])
-    payload = {'chainId': CHAIN, 'commit': commit,
+    payload = {'chainId': chain_id, 'commit': commit,
                'publicKeys': [base64.b64encode(decode_pubkey(row['publicKey'])).decode('ascii') for row in validators]}
     result = subprocess.run([str(probe)], input=json.dumps(payload), capture_output=True, text=True, timeout=10)
     check(result.returncode == 0, 'Comet cryptographic commit verification failed: ' + result.stderr.strip()[:200])
@@ -370,7 +370,7 @@ def find_four_signature_commit(replicas, validators, probe, first, last, report)
         for height in range(height, min(tip - 1, last) + 1):
             commit = canonical_commit(replicas, height)
             if sum(int(row['block_id_flag']) == 2 for row in commit['signatures']) == 4:
-                return verify_four_signatures(commit, validators, probe)
+                return verify_four_signatures(commit, validators, probe, chain_id=replicas[0].chain_id)
         height += 1
     raise ValueError('no canonical commit with all four validator signatures in the checked height window')
 

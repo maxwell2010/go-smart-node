@@ -18,6 +18,10 @@ on:
         description: Commit DRC20 and NFT media, publish it via HTTPS and restore it with the published MSP daemon
         type: boolean
         default: false
+      governed_nft_refund:
+        description: Upgrade four disposable validators from published MSP with signed NFT reserve refunds
+        type: boolean
+        default: false
       testnet_package_run:
         description: Verify an attested tMSP package from a completed release build at this source revision
         type: string
@@ -219,7 +223,7 @@ jobs:
              .signedBootstrap.appHash == .appHash and .signedBootstrap.outboundPeers == [.signedBootstrap.nodeId] and
              (.signedBootstrap.networkLaunchAuthorized | not)' "$report" >/dev/null
       - name: Install the published MSP release using the operator guide
-        if: (inputs.published_ibc || inputs.published_node || inputs.published_media) && !inputs.mainnet_package_run && matrix.profile == 'mainnet' && github.repository == 'maxwell2010/go-smart-node'
+        if: (inputs.published_ibc || inputs.published_node || inputs.published_media || inputs.governed_nft_refund) && matrix.profile == 'mainnet' && github.repository == 'maxwell2010/go-smart-node' && (!inputs.mainnet_package_run || inputs.governed_nft_refund)
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
@@ -403,6 +407,35 @@ jobs:
                 end))
               ' "$report" >/dev/null
           done
+      - name: Apply the NFT refund update to four isolated validators on published MSP
+        if: inputs.governed_nft_refund && matrix.profile == 'mainnet' && github.repository == 'maxwell2010/go-smart-node'
+        run: |
+          set -euo pipefail
+          umask 077
+          work="$PROFILE_WORK"
+          successor="$work/mcnd-nft-refund"
+          report="$work/evidence/published-governed-nft-refund.json"
+          go build -mod=readonly -p 2 -trimpath -tags mintcandy_mainnet,mcnd_native_sdk_migration_v1 \
+            -ldflags "-X main.buildCommit=$GITHUB_SHA" -o "$successor" ./cmd/mcnd
+          go test -mod=readonly -p 2 -tags mintcandy_mainnet -c -o "$work/nft-upgrade-signers.test" ./systemcontracts
+          successor_sha=$(sha256sum "$successor" | cut -d ' ' -f 1)
+          status=0
+          sudo -n unshare --net -- bash -euc 'ip link set lo up; exec "$@"' _ \
+            env TMPDIR="$work" python3 -B tools/native_launch_nft_refund.py \
+            --predecessor "$work/published/mcnd" --predecessor-sha256 "$PUBLISHED_BINARY_SHA" --predecessor-source "$PUBLISHED_SOURCE" \
+            --successor "$successor" --successor-sha256 "$successor_sha" --successor-source "$GITHUB_SHA" \
+            --fixture "$work/assembled" --assembly-report "$work/evidence/assembly.json" --signer "$work/nft-upgrade-signers.test" \
+            --commit-probe "$work/comet-commit-probe" --home-parent "$work" --report "$report" || status=$?
+          if [[ -f "$report" ]]; then sudo -n chown "$(id -u):$(id -g)" "$report"; fi
+          (( status == 0 ))
+          jq -e --arg old "$PUBLISHED_BINARY_SHA" --arg new "$successor_sha" '
+            .status == "PASS" and .loopbackOnlyNamespace and .chainId == "mintcandy_9905401-1" and .nativeDenom == "msp" and
+            .predecessor.sha256 == $old and .successor.sha256 == $new and
+            .proposal.tally.yes_count == "40000000000000000000000" and
+            .finalCommit.verifiedEd25519Signatures == 4 and .finalCommit.height > .upgrade.height and
+            ([.nfts[].refunds[] | .paidAtomic] == ["2000000000000000000","2000000000000000000","2000000000000000000"]) and
+            all(.nfts[]; .beforeUpgrade.paidAtomic == "0" and .repeat.paidAtomic == "0" and .repeat.remainingAtomic == "0")
+            ' "$report" >/dev/null
       - name: Relay ICS-20 packets with the versioned binary
         if: (((inputs.published_ibc || inputs.mainnet_package_run) && matrix.profile == 'mainnet') || (inputs.testnet_package_run && matrix.profile == 'testnet')) && github.repository == 'maxwell2010/go-smart-node'
         run: |

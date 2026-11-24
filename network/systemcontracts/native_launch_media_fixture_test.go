@@ -5,9 +5,11 @@ import (
 	"encoding/json"
 	"fmt"
 	"math/big"
+	"net"
 	"os"
 	"path/filepath"
 	"regexp"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -46,11 +48,7 @@ func TestExportLaunchMediaCreation(t *testing.T) {
 	require.True(t, ok)
 	evmID := spec.evmID
 	if doc.ChainID == identity.MainnetChainID {
-		localNetwork, err := os.Readlink("/proc/self/ns/net")
-		require.NoError(t, err)
-		initialNetwork, err := os.Readlink("/proc/1/ns/net")
-		require.NoError(t, err)
-		require.NotEqual(t, initialNetwork, localNetwork)
+		requirePrivateMainnetFixture(t)
 		evmID = identity.MainnetEVMChainID
 	} else {
 		require.Equal(t, nativeSponsoredLaunchChainID, doc.ChainID)
@@ -68,6 +66,13 @@ func TestExportLaunchMediaCreation(t *testing.T) {
 	creator := crypto.PubkeyToAddress(key.PublicKey)
 	target, payload, event, nonce, value := launchMediaTransaction(t, kind, creator, uri,
 		state.Withdrawal.TokenCenter, state.Withdrawal.NFTCenter)
+	if rawNonce := os.Getenv("MCND_MEDIA_NONCE"); rawNonce != "" {
+		require.Equal(t, identity.MainnetChainID, doc.ChainID)
+		require.True(t, strings.HasSuffix(kind, "-backed"))
+		nonce, err = strconv.ParseUint(rawNonce, 10, 16)
+		require.NoError(t, err)
+		require.Less(t, nonce, uint64(64))
+	}
 	require.NotEqual(t, common.Address{}, target)
 	gas := uint64(3_000_000)
 	if kind != "erc20" {
@@ -89,6 +94,20 @@ func TestExportLaunchMediaCreation(t *testing.T) {
 	closeErr := file.Close()
 	require.NoError(t, writeErr)
 	require.NoError(t, closeErr)
+}
+
+func requirePrivateMainnetFixture(t *testing.T) {
+	t.Helper()
+	localNetwork, err := os.Readlink("/proc/self/ns/net")
+	require.NoError(t, err)
+	initialNetwork, err := os.Readlink("/proc/1/ns/net")
+	require.NoError(t, err)
+	require.NotEqual(t, initialNetwork, localNetwork)
+	interfaces, err := net.Interfaces()
+	require.NoError(t, err)
+	require.Len(t, interfaces, 1)
+	require.Equal(t, "lo", interfaces[0].Name)
+	require.NotZero(t, interfaces[0].Flags&net.FlagLoopback)
 }
 
 func launchMediaTransaction(t *testing.T, kind string, creator common.Address, uri string,
