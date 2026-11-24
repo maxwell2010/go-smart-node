@@ -3,7 +3,6 @@
 package systemcontracts_test
 
 import (
-	"crypto/sha256"
 	"fmt"
 	"math/big"
 	"os"
