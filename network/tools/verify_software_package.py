@@ -13,6 +13,7 @@ import tarfile
 
 from binary_provenance import MAIN_MODULE, NATIVE_BUILD_TAGS, verify_recorded_build, validate_release_version
 from install_mcnd import validate_revision, pinned_go_version
+from source_inventory import verify_profile_inventory
 
 REQUIRED = {"bin/mcnd", "BUILD_INFO.txt", "SOFTWARE_RELEASE.txt", "CLI_VERSION.json",
             "SOURCE_INPUTS.json", "VERIFIED_BUILD.json", "SBOM.cdx.json", "MANIFEST.json", "provenance/LICENSE"}
@@ -76,6 +77,8 @@ def verify(archive,revision,release_version,*,native_denom=None):
     runtime=strict_json(metadata["CLI_VERSION.json"])
     if runtime.get("commit")!=revision or runtime.get("version")!=release_version or runtime.get("server_name")!="mcnd":raise ValueError("software runtime version identity differs")
     source=strict_json(metadata["SOURCE_INPUTS.json"])
+    if native_denom is not None and (tuple(map(int, release_version.split("."))) >= (1, 2, 3) or source.get("schemaVersion") == 2):
+        verify_profile_inventory(source, native_denom)
     build=strict_json(metadata["VERIFIED_BUILD.json"])
     if source.get("sourceRevision")!=revision or build.get("settings",{}).get("vcs.revision")!=revision or build.get("settings",{}).get("vcs.modified")!="false" or build.get("module",{}).get("path")!=MAIN_MODULE:raise ValueError("software source/build provenance differs")
     expected_go=pinned_go_version((Path(__file__).resolve().parents[1]/"go.mod").read_text(encoding="utf-8"))

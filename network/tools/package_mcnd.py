@@ -31,7 +31,7 @@ def package(binary,source,revision,output,source_inputs=None,release_version=Non
    runtime_version=json.loads(subprocess.check_output([str(binary),"version","--long","--output","json","--home",version_home],text=True,timeout=30))
   if runtime_version.get("commit")!=revision or runtime_version.get("server_name")!="mcnd":raise ValueError("runtime binary source commit mismatch")
   if release_version is not None and runtime_version.get("version")!=release_version:raise ValueError("runtime binary release version mismatch")
- inventory=verify_build_inputs(source,environment=environment)
+ inventory=verify_build_inputs(source,environment=environment,native_denom=native_denom)
  if source_inputs is not None and json.loads(pathlib.Path(source_inputs).read_bytes())!=inventory:raise ValueError("production source inputs differ from the pre-build inventory")
  data={"bin/mcnd":binary.read_bytes(),"BUILD_INFO.txt":info.encode()}
  if release_version is None:data["DEVELOPMENT.txt"]=b"DEVELOPMENT ONLY. Native feature integration and release gates remain incomplete.\n"

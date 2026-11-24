@@ -8,19 +8,9 @@ import re
 from pathlib import Path
 import subprocess
 
-from source_inventory import json_records, production_environment
+from source_inventory import NATIVE_BUILD_TAGS, json_records, native_build_tag, production_environment
 
 MAIN_MODULE = "github.com/maxwell2010/go-smart-node/network"
-NATIVE_BUILD_TAGS = {"msp": "mintcandy_mainnet", "tmsp": "mintcandy_testnet"}
-
-
-def native_build_tag(native_denom):
-    if native_denom is None:
-        return ""
-    try:
-        return NATIVE_BUILD_TAGS[native_denom]
-    except (KeyError, TypeError) as error:
-        raise ValueError("unsupported native release denomination") from error
 
 def validate_release_version(value):
     if not isinstance(value,str) or len(value)>64 or not re.fullmatch(r"(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)",value):

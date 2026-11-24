@@ -124,7 +124,7 @@ jobs:
           test -z "$(git status --porcelain)"
           profile_args=()
           if [[ -n "$BUILD_TAG" ]]; then profile_args=(--native-denom "$NATIVE_DENOM"); fi
-          python3 -B tools/source_inventory.py --source "$GITHUB_WORKSPACE" --output "$RUNNER_TEMP/software-source-inputs.json"
+          python3 -B tools/source_inventory.py --source "$GITHUB_WORKSPACE" --output "$RUNNER_TEMP/software-source-inputs.json" "${profile_args[@]}"
           go build -mod=readonly -tags="$BUILD_TAG" -p 2 -trimpath -ldflags "-X main.buildCommit=$GITHUB_SHA -X main.buildVersion=$RELEASE_VERSION" -o "$RUNNER_TEMP/mcnd-software" ./cmd/mcnd
           init_home=$(mktemp -d "$RUNNER_TEMP/mcnd-init.XXXXXXXX")
           "$RUNNER_TEMP/mcnd-software" init software-metadata-check --home "$init_home" --chain-id "mintcandy_$EVM_CHAIN_ID-1" --evm.evm-chain-id "$EVM_CHAIN_ID"

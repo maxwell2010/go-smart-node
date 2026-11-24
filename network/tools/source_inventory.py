@@ -6,6 +6,17 @@ import os
 from pathlib import Path
 import subprocess
 
+NATIVE_BUILD_TAGS = {"msp": "mintcandy_mainnet", "tmsp": "mintcandy_testnet"}
+
+
+def native_build_tag(native_denom):
+    if native_denom is None:
+        return ""
+    try:
+        return NATIVE_BUILD_TAGS[native_denom]
+    except (KeyError, TypeError) as error:
+        raise ValueError("unsupported native release denomination") from error
+
 INPUT_FIELDS = (
     "GoFiles", "CgoFiles", "CFiles", "CXXFiles", "MFiles", "HFiles", "FFiles",
     "SFiles", "SwigFiles", "SwigCXXFiles", "SysoFiles", "EmbedFiles",
@@ -36,8 +47,9 @@ def json_records(raw):
         yield value
 
 
-def verify_build_inputs(source, *, environment=None, package_loader=None):
+def verify_build_inputs(source, *, environment=None, package_loader=None, native_denom=None):
     environment = production_environment(environment)
+    tag = native_build_tag(native_denom)
     source = Path(source).resolve(strict=True)
     module = source / "network"
     def git(*args):
@@ -70,7 +82,7 @@ def verify_build_inputs(source, *, environment=None, package_loader=None):
 
     if package_loader is None:
         raw = subprocess.check_output(
-            ["go", "list", "-mod=readonly", "-tags=", "-deps", "-json", "./cmd/mcnd"],
+            ["go", "list", "-mod=readonly", "-tags=" + tag, "-deps", "-json", "./cmd/mcnd"],
             cwd=module, env=environment, text=True,
         )
         packages = json_records(raw)
@@ -100,18 +112,32 @@ def verify_build_inputs(source, *, environment=None, package_loader=None):
         raise ValueError("production inventory contains no local packages")
     add_input(module / "go.mod")
     add_input(module / "go.sum")
-    return {"schemaVersion": 1, "sourceRevision": git("rev-parse", "HEAD"),
+    inventory = {"schemaVersion": 1, "sourceRevision": git("rev-parse", "HEAD"),
             "scope": "Actual default mcnd source/embed inputs; external modules require module/source verifiers",
             "buildPolicy": {key: environment[key] for key in ("GOENV", "GOWORK", "GOTOOLCHAIN", "GOFLAGS", "GOOS", "GOARCH", "GOAMD64", "CGO_ENABLED", "CC")},
             "localPackages": local_packages, "files": dict(sorted(inputs.items()))}
+    if tag:
+        inventory.update(schemaVersion=2, scope=f"Actual {tag} mcnd source/embed inputs; external modules require module/source verifiers")
+        inventory["buildPolicy"]["-tags"] = tag
+        verify_profile_inventory(inventory, native_denom)
+    return inventory
+
+
+def verify_profile_inventory(inventory, native_denom):
+    tag = native_build_tag(native_denom)
+    expected = f"network/identity/profile_{tag.removeprefix('mintcandy_')}.go"
+    profiles = {name for name in inventory["files"] if name.startswith("network/identity/profile_") and name.endswith(".go")}
+    if inventory.get("schemaVersion") != 2 or inventory.get("buildPolicy", {}).get("-tags") != tag or profiles != {expected}:
+        raise ValueError("source inventory differs from the requested native profile")
 
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--source", required=True)
     parser.add_argument("--output", required=True)
+    parser.add_argument("--native-denom", choices=NATIVE_BUILD_TAGS)
     args = parser.parse_args()
-    inventory = verify_build_inputs(args.source)
+    inventory = verify_build_inputs(args.source, native_denom=args.native_denom)
     with Path(args.output).open("x", encoding="utf-8") as stream:
         json.dump(inventory, stream, indent=2, sort_keys=True)
         stream.write("\n")

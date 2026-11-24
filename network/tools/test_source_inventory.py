@@ -4,7 +4,7 @@ import subprocess
 import tempfile
 import unittest
 
-from source_inventory import json_records, production_environment, verify_build_inputs
+from source_inventory import json_records, production_environment, verify_build_inputs, verify_profile_inventory
 
 
 class ProductionSourceInventory(unittest.TestCase):
@@ -50,6 +50,29 @@ class ProductionSourceInventory(unittest.TestCase):
                 descriptor[field].append(name)
                 with self.assertRaisesRegex(ValueError, "untracked or ignored production build input"):
                     verify_build_inputs(root, package_loader=lambda _: [descriptor])
+
+    def test_go_list_records_only_the_compiled_native_identity(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root, package, _ = self.fixture(directory)
+            module = root / "network"
+            (module / "go.mod").write_text("module fixture\n\ngo 1.21\n")
+            (package / "main.go").write_text('package main\nimport _ "fixture/identity"\nfunc main() {}\n')
+            identity = module / "identity"
+            identity.mkdir()
+            for name, condition in (("mainnet", "mintcandy_mainnet"), ("testnet", "mintcandy_testnet"),
+                                    ("legacy", "!mintcandy_mainnet && !mintcandy_testnet")):
+                (identity / f"profile_{name}.go").write_text(f"//go:build {condition}\n\npackage identity\n")
+            subprocess.run(["git", "-C", str(root), "add", "network"], check=True)
+            subprocess.run(["git", "-C", str(root), "-c", "user.name=Fixture", "-c", "user.email=fixture@example.invalid",
+                            "-c", "commit.gpgsign=false", "commit", "-qm", "profiles"], check=True)
+            for denom, name, other in (("msp", "mainnet", "tmsp"), ("tmsp", "testnet", "msp")):
+                inv = verify_build_inputs(root, native_denom=denom)
+                self.assertIn(f"network/identity/profile_{name}.go", inv["files"])
+                with self.assertRaisesRegex(ValueError, "native profile"):
+                    verify_profile_inventory(inv, other)
+                inv["files"]["network/identity/profile_legacy.go"] = "0" * 64
+                with self.assertRaisesRegex(ValueError, "native profile"):
+                    verify_profile_inventory(inv, denom)
 
     def test_tracked_changes_and_external_local_replacement_are_rejected(self):
         with tempfile.TemporaryDirectory() as directory, tempfile.TemporaryDirectory() as outside:
