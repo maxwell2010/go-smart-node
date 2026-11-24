@@ -277,7 +277,8 @@ jobs:
           source=c7c1331a201cd2141cf9d90493fbed539bf62642
           archive_sha=ab7fb1563a544da1b0963134daff833bf49251cd1864c86e2f6a383db7f2b5a4
           binary_sha=b098a5174fd7df151dfaf7740362e1c1c782726b925f1439340eec112338d1d2
-          printf '%s  %s\n' a18b765cf2f2a384dc819642f8a0872a9bd85bbf12b4bac6edf75c62d3f0d3a1 +            "$work/install_software.py" | sha256sum --check --strict
+          printf '%s  %s\n' a18b765cf2f2a384dc819642f8a0872a9bd85bbf12b4bac6edf75c62d3f0d3a1 \
+            "$work/install_software.py" | sha256sum --check --strict
           curl -fsSL --retry 3 --proto '=https' --proto-redir '=https' \
             "$release/provenance.sigstore.json" -o "$work/successor-provenance.sigstore.json"
           python3 -I -B "$work/install_software.py" --source-sha "$source" \
