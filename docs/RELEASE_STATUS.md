@@ -22,6 +22,15 @@ ran their one-line commands without a GitHub token, verified each installed
 binary hash, then initialized and validated genesis for its profile.
 [Published installer checks](https://github.com/maxwell2010/go-smart-node/actions/runs/45377377447).
 
+Four isolated validators upgraded from the published MSP 1.2.1 archive to
+the published MSP 1.2.3 archive at height 97 with an ICS-20 packet in flight.
+The observer restored its closed backup from height 96 and reproduced the
+post-migration AppHash. All five nodes agreed on packet 1 and its 1 MSP escrow
+across migration and recovery. Hermes delivered it with one acknowledgement.
+The return transfer released 1 MSP and left zero escrow and zero voucher supply.
+All five nodes agreed at height 128 and all four validator signatures verified.
+[Pending transfer recovery evidence](https://github.com/maxwell2010/go-smart-node/actions/runs/45378581903).
+
 ## 1.2.2 software release
 
 The attested Linux amd64 packages for MSP and tMSP were built from
