@@ -32,6 +32,11 @@ func TestExportLaunchMediaCreation(t *testing.T) {
 	require.Zero(t, dir.Mode().Perm()&0077)
 	uri := os.Getenv("MCND_MEDIA_URI")
 	require.Regexp(t, regexp.MustCompile(`^ipfs://bafkrei[a-z2-7]{52}$`), uri)
+	kind := os.Getenv("MCND_MEDIA_KIND")
+	if kind == "" {
+		kind = "erc20"
+	}
+	require.Contains(t, []string{"erc20", "erc721", "erc1155"}, kind)
 	genesis, err := os.ReadFile(os.Getenv("MCND_MEDIA_GENESIS"))
 	require.NoError(t, err)
 	doc, err := cmttypes.GenesisDocFromJSON(genesis)
@@ -52,19 +57,21 @@ func TestExportLaunchMediaCreation(t *testing.T) {
 	var state struct {
 		Withdrawal struct {
 			TokenCenter common.Address `json:"token_center"`
+			NFTCenter   common.Address `json:"nft_center"`
 		} `json:"withdrawal_settlement"`
 	}
 	require.NoError(t, json.Unmarshal(doc.AppState, &state))
-	center := state.Withdrawal.TokenCenter
-	require.NotEqual(t, common.Address{}, center)
 	key, err := crypto.ToECDSA(nativeLaunchAccountKey(1, spec).Bytes())
 	require.NoError(t, err)
-	abi, err := contracts.CompiledABI("NewNetworkTokenCenter")
-	require.NoError(t, err)
-	payload, err := abi.Pack("createTokenReserveless", "LAUNCH AVATAR TOKEN", "media", false, true,
-		big.NewInt(10), new(big.Int), uri)
-	require.NoError(t, err)
-	tx := ethtypes.NewTx(&ethtypes.LegacyTx{To: &center, Gas: 3_000_000,
+	creator := crypto.PubkeyToAddress(key.PublicKey)
+	target, payload, event, nonce := launchMediaTransaction(t, kind, creator, uri,
+		state.Withdrawal.TokenCenter, state.Withdrawal.NFTCenter)
+	require.NotEqual(t, common.Address{}, target)
+	gas := uint64(3_000_000)
+	if kind != "erc20" {
+		gas = 12_000_000
+	}
+	tx := ethtypes.NewTx(&ethtypes.LegacyTx{To: &target, Nonce: nonce, Gas: gas,
 		GasPrice: big.NewInt(1_000_000_000_000), Data: payload})
 	signed, err := ethtypes.SignTx(tx, ethtypes.NewEIP155Signer(new(big.Int).SetUint64(evmID)), key)
 	require.NoError(t, err)
@@ -73,11 +80,58 @@ func TestExportLaunchMediaCreation(t *testing.T) {
 	file, err := os.OpenFile(output, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0600)
 	require.NoError(t, err)
 	writeErr := json.NewEncoder(file).Encode(map[string]string{
-		"creator": crypto.PubkeyToAddress(key.PublicKey).Hex(), "factory": center.Hex(), "uri": uri,
-		"event": abi.Events["TokenReservelessDeployed"].ID.Hex(), "hash": signed.Hash().Hex(), "raw": hexutil.Encode(raw),
+		"creator": creator.Hex(), "target": target.Hex(), "kind": kind, "uri": uri,
+		"event": event.Hex(), "hash": signed.Hash().Hex(), "raw": hexutil.Encode(raw),
 		"chainId": doc.ChainID, "genesisSha256": fmt.Sprintf("%x", sha256.Sum256(genesis)),
 	})
 	closeErr := file.Close()
 	require.NoError(t, writeErr)
 	require.NoError(t, closeErr)
+}
+
+func launchMediaTransaction(t *testing.T, kind string, creator common.Address, uri string,
+	tokenCenter, nftCenter common.Address,
+) (common.Address, []byte, common.Hash, uint64) {
+	t.Helper()
+	collection := os.Getenv("MCND_MEDIA_COLLECTION")
+	if kind == "erc20" {
+		require.Empty(t, collection)
+		factory, err := contracts.CompiledABI("NewNetworkTokenCenter")
+		require.NoError(t, err)
+		payload, err := factory.Pack("createTokenReserveless", "LAUNCH AVATAR TOKEN", "media", false, true,
+			big.NewInt(10), new(big.Int), uri)
+		require.NoError(t, err)
+		return tokenCenter, payload, factory.Events["TokenReservelessDeployed"].ID, 0
+	}
+	if collection != "" {
+		require.True(t, common.IsHexAddress(collection))
+		contract, event := "DRC721Reserveless", "Transfer"
+		args := []interface{}{creator, uri, new(big.Int), common.Address{}}
+		if kind == "erc1155" {
+			contract, event = "DRC1155Reserveless", "TransferSingle"
+			args = []interface{}{creator, big.NewInt(123), big.NewInt(2), uri, new(big.Int), common.Address{}}
+		}
+		asset, err := contracts.CompiledABI(contract)
+		require.NoError(t, err)
+		payload, err := asset.Pack("mint", args...)
+		require.NoError(t, err)
+		return common.HexToAddress(collection), payload, asset.Events[event].ID, 1
+	}
+	factory, err := contracts.CompiledABI("NewNetworkNFTCenter")
+	require.NoError(t, err)
+	method := "createDRC721Reserveless"
+	if kind == "erc1155" {
+		method = "createDRC1155Reserveless"
+	}
+	metadata := struct {
+		Creator     common.Address
+		Symbol      string
+		Name        string
+		ContractURI string
+		Refundable  bool
+		Burnable    bool
+	}{creator, "MEDIA", "Media rehearsal collection", uri, true, true}
+	payload, err := factory.Pack(method, metadata)
+	require.NoError(t, err)
+	return nftCenter, payload, factory.Events["NFTCreated"].ID, 0
 }

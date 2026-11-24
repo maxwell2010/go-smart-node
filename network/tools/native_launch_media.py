@@ -3,9 +3,11 @@
 import base64
 from contextlib import closing
 import json
+import os
 from pathlib import Path
 import re
 import ssl
+import subprocess
 import sys
 import time
 
@@ -25,20 +27,77 @@ def rehearse_media(root, expected, nodes, fixture_path, report, env, owner):
     from mcnd_media.store import Asset, strict
 
     report['phase'] = 'media-signed-token-creation'
-    fixture = json.loads(private_bytes(fixture_path, 4096))
-    check((fixture['chainId'], fixture['genesisSha256']) == (expected['chainId'], report['genesisSha256']),
+    fixture = read_media_fixture(fixture_path, report)
+    kind = fixture['kind']
+    check(kind in ('erc20', 'erc721', 'erc1155'), 'unknown media asset kind')
+    if kind != 'erc20':
+        report['phase'] = 'media-signed-nft-collection'
+    metadata = strict(private_bytes(fixture_path.parent / 'metadata.json', 64 << 10))
+    image = private_bytes(fixture_path.parent / 'avatar.png', 1 << 20)
+    source, witness = nodes[0], nodes[-1]
+    receipt = commit_media_transaction(source, nodes, fixture, 0, report)
+    topics = [fixture['event']]
+    address_data = r'0x0{24}[0-9a-f]{40}'
+    if kind != 'erc20':
+        topics.append(f'0x{int(kind == "erc1155"):064x}')
+        address_data += r'(?:[0-9a-f]{64})+'
+    records = [entry['data'] for entry in receipt['logs']
+               if entry['address'].lower() == fixture['target'] and entry['topics'] == topics]
+    check(len(records) == 1 and re.fullmatch(address_data, records[0]), 'missing exact asset creation event')
+    contract = '0x' + records[0][26:66]
+    asset = Asset(expected['chainId'], contract, kind, {'erc20': '0', 'erc721': '1', 'erc1155': '123'}[kind])
+    extra = {}
+    if kind != 'erc20':
+        report['phase'] = 'media-signed-nft-mint'
+        mint_path = fixture_path.with_name('mint.json')
+        signer_env = dict(env, MCND_MEDIA_KIND=kind, MCND_MEDIA_URI=fixture['uri'], MCND_MEDIA_COLLECTION=contract,
+                          MCND_MEDIA_GENESIS=str(source.home / 'config/genesis.json'), MCND_MEDIA_FIXTURE=str(mint_path))
+        signer = str(Path(os.environ['MCND_MEDIA_SIGNER']).resolve(strict=True))
+        subprocess.run([signer, '-test.run', '^TestExportLaunchMediaCreation$', '-test.timeout', '30s'],
+                       cwd=root, env=signer_env, check=True, timeout=35)
+        mint = read_media_fixture(mint_path, report)
+        check(tuple(mint[key] for key in ('kind', 'creator', 'uri', 'target')) ==
+              (kind, fixture['creator'], fixture['uri'], contract), 'mint fixture differs from the committed collection')
+        extra['collectionHeight'] = int(receipt['blockNumber'], 16)
+        receipt = commit_media_transaction(source, nodes, mint, 1, report)
+        recipient = '0x' + fixture['creator'][2:].rjust(64, '0')
+        zero = '0x' + '0' * 64
+        token_word = f'{int(asset.token_id):064x}'
+        expected_topics = [mint['event'], zero, recipient, '0x' + token_word]
+        expected_data = '0x'
+        if kind == 'erc1155':
+            expected_topics = [mint['event'], recipient, zero, recipient]
+            expected_data = f'0x{token_word}{2:064x}'
+        check(sum(entry['address'].lower() == contract and entry['topics'] == expected_topics and
+                  entry['data'] == expected_data for entry in receipt['logs']) == 1,
+              'mint receipt does not credit the expected NFT to its creator')
+
+    report['phase'] = 'media-https-publication-from-committed-uri'
+    source_reader = CommittedReader(asset.chain_id, LocalRPC(f'http://127.0.0.1:{source.p2p + 1}'), LocalRPC(source.evm))
+    check(source_reader(asset, fixture['uri']) == fixture['creator'], 'validator returned a different media authority')
+    publication = rehearse_https(root, asset, fixture, metadata, image, witness, env, owner, report)
+    report['committedMedia'] = {'status': 'PASS', 'kind': kind + '-reserveless', 'assetTokenId': asset.token_id,
+                                'receiptHeight': int(receipt['blockNumber'], 16), 'txHash': receipt['transactionHash'],
+                                'alteredMetadataRejected': True, 'httpsVerified': True, 'restoredObjects': 2,
+                                **extra, **publication}
+
+
+def read_media_fixture(path, report):
+    fixture = json.loads(private_bytes(path, 4096))
+    check((fixture['chainId'], fixture['genesisSha256']) == (report['chainId'], report['genesisSha256']),
           'media fixture is bound to a different isolated genesis')
-    for key in ('creator', 'factory'):
+    for key in ('creator', 'target'):
         check(re.fullmatch(ADDRESS, fixture[key]), 'invalid test fixture address')
         fixture[key] = fixture[key].lower()
     for key in ('event', 'hash'):
         check(re.fullmatch(WORD, fixture[key]), 'invalid test fixture hash')
     check(re.fullmatch(r'0x(?:[0-9a-f]{2}){100,1024}', fixture['raw']), 'invalid test fixture transaction')
-    metadata = strict(private_bytes(fixture_path.parent / 'metadata.json', 64 << 10))
-    image = private_bytes(fixture_path.parent / 'avatar.png', 1 << 20)
-    source, witness = nodes[0], nodes[-1]
-    check(int(ethereum('eth_getTransactionCount', [fixture['creator'], 'latest'], base=source.evm), 16) == 0,
-          'test media creator unexpectedly has an existing nonce')
+    return fixture
+
+
+def commit_media_transaction(source, nodes, fixture, nonce, report):
+    check(int(ethereum('eth_getTransactionCount', [fixture['creator'], 'latest'], base=source.evm), 16) == nonce,
+          'test media creator has an unexpected nonce')
     tx_hash = ethereum('eth_sendRawTransaction', [fixture['raw']], base=source.evm)
     check(tx_hash == fixture['hash'], 'media transaction hash differs from signed test fixture')
     deadline = time.monotonic() + 40
@@ -53,26 +112,13 @@ def rehearse_media(root, expected, nodes, fixture_path, report, env, owner):
             time.sleep(0.25)
     check(receipt is not None, 'test token creation was not indexed')
     check(int(receipt['status'], 16) == 1 and receipt['transactionHash'] == tx_hash and
-          receipt['from'].lower() == fixture['creator'] and receipt['to'].lower() == fixture['factory'],
-          'signed token creation failed or receipt does not match')
-    records = [entry['data'] for entry in receipt['logs']
-               if entry['address'].lower() == fixture['factory'] and entry['topics'] == [fixture['event']]]
-    check(len(records) == 1 and re.fullmatch(r'0x0{24}[0-9a-f]{40}', records[0]),
-          'missing exact reserveless creation event')
-    contract = '0x' + records[0][-40:]
+          receipt['from'].lower() == fixture['creator'] and receipt['to'].lower() == fixture['target'],
+          'signed media transaction failed or receipt does not match')
     height = int(receipt['blockNumber'], 16)
     wait_replicas(nodes, height + 3, 65, report)
     check(committed_header(nodes, height)['block_hash'].lower() == receipt['blockHash'][2:].lower(),
-          'created token receipt belongs to a different block')
-
-    report['phase'] = 'media-https-publication-from-committed-uri'
-    asset = Asset(expected['chainId'], contract, 'erc20')
-    source_reader = CommittedReader(asset.chain_id, LocalRPC(f'http://127.0.0.1:{source.p2p + 1}'), LocalRPC(source.evm))
-    check(source_reader(asset, fixture['uri']) == fixture['creator'], 'validator returned a different media authority')
-    publication = rehearse_https(root, asset, fixture, metadata, image, witness, env, owner, report)
-    report['committedMedia'] = {'status': 'PASS', 'kind': 'erc20-reserveless', 'receiptHeight': height,
-                                'txHash': tx_hash, 'alteredMetadataRejected': True, 'httpsVerified': True,
-                                'restoredObjects': 2, **publication}
+          'media transaction receipt belongs to a different block')
+    return receipt
 
 
 def rehearse_https(root, asset, fixture, metadata, image, witness, env, owner, report):
@@ -105,7 +151,7 @@ def rehearse_https(root, asset, fixture, metadata, image, witness, env, owner, r
         with gateway(root / 'nginx-media-live', root, MEDIA / 'nginx-live.conf',
                      MEDIA / 'nginx-media-limits.conf', certificate=certificate) as port:
             headers = {'Content-Type': 'application/json'}
-            upload = {'kind': 'erc20', 'contract': asset.contract, 'token_id': '0', 'metadata': metadata,
+            upload = {'kind': asset.kind, 'contract': asset.contract, 'token_id': asset.token_id, 'metadata': metadata,
                       'image_base64': base64.b64encode(image).decode('ascii'), 'mime': 'image/png'}
             altered = {**upload, 'metadata': {'name': 'Different bytes'}}
             metadata_path = '/ipfs/' + fixture['uri'].removeprefix('ipfs://')
