@@ -14,12 +14,11 @@ DEL Decimal и обеспеченный им voucher моста остаются
 | Пересчёт | `1 MSP = 1000000000000000000 msp` |
 | ERC-20 обёртка в новом genesis | MintCandy Wrapped MSP (`WMSP`), 18 знаков |
 
-В кандидате майнета `coin.params.base_title` задан как `MintCandy`, а
+В genesis майнета `coin.params.base_title` задан как `MintCandy`, а
 `bank.denom_metadata` содержит `name=MintCandy`, `symbol=MSP`, `display=MSP`,
 `base=msp` и две единицы: `msp` с exponent 0, `MSP` с exponent 18.
-Утверждены название, тикер, начальный выпуск и схема распределения.
-Публикация требует итогового genesis, подписанного манифеста и подтверждённого
-окна запуска.
+Итоговый genesis и подписанный манифест входят в выпуск `v1.2.0`.
+[Публичный запуск](https://github.com/maxwell2010/go-smart-node/releases/tag/v1.2.0#публичный-запуск).
 
 ## Сетевые профили
 
@@ -51,12 +50,12 @@ DEL Decimal и обеспеченный им voucher моста остаются
 
 В старых CI-отчётах, подписанном тестовом genesis и опубликованных файлах
 релиза 1.0.0 обозначение DEL относится к единице того проверенного стенда.
-Эти доказательства, хеши и бинарники сохраняются без изменений. Текущая
-публичная документация использует MSP для будущего нативного актива.
+Эти отчёты привязаны к исходным хешам и бинарникам проверенных стендов.
 
 Для майнета в Wallet, Explorer и Console используйте MintCandy / MSP / 18
 и EVM ID `9905401`. Native currency EVM-кошелька настраивается отдельно
-от bank metadata. Реальные RPC публикуются после проверки работающей сети.
+от bank metadata. Публичный EVM RPC майнета - `https://node4.mintcandy.pro/rpc/evm/`.
+[Метаданные bank](https://node4.mintcandy.pro/api/cosmos/bank/v1beta1/denoms_metadata/msp).
 
 [Исторический проект genesis с `del`](public-genesis.draft.json),
 [исторический проект распределения](public-launch-allocation.draft.json),

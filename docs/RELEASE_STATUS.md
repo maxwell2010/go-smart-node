@@ -25,6 +25,13 @@ refunds, daemon restart and recovery of an in-flight packet. Four validators
 agreed on the AppHash and signed the final checkpoint at height 58.
 [Published MSP IBC run](https://github.com/maxwell2010/go-smart-node/actions/runs/45308038431).
 
+The same published binary ran in a fresh observer home under systemd. After
+restart it reopened height 22 and matched validator state at height 25. A
+second observer restored snapshot 40 and matched validator AppHash at height
+44. On the pruned observer, an old supply proof was unavailable across restart,
+while the proof for height 51 matched the archive observer.
+[Published MSP systemd, snapshot and pruning run](https://github.com/maxwell2010/go-smart-node/actions/runs/45309605117).
+
 ## 1.1.5 software release
 
 [MintCandy Node 1.1.5](https://github.com/maxwell2010/go-smart-node/releases/tag/v1.1.5)

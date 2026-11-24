@@ -1,25 +1,26 @@
-# Подготовка запуска отдельной сети MintCandy
+# Установка и эксплуатация ноды MintCandy
 
-Кандидат майнета использует **MintCandy (MSP)**, 18 знаков и базовый denom `msp`.
-[Название, metadata и техническая совместимость](NATIVE_TOKEN_IDENTITY.md).
+Майнет использует **MintCandy (MSP)**, 18 знаков и базовый denom `msp`.
+Linux amd64 бинарник `mcnd` v1.2.0 и подписанный genesis доступны на GitHub.
+[Выпуск](https://github.com/maxwell2010/go-smart-node/releases/tag/v1.2.0) ·
+[Быстрая установка](https://github.com/maxwell2010/go-smart-node/releases/download/v1.2.0/INSTALL_RU.md).
 
-Это черновик для организаторов и операторов `mcnd`. В репозитории есть
-изолированные проверки консенсуса, финансовых операций, IBC и восстановления.
-Данные для публичного подключения ещё предстоит утвердить и опубликовать.
-Исторический replay Decimal ведётся в отдельной сборке. [Условия выпуска](../../../docs/RELEASE_STATUS.md)
+Новый оператор сначала может поднять наблюдателя и синхронизировать историю
+подписанного genesis. Для участия в консенсусе после запуска нужна отдельная
+регистрация валидатора. Исторический replay Decimal ведётся отдельной сборкой.
+[Параметры майнета](LAUNCH_APPROVAL.md) · [Результаты проверок](../../../docs/RELEASE_STATUS.md).
 
-Предложение для публичной сети собрано в [проекте запуска](PUBLIC_LAUNCH_DRAFT.md).
-Для согласования состава используйте [анкету операторов](VALIDATOR_LAUNCH_INTAKE.md).
-План майнета предусматривает четыре валидатора с отдельными consensus keys
-и стартовой делегацией 10 000 MSP каждому. Перед стартом нужно сверить
-фактические заявки, состав genesis и конфигурацию подключения.
-Исторические отчёты ниже относятся к отдельным стендам.
+В GitHub CI наблюдатель с опубликованным бинарником под systemd после
+перезапуска открыл состояние блока 22 и сверил AppHash на блоке 25.
+Второй наблюдатель восстановил снапшот 40 и совпал с валидаторами на блоке 44.
+После прореживания и перезапуска свежий proof выпуска MSP совпал с архивным
+на блоке 51. [Отчёт изолированного прогона](https://github.com/maxwell2010/go-smart-node/actions/runs/45309605117).
 
 ## Подготовка для майнета MSP
 
 | Сеть | CometBFT chain ID | EVM chain ID | Базовая единица | Тикер | Обёртка |
 | --- | --- | --- | --- | --- | --- |
-| Кандидат майнета | `mintcandy_9905401-1` | `9905401` | `msp` | MSP | WMSP |
+| Майнет | `mintcandy_9905401-1` | `9905401` | `msp` | MSP | WMSP |
 | Новый тестовый профиль | `mintcandy_990098-1` | `990098` | `tmsp` | tMSP | WtMSP |
 | Работающий нагрузочный стенд | `mintcandy_990097-1` | `990097` | `del` | Задан его genesis | Задана его genesis |
 
@@ -343,6 +344,11 @@ mcnd comet show-node-id --home "$MCND_HOME"
 Comet RPC, Cosmos REST и EVM RPC публикуются отдельно. Порты и доступ к
 приватным валидаторам согласуются внутри операторского контура.
 
+Подписанный манифест майнета содержит bootstrap-пир
+`0a7d73e4af46c1e56f6e738d34fb0f48e37997f7@node4.mintcandy.pro:36657`.
+Список `seeds` в манифесте пуст. Публичный RPC наблюдателя подходит для
+сверки chain ID, высоты и хеша блока. [CometBFT RPC](https://node4.mintcandy.pro/rpc/comet/status).
+
 Для state sync опубликуйте как минимум два Comet RPC от независимых
 операторов, `trust_height`, `trust_hash`, `trust_period` и сведения о доступном
 snapshot. `trust_hash` берите из `block_id.hash` заголовка на выбранной высоте.
@@ -467,10 +473,11 @@ python3 network/tools/native_launch_package.py verify --archive "$LAUNCH_ARCHIVE
 
 ## Применение подписанного публичного genesis
 
-Получите у организатора манифест, подпись, открытый ключ и точные байты
-genesis. Сверьте отпечаток подписанта и SHA256 манифеста по согласованному
-каналу. Установите аттестованный бинарник той версии, которая указана
-в манифесте. [Комплект оператора](INSTALL_LAUNCH_TOOLS.md).
+Распакуйте `mintcandy-mainnet-verified-launch-fb210aac.tar.gz` из выпуска
+v1.2.0. В архиве есть манифест, подпись, открытый ключ, genesis и утилиты.
+Сверьте отпечаток подписанта и SHA256 манифеста, затем установите бинарник
+из того же выпуска. Команды ниже выполняйте из корня распакованного пакета.
+[Инструкция и контрольные суммы](https://github.com/maxwell2010/go-smart-node/releases/download/v1.2.0/INSTALL_RU.md).
 [Процедура проверки манифеста](VALIDATOR_LAUNCH_INTAKE.md#подготовка-и-проверка-подписанного-манифеста).
 
 Начальный валидатор использует подготовленный при регистрации `MCND_HOME`
@@ -483,8 +490,8 @@ EVM-адрес `0x...` в `OPERATOR_ADDRESS` для genesis с `msp`.
 ```sh
 python3 -B network/tools/public_genesis_manifest.py install \
   --genesis "$DOWNLOADED_GENESIS" --binary "$MCND_BINARY" \
-  --manifest public-genesis-manifest.json \
-  --signature public-genesis-manifest.json.asc --trusted-keyring genesis-signer.gpg \
+  --manifest genesis-manifest.json \
+  --signature genesis-manifest.json.asc --trusted-keyring genesis-signer.gpg \
   --signer-fingerprint "$GENESIS_SIGNER_FINGERPRINT" \
   --approved-manifest-sha256 "$APPROVED_MANIFEST_SHA256" \
   --home "$MCND_HOME" --operator "$OPERATOR_ADDRESS"
@@ -511,8 +518,8 @@ signing-state, чужой ключ и вручную изменённый ста
   --chain-id "$CHAIN_ID" --evm.evm-chain-id "$EVM_CHAIN_ID"
 python3 -B network/tools/public_genesis_manifest.py install-observer \
   --genesis "$DOWNLOADED_GENESIS" --binary "$MCND_BINARY" \
-  --manifest public-genesis-manifest.json \
-  --signature public-genesis-manifest.json.asc --trusted-keyring genesis-signer.gpg \
+  --manifest genesis-manifest.json \
+  --signature genesis-manifest.json.asc --trusted-keyring genesis-signer.gpg \
   --signer-fingerprint "$GENESIS_SIGNER_FINGERPRINT" \
   --approved-manifest-sha256 "$APPROVED_MANIFEST_SHA256" \
   --home "$MCND_HOME"
