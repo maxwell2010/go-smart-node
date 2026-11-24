@@ -162,9 +162,10 @@ def commit_media_transaction(source, nodes, fixture, nonce, report, *, status=1)
         if receipt is None:
             time.sleep(0.25)
     check(receipt is not None, 'test token creation was not indexed')
-    check(int(receipt['status'], 16) == status and receipt['transactionHash'] == tx_hash and
-          receipt['from'].lower() == fixture['creator'] and receipt['to'].lower() == fixture['target'],
-          'signed media transaction failed or receipt does not match')
+    check(receipt['transactionHash'] == tx_hash and receipt['from'].lower() == fixture['creator'].lower()
+          and receipt['to'].lower() == fixture['target'].lower(), 'transaction receipt identity differs from the signed fixture')
+    check(int(receipt['status'], 16) == status,
+          f"transaction {tx_hash} returned status {receipt['status']} at height {int(receipt['blockNumber'], 16)}")
     height = int(receipt['blockNumber'], 16)
     wait_replicas(nodes, height + 3, 65, report)
     check(committed_header(nodes, height)['block_hash'].lower() == receipt['blockHash'][2:].lower(),
