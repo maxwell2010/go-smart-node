@@ -229,7 +229,7 @@ func (b *Backend) GetTransactionReceipt(hash common.Hash) (map[string]interface{
 			"payer": fee.Payer, "token": fee.Token, "feeNonce": fee.FeeNonce,
 			"tokenInput": fee.TokenInput, "nativeOutput": fee.NativeOutput,
 			"conversionFee": fee.ConversionFee, "conversionGas": hexutil.Uint64(fee.ConversionGas),
-			"refundAsset": "native del",
+			"refundAsset": "native " + evmtypes.GetEVMCoinDenom(),
 		}
 	}
 	return fields, nil

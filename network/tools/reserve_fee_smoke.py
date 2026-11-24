@@ -93,7 +93,7 @@ def state_at(replicas, fixture, height):
 
 
 def encode_operation(binary, home, env, directory, fixture, operation, root):
-    flags = ['--tx-file', str(directory / operation['raw_file']), '--cosmos-chain-id', CHAIN, '--evm-id', str(EVM_CHAIN),
+    flags = ['--tx-file', str(directory / operation['raw_file']), '--cosmos-chain-id', fixture['chain_id'], '--evm-id', str(fixture['evm_id']),
              '--token', fixture['token'], '--exact-input', fixture['exact_input'], '--min-native-output', fixture['min_native_output'],
              '--conversion-gas', str(fixture['conversion_gas']), '--deadline', str(fixture['deadline']), '--fee-nonce', str(operation['fee_nonce'])]
     payload = json.loads(run_command(binary, home, ['fee-envelope', 'payload', *flags], env))

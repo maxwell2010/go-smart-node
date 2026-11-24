@@ -1244,7 +1244,7 @@
   "modifiedFiles": {
     "mempool/mempool.go": "b0d7c0ce7e1a2c67d9bf9b0bdf9a4cc24dcdec5fe1feb8e470b1f712516d3157",
     "rpc/backend/comet_to_eth.go": "8bdc539b6c6247fbc2c93ca99b78e40476300205fb3ab9c114b98f62b9cdf155",
-    "rpc/backend/tx_info.go": "9edce2233fa9b8afee3fbac8a3d3792b5775d768778a4363ce70b62b2a38e2ce",
+    "rpc/backend/tx_info.go": "15cd43c3090dd4750424ec9d55f2fabfa03200026105070a24e795387fe1b890",
     "rpc/backend/tx_info_test.go": "cf19430031f644afe517f5d2a242cd40f320afbf722ba527f94e2ebe66d76863",
     "rpc/types/events.go": "3c56531f33696de7d2825c0b30c0745244fb3f37369f285cabb79e3458f5327a",
     "rpc/types/events_test.go": "447fca30b689d0bd45d5242b581a2066d1d84e8f30e722ac3a635c1e1151ab70",

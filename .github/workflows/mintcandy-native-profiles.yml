@@ -121,6 +121,7 @@ jobs:
             -ldflags "-X main.buildCommit=$GITHUB_SHA" -o "$work/mcnd" ./cmd/mcnd
           go build -mod=readonly -p 2 -tags "$tags" -trimpath -o "$work/mcnd-genesis" ./cmd/mcnd-genesis
           go build -mod=readonly -p 2 -tags "$tags" -trimpath -o "$work/comet-commit-probe" ./tools/comet_commit_probe
+          go test -mod=readonly -p 2 -tags "$tags" -c -o "$work/fee-profile.test" ./systemcontracts
           go test -mod=readonly -p 2 -tags "$tags" -count=1 -timeout 2m -run '^TestVerifiedQuorum$' ./tools/comet_commit_probe
           go test -mod=readonly -p 2 -tags "$tags" -count=1 -timeout 2m -json \
             -run '^TestCompiledNativeProfile$' ./identity | tee "$work/evidence/compiled-profile.jsonl"
@@ -217,6 +218,7 @@ jobs:
             --fixture "$work/assembled" --home-parent "$work" --assembly-report "$work/evidence/assembly.json" \
             --report "$report" --network-profile "$PROFILE" --four-validators --empty-user-assets \
             --quorum-loss-recovery --signed-bootstrap --commit-probe "$work/comet-commit-probe" \
+            --fee-signer "$work/fee-profile.test" \
             --package-genesis "$work/verified/genesis.json" || status=$?
           if [[ -f "$report" ]]; then
             sudo -n chown "$(id -u):$(id -g)" "$report"
@@ -227,6 +229,8 @@ jobs:
             '.status == "PASS" and .loopbackOnlyNamespace and .offlineAssembledGenesis and .followerVotingPower == 0 and
              .genesisSha256 == $genesis and .foundingCommitProof.status == "FOUNDING_COMMIT_VERIFIED" and
              .rpc.nativeDenom == $denom and .rpc.nativeSymbol == $symbol and .wrappedTokenSymbol == $wrapper and
+             .reserveFees.refundAsset == ("native " + $denom) and [.reserveFees.operations[].status] == [1,0] and
+             .reserveFees.observerMatched and .reserveFees.nativeSupplyUnchanged and
              .quorumRecovery.verifiedEd25519Signatures == 3 and .fourSignerRecovery.verifiedEd25519Signatures == 4 and
              .signedBootstrap.appHash == .appHash and .signedBootstrap.outboundPeers == [.signedBootstrap.nodeId] and
              (.signedBootstrap.networkLaunchAuthorized | not)' "$report" >/dev/null

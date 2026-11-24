@@ -577,7 +577,7 @@ def verify_systemd_upgrade(systemd, follower, validators, expected, genesis, upg
 
 def run_launch(binary, root, genesis, expected, keys, env, owner, report, *, four_validators=False, treasury=None,
                systemd=None, restart_snapshot=False, upgrade_binary=None, quorum_loss_recovery=False, commit_probe=None,
-               verify_history=False, media_fixture=None, signed_bootstrap=None):
+               verify_history=False, media_fixture=None, signed_bootstrap=None, fee_signer=None):
     rows = expected["validators"]
     powers = tuple(row["initialPower"] for row in rows)
     options = {"chain_id": expected["chainId"], "evm_chain_id": expected["evmChainId"]}
@@ -715,6 +715,10 @@ def run_launch(binary, root, genesis, expected, keys, env, owner, report, *, fou
                                      "catchingUp": False, "syncedFromHeight": 1, "verifiedHeight": height}
     if treasury is not None:
         rehearse_treasury(nodes, treasury, height, report)
+    if fee_signer is not None:
+        from native_profile_fees import rehearse_profile_fees
+
+        rehearse_profile_fees(binary, fee_signer, root, nodes, expected, env, report)
     if media_fixture is not None:
         from native_launch_media import rehearse_media
 
@@ -747,6 +751,7 @@ def main(argv=None, signals=None):
     parser.add_argument("--empty-user-assets", action="store_true", help="rehearse the isolated four-validator founder allocation without user assets")
     parser.add_argument("--assembly-report", type=Path, help="cold verification report for the offline-assembled isolated genesis")
     parser.add_argument("--network-profile", choices=NETWORK_PROFILES, help="opt in to a compiled native denomination profile")
+    parser.add_argument("--fee-signer", type=Path, help="exercise reserve-token payments using a disposable profile signer")
     parser.add_argument("--quorum-loss-recovery", action="store_true", help="halt safely with two of four validators and recover original signers")
     parser.add_argument("--commit-probe", type=Path, help="owned Comet Ed25519 commit verifier")
     parser.add_argument("--signed-bootstrap", action="store_true", help="start the fresh test observer using the signed P2P manifest")
@@ -766,6 +771,8 @@ def main(argv=None, signals=None):
         parser.error("--assembly-report requires --empty-user-assets")
     if args.network_profile and not args.assembly_report:
         parser.error("--network-profile requires an offline-assembled isolated genesis")
+    if args.fee_signer and not args.network_profile:
+        parser.error("--fee-signer requires a compiled network profile")
     if args.media_fixture and not args.assembly_report:
         parser.error("--media-fixture requires the offline-assembled isolated genesis")
     if args.quorum_loss_recovery and (not args.four_validators or args.commit_probe is None):
@@ -853,7 +860,7 @@ def main(argv=None, signals=None):
                                        restart_snapshot=args.restart_and_snapshot, upgrade_binary=upgrade_binary,
                                        quorum_loss_recovery=args.quorum_loss_recovery, commit_probe=args.commit_probe,
                                        verify_history=bool(args.assembly_report and args.restart_and_snapshot and not upgrade_binary),
-                                       media_fixture=args.media_fixture,
+                                       media_fixture=args.media_fixture, fee_signer=args.fee_signer,
                                        signed_bootstrap=(Path(args.fixture), args.assembly_report) if args.signed_bootstrap else None)
                 finally:
                     owner.close()

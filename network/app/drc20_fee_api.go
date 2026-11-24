@@ -18,6 +18,7 @@ import (
 	"github.com/gorilla/mux"
 	"github.com/maxwell2010/go-smart-node/network/fees/authorization"
 	"github.com/maxwell2010/go-smart-node/network/fees/envelope"
+	"github.com/maxwell2010/go-smart-node/network/identity"
 )
 
 const DRC20FeeQuoteRequestBytes int64 = 8 * 1024
@@ -176,7 +177,7 @@ func (app *App) feePolicyJSON(ctx sdk.Context, payer common.Address, hasPayer bo
 		"domain_salt": crypto.Keccak256Hash([]byte(app.chainID)).Hex(), "snapshot_height": ctx.BlockHeight(), "snapshot_time": ctx.BlockTime().UTC().Format(time.RFC3339Nano),
 		"max_conversion_gas": DRC20FeeMaxConversionGas, "settlement_gas": DRC20FeeSettlementGas, "max_quote_request_bytes": DRC20FeeQuoteRequestBytes,
 		"max_envelope_bytes": envelope.MaxEnvelopeBytes, "native_fee_budget_formula": "(ethereum_gas_limit + conversion_gas_limit) * ethereum_fee_cap",
-		"refund_asset": "native del", "transport": "mintcandy-drc20-fee-v1", "broadcast_method": "Comet broadcast_tx_sync or Cosmos /cosmos/tx/v1beta1/txs",
+		"refund_asset": "native " + identity.BaseDenom, "transport": "mintcandy-drc20-fee-v1", "broadcast_method": "Comet broadcast_tx_sync or Cosmos /cosmos/tx/v1beta1/txs",
 		"submits_transactions": false,
 	}
 	if hasPayer {
