@@ -114,6 +114,28 @@ jobs:
           printf '%s  %s\n' 'cbb4e0c1a060b09e9fb45204c1f2de16d4be37d67753378b06782abeaebf8117' \
             "$home/config/genesis.json" | sha256sum --check --strict
           jq -e '.height == "0"' "$home/data/priv_validator_state.json" >/dev/null
+          jq -e '.chain_id == "mintcandy_9905401-1" and
+            .app_state.gov.params.min_deposit == [{"amount":"10000000000000000000","denom":"msp"}] and
+            .app_state.gov.params.voting_period == "172800s" and
+            ([.. | objects | select(has("enable_native_upgrade_governance")) |
+              .enable_native_upgrade_governance] == [true])' "$home/config/genesis.json" >/dev/null
+          upgrade_guide="$GITHUB_WORKSPACE/network/docs/ru/GOVERNED_UPGRADE_1_2_2.md"
+          export MCND_HOME="$work/proposal-client" KEYRING_BACKEND=test PROPOSER_KEY=review-only
+          export UPGRADE_HEIGHT=123456 DEPOSIT_ATOMIC=10000000000000000000
+          binary="$HOME/.local/opt/mcnd/1.2.1-msp/mcnd"
+          "$binary" keys add "$PROPOSER_KEY" --home "$MCND_HOME" --keyring-backend test >/dev/null 2>&1
+          proposer=$("$binary" keys show "$PROPOSER_KEY" --home "$MCND_HOME" --keyring-backend test -a)
+          cd "$work"
+          run_guide "$upgrade_guide" 'Черновик предложения до голосования'
+          run_guide "$upgrade_guide" 'Проверка предложения бинарником 1.2.1' > unsigned.json
+          jq -e --arg proposer "$proposer" '
+            .signatures == [] and (.body.messages | length) == 1 and
+            (.body.messages[0] |
+              .["@type"] == "/cosmos.gov.v1.MsgSubmitProposal" and .proposer == $proposer and
+              .messages == [] and .expedited == false and
+              .initial_deposit == [{"amount":"10000000000000000000","denom":"msp"}] and
+              .metadata == "mintcandy-sdk-upgrade/v1:{\"name\":\"mintcandy-native-sdk-migrations-v1\",\"height\":123456}")' unsigned.json >/dev/null
+          cp unsigned.json "$evidence/unsigned-upgrade-example.json"
       - name: Execute the public MSP and tMSP 1.2.2 one-line installers
         if: inputs.published_install_122
         shell: bash

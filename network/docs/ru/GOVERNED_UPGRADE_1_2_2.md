@@ -7,6 +7,69 @@
 опубликованный пакет 1.2.2 и принятое предложение майнета.
 [Репетиция перехода четырёх валидаторов с опубликованными пакетами](https://github.com/maxwell2010/go-smart-node/actions/runs/45340801528).
 
+## Черновик предложения до голосования
+
+Для обновления используется нативное голосование MintCandy. Предложение
+содержит пустой список исполняемых сообщений и точную строку плана в
+`metadata`. При успешном голосовании нода сама назначает обновление.
+
+В подписанном genesis обычный депозит равен 10 MSP, период голосования -
+48 часов. Перед подготовкой сверьте актуальные `min_deposit` и
+`voting_period` через `/cosmos/gov/v1/params/voting` и
+`/cosmos/gov/v1/params/deposit` на доверенном локальном REST. Согласуйте
+высоту с учётом скорости блоков, времени до начала и окончания голосования
+и запаса для операторов. К моменту подсчёта голосов высота должна
+оставаться в будущем. В пустом рабочем каталоге задайте `UPGRADE_HEIGHT`
+и `DEPOSIT_ATOMIC` в окружении. Для 10 MSP это `10000000000000000000`
+атомов. Следующая команда создаёт локальный файл для обсуждения.
+
+```sh
+python3 - <<'PY'
+import json
+import os
+import re
+
+def positive_integer(key):
+    value = os.environ.get(key, "")
+    if not re.fullmatch(r"[1-9][0-9]*", value):
+        raise SystemExit(f"{key}: требуется положительное целое число")
+    return int(value)
+
+height = positive_integer("UPGRADE_HEIGHT")
+deposit = positive_integer("DEPOSIT_ATOMIC")
+if height > 2**63 - 1 or deposit.bit_length() > 256:
+    raise SystemExit("Высота или депозит превышают диапазон ноды")
+plan = {"name": "mintcandy-native-sdk-migrations-v1", "height": height}
+proposal = {
+    "messages": [],
+    "metadata": "mintcandy-sdk-upgrade/v1:" + json.dumps(plan, separators=(",", ":")),
+    "deposit": f"{deposit}msp",
+    "title": "MintCandy Node 1.2.2",
+    "summary": f"Майнет mintcandy_9905401-1. Переход на 1.2.2 на блоке {height} для возврата нативного обеспечения NFT.",
+    "expedited": False,
+}
+with open("proposal.json", "x", encoding="utf-8") as output:
+    print(json.dumps(proposal, ensure_ascii=False, indent=2), file=output)
+PY
+```
+
+## Проверка предложения бинарником 1.2.1
+
+В том же каталоге укажите `PROPOSER_KEY` (локальное имя учётной записи
+инициатора в keyring) и `MCND_HOME` (каталог её клиента). По умолчанию
+используется keyring `file`. Команда формирует неподписанную транзакцию и
+печатает её в терминал. Для проверки не нужен запущенный RPC.
+
+```sh
+"$HOME/.local/opt/mcnd/1.2.1-msp/mcnd" tx gov submit-proposal proposal.json \
+  --generate-only --offline --chain-id mintcandy_9905401-1 --evm.evm-chain-id 9905401 \
+  --home "${MCND_HOME:?}" --from "${PROPOSER_KEY:?}" --keyring-backend "${KEYRING_BACKEND:-file}"
+```
+
+Перед отдельным решением о подписи сверьте инициатора, депозит, название
+и высоту в единственном сообщении `MsgSubmitProposal`, а также пустые
+`messages` внутри него. Формирование черновика не назначает высоту в сети.
+
 ## До принятой высоты
 
 1. Сверьте chain ID, текущую версию бинарника и SHA256 подписанного genesis.
