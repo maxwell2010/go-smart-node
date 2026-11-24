@@ -98,7 +98,7 @@ func (k *StateKeeper) admitGatewayIsolation(ctx sdk.Context, proof GatewayIsolat
 		return empty, errors.New("Gateway isolation differs from the native uniform origin reserve or supply")
 	}
 	owner := sdk.AccAddress(proof.Owner[:])
-	units, err := k.selectIsolationOriginUnits(child, origin, owner, proof.Quantity)
+	units, err := k.selectUniformOriginUnits(child, origin, owner, proof.Quantity)
 	if err != nil {
 		return empty, err
 	}
@@ -222,7 +222,7 @@ func matchesIsolatedReserve(perUnit sdkmath.Int, quantity uint32, amount sdkmath
 
 // The owner index orders IDs numerically. Read it once and validate each
 // selected primary and archive key without decoding token metadata per unit.
-func (k *StateKeeper) selectIsolationOriginUnits(ctx sdk.Context, token types.Token, owner sdk.AccAddress, quantity uint32) (units []uint32, err error) {
+func (k *StateKeeper) selectUniformOriginUnits(ctx sdk.Context, token types.Token, owner sdk.AccAddress, quantity uint32) (units []uint32, err error) {
 	state := k.service.OpenKVStore(ctx)
 	prefix := types.GetSubTokensByOwnerKey(owner, token.ID)
 	iterator, err := state.Iterator(prefix, storetypes.PrefixEndBytes(prefix))

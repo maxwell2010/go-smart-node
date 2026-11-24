@@ -338,6 +338,15 @@ jobs:
       - name: Test signed public NFT admission and restart
         if: ${{ !cancelled() }}
         run: go test -mod=readonly -p 2 -count=1 -v -timeout 12m -tags appstate -run '^TestOwnedAppNativeUserNFTLifecycle$' ./systemcontracts |& tee validation-logs/public-user-nft.log
+      - name: Test wallet NFT refunds across a governed upgrade
+        if: ${{ !cancelled() }}
+        run: |
+          set -euo pipefail
+          work=$(mktemp -d "$RUNNER_TEMP/nft-refund.XXXXXXXX")
+          go test -mod=readonly -p 2 -tags appstate -c -o "$work/predecessor.test" ./systemcontracts
+          go test -mod=readonly -p 2 -tags appstate,mcnd_native_sdk_migration_v1 -c -o "$work/successor.test" ./systemcontracts
+          MCND_USER_NFT_REFUND_PREDECESSOR="$work/predecessor.test" "$work/successor.test" \
+            -test.v -test.timeout=12m -test.run '^TestOwnedAppNativeUserNFTRefundLifecycle$' |& tee validation-logs/public-user-nft-refund.log
       - name: Test grace expiry and old evidence across process restart
         if: ${{ !cancelled() }}
         run: go test -mod=readonly -p 2 -count=1 -v -timeout 12m -tags appstate -run '^TestOwnedAppNativeTestGrace(Lifecycle|DowntimeLifecycle)$' ./systemcontracts |& tee validation-logs/native-test-grace.log

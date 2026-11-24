@@ -1,5 +1,31 @@
 # Software release verification
 
+## 1.2.2 software release
+
+The attested Linux amd64 packages for MSP and tMSP were built from
+`c7c1331a201cd2141cf9d90493fbed539bf62642`. Both exact binaries passed
+systemd restart on the same data directory, followed by replay and state
+sync from snapshot 40 on an isolated network. Hermes passed 12 scenarios
+for MSP and 10 for tMSP. The MSP scenarios include rejection and full
+refund of testnet-native assets. [MSP release](https://github.com/maxwell2010/go-smart-node/releases/tag/v1.2.2) ·
+[tMSP release](https://github.com/maxwell2010/go-smart-node/releases/tag/v1.2.2-testnet) ·
+[Exact archive reference tests](https://github.com/maxwell2010/go-smart-node/actions/runs/45340801528).
+
+CI downloaded both published Russian guides and ran their one-line installers
+under a clean home without a GitHub token. The installed binaries matched
+the release checksums and initialized and validated their own chain profiles.
+[Published installer run](https://github.com/maxwell2010/go-smart-node/actions/runs/45343720194).
+
+Four isolated validators applied the approved NFT reserve refund upgrade
+at block 64. After the published MSP 1.2.1 binary reached the boundary,
+the attested 1.2.2 binary reopened the same node homes. ERC721 refunded
+2 MSP, and ERC1155 refunded two units separately at 2 MSP each. Repeat
+burns paid zero. Block 87 had matching AppHash on all five nodes and four
+cryptographically verified signatures. The operator procedure preserves
+the network's signed genesis and uses the height approved by governance.
+[Upgrade report](https://github.com/maxwell2010/go-smart-node/actions/runs/45340801528) ·
+[Operator procedure](../network/docs/ru/GOVERNED_UPGRADE_1_2_2.md).
+
 ## 1.2.1 software release
 
 The `msp` and `tmsp` Linux amd64 packages use the same source revision,
