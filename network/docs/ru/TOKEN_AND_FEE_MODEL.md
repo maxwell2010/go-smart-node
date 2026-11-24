@@ -96,10 +96,9 @@ REST при включённом финансовом профиле:
 проходит в базовой монете сети. Исправленная версия формирует обе строки
 из настроек профиля: `native msp` или `native tmsp`.
 
-Подготовлен офлайн CLI `mcnd fee-envelope payload|encode`: он формирует
-EIP-712 payload и упаковывает две готовые подписи. Команда не подписывает,
-не читает keyring и не отправляет транзакции. Её Linux CI запущен отдельно
-от проверенной основы выше.
+Офлайн CLI `mcnd fee-envelope payload` формирует данные для подписи EIP-712,
+а `mcnd fee-envelope encode` упаковывает две готовые подписи. Подписывает
+кошелёк. Готовый пакет клиент передаёт через Comet или Cosmos BroadcastTx.
 
 В Cosmos ante подключён SDK feegrant, но текущий native allowlist не допускает
 пользовательские `MsgGrantAllowance` и `MsgRevokeAllowance`. Поэтому наличие
@@ -160,8 +159,11 @@ Ethereum здесь не заявляется. Награды не создаю�
 Тесты с настоящей EVM проверяют расход DRC20, выплату в fee collector,
 неизменность нативного supply, `REVERT`, ante rollback, CheckTx без изменения
 committed state и запрет повтора после LevelDB restart. Проверены codec,
-mempool и расчёт RPC receipt. Проверка всего пути через запущенный daemon и
-сетевой RPC остаётся релизным gate.
+mempool и расчёт RPC receipt. На изолированных нодах обоих профилей Linux CI
+создал резервный DRC20 и провёл оплату через CLI и Comet. В каждом профиле
+подтверждены успешный `approve` и отклонённый EVM-перевод: проверены обе
+квитанции, расход резерва и возврат плательщику. Валидатор и наблюдатель
+показали одинаковые балансы. [Отчёты стендов MSP и tMSP](https://github.com/maxwell2010/go-smart-node/actions/runs/45365828305).
 
 Источники реализации: `app/drc20_fee_ante.go`, `app/reserve_fee_payment.go`,
 `app/drc20_fee_api.go`, `fees/authorization`, `fees/envelope`, `fees/nonce`,

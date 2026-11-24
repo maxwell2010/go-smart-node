@@ -341,6 +341,26 @@ jobs:
           grep -F -- "$DENOM profile requires chain ID \"mintcandy_${EVM_ID}-1\"" "$work/wrong-profile.log"
           printf 'PUBLISHED_SOURCE=%s\nPUBLISHED_ARCHIVE_SHA=%s\nPUBLISHED_BINARY_SHA=%s\n' \
             "$source" "$archive_sha" "$binary_sha" >> "$GITHUB_ENV"
+      - name: Settle DRC20 fees using the installed attested candidate
+        if: ((inputs.mainnet_package_run && matrix.profile == 'mainnet') || (inputs.testnet_package_run && matrix.profile == 'testnet')) && github.repository == 'maxwell2010/go-smart-node'
+        run: |
+          set -euo pipefail
+          work="$PROFILE_WORK"
+          report="$work/evidence/installed-fees.json"
+          status=0
+          sudo -n unshare --net -- bash -euc 'ip link set lo up; exec "$@"' _ \
+            env TMPDIR="$work" "$(command -v python3)" -B "$PWD/tools/native_launch_rehearsal.py" \
+            --binary "$work/published/mcnd" --binary-sha256 "$PUBLISHED_BINARY_SHA" \
+            --archive-sha256 "$PUBLISHED_ARCHIVE_SHA" --source-commit "$PUBLISHED_SOURCE" \
+            --fixture "$work/assembled" --home-parent "$work" --assembly-report "$work/evidence/assembly.json" \
+            --report "$report" --network-profile "$PROFILE" --four-validators --empty-user-assets \
+            --package-genesis "$work/verified/genesis.json" --fee-signer "$work/fee-profile.test" || status=$?
+          if [[ -f "$report" ]]; then sudo -n chown "$(id -u):$(id -g)" "$report"; fi
+          (( status == 0 ))
+          jq -e --arg denom "$DENOM" --arg sha "$PUBLISHED_BINARY_SHA" --arg archive "$PUBLISHED_ARCHIVE_SHA" '
+            .status == "PASS" and .loopbackOnlyNamespace and .binarySha256 == $sha and .archiveSha256 == $archive and
+            .reserveFees.refundAsset == ("native " + $denom) and [.reserveFees.operations[].status] == [1,0] and
+            .reserveFees.observerMatched and .reserveFees.nativeSupplyUnchanged' "$report" >/dev/null
       - name: Verify systemd restart, snapshot sync and pruning with the versioned binary
         if: (((inputs.published_node || inputs.mainnet_package_run) && matrix.profile == 'mainnet') || (inputs.testnet_package_run && matrix.profile == 'testnet')) && github.repository == 'maxwell2010/go-smart-node'
         run: |
