@@ -1,5 +1,22 @@
 # Software release verification
 
+## 1.2.3 software release
+
+The Linux amd64 [MSP release](https://github.com/maxwell2010/go-smart-node/releases/tag/v1.2.3)
+and [tMSP release](https://github.com/maxwell2010/go-smart-node/releases/tag/v1.2.3-testnet)
+identify the native refund asset for a reserve-backed DRC20 gas payment in the
+REST policy, REST quote and EVM receipt. Source inventories include the selected
+network profile. Both packages come from commit `ebc6111a488ee75166d5c0f8fb112e5b4b35d578`.
+[MSP build attestation](https://github.com/maxwell2010/go-smart-node/actions/runs/45367941768)
+and [tMSP build attestation](https://github.com/maxwell2010/go-smart-node/actions/runs/45367948512).
+
+On each isolated network the installed release binary settled the fee for a
+successful EVM transaction at height 27 and for a reverted transaction at
+height 29. The observer agreed with the validator, and native supply stayed
+constant. Both binaries passed systemd restart, snapshot sync, pruning and
+Hermes ICS-20 transfers. Four MSP validators also applied the governed NFT
+reserve refund update. [Exact archive checks and reports](https://github.com/maxwell2010/go-smart-node/actions/runs/45371010838).
+
 ## 1.2.2 software release
 
 The attested Linux amd64 packages for MSP and tMSP were built from

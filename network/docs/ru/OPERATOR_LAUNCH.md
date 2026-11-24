@@ -1,9 +1,9 @@
 # Установка и эксплуатация ноды MintCandy
 
 Майнет использует **MintCandy (MSP)**, 18 знаков и базовый denom `msp`.
-Linux amd64 бинарник `mcnd` 1.2.2 и подписанный genesis доступны на GitHub.
-[Выпуск 1.2.2](https://github.com/maxwell2010/go-smart-node/releases/tag/v1.2.2) ·
-[Установка 1.2.2](https://github.com/maxwell2010/go-smart-node/releases/download/v1.2.2/INSTALL_RU.md) ·
+Linux amd64 бинарник `mcnd` 1.2.3 и подписанный genesis доступны на GitHub.
+[Выпуск 1.2.3](https://github.com/maxwell2010/go-smart-node/releases/tag/v1.2.3) ·
+[Установка 1.2.3](https://github.com/maxwell2010/go-smart-node/releases/download/v1.2.3/INSTALL_RU.md) ·
 [Версия 1.2.1 для воспроизведения до обновления](https://github.com/maxwell2010/go-smart-node/releases/download/v1.2.1/INSTALL_RU.md) ·
 [Подписанный genesis v1.2.0](https://github.com/maxwell2010/go-smart-node/releases/tag/v1.2.0#публичный-запуск).
 
@@ -38,8 +38,8 @@ Linux amd64 бинарник `mcnd` 1.2.2 и подписанный genesis до
 
 Для нового тестового профиля есть отдельный аттестованный Linux-пакет и
 однострочник. Genesis, его контрольную сумму и параметры подключения выдаёт
-оператор конкретного стенда. [Выпуск tMSP](https://github.com/maxwell2010/go-smart-node/releases/tag/v1.2.2-testnet) ·
-[Установка tMSP](https://github.com/maxwell2010/go-smart-node/releases/download/v1.2.2-testnet/INSTALL_TESTNET_RU.md).
+оператор конкретного стенда. [Выпуск tMSP](https://github.com/maxwell2010/go-smart-node/releases/tag/v1.2.3-testnet) ·
+[Установка tMSP](https://github.com/maxwell2010/go-smart-node/releases/download/v1.2.3-testnet/INSTALL_TESTNET_RU.md).
 
 Сборка кандидата и подготовка каталога данных сами по себе сеть не запускают.
 На общем сервере выделите отдельные службу systemd, пользователя, каталог

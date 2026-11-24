@@ -10,6 +10,10 @@ on:
         description: Execute both public 1.2.2 one-line installers with a clean HOME
         type: boolean
         default: false
+      published_install_123:
+        description: Execute both public 1.2.3 one-line installers with a clean HOME
+        type: boolean
+        default: false
   push:
     branches: ['feat/native-duplicate-vote-master-20261112', 'release/**']
     paths:
@@ -57,7 +61,7 @@ permissions:
   contents: read
 jobs:
   published-onboarding:
-    if: (inputs.published_onboarding || inputs.published_install_122) && github.repository == 'maxwell2010/go-smart-node'
+    if: (inputs.published_onboarding || inputs.published_install_122 || inputs.published_install_123) && github.repository == 'maxwell2010/go-smart-node'
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     steps:
@@ -136,36 +140,41 @@ jobs:
               .initial_deposit == [{"amount":"10000000000000000000","denom":"msp"}] and
               .metadata == "mintcandy-sdk-upgrade/v1:{\"name\":\"mintcandy-native-sdk-migrations-v1\",\"height\":123456}")' unsigned.json >/dev/null || { cat unsigned.json; exit 1; }
           cp unsigned.json "$evidence/unsigned-upgrade-example.json"
-      - name: Execute the public MSP and tMSP 1.2.2 one-line installers
-        if: inputs.published_install_122
+      - name: Execute the public MSP and tMSP one-line installers
+        if: inputs.published_install_122 || inputs.published_install_123
+        env:
+          CHECK_122: ${{ inputs.published_install_122 }}
+          CHECK_123: ${{ inputs.published_install_123 }}
         shell: bash
         run: |
           set -euo pipefail
           umask 077
-          work=$(mktemp -d "$RUNNER_TEMP/install122.XXXXXXXX")
+          work=$(mktemp -d "$RUNNER_TEMP/install.XXXXXXXX")
           export HOME="$work/home" GH_CONFIG_DIR="$work/gh" GH_PROMPT_DISABLED=1
           unset GH_TOKEN GITHUB_TOKEN
           evidence="$RUNNER_TEMP/onboarding-evidence"
           mkdir -p -- "$HOME" "$evidence"
-          source=c7c1331a201cd2141cf9d90493fbed539bf62642
           releases='https://github.com/maxwell2010/go-smart-node/releases/download'
+          verify_installers() {
+          local version="$1" source="$2" main_sha="$3" test_sha="$4"
+          local suffix="${version//./_}"
           for denom in msp tmsp; do
             if [[ "$denom" == msp ]]; then
-              tag=v1.2.2
+              tag="v$version"
               guide=INSTALL_RU.md
-              expected=INSTALL_1_2_2_RU.md
-              binary_sha=b098a5174fd7df151dfaf7740362e1c1c782726b925f1439340eec112338d1d2
+              expected="INSTALL_${suffix}_RU.md"
+              binary_sha="$main_sha"
               evm=9905401
             else
-              tag=v1.2.2-testnet
+              tag="v$version-testnet"
               guide=INSTALL_TESTNET_RU.md
-              expected=INSTALL_TESTNET_1_2_2_RU.md
-              binary_sha=5a88caab856f4725d281694a2ece4672a96fd98a488d14faad17d9b318a8371d
+              expected="INSTALL_TESTNET_${suffix}_RU.md"
+              binary_sha="$test_sha"
               evm=990098
             fi
             curl -fsSL --proto '=https' --proto-redir '=https' "$releases/$tag/$guide" -o "$work/$guide"
             cmp "$work/$guide" "network/docs/ru/$expected"
-            python3 -B - "$work/$guide" <<'PY' | bash > "$evidence/$denom-install-122.json"
+            python3 -B - "$work/$guide" <<'PY' | bash > "$evidence/$denom-install-${version//./}.json"
           from pathlib import Path
           import re
           import sys
@@ -177,16 +186,25 @@ jobs:
               raise SystemExit("installation guide must contain exactly one command line")
           print(command)
           PY
-            binary="$HOME/.local/opt/mcnd/1.2.2-$denom/mcnd"
+            binary="$HOME/.local/opt/mcnd/$version-$denom/mcnd"
             printf '%s  %s\n' "$binary_sha" "$binary" | sha256sum --check --strict
-            jq -e --arg denom "$denom" --arg sha "$binary_sha" --arg source "$source" --arg path "$binary" '
-              .releaseVersion == "1.2.2" and .nativeDenom == $denom and .binarySha256 == $sha and
+            jq -e --arg version "$version" --arg denom "$denom" --arg sha "$binary_sha" --arg source "$source" --arg path "$binary" '
+              .releaseVersion == $version and .nativeDenom == $denom and .binarySha256 == $sha and
               .sourceRevision == $source and .binary == $path and .includesGenesis == false and .networkLaunchApproved == false
-              ' "$evidence/$denom-install-122.json" >/dev/null
-            node_home="$work/node-$denom"
+              ' "$evidence/$denom-install-${version//./}.json" >/dev/null
+            node_home="$work/node-$denom-$version"
             "$binary" init install-check --home "$node_home" --chain-id "mintcandy_${evm}-1" --evm.evm-chain-id "$evm" >/dev/null
             "$binary" genesis validate-genesis --home "$node_home" --chain-id "mintcandy_${evm}-1" --evm.evm-chain-id "$evm"
           done
+          }
+          if [[ "$CHECK_122" == true ]]; then
+            verify_installers 1.2.2 c7c1331a201cd2141cf9d90493fbed539bf62642 \
+              b098a5174fd7df151dfaf7740362e1c1c782726b925f1439340eec112338d1d2 5a88caab856f4725d281694a2ece4672a96fd98a488d14faad17d9b318a8371d
+          fi
+          if [[ "$CHECK_123" == true ]]; then
+            verify_installers 1.2.3 ebc6111a488ee75166d5c0f8fb112e5b4b35d578 \
+              a27d36e8b4a8e07319357330aac84eb1f0c4f5509f173dab77199a61a256c6c5 1be76cf09b99a9ad7e92ead9e06d9c544008998d5b713cd9b2e8aefa30c48ab7
+          fi
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
         with:
           name: published-onboarding-${{ github.sha }}
