@@ -63,6 +63,13 @@ validator signatures verified. The group's peak memory was 927731712 bytes
 under an 8000000000-byte limit with swap disabled and zero OOM events.
 [Replay, snapshot and memory measurements](https://github.com/maxwell2010/go-smart-node/actions/runs/45384545284).
 
+Five isolated networks started with empty user asset registries on the
+attested MSP 1.2.3 binary. They committed media for a reserve-free DRC20 and
+for ERC721 and ERC1155 collections with and without reserves. The gateway
+rejected altered metadata. Restoring from backup reproduced both original
+objects over HTTPS for every asset. [Media rehearsal](https://github.com/maxwell2010/go-smart-node/actions/runs/45387971457) ·
+[Release hashes, isolated checkpoints and per-asset CIDs](../network/docs/ru/evidence/software-release-1.2.3.json).
+
 ## 1.2.2 software release
 
 The attested Linux amd64 packages for MSP and tMSP were built from

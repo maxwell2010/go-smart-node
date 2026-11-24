@@ -1,0 +1,206 @@
+{
+  "releaseVersion": "1.2.3",
+  "sourceRevision": "ebc6111a488ee75166d5c0f8fb112e5b4b35d578",
+  "profiles": {
+    "mainnet": {
+      "release": "https://github.com/maxwell2010/go-smart-node/releases/tag/v1.2.3",
+      "buildRun": "https://github.com/maxwell2010/go-smart-node/actions/runs/45367941768",
+      "archiveRehearsal": "https://github.com/maxwell2010/go-smart-node/actions/runs/45371010838",
+      "chainId": "mintcandy_9905401-1",
+      "nativeDenom": "msp",
+      "archiveSha256": "079c9fe2b275f4e14db49ff90237305e6989d8ee182e0dda77035f6c762ddc08",
+      "binarySha256": "a27d36e8b4a8e07319357330aac84eb1f0c4f5509f173dab77199a61a256c6c5",
+      "refundAsset": "native msp",
+      "feeReceiptStatuses": [
+        1,
+        0
+      ],
+      "systemdRestart": {
+        "beforeHeight": 22,
+        "loadedHeight": 22,
+        "verifiedHeight": 25,
+        "sameHome": true,
+        "sameNodeId": true
+      },
+      "snapshot": {
+        "sourceSnapshotHeight": 40,
+        "trustHeight": 42,
+        "restoredHeight": 40
+      },
+      "history": {
+        "prunedSupplyProofUnavailable": true,
+        "freshProofMatchesArchive": true
+      },
+      "ibcPassedPhases": [
+        "client_connection_channel_handshake",
+        "native_send",
+        "voucher_return",
+        "foreign_bank_voucher",
+        "foreign_bank_voucher_return",
+        "testnet_tmsp_rejected",
+        "testnet_wtmsp_rejected",
+        "pending_packet_restart",
+        "error_ack_refund",
+        "timeout_refund",
+        "daemon_live_relay",
+        "daemon_restart_backlog"
+      ],
+      "reportsSha256": {
+        "installed-fees.json": "9179c8f46518d86d94774366f1575fc43635497c70a22eab9cf7a80aa6f71164",
+        "published-node.json": "5de8736fd32e9f702e8b5054cf0b1ca7cac6070481365a20b6def561f21c89d2",
+        "published-ibc.json": "74ca48a5b468cc024bae48bb016aa0df21d90ffb580247ba9f6f5d7b84b08937"
+      },
+      "governedMigration": {
+        "run": "https://github.com/maxwell2010/go-smart-node/actions/runs/45381437861",
+        "reportSha256": "7766b2bcd95714d9d10fbff0b2d660b793e94e5a7d747d69b1c866f78cf5d7a2",
+        "upgradeHeight": 98,
+        "finalCommit": {
+          "height": 146,
+          "appHash": "4441340871BE15B8EC8DE662D6EB7A8C50C50CE9A4A3728DAC0758A568B7FA7F",
+          "verifiedEd25519Signatures": 4,
+          "matchingNodes": 5
+        },
+        "packet": {
+          "acknowledgedSequence": "1",
+          "returnedAtomic": "1000000000000000000",
+          "finalEscrowAtomic": "0",
+          "finalVoucherSupplyAtomic": "0"
+        },
+        "payout": {
+          "height": 120,
+          "paidAtomic": "38501977632000000000",
+          "denom": "msp",
+          "matchingNodes": 5
+        }
+      },
+      "postUpgradeSync": {
+        "run": "https://github.com/maxwell2010/go-smart-node/actions/runs/45384545284",
+        "reportSha256": "6c55d67a4d5e459f32195d81af1cd21174a14c0a9872994970aefe897e026ddf",
+        "upgradeHeight": 64,
+        "finalCommit": {
+          "height": 113,
+          "appHash": "37B49FD68DA30CC7B438C491ED15FE97A4AA1D02AD292E557D2F83221E6C7408",
+          "verifiedEd25519Signatures": 4,
+          "matchingNodes": 7
+        },
+        "snapshot": {
+          "sourceSnapshotHeight": 100,
+          "trustHeight": 102,
+          "restoredHeight": 100
+        },
+        "memory": {
+          "limitBytes": 8000000000,
+          "peakBytes": 927731712,
+          "swapLimitBytes": 0
+        }
+      },
+      "committedMedia": {
+        "run": "https://github.com/maxwell2010/go-smart-node/actions/runs/45387971457",
+        "records": [
+          {
+            "kind": "erc20-reserveless",
+            "assetTokenId": "0",
+            "receiptHeight": 23,
+            "restoredObjects": 2,
+            "httpsVerified": true,
+            "alteredMetadataRejected": true,
+            "image_uri": "ipfs://bafkreibgpxse4yws24q4cluk7kqn7xfj3xvx2toadqygzi745ejh62xi2q",
+            "metadata_uri": "ipfs://bafkreig5337ec5r5u4sfuqwa2pf7ge45m6g2vnyywdwehkfyv3jqx2spoa",
+            "reportSha256": "6c44103f7084bafadb21a61aa915f486aec26fa51c928cd4a6b104730f1e635a"
+          },
+          {
+            "kind": "erc721-reserveless",
+            "assetTokenId": "1",
+            "receiptHeight": 27,
+            "restoredObjects": 2,
+            "httpsVerified": true,
+            "alteredMetadataRejected": true,
+            "image_uri": "ipfs://bafkreibqyevbituxxbwfni6ujaizmidbpfp2sgdoe2mv3r5z2ep2evra2u",
+            "metadata_uri": "ipfs://bafkreib2lweyd4s5lolfqeyqdlu55cn6szk4aznv4no5cvrch242n64rs4",
+            "reportSha256": "0a966f520fe09345ddce8cccc3f7aab34b7d6b7dbb297680bb88f4effe99a1d7"
+          },
+          {
+            "kind": "erc1155-reserveless",
+            "assetTokenId": "123",
+            "receiptHeight": 27,
+            "restoredObjects": 2,
+            "httpsVerified": true,
+            "alteredMetadataRejected": true,
+            "image_uri": "ipfs://bafkreie7xrhqvm2igt4kp6ae3odvws7jodivtsbdtc2mvnojhkilkqrd2m",
+            "metadata_uri": "ipfs://bafkreicwgb7ykvjfrpdkyxlpmmb3zwx7mwux7okos5raggpdid43kh7oai",
+            "reportSha256": "79369b6b171178d0ceca54113562d92e9a153d78fed74df262964898dc7e820c"
+          },
+          {
+            "kind": "erc721-backed",
+            "assetTokenId": "1",
+            "receiptHeight": 27,
+            "restoredObjects": 2,
+            "httpsVerified": true,
+            "alteredMetadataRejected": true,
+            "image_uri": "ipfs://bafkreibcwqs2sc5ztyqxoveyo7z47jdx56bbi27s7nyt56fvvr3bka4u64",
+            "metadata_uri": "ipfs://bafkreicybjem7ha5jpkuizv2yijkqtukn7z4w7qoz7k35mpxlw64bsqtea",
+            "reportSha256": "d50a42ccd95cc6d1278189864d575b952ccb09187b2d01c511f01b15e456a1bf"
+          },
+          {
+            "kind": "erc1155-backed",
+            "assetTokenId": "123",
+            "receiptHeight": 27,
+            "restoredObjects": 2,
+            "httpsVerified": true,
+            "alteredMetadataRejected": true,
+            "image_uri": "ipfs://bafkreifvgsn3tfserdpmv4i45v5l54kvpjk46nefsz5rh6jkuj3uigapeq",
+            "metadata_uri": "ipfs://bafkreic26az6fagigeymvcqkxjrm72ocf4ux5ofw5bjsrodjezhqfc7kya",
+            "reportSha256": "e232af9d59478859f26df9b1bad14989dbc6734323df93f7637fecb11c1442f6"
+          }
+        ]
+      }
+    },
+    "testnet": {
+      "release": "https://github.com/maxwell2010/go-smart-node/releases/tag/v1.2.3-testnet",
+      "buildRun": "https://github.com/maxwell2010/go-smart-node/actions/runs/45367948512",
+      "archiveRehearsal": "https://github.com/maxwell2010/go-smart-node/actions/runs/45371010838",
+      "chainId": "mintcandy_990098-1",
+      "nativeDenom": "tmsp",
+      "archiveSha256": "95c257ae0a13a25d1d51a5d5310bbd57c5aed761335de015a76ccc7ad995e187",
+      "binarySha256": "1be76cf09b99a9ad7e92ead9e06d9c544008998d5b713cd9b2e8aefa30c48ab7",
+      "refundAsset": "native tmsp",
+      "feeReceiptStatuses": [
+        1,
+        0
+      ],
+      "systemdRestart": {
+        "beforeHeight": 22,
+        "loadedHeight": 22,
+        "verifiedHeight": 25,
+        "sameHome": true,
+        "sameNodeId": true
+      },
+      "snapshot": {
+        "sourceSnapshotHeight": 40,
+        "trustHeight": 42,
+        "restoredHeight": 40
+      },
+      "history": {
+        "prunedSupplyProofUnavailable": true,
+        "freshProofMatchesArchive": true
+      },
+      "ibcPassedPhases": [
+        "client_connection_channel_handshake",
+        "native_send",
+        "voucher_return",
+        "foreign_bank_voucher",
+        "foreign_bank_voucher_return",
+        "pending_packet_restart",
+        "error_ack_refund",
+        "timeout_refund",
+        "daemon_live_relay",
+        "daemon_restart_backlog"
+      ],
+      "reportsSha256": {
+        "installed-fees.json": "87de78d8215ba735f11eddd6a7d5504bfbd37a74a01b9b932cc80598b5e4994d",
+        "published-node.json": "d6a3b33d350239e2d7a3e8d0231ea287e4584a58c9f34174cbffdb9244168e43",
+        "published-ibc.json": "6181fc6ef1224981aa11e10779d2d792d2e82ce016519f927fdb24a8f109c4e6"
+      }
+    }
+  }
+}

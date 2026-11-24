@@ -5,6 +5,27 @@ genesis, число валидаторов, распределение моне�
 Наличие процедуры в исходниках не означает, что выпуск уже опубликован
 или что все [release gates](../../../docs/RELEASE_STATUS.md) пройдены.
 
+## Как проверить аватарки на релизном бинарнике
+
+Команда ниже повторяет проверку MSP 1.2.3, пока GitHub Actions хранит
+артефакты прогона сборки `45367941768`. Сам архив и его аттестация также
+опубликованы в [релизе 1.2.3](https://github.com/maxwell2010/go-smart-node/releases/tag/v1.2.3).
+Параметр `published_media=true` включает отдельный шаг
+проверки HTTPS и восстановления. Один `mainnet_package_run` запускает проверки
+пакета, комиссий, systemd и IBC, но пропускает этот шаг.
+
+```sh
+gh workflow run mintcandy-native-profiles.yml --repo maxwell2010/go-smart-node --ref release/mintcandy-1.2.3 -f mainnet_package_run=45367941768 -f published_media=true
+```
+
+В задании `isolated-launch (mainnet, ...)` дождитесь результата `success` у
+шага `Publish and restore committed token and NFT media over isolated HTTPS`.
+В артефакте `mintcandy-mainnet-rehearsal-<SHA>-<попытка>` появятся пять
+отчётов `published-media-*.json`. Сверьте `binarySha256` и `archiveSha256`
+с опубликованным `software-verified.json`. В каждом отчёте
+`committedMedia` содержит CID изображения и метаданных, высоту транзакции,
+результат проверки подмены и число восстановленных файлов.
+
 ## Что готовит workflow
 
 Переиспользуемый `.github/workflows/software-release.yml` принимает
