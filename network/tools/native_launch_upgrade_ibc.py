@@ -8,8 +8,8 @@ import sys
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'internal' / 'ibclab'))
 from hermes_lab import (
-    B_ID, HERMES_SHA256, Lab, amount, binary, clear_packets, commitments, connect_transfer, escrow,
-    field, fields, fund_assembled_relayer, new_events, open_channel, phase_after, phase_before, query, require, supply,
+    B_ID, HERMES_SHA256, OWNED_GAS_PRICE, Lab, amount, binary, clear_packets, commitments, connect_transfer, escrow,
+    field, fields, fund_assembled_relayer, new_events, open_channel, patch_toml, phase_after, phase_before, query, require, supply,
 )
 
 
@@ -26,12 +26,28 @@ class GovernedUpgradeTransfer:
     def close(self):
         self.lab.close()
 
+    def configure_replicas(self, nodes):
+        for node in nodes:
+            patch_toml(node.home / 'config/app.toml', {('', 'minimum-gas-prices'): f'{OWNED_GAS_PRICE}msp'})
+
     def start(self, predecessor, nodes):
         self.chain, self.denom = nodes[0].chain_id, 'msp'
         owned, _ = fund_assembled_relayer(self.lab, predecessor, nodes[0], self.donor, self.denom)
         owned.update(chain=self.chain, denom=self.denom)
-        self.a, self.b, self.run, self.a_channel, self.b_channel = connect_transfer(
-            self.lab, predecessor, self.reference, self.hermes, owned=owned)
+        try:
+            self.a, self.b, self.run, self.a_channel, self.b_channel = connect_transfer(
+                self.lab, predecessor, self.reference, self.hermes, owned=owned)
+        except RuntimeError as error:
+            # Key-import commands suppress their output. Keep only known
+            # read-only health diagnostics for this combined rehearsal.
+            reason = str(error)
+            prefix = 'Hermes chain health warnings: '
+            if reason.startswith(prefix):
+                warnings = json.loads(reason[len(prefix):])
+                messages = [str(row.get('fields', {}).get('error') or row.get('fields', {}).get('message') or
+                                row.get('message', '')) for row in warnings]
+                raise ValueError('Hermes health check: ' + ' '.join(messages)) from None
+            raise
         self.voucher = 'ibc/' + hashlib.sha256(f'transfer/{self.b_channel}/{self.denom}'.encode()).hexdigest().upper()
         peer = self.b['rpc']
         channel = fields(query(peer, '/ibc.core.channel.v1.Query/Channel',

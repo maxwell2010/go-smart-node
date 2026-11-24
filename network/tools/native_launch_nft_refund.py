@@ -223,6 +223,8 @@ def rehearse(args, root, env, genesis, expected, keys, owner, report, packet=Non
     for node in nodes:
         configure_peers(node, [other for other in validators if other is not node])
         write_config(node.home, 'config.toml', {('consensus', 'timeout_commit'): '"2s"'})
+    if packet is not None:
+        packet.configure_replicas(nodes)
     run_command(str(args.predecessor), validators[0].home, ['genesis', 'validate-genesis'], env)
     for node in nodes:
         node.start(str(args.predecessor), env, owner, 'published')
