@@ -44,20 +44,21 @@ def decode_reward_sweep(raw):
     return {'openedHeight': height, 'cursorHex': cursor.hex(), 'endHex': end.hex()}
 
 
-def native_module_balance(node, module, height, read_native):
+def native_module_balance(node, module, height, read_native, denom):
     account = read_native('/cosmos/auth/v1beta1/module_accounts/' + module, height,
                           base=node.rest)['account']
     check(account.get('name') == module, 'unexpected native reward module identity')
     address = account['base_account']['address']
     check(re.fullmatch(r'd0[0-9a-z]{20,80}', address) is not None, 'invalid native reward module address')
-    balance = read_native('/cosmos/bank/v1beta1/balances/' + address + '/by_denom?denom=del',
+    balance = read_native('/cosmos/bank/v1beta1/balances/' + address + '/by_denom?denom=' + denom,
                           height, base=node.rest)['balance']
-    check(balance['denom'] == 'del' and re.fullmatch(r'[0-9]{1,78}', balance['amount']) is not None,
+    check(balance['denom'] == denom and re.fullmatch(r'[0-9]{1,78}', balance['amount']) is not None,
           'invalid committed reward module balance')
     return address, balance['amount']
 
 
-def native_reward_checkpoint(replicas, height, *, require_pending=False, read_native=native):
+def native_reward_checkpoint(replicas, height, *, require_pending=False, read_native=native, denom='del'):
+    check(denom in ('del', 'msp', 'tmsp'), 'unsupported native reward denom')
     check(bool(replicas), 'reward checkpoint requires isolated replicas')
     snapshots = []
     for node in replicas:
@@ -65,14 +66,14 @@ def native_reward_checkpoint(replicas, height, *, require_pending=False, read_na
             check(reward_store(node, b'\x7d', height) is None and reward_store(node, b'\x7e\x01', height) is None,
                   'orphan reward liabilities exist without the tree marker')
             check(not require_pending, 'predecessor has no reward tree for the pending-credit gate')
-            _, collector = native_module_balance(node, 'fee_collector', height, read_native)
+            _, collector = native_module_balance(node, 'fee_collector', height, read_native, denom)
             snapshots.append({'height': height, 'mode': 'legacy-no-reward-tree', 'collectorAtomic': collector})
             continue
         liability = reward_store(node, b'\x7d', height)
         check(liability is not None and len(liability) == 32, 'missing committed native reward liability')
         owed = int.from_bytes(liability, 'big')
-        address, escrow = native_module_balance(node, 'native_fee_rewards', height, read_native)
-        _, collector = native_module_balance(node, 'fee_collector', height, read_native)
+        address, escrow = native_module_balance(node, 'native_fee_rewards', height, read_native, denom)
+        _, collector = native_module_balance(node, 'fee_collector', height, read_native, denom)
         check(int(escrow) >= owed, 'committed reward escrow does not cover liabilities')
         check(not require_pending or owed > 0, 'upgrade checkpoint must contain unpaid native rewards')
         raw_sweep = reward_store(node, b'\x7e\x01', height)
@@ -103,14 +104,14 @@ def compare_reward_migration(before, after):
     return 'pending-reward-tree-preserved'
 
 
-def verify_reward_handoff(replicas, target, report, *, restored=False, read_native=native):
+def verify_reward_handoff(replicas, target, report, *, restored=False, read_native=native, denom='del'):
     """Capture once on the primary branch; compare exact records after restore."""
     if 'rewardMigration' not in report:
         return
     checkpoints = report['rewardMigration']
-    check(native_reward_checkpoint(replicas, target - 1, read_native=read_native) == checkpoints['before'],
+    check(native_reward_checkpoint(replicas, target - 1, read_native=read_native, denom=denom) == checkpoints['before'],
           'reopening changed the committed pre-upgrade reward checkpoint')
-    after = native_reward_checkpoint(replicas, target, read_native=read_native)
+    after = native_reward_checkpoint(replicas, target, read_native=read_native, denom=denom)
     if restored:
         check('after' in checkpoints and after == checkpoints['after'],
               'restored approved migration changed the committed reward accounting')

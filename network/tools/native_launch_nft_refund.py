@@ -23,6 +23,7 @@ from native_governance_upgrade_smoke import (
 )
 from native_launch_media import commit_media_transaction, read_media_fixture
 from native_launch_rehearsal import configure_peers, load_fixture, verify_first_block
+from native_reward_checkpoint import native_reward_checkpoint, verify_reward_handoff
 from native_launch_snapshot import configure_snapshot_source, rehearse_snapshot
 from node_resource_usage import replica_usage
 from withdrawal_genesis_smoke import SHA256, bech32_payload, check, native, private_bytes, safe_diagnostic
@@ -212,6 +213,46 @@ def restore_ibc_observer(args, backup, env, owner, report, nodes, packet, target
                                            verifiedHeight=height, appHash=header['app_hash'])
 
 
+def verify_automatic_payout(nodes, migration_height, eligible, report):
+    # No transactions are sent between migration and this automatic payout.
+    period = 120
+    height = (migration_height // period + 1) * period
+    wait_replicas(nodes, height + 2, 3 * period + 30, report)
+    before = native_reward_checkpoint(nodes, height - 1, require_pending=True, denom='msp')
+    after = native_reward_checkpoint(nodes, height, denom='msp')
+    following = native_reward_checkpoint(nodes, height + 1, denom='msp')
+    paid = int(before['owedAtomic'])
+    check(before['collectorAtomic'] == '0' and after['owedAtomic'] == following['owedAtomic'] == '0' and
+          int(before['escrowAtomic']) - int(after['escrowAtomic']) == paid and
+          after['escrowAtomic'] == following['escrowAtomic'], 'automatic MSP payout differs from escrow liabilities')
+
+    by_recipient = None
+    for node in nodes:
+        payments = {}
+        for block_height in (height, height + 1):
+            block = node.rpc(f'block_results?height={block_height}')
+            check(not block.get('txs_results'), 'expected empty blocks during automatic MSP payout')
+            for event in block.get('finalize_block_events') or []:
+                if event['type'] != 'decimal_native_fee_reward':
+                    continue
+                fields = {attr['key']: attr['value'] for attr in event['attributes']}
+                check(block_height == height and fields['height'] == str(height) and fields['recipient'] in eligible and
+                      re.fullmatch(r'[1-9][0-9]*msp', fields['amount']), 'unexpected or repeated MSP payout')
+                recipient = fields['recipient']
+                payments[recipient] = payments.get(recipient, 0) + int(fields['amount'][:-3])
+        check(sum(payments.values()) == paid and (by_recipient is None or payments == by_recipient),
+              'MSP reward receipts differ from accrued fees or across replicas')
+        for recipient, amount in payments.items():
+            path = '/cosmos/bank/v1beta1/balances/' + recipient + '/by_denom?denom=msp'
+            balances = [int(native(path, h, base=node.rest)['balance']['amount']) for h in (height - 1, height, height + 1)]
+            check(balances[1] - balances[0] == amount and balances[2] == balances[1],
+                  'recipient bank balance differs from the automatic payout')
+        by_recipient = payments
+    report['automaticFeePayout'] = {'height': height, 'paidAtomic': str(paid), 'denom': 'msp',
+                                    'matchingNodes': len(nodes), 'recipientAmountsAtomic': {
+                                        recipient: str(amount) for recipient, amount in by_recipient.items()}}
+
+
 def rehearse(args, root, env, genesis, expected, keys, owner, report, packet=None):
     rows = expected['validators']
     powers = tuple(row['initialPower'] for row in rows)
@@ -274,6 +315,7 @@ def rehearse(args, root, env, genesis, expected, keys, owner, report, packet=Non
               int(observer.rpc('status')['validator_info']['voting_power']) == 0,
               'pre-upgrade backup requires an observer at the old committed boundary')
         packet.report['beforeMigration'] = packet.check_pending(nodes)
+        report['rewardMigration'] = {'before': native_reward_checkpoint(nodes, target - 1, require_pending=True, denom='msp')}
     for node in nodes:
         owner.stop(node.child)
     if packet is not None:
@@ -294,7 +336,12 @@ def rehearse(args, root, env, genesis, expected, keys, owner, report, packet=Non
     if packet is not None:
         report['phase'] = 'verify-ibc-packet-after-migration'
         packet.report['afterMigration'] = packet.check_pending(nodes)
+        verify_reward_handoff(nodes, target, report, denom='msp')
         restore_ibc_observer(args, backup, env, owner, report, nodes, packet, target)
+        verify_reward_handoff(nodes, target, report, denom='msp', restored=True)
+        report['phase'] = 'automatic-MSP-fee-payment'
+        eligible = {expected['actorNative'], *(v['reward_address'] for v in json.loads(genesis)['app_state']['validator']['validators'])}
+        verify_automatic_payout(nodes, target, eligible, report)
         report['phase'] = 'relay-the-preserved-ibc-packet'
         packet.settle(target, nodes)
 

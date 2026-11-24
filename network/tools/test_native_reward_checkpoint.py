@@ -29,16 +29,16 @@ class Node:
                              'value': base64.b64encode(self.rows.get(key, b'')).decode()}}
 
 
-def bank(balance, collector=0):
+def bank(balance, collector=0, denom='del'):
     def read(path, height, *, base):
         assert height > 0 and base == Node.rest
         if path.startswith('/cosmos/auth/v1beta1/module_accounts/'):
             module = path.rsplit('/', 1)[1]
             assert module in ('native_fee_rewards', 'fee_collector')
             return {'account': {'name': module, 'base_account': {'address': 'd01' + ('a' if module == 'native_fee_rewards' else 'b') * 38}}}
-        assert path.startswith('/cosmos/bank/v1beta1/balances/') and path.endswith('/by_denom?denom=del')
+        assert path.startswith('/cosmos/bank/v1beta1/balances/') and path.endswith('/by_denom?denom=' + denom)
         amount = collector if 'd01' + 'b' * 38 in path else balance
-        return {'balance': {'denom': 'del', 'amount': str(amount)}}
+        return {'balance': {'denom': denom, 'amount': str(amount)}}
     return read
 
 
@@ -51,6 +51,19 @@ class NativeRewardCheckpointTests(unittest.TestCase):
         self.assertTrue(all(node.calls for node in nodes))
         after = native_reward_checkpoint(nodes, 124, require_pending=True, read_native=bank(50))
         self.assertEqual(compare_reward_migration(state, after), 'pending-reward-tree-preserved')
+
+    def test_profile_denom_for_pinned_rewards(self):
+        for denom in ('msp', 'tmsp'):
+            with self.subTest(denom=denom):
+                checkpoint = native_reward_checkpoint([Node()], 123, denom=denom, read_native=bank(50, denom=denom))
+                self.assertEqual(checkpoint['escrowAtomic'], '50')
+                def wrong_denom(path, height, *, base):
+                    result = bank(50, denom=denom)(path, height, base=base)
+                    if 'balance' in result:
+                        result['balance']['denom'] = 'del'
+                    return result
+                with self.assertRaises(ValueError):
+                    native_reward_checkpoint([Node()], 123, denom=denom, read_native=wrong_denom)
 
     def test_deficit_disagreement_or_wrong_height_fail_closed(self):
         with self.assertRaises(ValueError):

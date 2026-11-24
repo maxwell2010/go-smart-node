@@ -573,13 +573,17 @@ jobs:
               .finalCommit.matchingNodes == 7
             else .finalCommit.matchingNodes == 5 end) and
             (if $ibc == "true" then
-              .upgrade as $upgrade | .ibcUpgrade |
+              .rewardMigration.coverage == "pending-reward-tree-preserved" and
+              .automaticFeePayout.denom == "msp" and .automaticFeePayout.matchingNodes == 5 and
+              (.automaticFeePayout.paidAtomic | test("^[1-9][0-9]*$")) and
+              (.automaticFeePayout.height % 120 == 0) and
+              (.upgrade as $upgrade | .ibcUpgrade |
               .beforeMigration == .afterMigration and .beforeMigration == .submitted and .beforeMigration.matchingNodes == 5 and
               .observerRestore.commitments == .beforeMigration.commitments and .observerRestore.escrowAtomic == "1000000000000000000" and
               .observerRestore.appHash == $upgrade.appHashAfter and .observerRestore.backupHeight == $upgrade.height - 1 and
               .clientHeightAfter > $upgrade.height and .acknowledgedSequence == (.beforeMigration.commitments[0].sequence | tostring) and
               .acknowledgments == 1 and .sourceConfirmations == 1 and .returnedAtomic == "1000000000000000000" and
-              .finalEscrowAtomic == "0" and .finalVoucherSupplyAtomic == "0"
+              .finalEscrowAtomic == "0" and .finalVoucherSupplyAtomic == "0")
             else .ibcUpgrade == null end)
             ' "$report" >/dev/null
       - name: Relay ICS-20 packets with the versioned binary
