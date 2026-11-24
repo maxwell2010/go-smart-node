@@ -1,6 +1,11 @@
 name: Public launch draft checks
 on:
   workflow_dispatch:
+    inputs:
+      published_onboarding:
+        description: Run the installation guides and verify the signed public genesis offline
+        type: boolean
+        default: false
   push:
     branches: ['feat/native-duplicate-vote-master-20261112', 'release/**']
     paths:
@@ -47,6 +52,69 @@ on:
 permissions:
   contents: read
 jobs:
+  published-onboarding:
+    if: inputs.published_onboarding && github.repository == 'maxwell2010/go-smart-node'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - name: Execute the documented installation commands and validate the mainnet home
+        shell: bash
+        run: |
+          set -euo pipefail
+          umask 077
+          command -v gh gpgv jq
+          work=$(mktemp -d "$RUNNER_TEMP/onboarding.XXXXXXXX")
+          export HOME="$work/home" GH_CONFIG_DIR="$work/gh" GH_PROMPT_DISABLED=1
+          unset GH_TOKEN GITHUB_TOKEN
+          mkdir -p -- "$HOME" "$RUNNER_TEMP/onboarding-evidence"
+          evidence="$RUNNER_TEMP/onboarding-evidence"
+          releases='https://github.com/maxwell2010/go-smart-node/releases/download'
+          curl -fsSL --proto '=https' --proto-redir '=https' "$releases/v1.2.0/INSTALL_RU.md" -o "$work/foundation.md"
+          curl -fsSL --proto '=https' --proto-redir '=https' "$releases/v1.2.1-testnet/INSTALL_TESTNET_RU.md" -o "$work/testnet.md"
+          printf '%s  %s\n' \
+            4b34669d2f4cfb734ac8289c7f7757142932b50354b5b51615c9e5b2218947df "$work/foundation.md" \
+            6c9d79279da6288bda1470c5a35ad216563cfbab4650483227e9114f359bab62 "$work/testnet.md" | sha256sum --check --strict
+          run_guide() {
+            python3 -B - "$1" "$2" <<'PY' | bash
+          from pathlib import Path
+          import re
+          import sys
+
+          guide = Path(sys.argv[1]).read_text(encoding="utf-8")
+          section = guide.split(f"## {sys.argv[2]}\n", 1)[1].split("\n## ", 1)[0]
+          commands, = re.findall(r"(?m)^```sh\n([\s\S]*?)^```\s*$", section)
+          print(commands)
+          PY
+          }
+          guide=network/docs/ru/INSTALL_RU.md
+          run_guide "$guide" 'Быстрая установка бинарника' > "$evidence/msp-install.json"
+          run_guide "$work/foundation.md" 'Быстрая установка бинарника' > "$evidence/foundation-install.json"
+          run_guide "$work/testnet.md" 'Быстрая установка' > "$evidence/tmsp-install.json"
+          run_guide "$guide" 'Новая нода из подписанного genesis' > "$work/home-validation.log"
+          jq -Rsc '[split("\n")[] | fromjson? | select(.status == "OBSERVER_GENESIS_INSTALLED")] | if length == 1 then .[0] else error("observer install report missing") end' \
+            "$work/home-validation.log" > "$evidence/observer.json"
+          jq -e '.releaseVersion == "1.2.1" and .nativeDenom == "msp" and
+              .binarySha256 == "dc3fa4e88fe03173d81a03e2cc7ae75b17f8960ed2e8a1775130cd7aa0bf6c84"' "$evidence/msp-install.json" >/dev/null
+          jq -e '.releaseVersion == "1.2.0" and .nativeDenom == "msp"' "$evidence/foundation-install.json" >/dev/null
+          jq -e '.releaseVersion == "1.2.1" and .nativeDenom == "tmsp" and
+              .binarySha256 == "8e43c5946a6c8e6da97b69c6e5330e3feaff79b7ec0c414701f8702168525c75"' "$evidence/tmsp-install.json" >/dev/null
+          jq -e '.changed and .genesisSha256 == "cbb4e0c1a060b09e9fb45204c1f2de16d4be37d67753378b06782abeaebf8117" and
+              .signerFingerprint == "E6F019522D030B2F37249D4B7903FAD265CBFDB9" and
+              .publicP2P.persistent_peers == "0a7d73e4af46c1e56f6e738d34fb0f48e37997f7@node4.mintcandy.pro:36657" and
+              .publicP2P.seeds == "" and .networkLaunchAuthorized == false' "$evidence/observer.json" >/dev/null
+          home="$HOME/.mintcandy-mainnet"
+          printf '%s  %s\n' 'cbb4e0c1a060b09e9fb45204c1f2de16d4be37d67753378b06782abeaebf8117' \
+            "$home/config/genesis.json" | sha256sum --check --strict
+          jq -e '.height == "0"' "$home/data/priv_validator_state.json" >/dev/null
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+        with:
+          name: published-onboarding-${{ github.sha }}
+          path: ${{ runner.temp }}/onboarding-evidence/*.json
+          if-no-files-found: error
+          retention-days: 30
   draft-integrity:
     runs-on: ubuntu-24.04
     timeout-minutes: 5

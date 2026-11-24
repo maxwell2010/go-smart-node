@@ -506,6 +506,10 @@ python3 -B network/tools/public_genesis_manifest.py install \
   --signature genesis-manifest.json.asc --trusted-keyring genesis-signer.gpg \
   --signer-fingerprint "$GENESIS_SIGNER_FINGERPRINT" \
   --approved-manifest-sha256 "$APPROVED_MANIFEST_SHA256" \
+  --draft network/docs/ru/public-genesis-msp.draft.json \
+  --plan network/docs/ru/public-launch-allocation-msp.draft.json \
+  --software-record software-verified.json \
+  --approved-software-record-sha256 666dba9207337f7a727e582518864e301a5a703b7a6bcaf48412fe3d3e7a7008 \
   --home "$MCND_HOME" --operator "$OPERATOR_ADDRESS"
 ```
 
@@ -521,21 +525,8 @@ signing-state, чужой ключ и вручную изменённый ста
 до и после установки.
 [Прогон GitHub CI](https://github.com/maxwell2010/go-smart-node/actions/runs/45110885140).
 
-Для новой наблюдающей ноды подготовьте отдельный, ещё не запускавшийся home
-командой `mcnd init` с утверждёнными chain ID. Используйте установленную
-версию `mcnd` из манифеста.
-
-```sh
-"$MCND_BINARY" init "$MONIKER" --home "$MCND_HOME" \
-  --chain-id "$CHAIN_ID" --evm.evm-chain-id "$EVM_CHAIN_ID"
-python3 -B network/tools/public_genesis_manifest.py install-observer \
-  --genesis "$DOWNLOADED_GENESIS" --binary "$MCND_BINARY" \
-  --manifest genesis-manifest.json \
-  --signature genesis-manifest.json.asc --trusted-keyring genesis-signer.gpg \
-  --signer-fingerprint "$GENESIS_SIGNER_FINGERPRINT" \
-  --approved-manifest-sha256 "$APPROVED_MANIFEST_SHA256" \
-  --home "$MCND_HOME"
-```
+Для новой наблюдающей ноды используйте готовую команду `install-observer`
+с параметрами подписанного пакета MSP. [Установка genesis наблюдателя](INSTALL_RU.md#новая-нода-из-подписанного-genesis).
 
 Установщик проверяет подпись и точные байты genesis. Он отклоняет home с
 блоками, использованным signing-state или consensus key из стартового набора
