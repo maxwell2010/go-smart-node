@@ -23,13 +23,20 @@ on:
         type: boolean
         default: false
       governed_observer_sync:
-        description: Verify fresh replay and post-upgrade snapshots with the released MSP 1.2.1 and 1.2.2 binaries
+        description: Verify fresh replay and post-upgrade snapshots from MSP 1.2.1 to the selected published successor
         type: boolean
         default: false
       governed_pending_ibc:
         description: Preserve, restore and relay a pending ICS-20 packet across the published MSP upgrade
         type: boolean
         default: false
+      msp_successor_version:
+        description: Published successor for governed observer or pending-packet rehearsals
+        type: choice
+        default: '1.2.3'
+        options:
+          - '1.2.3'
+          - '1.2.2'
       testnet_package_run:
         description: Verify an attested tMSP package from a completed release build at this source revision
         type: string
@@ -275,23 +282,34 @@ jobs:
         if: (inputs.governed_observer_sync || inputs.governed_pending_ibc) && matrix.profile == 'mainnet' && github.repository == 'maxwell2010/go-smart-node'
         env:
           GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ inputs.msp_successor_version }}
           MAINNET_PACKAGE_RUN: ${{ inputs.mainnet_package_run }}
         run: |
           set -euo pipefail
           umask 077
           [[ -z "$MAINNET_PACKAGE_RUN" ]] || { echo 'Choose the published successor or the same-source package run.' >&2; exit 1; }
           work="$PROFILE_WORK"
-          release='https://github.com/maxwell2010/go-smart-node/releases/download/v1.2.2'
-          source=c7c1331a201cd2141cf9d90493fbed539bf62642
-          archive_sha=ab7fb1563a544da1b0963134daff833bf49251cd1864c86e2f6a383db7f2b5a4
-          binary_sha=b098a5174fd7df151dfaf7740362e1c1c782726b925f1439340eec112338d1d2
+          case "$VERSION" in
+            1.2.3)
+              source=ebc6111a488ee75166d5c0f8fb112e5b4b35d578
+              archive_sha=079c9fe2b275f4e14db49ff90237305e6989d8ee182e0dda77035f6c762ddc08
+              binary_sha=a27d36e8b4a8e07319357330aac84eb1f0c4f5509f173dab77199a61a256c6c5
+              ;;
+            1.2.2)
+              source=c7c1331a201cd2141cf9d90493fbed539bf62642
+              archive_sha=ab7fb1563a544da1b0963134daff833bf49251cd1864c86e2f6a383db7f2b5a4
+              binary_sha=b098a5174fd7df151dfaf7740362e1c1c782726b925f1439340eec112338d1d2
+              ;;
+            *) echo "Unsupported MSP successor: $VERSION" >&2; exit 1 ;;
+          esac
+          release="https://github.com/maxwell2010/go-smart-node/releases/download/v$VERSION"
           printf '%s  %s\n' a18b765cf2f2a384dc819642f8a0872a9bd85bbf12b4bac6edf75c62d3f0d3a1 \
             "$work/install_software.py" | sha256sum --check --strict
           curl -fsSL --retry 3 --proto '=https' --proto-redir '=https' \
             "$release/provenance.sigstore.json" -o "$work/successor-provenance.sigstore.json"
           python3 -I -B "$work/install_software.py" --source-sha "$source" \
-            --source-ref refs/heads/release/mintcandy-1.2.2 --release-version 1.2.2 --native-denom msp \
-            --archive-sha "$archive_sha" --archive-url "$release/mcnd-1.2.2-linux-amd64.tar.gz" \
+            --source-ref "refs/heads/release/mintcandy-$VERSION" --release-version "$VERSION" --native-denom msp \
+            --archive-sha "$archive_sha" --archive-url "$release/mcnd-$VERSION-linux-amd64.tar.gz" \
             --bundle "$work/successor-provenance.sigstore.json" --destination "$work/published/mcnd" \
             > "$work/evidence/published-install.json"
           printf '%s  %s\n' "$binary_sha" "$work/published/mcnd" | sha256sum --check --strict
