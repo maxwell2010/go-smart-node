@@ -226,6 +226,7 @@ jobs:
         if: (inputs.published_ibc || inputs.published_node || inputs.published_media || inputs.governed_nft_refund) && matrix.profile == 'mainnet' && github.repository == 'maxwell2010/go-smart-node' && (!inputs.mainnet_package_run || inputs.governed_nft_refund)
         env:
           GH_TOKEN: ${{ github.token }}
+          SEPARATE_PREDECESSOR: ${{ inputs.governed_nft_refund && inputs.mainnet_package_run != '' }}
         run: |
           set -euo pipefail
           umask 077
@@ -234,6 +235,12 @@ jobs:
           source='b1a460046270399592773c845d00aef4b7277a9b'
           archive_sha='e70dbdd964bb24dc01ba0f46782290402165306dace3ae30f3864b574bea472c'
           binary_sha='dc3fa4e88fe03173d81a03e2cc7ae75b17f8960ed2e8a1775130cd7aa0bf6c84'
+          destination="$work/published/mcnd"
+          install_report="$work/evidence/published-install.json"
+          if [[ "$SEPARATE_PREDECESSOR" == true ]]; then
+            destination="$work/msp-predecessor/mcnd"
+            install_report="$work/evidence/msp-predecessor-install.json"
+          fi
           curl -fsSL --retry 3 --proto '=https' --proto-redir '=https' \
             "https://raw.githubusercontent.com/maxwell2010/go-smart-node/$source/network/tools/install_software.py" \
             -o "$work/install_software.py"
@@ -244,11 +251,14 @@ jobs:
           python3 -I -B "$work/install_software.py" --source-sha "$source" \
             --source-ref refs/heads/codex/mintcandy-native-denoms --release-version 1.2.1 --native-denom msp \
             --archive-sha "$archive_sha" --archive-url "$release/mcnd-1.2.1-linux-amd64.tar.gz" \
-            --bundle "$work/provenance.sigstore.json" --destination "$work/published/mcnd" \
-            > "$work/evidence/published-install.json"
-          printf '%s  %s\n' "$binary_sha" "$work/published/mcnd" | sha256sum --check --strict
-          printf 'PUBLISHED_SOURCE=%s\nPUBLISHED_ARCHIVE_SHA=%s\nPUBLISHED_BINARY_SHA=%s\n' \
-            "$source" "$archive_sha" "$binary_sha" >> "$GITHUB_ENV"
+            --bundle "$work/provenance.sigstore.json" --destination "$destination" > "$install_report"
+          printf '%s  %s\n' "$binary_sha" "$destination" | sha256sum --check --strict
+          printf 'MSP_PREDECESSOR=%s\nMSP_PREDECESSOR_SOURCE=%s\nMSP_PREDECESSOR_SHA=%s\n' \
+            "$destination" "$source" "$binary_sha" >> "$GITHUB_ENV"
+          if [[ "$SEPARATE_PREDECESSOR" != true ]]; then
+            printf 'PUBLISHED_SOURCE=%s\nPUBLISHED_ARCHIVE_SHA=%s\nPUBLISHED_BINARY_SHA=%s\n' \
+              "$source" "$archive_sha" "$binary_sha" >> "$GITHUB_ENV"
+          fi
       - name: Install the attested release candidate and reject the other signing domain
         if: ((inputs.mainnet_package_run && matrix.profile == 'mainnet') || (inputs.testnet_package_run && matrix.profile == 'testnet')) && github.repository == 'maxwell2010/go-smart-node'
         env:
@@ -409,28 +419,39 @@ jobs:
           done
       - name: Apply the NFT refund update to four isolated validators on published MSP
         if: inputs.governed_nft_refund && matrix.profile == 'mainnet' && github.repository == 'maxwell2010/go-smart-node'
+        env:
+          MAINNET_PACKAGE_RUN: ${{ inputs.mainnet_package_run }}
         run: |
           set -euo pipefail
           umask 077
           work="$PROFILE_WORK"
           successor="$work/mcnd-nft-refund"
           report="$work/evidence/published-governed-nft-refund.json"
-          go build -mod=readonly -p 2 -trimpath -tags mintcandy_mainnet,mcnd_native_sdk_migration_v1 \
-            -ldflags "-X main.buildCommit=$GITHUB_SHA" -o "$successor" ./cmd/mcnd
+          package=()
+          if [[ -n "$MAINNET_PACKAGE_RUN" ]]; then
+            successor="$work/published/mcnd"
+            package=(--successor-archive-sha256 "$PUBLISHED_ARCHIVE_SHA")
+            [[ "$PUBLISHED_SOURCE" == "$GITHUB_SHA" && "$successor" != "$MSP_PREDECESSOR" ]]
+          else
+            go build -mod=readonly -p 2 -trimpath -tags mintcandy_mainnet \
+              -ldflags "-X main.buildCommit=$GITHUB_SHA" -o "$successor" ./cmd/mcnd
+          fi
           go test -mod=readonly -p 2 -tags mintcandy_mainnet -c -o "$work/nft-upgrade-signers.test" ./systemcontracts
           successor_sha=$(sha256sum "$successor" | cut -d ' ' -f 1)
           status=0
           sudo -n unshare --net -- bash -euc 'ip link set lo up; exec "$@"' _ \
             env TMPDIR="$work" python3 -B tools/native_launch_nft_refund.py \
-            --predecessor "$work/published/mcnd" --predecessor-sha256 "$PUBLISHED_BINARY_SHA" --predecessor-source "$PUBLISHED_SOURCE" \
-            --successor "$successor" --successor-sha256 "$successor_sha" --successor-source "$GITHUB_SHA" \
+            --predecessor "$MSP_PREDECESSOR" --predecessor-sha256 "$MSP_PREDECESSOR_SHA" --predecessor-source "$MSP_PREDECESSOR_SOURCE" \
+            --successor "$successor" --successor-sha256 "$successor_sha" --successor-source "$GITHUB_SHA" "${package[@]}" \
             --fixture "$work/assembled" --assembly-report "$work/evidence/assembly.json" --signer "$work/nft-upgrade-signers.test" \
             --commit-probe "$work/comet-commit-probe" --home-parent "$work" --report "$report" || status=$?
           if [[ -f "$report" ]]; then sudo -n chown "$(id -u):$(id -g)" "$report"; fi
           (( status == 0 ))
-          jq -e --arg old "$PUBLISHED_BINARY_SHA" --arg new "$successor_sha" '
+          jq -e --arg old "$MSP_PREDECESSOR_SHA" --arg new "$successor_sha" --arg run "$MAINNET_PACKAGE_RUN" \
+            --arg archive "${PUBLISHED_ARCHIVE_SHA:-}" '
             .status == "PASS" and .loopbackOnlyNamespace and .chainId == "mintcandy_9905401-1" and .nativeDenom == "msp" and
             .predecessor.sha256 == $old and .successor.sha256 == $new and
+            (if $run == "" then .successor.archiveSha256 == null else .successor.archiveSha256 == $archive end) and
             .proposal.tally.yes_count == "40000000000000000000000" and
             .finalCommit.verifiedEd25519Signatures == 4 and .finalCommit.height > .upgrade.height and
             ([.nfts[].refunds[] | .paidAtomic] == ["2000000000000000000","2000000000000000000","2000000000000000000"]) and

@@ -1,4 +1,4 @@
-//go:build mcnd_native_sdk_migration_v1
+//go:build mcnd_native_sdk_migration_v1 || mintcandy_mainnet || mintcandy_testnet
 
 package app
 

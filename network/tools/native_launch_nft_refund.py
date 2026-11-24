@@ -175,6 +175,7 @@ def rehearse(args, root, env, genesis, expected, keys, owner, report):
     boundary = committed_header(validators, target)
     for node in nodes:
         owner.stop(node.child)
+    for node in nodes:
         node.start(str(args.successor), env, owner, 'successor')
     wait_replicas(nodes, target + 5, 125, report)
     check(committed_header(nodes, target - 1) == checkpoint and committed_header(nodes, target) == boundary and
@@ -206,6 +207,7 @@ def main(signals):
         parser.add_argument('--' + flag, required=True, type=Path)
     for flag in ('predecessor-sha256', 'successor-sha256', 'predecessor-source', 'successor-source'):
         parser.add_argument('--' + flag, required=True)
+    parser.add_argument('--successor-archive-sha256')
     args = parser.parse_args()
     report = {'status': 'FAIL', 'phase': 'verify-disposable-domain', 'initialHeight': 1}
     with args.report.open('x', encoding='utf8') as stream:
@@ -239,6 +241,9 @@ def main(signals):
                     check(version['server_name'] == 'mcnd' and version['commit'] == source, f'{role} source differs')
                     report[role] = {'sha256': digest, 'source': source}
                 check(report['predecessor'] != report['successor'], 'requires separate predecessor and successor revisions')
+                if args.successor_archive_sha256:
+                    check(re.fullmatch(SHA256, args.successor_archive_sha256), 'invalid successor archive hash')
+                    report['successor']['archiveSha256'] = args.successor_archive_sha256
                 owner = ProcessOwner(signals)
                 try:
                     rehearse(args, root, env, genesis, expected, keys, owner, report)
