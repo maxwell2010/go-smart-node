@@ -181,6 +181,12 @@ def amount(port, address, denom):
     return int(coin.get(2, [b"0"])[0])
 
 
+def supply(port, denom):
+    body = query(port, "/cosmos.bank.v1beta1.Query/SupplyOf", field(1, denom))
+    coin = fields(body[1][0]) if body.get(1) else {}
+    return int(coin.get(2, [b"0"])[0])
+
+
 def verify_native_unbonding(port):
     response = query(port, "/cosmos.staking.v1beta1.Query/Params")
     params = fields(response[1][0]) if response.get(1) else {}
@@ -330,10 +336,13 @@ def health_check(run):
     return output
 
 
-def reference_probe(lab, reference, hermes):
+def reference_probe(lab, reference, hermes, *, fund_test_assets=False):
     rpc_port, p2p, grpc = lab.port(), lab.port(), lab.port()
     home = lab.root / "reference"
-    command([reference, "prepare", "--home", home, "--rpc-port", rpc_port, "--p2p-port", p2p, "--grpc-port", grpc], lab.env, timeout=60)
+    prepare = [reference, "prepare", "--home", home, "--rpc-port", rpc_port, "--p2p-port", p2p, "--grpc-port", grpc]
+    if fund_test_assets:
+        prepare.append("--fund-test-assets")
+    command(prepare, lab.env, timeout=60)
     marker = json.loads((home / "disposable-ibc-reference.json").read_text())
     require(marker["chain_id"] == B_ID, "wrong generated counterparty")
     child = lab.spawn([reference, "start", "--home", home, "--log_level", "error"], "reference")
@@ -671,14 +680,14 @@ def phase_after(lab, label, a, b, before, native_a_delta=0, native_b_delta=0):
 
 
 def connect_transfer(lab, mcnd, reference, hermes, upgrade=False, native_fixture=None, *, owned=None,
-                     assembly_report=None, donor_file=None, network_profile=None):
+                     assembly_report=None, donor_file=None, network_profile=None, fund_test_assets=False):
     # Start the native group's fixed ports first so dynamically allocated
     # reference ports cannot reuse any of them.
     a = owned
     if native_fixture:
         a = prepare_native_owned(lab, mcnd, native_fixture, assembly_report=assembly_report,
                                  donor_file=donor_file, network_profile=network_profile)
-    b, config = reference_probe(lab, reference, hermes)
+    b, config = reference_probe(lab, reference, hermes, fund_test_assets=fund_test_assets)
     if a is None:
         a = prepare_owned(lab, mcnd, upgrade=upgrade)
     chain_id = a.get("chain", A_ID)
@@ -805,10 +814,10 @@ def clear_packets(run, chain_id, channel):
 
 
 def full_suite(lab, mcnd, reference, hermes, native_fixture=None, *, assembly_report=None, donor_file=None,
-               network_profile=None, replacement=None, observer_schema_probe=None):
+               network_profile=None, replacement=None, observer_schema_probe=None, testnet_asset_admission=False):
     a, b, run, a_channel, b_channel = connect_transfer(lab, mcnd, reference, hermes, native_fixture=native_fixture,
                                                        assembly_report=assembly_report, donor_file=donor_file,
-                                                       network_profile=network_profile)
+                                                       network_profile=network_profile, fund_test_assets=testnet_asset_admission)
     chain_id = a.get("chain", A_ID)
     denom = a["denom"]
     voucher = "ibc/" + hashlib.sha256(f"transfer/{b_channel}/{denom}".encode()).hexdigest().upper()
@@ -857,6 +866,35 @@ def full_suite(lab, mcnd, reference, hermes, native_fixture=None, *, assembly_re
         require(amount(a["rpc"], a["address"], bank_voucher) == 0 and escrow(b["rpc"], "stake") == 0,
                 "foreign voucher return must clear reference escrow")
         phase_after(lab, "foreign_bank_voucher_return", a, b, before, native_b_delta=foreign)
+
+    if testnet_asset_admission:
+        for test_denom in ("tmsp", "wtmsp"):
+            rejected_voucher = "ibc/" + hashlib.sha256(f"transfer/{a_channel}/{test_denom}".encode()).hexdigest().upper()
+            funded = amount(b["rpc"], b["address"], test_denom)
+            require(funded == 10**6 and escrow(b["rpc"], test_denom) == 0, "expected unopened test asset escrow")
+            require(supply(a["rpc"], rejected_voucher) == 0, "destination voucher must start unissued")
+            before = phase_before(a, b)
+            transfer(B_ID, chain_id, b_channel, test_denom, funded, a["address"])
+            lab.wait(lambda: len(commitments(b["rpc"], b_channel)) == 1, "test asset source commitment")
+            sequence = str(commitments(b["rpc"], b_channel)[0]["sequence"])
+            require(amount(b["rpc"], b["address"], test_denom) == 0 and escrow(b["rpc"], test_denom) == funded,
+                    "source principal must be escrowed before relay")
+            clear()
+            label = f"testnet_{test_denom}_rejected"
+            phase_after(lab, label, a, b, before)
+            acks = [event for event in new_events(a, before["a_tx"], "write_acknowledgement")
+                    if event.get("packet_sequence") == sequence and event.get("packet_dst_channel") == a_channel]
+            refunds = [event for event in new_events(b, before["b_tx"], "acknowledge_packet")
+                       if event.get("packet_sequence") == sequence and event.get("packet_src_channel") == b_channel]
+            require(len(acks) == 1 and len(refunds) == 1, "the destination must acknowledge and the source must process it once")
+            ack = json.loads(bytes.fromhex(acks[0]["packet_ack_hex"]))
+            require(ack.get("error") and "result" not in ack, "the test asset must receive an error ACK")
+            require(amount(b["rpc"], b["address"], test_denom) == funded and escrow(b["rpc"], test_denom) == 0,
+                    "IBC must refund all test asset principal and release escrow")
+            require(supply(a["rpc"], rejected_voucher) == 0 and amount(a["rpc"], a["address"], rejected_voucher) == 0,
+                    "mainnet must not mint or credit a test asset voucher")
+            lab.report["phases"][label].update(sequence=sequence, refundedAtomic=funded, voucherSupplyAtomic=0,
+                                               sourceEscrowAtomic=0, errorAcknowledgements=len(acks))
 
     before = phase_before(a, b)
     transfer(chain_id, B_ID, a_channel, denom, value, b["address"], seconds=600 if replacement else 300)
@@ -945,7 +983,7 @@ def full_suite(lab, mcnd, reference, hermes, native_fixture=None, *, assembly_re
     require(len(timeouts) == 1, "actual timeout receipt event required")
     lab.report["phases"]["timeout_refund"]["timeout_sequence"] = timeout_sequence
     lab.report["phases"]["timeout_refund"]["packet_timeout_timestamp"] = timeout_timestamp
-    expected_phases = 8 if native_fixture else 6
+    expected_phases = (8 if native_fixture else 6) + (2 if testnet_asset_admission else 0)
     if assembly_report is not None:
         verify_background_relay(lab, hermes, a, b, a_channel, b_channel, voucher, transfer)
         expected_phases += 2
@@ -1154,6 +1192,7 @@ def main(argv=None, signals=None):
     parser.add_argument("--native-fixture", type=Path)
     parser.add_argument("--assembly-report", type=Path)
     parser.add_argument("--network-profile", choices=["mainnet", "testnet"])
+    parser.add_argument("--testnet-asset-admission", action="store_true")
     parser.add_argument("--fixture-donor-key", type=Path)
     args = parser.parse_args(argv)
     report = {"status": "FAIL", "mode": args.mode, "release_gate": False}
@@ -1166,6 +1205,8 @@ def main(argv=None, signals=None):
                 "assembled genesis verification and its disposable gas wallet require native-full")
         require(args.network_profile is None or args.assembly_report is not None,
                 "a compiled network profile requires an isolated assembled genesis")
+        require(not args.testnet_asset_admission or args.network_profile == "mainnet",
+                "test asset admission requires the isolated mainnet profile")
         require(re.fullmatch(r"[0-9a-f]{40}", args.reference_source_commit), "full reference source commit required")
         reference, ref_hash = binary(args.reference_binary, args.reference_sha256)
         hermes, hermes_hash = binary(args.hermes_binary, HERMES_SHA256)
@@ -1206,7 +1247,8 @@ def main(argv=None, signals=None):
                     full_suite(lab, mcnd, reference, hermes, native_fixture=args.native_fixture,
                                assembly_report=args.assembly_report, donor_file=args.fixture_donor_key,
                                network_profile=args.network_profile, replacement=replacement,
-                               observer_schema_probe=args.observer_schema_probe)
+                               observer_schema_probe=args.observer_schema_probe,
+                               testnet_asset_admission=args.testnet_asset_admission)
                 elif args.mode == "client-upgrade":
                     client_upgrade_suite(lab, mcnd, replacement, reference, hermes)
                 else:

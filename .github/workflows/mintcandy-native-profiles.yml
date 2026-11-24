@@ -222,10 +222,10 @@ jobs:
           set -euo pipefail
           umask 077
           work="$PROFILE_WORK"
-          release='https://github.com/maxwell2010/go-smart-node/releases/download/v1.2.0'
-          source='fcfe88732af1b96315826f39a2b2bf04f9ef54f8'
-          archive_sha='62a400e118178bb5b904d809a140c83fa100dee605db154e521ab51c1c4f308c'
-          binary_sha='21179ad426df0d2ae1aaf87a6e08c22a91f6aad8924a513a7c3593f6ce81de94'
+          release='https://github.com/maxwell2010/go-smart-node/releases/download/v1.2.1'
+          source='b1a460046270399592773c845d00aef4b7277a9b'
+          archive_sha='e70dbdd964bb24dc01ba0f46782290402165306dace3ae30f3864b574bea472c'
+          binary_sha='dc3fa4e88fe03173d81a03e2cc7ae75b17f8960ed2e8a1775130cd7aa0bf6c84'
           curl -fsSL --retry 3 --proto '=https' --proto-redir '=https' \
             "https://raw.githubusercontent.com/maxwell2010/go-smart-node/$source/network/tools/install_software.py" \
             -o "$work/install_software.py"
@@ -234,8 +234,8 @@ jobs:
           curl -fsSL --retry 3 --proto '=https' --proto-redir '=https' \
             "$release/provenance.sigstore.json" -o "$work/provenance.sigstore.json"
           python3 -I -B "$work/install_software.py" --source-sha "$source" \
-            --source-ref refs/heads/codex/mintcandy-native-denoms --release-version 1.2.0 --native-denom msp \
-            --archive-sha "$archive_sha" --archive-url "$release/mcnd-1.2.0-linux-amd64.tar.gz" \
+            --source-ref refs/heads/codex/mintcandy-native-denoms --release-version 1.2.1 --native-denom msp \
+            --archive-sha "$archive_sha" --archive-url "$release/mcnd-1.2.1-linux-amd64.tar.gz" \
             --bundle "$work/provenance.sigstore.json" --destination "$work/published/mcnd" \
             > "$work/evidence/published-install.json"
           printf '%s  %s\n' "$binary_sha" "$work/published/mcnd" | sha256sum --check --strict
@@ -339,10 +339,14 @@ jobs:
             go test -mod=readonly -p 2 -count=1 -timeout 4m \
             -run '^TestExportSponsoredLaunchIBCDonor$' ./systemcontracts
           report="$work/evidence/published-ibc.json"
+          admission=()
+          if [[ "$PROFILE" == mainnet ]]; then
+            admission=(--testnet-asset-admission)
+          fi
           status=0
           sudo -n unshare --net -- bash -euc 'ip link set lo up; exec "$@"' _ \
             env TMPDIR="$work" "$(command -v python3)" -B "$PWD/internal/ibclab/hermes_lab.py" \
-            --mode native-full --network-profile "$PROFILE" \
+            --mode native-full --network-profile "$PROFILE" "${admission[@]}" \
             --mcnd-binary "$work/published/mcnd" --mcnd-sha256 "$PUBLISHED_BINARY_SHA" --mcnd-source-commit "$PUBLISHED_SOURCE" \
             --reference-binary "$work/ibcreference" --reference-source-commit "$GITHUB_SHA" \
             --reference-sha256 "$(sha256sum "$work/ibcreference" | cut -d' ' -f1)" \
@@ -365,9 +369,15 @@ jobs:
               .owned_probe.genesis_sha256 == $genesis and .owned_probe.replicas == 4 and
               .native_final_consensus.signers == ["a", "b", "c", "d"] and .relayer_funding.genesis_unchanged and
               .routePreflight.status == "IBC_ROUTE_STATE_MATCH" and .routePreflight.receiptsUnchanged and
-              (.phases | keys == ["client_connection_channel_handshake", "daemon_live_relay", "daemon_restart_backlog",
+              (.phases | keys == (["client_connection_channel_handshake", "daemon_live_relay", "daemon_restart_backlog",
                 "error_ack_refund", "foreign_bank_voucher", "foreign_bank_voucher_return", "native_send",
-                "pending_packet_restart", "timeout_refund", "voucher_return"]) and
+                "pending_packet_restart", "timeout_refund", "voucher_return"] +
+                (if $denom == "msp" then ["testnet_tmsp_rejected", "testnet_wtmsp_rejected"] else [] end) | sort)) and
+              (if $denom == "msp" then
+                all(.phases.testnet_tmsp_rejected, .phases.testnet_wtmsp_rejected;
+                  .errorAcknowledgements == 1 and .refundedAtomic == 1000000 and
+                  .voucherSupplyAtomic == 0 and .sourceEscrowAtomic == 0)
+                else true end) and
               all(.phases[]; .status == "PASS" and all(.owned_fees[]; .denom == $denom)) and
               (.phases.native_send.owned_fees | length > 0) and
               (.phases.pending_packet_restart.preserved_packets | length == 1) and

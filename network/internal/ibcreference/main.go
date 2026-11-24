@@ -89,11 +89,13 @@ func run() error {
 		rpc, _ := cmd.Flags().GetInt("rpc-port")
 		p2p, _ := cmd.Flags().GetInt("p2p-port")
 		grpc, _ := cmd.Flags().GetInt("grpc-port")
-		return prepareFixture(home, rpc, p2p, grpc)
+		fundTestAssets, _ := cmd.Flags().GetBool("fund-test-assets")
+		return prepareFixture(home, rpc, p2p, grpc, fundTestAssets)
 	}}
 	prepare.Flags().Int("rpc-port", 28757, "Private loopback RPC port")
 	prepare.Flags().Int("p2p-port", 28756, "Private loopback P2P port")
 	prepare.Flags().Int("grpc-port", 28790, "Private loopback gRPC port")
+	prepare.Flags().Bool("fund-test-assets", false, "Fund disposable tmsp and wtmsp test assets")
 	root.AddCommand(prepare)
 	root.AddCommand(server.StartCmd(func(logger log.Logger, db dbm.DB, trace io.Writer, opts servertypes.AppOptions) servertypes.Application {
 		return referenceapp.NewApp(logger, db, trace, true, opts, append(server.DefaultBaseappOptions(opts), baseapp.SetChainID(chainID))...)
@@ -155,7 +157,7 @@ func validateFixture(home string, ctx *server.Context) error {
 	return nil
 }
 
-func prepareFixture(home string, rpcPort, p2pPort, grpcPort int) error {
+func prepareFixture(home string, rpcPort, p2pPort, grpcPort int, fundTestAssets bool) error {
 	if !filepath.IsAbs(home) {
 		return fmt.Errorf("absolute NEW disposable home required")
 	}
@@ -197,7 +199,12 @@ func prepareFixture(home string, rpcPort, p2pPort, grpcPort int) error {
 	vals := cmttypes.NewValidatorSet([]*cmttypes.Validator{cmttypes.NewValidator(pub, 1)})
 	app := referenceapp.NewApp(log.NewNopLogger(), dbm.NewMemDB(), nil, true, options{flags.FlagHome: home})
 	defer app.Close()
-	genesis, err := simtestutil.GenesisStateWithValSet(app.AppCodec(), app.DefaultGenesis(), vals, []authtypes.GenesisAccount{account}, banktypes.Balance{Address: account.GetAddress().String(), Coins: sdk.NewCoins(sdk.NewCoin(sdk.DefaultBondDenom, math.NewInt(1_000_000_000_000_000_000)))})
+	coins := sdk.NewCoins(sdk.NewCoin(sdk.DefaultBondDenom, math.NewInt(1_000_000_000_000_000_000)))
+	if fundTestAssets {
+		coins = coins.Add(sdk.NewInt64Coin("tmsp", 1_000_000), sdk.NewInt64Coin("wtmsp", 1_000_000))
+	}
+	genesis, err := simtestutil.GenesisStateWithValSet(app.AppCodec(), app.DefaultGenesis(), vals,
+		[]authtypes.GenesisAccount{account}, banktypes.Balance{Address: account.GetAddress().String(), Coins: coins})
 	if err != nil {
 		return err
 	}
