@@ -9,12 +9,13 @@ Chain ID майнета - `mintcandy_9905401-1`, EVM chain ID - `9905401`.
 собственная сеть с новым genesis, EVM, нативный консенсус и IBC.
 
 Четыре валидатора подписали первый блок майнета. Для установки нужны
-Linux-бинарник и подписанный genesis. Переход с 1.2.1 на 1.2.2 выполняется
-на высоте, принятой голосованием. [Выпуск v1.2.2](https://github.com/maxwell2010/go-smart-node/releases/tag/v1.2.2) ·
+Linux-бинарник и подписанный genesis. Для запуска с версии 1.2.1 соблюдайте
+высоту обновления, утверждённую голосованием. Версия 1.2.3 сохраняет правила
+обработки блоков версии 1.2.2. [Выпуск v1.2.3](https://github.com/maxwell2010/go-smart-node/releases/tag/v1.2.3) ·
 [Подписанный genesis v1.2.0](https://github.com/maxwell2010/go-smart-node/releases/tag/v1.2.0) ·
 [Порядок обновления и синхронизации](network/docs/ru/GOVERNED_UPGRADE_1_2_2.md).
 
-[Однострочник установки](https://github.com/maxwell2010/go-smart-node/releases/download/v1.2.2/INSTALL_RU.md) ·
+[Однострочник установки](https://github.com/maxwell2010/go-smart-node/releases/download/v1.2.3/INSTALL_RU.md) ·
 [Проверка издателя](network/docs/ru/SOFTWARE_RELEASE_VERIFICATION.md) ·
 [Офлайн-комплект](network/docs/ru/INSTALL_LAUNCH_TOOLS.md).
 
@@ -61,6 +62,8 @@ DePIN и торговый MEV-сервис не входят в первый с�
 
 | Проверка | Ревизия и результат |
 | --- | --- |
+| 1.2.3, оплата DRC20, возврат в MSP и tMSP, systemd, снапшот и Hermes | [Проверка обоих бинарников](https://github.com/maxwell2010/go-smart-node/actions/runs/45371010838) |
+| 1.2.3, чистая установка двух публичных пакетов по однострочникам | [Прогон CI](https://github.com/maxwell2010/go-smart-node/actions/runs/45377377447) |
 | 1.2.2, миграция с пакетом ICS-20 на 1 MSP, восстановление наблюдателя и обратный перевод | [Прогон CI](https://github.com/maxwell2010/go-smart-node/actions/runs/45351481993) |
 | 1.2.2, подключение новой ноды из genesis и снапшота после миграции | [Прогон CI](https://github.com/maxwell2010/go-smart-node/actions/runs/45346495072) |
 | v1.1.5: MSP в новом `mcnd init`, WMSP в genesis и 10 сценариев Hermes | [CI 45124076770](https://github.com/maxwell2010/go-smart-node/actions/runs/45124076770), success |

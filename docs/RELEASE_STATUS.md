@@ -17,6 +17,11 @@ constant. Both binaries passed systemd restart, snapshot sync, pruning and
 Hermes ICS-20 transfers. Four MSP validators also applied the governed NFT
 reserve refund update. [Exact archive checks and reports](https://github.com/maxwell2010/go-smart-node/actions/runs/45371010838).
 
+A clean GitHub runner downloaded both published Russian installation guides,
+ran their one-line commands without a GitHub token, verified each installed
+binary hash, then initialized and validated genesis for its profile.
+[Published installer checks](https://github.com/maxwell2010/go-smart-node/actions/runs/45377377447).
+
 ## 1.2.2 software release
 
 The attested Linux amd64 packages for MSP and tMSP were built from
