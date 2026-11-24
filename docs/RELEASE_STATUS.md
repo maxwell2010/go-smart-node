@@ -49,6 +49,20 @@ positions, including restart. [Hold](https://github.com/maxwell2010/go-smart-nod
 [token features](https://github.com/maxwell2010/go-smart-node/actions/runs/45382318216),
 [mass delegation](https://github.com/maxwell2010/go-smart-node/actions/runs/45367941768).
 
+The public 1.2.3 binary validated the original OpenPGP-signed mainnet genesis
+in a fresh observer home at signing height zero. The 1.2.1 CLI used the
+operator guide to generate a 1.2.3 proposal with a 10 MSP deposit, the expected
+upgrade metadata and zero signatures. The proposed height was a CI fixture.
+[Public onboarding and unsigned proposal](https://github.com/maxwell2010/go-smart-node/actions/runs/45384492338).
+
+After four isolated validators migrated at height 64, a new observer replayed
+from genesis through 1.2.1 and 1.2.3. Another observer restored snapshot 100
+on the published 1.2.3 binary using trust height 102. Both preserved the
+unpaid 2 MSP ERC1155 reserve. All seven nodes agreed at height 113 and four
+validator signatures verified. The group's peak memory was 927731712 bytes
+under an 8000000000-byte limit with swap disabled and zero OOM events.
+[Replay, snapshot and memory measurements](https://github.com/maxwell2010/go-smart-node/actions/runs/45384545284).
+
 ## 1.2.2 software release
 
 The attested Linux amd64 packages for MSP and tMSP were built from
