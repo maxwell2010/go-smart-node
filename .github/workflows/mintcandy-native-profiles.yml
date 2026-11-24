@@ -20,6 +20,10 @@ on:
       mainnet_package_run:
         description: Verify an attested MSP package from a completed release build at this source revision
         type: string
+      msp_release_switch:
+        description: Switch the isolated MSP validators from v1.2.0 to v1.2.1 and back with an ICS-20 packet pending
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -71,6 +75,7 @@ jobs:
       OTHER_DENOM: ${{ matrix.other_denom }}
       SYMBOL: ${{ matrix.symbol }}
       WRAPPER: ${{ matrix.wrapper }}
+      MSP_RELEASE_SWITCH: ${{ inputs.msp_release_switch }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
@@ -215,9 +220,10 @@ jobs:
              .signedBootstrap.appHash == .appHash and .signedBootstrap.outboundPeers == [.signedBootstrap.nodeId] and
              (.signedBootstrap.networkLaunchAuthorized | not)' "$report" >/dev/null
       - name: Install the published MSP release using the operator guide
-        if: (inputs.published_ibc || inputs.published_node) && !inputs.mainnet_package_run && matrix.profile == 'mainnet' && github.repository == 'maxwell2010/go-smart-node'
+        if: ((inputs.published_ibc || inputs.published_node) && !inputs.mainnet_package_run || inputs.msp_release_switch) && matrix.profile == 'mainnet' && github.repository == 'maxwell2010/go-smart-node'
         env:
           GH_TOKEN: ${{ github.token }}
+          REPLACEMENT_RUN: ${{ inputs.mainnet_package_run }}
         run: |
           set -euo pipefail
           umask 077
@@ -226,6 +232,13 @@ jobs:
           source='fcfe88732af1b96315826f39a2b2bf04f9ef54f8'
           archive_sha='62a400e118178bb5b904d809a140c83fa100dee605db154e521ab51c1c4f308c'
           binary_sha='21179ad426df0d2ae1aaf87a6e08c22a91f6aad8924a513a7c3593f6ce81de94'
+          destination="$work/published/mcnd"
+          variable_prefix=PUBLISHED
+          if [[ "$MSP_RELEASE_SWITCH" == true ]]; then
+            [[ "$REPLACEMENT_RUN" =~ ^[1-9][0-9]{0,19}$ ]]
+            destination="$work/predecessor/mcnd"
+            variable_prefix=PREDECESSOR
+          fi
           curl -fsSL --retry 3 --proto '=https' --proto-redir '=https' \
             "https://raw.githubusercontent.com/maxwell2010/go-smart-node/$source/network/tools/install_software.py" \
             -o "$work/install_software.py"
@@ -236,11 +249,14 @@ jobs:
           python3 -I -B "$work/install_software.py" --source-sha "$source" \
             --source-ref refs/heads/codex/mintcandy-native-denoms --release-version 1.2.0 --native-denom msp \
             --archive-sha "$archive_sha" --archive-url "$release/mcnd-1.2.0-linux-amd64.tar.gz" \
-            --bundle "$work/provenance.sigstore.json" --destination "$work/published/mcnd" \
-            > "$work/evidence/published-install.json"
-          printf '%s  %s\n' "$binary_sha" "$work/published/mcnd" | sha256sum --check --strict
-          printf 'PUBLISHED_SOURCE=%s\nPUBLISHED_ARCHIVE_SHA=%s\nPUBLISHED_BINARY_SHA=%s\n' \
-            "$source" "$archive_sha" "$binary_sha" >> "$GITHUB_ENV"
+            --bundle "$work/provenance.sigstore.json" --destination "$destination" \
+            > "$work/evidence/${variable_prefix,,}-install.json"
+          printf '%s  %s\n' "$binary_sha" "$destination" | sha256sum --check --strict
+          {
+            printf '%s_SOURCE=%s\n' "$variable_prefix" "$source"
+            printf '%s_ARCHIVE_SHA=%s\n' "$variable_prefix" "$archive_sha"
+            printf '%s_BINARY_SHA=%s\n' "$variable_prefix" "$binary_sha"
+          } >> "$GITHUB_ENV"
       - name: Install the attested release candidate and reject the other signing domain
         if: ((inputs.mainnet_package_run && matrix.profile == 'mainnet') || (inputs.testnet_package_run && matrix.profile == 'testnet')) && github.repository == 'maxwell2010/go-smart-node'
         env:
@@ -253,6 +269,12 @@ jobs:
           work="$PROFILE_WORK"
           source="$GITHUB_SHA"
           branch="${GITHUB_REF#refs/heads/}"
+          if [[ "$MSP_RELEASE_SWITCH" == true && "$PROFILE" == mainnet ]]; then
+            source='b1a460046270399592773c845d00aef4b7277a9b'
+            branch='codex/mintcandy-native-denoms'
+            git fetch --no-tags --depth=1 origin "$source"
+            git diff --exit-code "$source" "$GITHUB_SHA" -- network
+          fi
           attempt=$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$PACKAGE_RUN" | jq -er \
             --arg source "$source" --arg branch "$branch" --arg repo "$GITHUB_REPOSITORY" '
             select(.status == "completed" and .conclusion == "success" and .event == "workflow_dispatch" and
@@ -269,11 +291,14 @@ jobs:
             ' "$verification" >/dev/null
           version=$(jq -er .releaseVersion "$verification")
           [[ "$version" =~ ^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]]
+          if [[ "$MSP_RELEASE_SWITCH" == true && "$PROFILE" == mainnet ]]; then
+            test "$version" = 1.2.1
+          fi
           archive="$work/software-archive/mcnd-$version-linux-amd64.tar.gz"
           archive_sha=$(jq -er .archiveSha256 "$verification")
           binary_sha=$(jq -er .binarySha256 "$verification")
           python3 -I -B tools/install_software.py --source-sha "$source" \
-            --source-ref "$GITHUB_REF" --release-version "$version" --native-denom "$DENOM" \
+            --source-ref "refs/heads/$branch" --release-version "$version" --native-denom "$DENOM" \
             --archive-sha "$archive_sha" --archive "$archive" --bundle "$work/software-archive/provenance.sigstore.json" \
             --destination "$work/published/mcnd" > "$work/evidence/published-install.json"
           printf '%s  %s\n' "$binary_sha" "$work/published/mcnd" | sha256sum --check --strict
@@ -286,7 +311,7 @@ jobs:
           printf 'PUBLISHED_SOURCE=%s\nPUBLISHED_ARCHIVE_SHA=%s\nPUBLISHED_BINARY_SHA=%s\n' \
             "$source" "$archive_sha" "$binary_sha" >> "$GITHUB_ENV"
       - name: Verify systemd restart, snapshot sync and pruning with the versioned binary
-        if: (((inputs.published_node || inputs.mainnet_package_run) && matrix.profile == 'mainnet') || (inputs.testnet_package_run && matrix.profile == 'testnet')) && github.repository == 'maxwell2010/go-smart-node'
+        if: (((inputs.published_node || inputs.mainnet_package_run) && !inputs.msp_release_switch && matrix.profile == 'mainnet') || (inputs.testnet_package_run && matrix.profile == 'testnet')) && github.repository == 'maxwell2010/go-smart-node'
         run: |
           set -euo pipefail
           umask 077
@@ -339,11 +364,23 @@ jobs:
             go test -mod=readonly -p 2 -count=1 -timeout 4m \
             -run '^TestExportSponsoredLaunchIBCDonor$' ./systemcontracts
           report="$work/evidence/published-ibc.json"
+          base_binary="$work/published/mcnd"
+          base_sha="$PUBLISHED_BINARY_SHA"
+          base_source="$PUBLISHED_SOURCE"
+          replacement=()
+          if [[ "$MSP_RELEASE_SWITCH" == true && "$PROFILE" == mainnet ]]; then
+            base_binary="$work/predecessor/mcnd"
+            base_sha="$PREDECESSOR_BINARY_SHA"
+            base_source="$PREDECESSOR_SOURCE"
+            replacement=(--replacement-binary "$work/published/mcnd" --replacement-sha256 "$PUBLISHED_BINARY_SHA"
+                         --replacement-source-commit "$PUBLISHED_SOURCE")
+          fi
           status=0
           sudo -n unshare --net -- bash -euc 'ip link set lo up; exec "$@"' _ \
             env TMPDIR="$work" "$(command -v python3)" -B "$PWD/internal/ibclab/hermes_lab.py" \
             --mode native-full --network-profile "$PROFILE" \
-            --mcnd-binary "$work/published/mcnd" --mcnd-sha256 "$PUBLISHED_BINARY_SHA" --mcnd-source-commit "$PUBLISHED_SOURCE" \
+            --mcnd-binary "$base_binary" --mcnd-sha256 "$base_sha" --mcnd-source-commit "$base_source" \
+            "${replacement[@]}" \
             --reference-binary "$work/ibcreference" --reference-source-commit "$GITHUB_SHA" \
             --reference-sha256 "$(sha256sum "$work/ibcreference" | cut -d' ' -f1)" \
             --hermes-binary "$work/hermes" --native-fixture "$work/assembled" \
@@ -356,7 +393,7 @@ jobs:
             jq -r '.error // .status' "$report" >&2
             exit "$status"
           fi
-          jq -e --arg sha "$PUBLISHED_BINARY_SHA" --arg source "$PUBLISHED_SOURCE" \
+          jq -e --arg sha "$base_sha" --arg source "$base_source" \
             --arg chain "mintcandy_${EVM_ID}-1" --arg denom "$DENOM" \
             --arg genesis "$(jq -er .genesisSha256 "$work/evidence/assembly.json")" '
               .status == "NATIVE_CONSENSUS_HERMES_PASS" and .release_gate and
@@ -373,6 +410,16 @@ jobs:
               (.phases.pending_packet_restart.preserved_packets | length == 1) and
               (.phases.daemon_restart_backlog | .sequence == (.commitment_before_restart.sequence | tostring))
             ' "$report" >/dev/null
+          if [[ "$MSP_RELEASE_SWITCH" == true && "$PROFILE" == mainnet ]]; then
+            jq -e --arg sha "$PUBLISHED_BINARY_SHA" --arg source "$PUBLISHED_SOURCE" '
+              .publishedReleaseSwitch as $switch | .phases.pending_packet_restart as $phase |
+              .binaries.replacement == {sha256: $sha, source_commit: $source} and
+              $switch.successorCheckpoint.signers == ["a", "b", "c", "d"] and
+              ($switch.beforeSignerHeights | length == 4) and ($switch.successorSignerHeights | length == 4) and
+              $phase.native_after_restart.height > $switch.successorCheckpoint.height and
+              $switch.ackCount == 1 and $switch.acknowledgedSequence == ($phase.preserved_packets[0].sequence | tostring)
+              ' "$report" >/dev/null
+          fi
       - name: Package the exact tested daemon and offline launch tools
         run: |
           set -euo pipefail
