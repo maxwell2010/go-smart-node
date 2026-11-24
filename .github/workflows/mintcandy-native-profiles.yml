@@ -14,6 +14,9 @@ on:
         description: Rehearse systemd restart, snapshot sync and pruning with the published MSP daemon
         type: boolean
         default: false
+      testnet_package_run:
+        description: Verify the attested tMSP 1.2.0 Linux package from this completed workflow run
+        type: string
 
 permissions:
   contents: read
@@ -26,6 +29,9 @@ jobs:
   isolated-launch:
     runs-on: ubuntu-24.04
     timeout-minutes: 45
+    permissions:
+      contents: read
+      actions: read
     strategy:
       fail-fast: false
       matrix:
@@ -229,8 +235,53 @@ jobs:
           printf '%s  %s\n' "$binary_sha" "$work/published/mcnd" | sha256sum --check --strict
           printf 'PUBLISHED_SOURCE=%s\nPUBLISHED_ARCHIVE_SHA=%s\nPUBLISHED_BINARY_SHA=%s\n' \
             "$source" "$archive_sha" "$binary_sha" >> "$GITHUB_ENV"
-      - name: Verify systemd restart, snapshot sync and pruning with the published MSP release
-        if: inputs.published_node && matrix.profile == 'mainnet' && github.repository == 'maxwell2010/go-smart-node'
+      - name: Install the attested tMSP package and reject the mainnet signing domain
+        if: inputs.testnet_package_run && matrix.profile == 'testnet' && github.repository == 'maxwell2010/go-smart-node'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PACKAGE_RUN: ${{ inputs.testnet_package_run }}
+        run: |
+          set -euo pipefail
+          umask 077
+          [[ "$PACKAGE_RUN" =~ ^[1-9][0-9]{0,19}$ ]]
+          work="$PROFILE_WORK"
+          source='fcfe88732af1b96315826f39a2b2bf04f9ef54f8'
+          branch='release/mintcandy-tmsp-1.2.0'
+          attempt=$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$PACKAGE_RUN" | jq -er \
+            --arg source "$source" --arg branch "$branch" --arg repo "$GITHUB_REPOSITORY" '
+            select(.status == "completed" and .conclusion == "success" and .event == "workflow_dispatch" and
+              .head_sha == $source and .head_branch == $branch and .head_repository.full_name == $repo and
+              .path == ".github/workflows/modern-network-development.yml") | .run_attempt')
+          for kind in package attestation; do
+            gh run download "$PACKAGE_RUN" --repo "$GITHUB_REPOSITORY" --dir "$work/tmsp-archive" \
+              --name "mcnd-software-$kind-$source-$attempt"
+          done
+          archive="$work/tmsp-archive/mcnd-1.2.0-linux-amd64.tar.gz"
+          read -r archive_sha _ < "$archive.sha256"
+          binary_sha=$(jq -er --arg sha "$archive_sha" --arg source "$source" '
+            select(.status == "software-release" and .archiveSha256 == $sha and .sourceRevision == $source and
+              .releaseVersion == "1.2.0" and .nativeDenom == "tmsp" and .includesGenesis == false) | .binarySha256
+            ' "$work/tmsp-archive/software-verified.json")
+          curl -fsSL --retry 3 --proto '=https' --proto-redir '=https' \
+            "https://raw.githubusercontent.com/maxwell2010/go-smart-node/$source/network/tools/install_software.py" \
+            -o "$work/install_software.py"
+          printf '%s  %s\n' a18b765cf2f2a384dc819642f8a0872a9bd85bbf12b4bac6edf75c62d3f0d3a1 \
+            "$work/install_software.py" | sha256sum --check --strict
+          python3 -I -B "$work/install_software.py" --source-sha "$source" \
+            --source-ref "refs/heads/$branch" --release-version 1.2.0 --native-denom tmsp \
+            --archive-sha "$archive_sha" --archive "$archive" --bundle "$work/tmsp-archive/provenance.sigstore.json" \
+            --destination "$work/published/mcnd" > "$work/evidence/published-install.json"
+          printf '%s  %s\n' "$binary_sha" "$work/published/mcnd" | sha256sum --check --strict
+          if "$work/published/mcnd" init wrong-profile --home "$work/wrong-profile" \
+            --chain-id mintcandy_9905401-1 --evm.evm-chain-id 9905401 > "$work/wrong-profile.log" 2>&1; then
+            echo 'The tMSP executable unexpectedly accepted the MSP domain.' >&2
+            exit 1
+          fi
+          grep -F 'tmsp profile requires chain ID "mintcandy_990098-1"' "$work/wrong-profile.log"
+          printf 'PUBLISHED_SOURCE=%s\nPUBLISHED_ARCHIVE_SHA=%s\nPUBLISHED_BINARY_SHA=%s\n' \
+            "$source" "$archive_sha" "$binary_sha" >> "$GITHUB_ENV"
+      - name: Verify systemd restart, snapshot sync and pruning with the versioned binary
+        if: ((inputs.published_node && matrix.profile == 'mainnet') || (inputs.testnet_package_run && matrix.profile == 'testnet')) && github.repository == 'maxwell2010/go-smart-node'
         run: |
           set -euo pipefail
           umask 077
@@ -246,7 +297,7 @@ jobs:
             --binary "$work/published/mcnd" --binary-sha256 "$PUBLISHED_BINARY_SHA" \
             --archive-sha256 "$PUBLISHED_ARCHIVE_SHA" --source-commit "$PUBLISHED_SOURCE" \
             --fixture "$work/assembled" --home-parent "$work" --assembly-report "$work/evidence/assembly.json" \
-            --report "$report" --network-profile mainnet --four-validators --empty-user-assets \
+            --report "$report" --network-profile "$PROFILE" --four-validators --empty-user-assets \
             --package-genesis "$work/verified/genesis.json" --systemd-follower --restart-and-snapshot || status=$?
           if [[ -f "$report" ]]; then
             sudo -n chown "$(id -u):$(id -g)" "$report"
@@ -255,18 +306,19 @@ jobs:
             jq -r '[.phase, (.error // .status)] | join(": ")' "$report" >&2
             exit "$status"
           fi
-          jq -e --arg sha "$PUBLISHED_BINARY_SHA" --arg genesis "$(jq -er .genesisSha256 "$work/evidence/assembly.json")" '
+          jq -e --arg sha "$PUBLISHED_BINARY_SHA" --arg denom "$DENOM" \
+            --arg genesis "$(jq -er .genesisSha256 "$work/evidence/assembly.json")" '
             .status == "PASS" and .loopbackOnlyNamespace and .binarySha256 == $sha and .genesisSha256 == $genesis and
-            .rpc.nativeDenom == "msp" and .systemdFollower.genesisSha256 == $genesis and .systemdRestart.sameHome and
-            (.stateSync | .nativeDenom == "msp" and .restoredHeight > 1 and .observerVotingPower == 0 and
+            .rpc.nativeDenom == $denom and .systemdFollower.genesisSha256 == $genesis and .systemdRestart.sameHome and
+            (.stateSync | .nativeDenom == $denom and .restoredHeight > 1 and .observerVotingPower == 0 and
               (.catchingUp | not) and .checkpointPreflight.status == "STATE_SYNC_CHECKPOINT_MATCH" and
               .checkpointPreflight.trustHash == .trustHash and .checkpointPreflight.trustHeight == .trustHeight) and
-            (.historyRetention | .nativeDenom == "msp" and .retainedBlockHeight == 1 and .archivedSupplyProofAvailable and
+            (.historyRetention | .nativeDenom == $denom and .retainedBlockHeight == 1 and .archivedSupplyProofAvailable and
               .prunedSupplyProofUnavailable and .historicalABCIResponsesDisabled and .transactionSearchDisabled and
               .freshProofMatchesArchive and (.verifiedHeight > .loadedHeightAfterRestart))
             ' "$report" >/dev/null
-      - name: Relay ICS-20 packets with the published MSP release
-        if: inputs.published_ibc && matrix.profile == 'mainnet' && github.repository == 'maxwell2010/go-smart-node'
+      - name: Relay ICS-20 packets with the versioned binary
+        if: ((inputs.published_ibc && matrix.profile == 'mainnet') || (inputs.testnet_package_run && matrix.profile == 'testnet')) && github.repository == 'maxwell2010/go-smart-node'
         run: |
           set -euo pipefail
           umask 077
@@ -285,7 +337,7 @@ jobs:
           status=0
           sudo -n unshare --net -- bash -euc 'ip link set lo up; exec "$@"' _ \
             env TMPDIR="$work" "$(command -v python3)" -B "$PWD/internal/ibclab/hermes_lab.py" \
-            --mode native-full --network-profile mainnet \
+            --mode native-full --network-profile "$PROFILE" \
             --mcnd-binary "$work/published/mcnd" --mcnd-sha256 "$PUBLISHED_BINARY_SHA" --mcnd-source-commit "$PUBLISHED_SOURCE" \
             --reference-binary "$work/ibcreference" --reference-source-commit "$GITHUB_SHA" \
             --reference-sha256 "$(sha256sum "$work/ibcreference" | cut -d' ' -f1)" \
@@ -300,17 +352,18 @@ jobs:
             exit "$status"
           fi
           jq -e --arg sha "$PUBLISHED_BINARY_SHA" --arg source "$PUBLISHED_SOURCE" \
+            --arg chain "mintcandy_${EVM_ID}-1" --arg denom "$DENOM" \
             --arg genesis "$(jq -er .genesisSha256 "$work/evidence/assembly.json")" '
               .status == "NATIVE_CONSENSUS_HERMES_PASS" and .release_gate and
               .binaries.mcnd == {sha256: $sha, source_commit: $source} and
-              .owned_probe.chain == "mintcandy_9905401-1" and .owned_probe.native_denom == "msp" and
+              .owned_probe.chain == $chain and .owned_probe.native_denom == $denom and
               .owned_probe.genesis_sha256 == $genesis and .owned_probe.replicas == 4 and
               .native_final_consensus.signers == ["a", "b", "c", "d"] and .relayer_funding.genesis_unchanged and
               .routePreflight.status == "IBC_ROUTE_STATE_MATCH" and .routePreflight.receiptsUnchanged and
               (.phases | keys == ["client_connection_channel_handshake", "daemon_live_relay", "daemon_restart_backlog",
                 "error_ack_refund", "foreign_bank_voucher", "foreign_bank_voucher_return", "native_send",
                 "pending_packet_restart", "timeout_refund", "voucher_return"]) and
-              all(.phases[]; .status == "PASS" and all(.owned_fees[]; .denom == "msp")) and
+              all(.phases[]; .status == "PASS" and all(.owned_fees[]; .denom == $denom)) and
               (.phases.native_send.owned_fees | length > 0) and
               (.phases.pending_packet_restart.preserved_packets | length == 1) and
               (.phases.daemon_restart_backlog | .sequence == (.commitment_before_restart.sequence | tostring))
