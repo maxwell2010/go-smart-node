@@ -137,9 +137,11 @@ jobs:
             (.body.messages[0] |
               .["@type"] == "/cosmos.gov.v1.MsgSubmitProposal" and .proposer == $proposer and
               .messages == [] and .expedited == false and
+              .title == "MintCandy Node 1.2.3" and (.summary | contains("1.2.3")) and
               .initial_deposit == [{"amount":"10000000000000000000","denom":"msp"}] and
               .metadata == "mintcandy-sdk-upgrade/v1:{\"name\":\"mintcandy-native-sdk-migrations-v1\",\"height\":123456}")' unsigned.json >/dev/null || { cat unsigned.json; exit 1; }
           cp unsigned.json "$evidence/unsigned-upgrade-example.json"
+          printf 'APPROVED_OBSERVER_HOME=%s\n' "$home" >> "$GITHUB_ENV"
       - name: Execute the public MSP and tMSP one-line installers
         if: inputs.published_install_122 || inputs.published_install_123
         env:
@@ -204,6 +206,16 @@ jobs:
           if [[ "$CHECK_123" == true ]]; then
             verify_installers 1.2.3 ebc6111a488ee75166d5c0f8fb112e5b4b35d578 \
               a27d36e8b4a8e07319357330aac84eb1f0c4f5509f173dab77199a61a256c6c5 1be76cf09b99a9ad7e92ead9e06d9c544008998d5b713cd9b2e8aefa30c48ab7
+            if [[ -n "${APPROVED_OBSERVER_HOME:-}" ]]; then
+              genesis="$APPROVED_OBSERVER_HOME/config/genesis.json"
+              genesis_sha=cbb4e0c1a060b09e9fb45204c1f2de16d4be37d67753378b06782abeaebf8117
+              binary="$HOME/.local/opt/mcnd/1.2.3-msp/mcnd"
+              "$binary" genesis validate-genesis --home "$APPROVED_OBSERVER_HOME" --chain-id mintcandy_9905401-1 --evm.evm-chain-id 9905401
+              printf '%s  %s\n' "$genesis_sha" "$genesis" | sha256sum --check --strict
+              jq -e '.height == "0"' "$APPROVED_OBSERVER_HOME/data/priv_validator_state.json" >/dev/null
+              jq -n --arg sha "$genesis_sha" '{version:"1.2.3",chainId:"mintcandy_9905401-1",genesisSha256:$sha,signingHeight:0}' \
+                > "$evidence/signed-mainnet-genesis-123.json"
+            fi
           fi
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
         with:
