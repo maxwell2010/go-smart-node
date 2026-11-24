@@ -1,5 +1,28 @@
 # Software release verification
 
+## 1.2.1 software release
+
+The `msp` and `tmsp` Linux amd64 packages use the same source revision,
+`b1a460046270399592773c845d00aef4b7277a9b`, with separate signing domains.
+The Gorilla WebSocket and OpenTelemetry updates address `GO-2026-6278`
+and `GO-2026-6974`. CI verified each package's source and binary against
+the advisory database snapshot from 23 November 2026. Both scans reported
+zero symbol-level findings. [MSP build](https://github.com/maxwell2010/go-smart-node/actions/runs/45314434795) ·
+[tMSP build](https://github.com/maxwell2010/go-smart-node/actions/runs/45314434847).
+
+The exact attested archives rejected each other's chain ID at `mcnd init`. On isolated
+networks both passed systemd restart, snapshot 40 recovery with matching
+AppHash at 44, history pruning, and ten ICS-20 scenarios with Hermes.
+[Runtime evidence](https://github.com/maxwell2010/go-smart-node/actions/runs/45317365804) ·
+[tMSP release and installation](https://github.com/maxwell2010/go-smart-node/releases/tag/v1.2.1-testnet).
+
+Four isolated validators switched from v1.2.0 to v1.2.1 and back on the same
+homes with IBC packet 3 in flight. The validators agreed on AppHash at the
+successor checkpoint 40 and at checkpoint 42 after rollback. The packet
+was subsequently delivered and recorded exactly one acknowledgement.
+[Switch and rollback evidence](https://github.com/maxwell2010/go-smart-node/actions/runs/45318226553) ·
+[MSP release and installation](https://github.com/maxwell2010/go-smart-node/releases/tag/v1.2.1).
+
 ## 1.2.0 software release
 
 [MintCandy Node 1.2.0](https://github.com/maxwell2010/go-smart-node/releases/tag/v1.2.0)

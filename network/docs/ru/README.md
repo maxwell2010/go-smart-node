@@ -8,9 +8,10 @@
 Версионные программные пакеты перечислены в
 [GitHub Releases](https://github.com/maxwell2010/go-smart-node/releases).
 Для установки майнета без Go и кэшей сборки используйте
-[инструкцию v1.2.0 с однострочником](https://github.com/maxwell2010/go-smart-node/releases/download/v1.2.0/INSTALL_RU.md).
-Программный архив, аттестация и подписанный genesis доступны на
-[странице выпуска v1.2.0](https://github.com/maxwell2010/go-smart-node/releases/tag/v1.2.0).
+[инструкцию v1.2.1 с однострочником](https://github.com/maxwell2010/go-smart-node/releases/download/v1.2.1/INSTALL_RU.md).
+Архив и аттестация доступны в [выпуске v1.2.1](https://github.com/maxwell2010/go-smart-node/releases/tag/v1.2.1),
+подписанный genesis - в [выпуске v1.2.0](https://github.com/maxwell2010/go-smart-node/releases/tag/v1.2.0).
+Для изолированной тестовой сети есть [отдельный пакет tMSP](https://github.com/maxwell2010/go-smart-node/releases/tag/v1.2.1-testnet).
 Для нового каталога ноды см. [подготовку профиля MSP](OPERATOR_LAUNCH.md#подготовка-для-майнета-msp).
 Корневой модуль
 и `dscd` относятся к отдельной legacy-сборке/replay. Нельзя заменять

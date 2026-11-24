@@ -1,9 +1,10 @@
 # Установка и эксплуатация ноды MintCandy
 
 Майнет использует **MintCandy (MSP)**, 18 знаков и базовый denom `msp`.
-Linux amd64 бинарник `mcnd` v1.2.0 и подписанный genesis доступны на GitHub.
-[Выпуск](https://github.com/maxwell2010/go-smart-node/releases/tag/v1.2.0) ·
-[Быстрая установка](https://github.com/maxwell2010/go-smart-node/releases/download/v1.2.0/INSTALL_RU.md).
+Linux amd64 бинарник `mcnd` v1.2.1 и подписанный genesis доступны на GitHub.
+[Выпуск](https://github.com/maxwell2010/go-smart-node/releases/tag/v1.2.1) ·
+[Установка и обновление](https://github.com/maxwell2010/go-smart-node/releases/download/v1.2.1/INSTALL_RU.md) ·
+[Подписанный genesis v1.2.0](https://github.com/maxwell2010/go-smart-node/releases/tag/v1.2.0#публичный-запуск).
 
 Новый оператор сначала может поднять наблюдателя и синхронизировать историю
 подписанного genesis. Для участия в консенсусе после запуска нужна отдельная
@@ -16,6 +17,12 @@ Linux amd64 бинарник `mcnd` v1.2.0 и подписанный genesis д�
 После прореживания и перезапуска свежий proof выпуска MSP совпал с архивным
 на блоке 51. [Отчёт изолированного прогона](https://github.com/maxwell2010/go-smart-node/actions/runs/45309605117).
 
+Для v1.2.1 повторили проверки systemd, снапшотов, прореживания и Hermes.
+Отдельно четыре валидатора перешли на v1.2.1 и вернулись на v1.2.0 с той же
+базой. IBC-пакет пережил переключение и получил одно подтверждение.
+[Проверки v1.2.1](https://github.com/maxwell2010/go-smart-node/actions/runs/45317365804) ·
+[Переключение версий](https://github.com/maxwell2010/go-smart-node/actions/runs/45318226553).
+
 ## Подготовка для майнета MSP
 
 | Сеть | CometBFT chain ID | EVM chain ID | Базовая единица | Тикер | Обёртка |
@@ -23,6 +30,11 @@ Linux amd64 бинарник `mcnd` v1.2.0 и подписанный genesis д�
 | Майнет | `mintcandy_9905401-1` | `9905401` | `msp` | MSP | WMSP |
 | Новый тестовый профиль | `mintcandy_990098-1` | `990098` | `tmsp` | tMSP | WtMSP |
 | Работающий нагрузочный стенд | `mintcandy_990097-1` | `990097` | `del` | Задан его genesis | Задана его genesis |
+
+Для нового тестового профиля есть отдельный аттестованный Linux-пакет и
+однострочник. Genesis, его контрольную сумму и параметры подключения выдаёт
+оператор конкретного стенда. [Выпуск tMSP](https://github.com/maxwell2010/go-smart-node/releases/tag/v1.2.1-testnet) ·
+[Установка tMSP](https://github.com/maxwell2010/go-smart-node/releases/download/v1.2.1-testnet/INSTALL_TESTNET_RU.md).
 
 Сборка кандидата и подготовка каталога данных сами по себе сеть не запускают.
 На общем сервере выделите отдельные службу systemd, пользователя, каталог
