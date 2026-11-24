@@ -31,6 +31,24 @@ The return transfer released 1 MSP and left zero escrow and zero voucher supply.
 All five nodes agreed at height 128 and all four validator signatures verified.
 [Pending transfer recovery evidence](https://github.com/maxwell2010/go-smart-node/actions/runs/45378581903).
 
+A second published-binary rehearsal checked the actual MSP reward accounts
+on four validators and an observer. Across the approved migration at height 98
+and the observer's backup restore, 38.501977632 MSP remained owed and covered
+by escrow. The automatic payout at height 120 transferred that sum to three
+accounts. Their bank balances matched the events on all five nodes, with zero
+remaining liability and no repeat at height 121. The outstanding ICS-20
+packet settled once. All four validator signatures verified at height 146.
+[Reward and packet recovery](https://github.com/maxwell2010/go-smart-node/actions/runs/45381437861).
+
+Separate process tests at the release source revision applied a downtime
+penalty to a held delegation and an NFT-backed delegation on the integration
+chain `mintcandy_990001-1`. Both jailed the responsible validator and recorded
+a single penalty. The release build's ABCI/EVM test exercised 10, 100 and 1000
+positions, including restart. [Hold](https://github.com/maxwell2010/go-smart-node/actions/runs/45382317981),
+[NFT](https://github.com/maxwell2010/go-smart-node/actions/runs/45382318369),
+[token features](https://github.com/maxwell2010/go-smart-node/actions/runs/45382318216),
+[mass delegation](https://github.com/maxwell2010/go-smart-node/actions/runs/45367941768).
+
 ## 1.2.2 software release
 
 The attested Linux amd64 packages for MSP and tMSP were built from
