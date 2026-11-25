@@ -1,0 +1,464 @@
+{
+  "run": "https://github.com/maxwell2010/go-smart-node/actions/runs/45679795564",
+  "package": {
+    "archiveSha256": "9f37e47199dacf610a8f87b09e45957123d7189b4e15683d39d3c36f65e93273",
+    "binarySha256": "c18acd09c2baa8cb0892345d3e94e2d3d77569cca8990458dbb2978c174f65ed",
+    "chainId": "mintcandy_990098-1",
+    "genesisSha256": "d6303a781d1be9c4f29845028d393c96d010faee98617fbe04213c0d1d369dfe",
+    "manifestSha256": "3a59abb7e76a9fd1bcc26fcfdec4c453fc137ec33aae258c4c01e4807b9b85f9",
+    "platform": "linux/amd64",
+    "schemaVersion": 1,
+    "signerFingerprint": "27DB06344C1F7BAD7904654742FC7BACDA913B0B",
+    "sourceCommit": "9eb9db175bbf9cef932ca6b65ef3303e734f3110",
+    "status": "test-launch-rehearsal"
+  },
+  "chainId": "mintcandy_990098-1",
+  "isolated": true,
+  "assetBundle": {
+    "chainId": "mintcandy_990098-1",
+    "outcomes": [
+      {
+        "asset": "DRC20",
+        "case": "expired-permit",
+        "status": 0,
+        "height": 184,
+        "hash": "0x32f11afae98129d86b32524b833772942a9da54e6bfab70510dffcc73ab7cd51"
+      },
+      {
+        "asset": "DRC20",
+        "case": "wrong-domain-permit",
+        "status": 0,
+        "height": 188,
+        "hash": "0xd79936fe37ac62fb4a70de60fe6c008beb44a19f3e03a0cb86554d3a71b06c2d"
+      },
+      {
+        "asset": "DRC20",
+        "case": "permit",
+        "status": 1,
+        "height": 192,
+        "hash": "0x2de84da5ebcbf306b0c80ebe94d03843c75ba8e6e530e484cb29c5665581d1f9"
+      },
+      {
+        "asset": "DRC20",
+        "case": "replayed-permit",
+        "status": 0,
+        "height": 196,
+        "hash": "0x77efc84c00f073545a4fc1ea15c0ce736ddb3c7113c1698647f959f14454818a"
+      },
+      {
+        "asset": "DRC20Reserveless",
+        "case": "expired-permit",
+        "status": 0,
+        "height": 200,
+        "hash": "0x60f07067c25c3ce1d28cc5f5f75ec35bdcdadc85fb5473f80f13242b66fea3d6"
+      },
+      {
+        "asset": "DRC20Reserveless",
+        "case": "wrong-domain-permit",
+        "status": 0,
+        "height": 204,
+        "hash": "0xb13754822c5a719c34801eb2c7aef103aeaadf60083d6c8fa6a60e7784508bb1"
+      },
+      {
+        "asset": "DRC20Reserveless",
+        "case": "permit",
+        "status": 1,
+        "height": 208,
+        "hash": "0x04480a3e0465ea0f447a2f4bf501f0712e682bd122fc65629da376c278044a3d"
+      },
+      {
+        "asset": "DRC20Reserveless",
+        "case": "replayed-permit",
+        "status": 0,
+        "height": 212,
+        "hash": "0x730562eca84a9492c331ea1c7548129124d1f248470d57c965c0335e2598980b"
+      },
+      {
+        "asset": "NewNetworkDRC721",
+        "case": "collection",
+        "status": 1,
+        "height": 216,
+        "hash": "0x47d8722ea871fad7e8a4dc30ea8528e60ff36a7df659deadf19044ebd76d55ee"
+      },
+      {
+        "asset": "NewNetworkDRC721",
+        "case": "mint",
+        "status": 1,
+        "height": 220,
+        "hash": "0x4120ab13e9a9b1de7ef470694b295d9bce86e2a0a8493e0716cbaebff7d1fe9d"
+      },
+      {
+        "asset": "NewNetworkDRC721",
+        "case": "expired-permit",
+        "status": 0,
+        "height": 224,
+        "hash": "0x8467f0c2c5490ce15d59c0d0536e7a2afdb903b25cdd9fb096f983a2f760575a"
+      },
+      {
+        "asset": "NewNetworkDRC721",
+        "case": "wrong-domain-permit",
+        "status": 0,
+        "height": 228,
+        "hash": "0xeb0c9f553c53e789f6ab7b7297a674657d422e3d3b5dcae336ebbc2d90e9ee45"
+      },
+      {
+        "asset": "NewNetworkDRC721",
+        "case": "permit",
+        "status": 1,
+        "height": 232,
+        "hash": "0xa1b97dbcd0f4a22b9b8cbb8ecd54004727c2a00c5ade44f9ac218c728ab7bed0"
+      },
+      {
+        "asset": "NewNetworkDRC721",
+        "case": "replayed-permit",
+        "status": 0,
+        "height": 236,
+        "hash": "0x77bbc98081bccd01cedf245b83e12488ec09daffce3774c5527f9e88fb7f7b24"
+      },
+      {
+        "asset": "NewNetworkDRC721",
+        "case": "zero-topup",
+        "status": 0,
+        "height": 240,
+        "hash": "0x039d77c1f9f14b418a69fa99b3959f231667deb59e3ce468803468fcbaeea8a1"
+      },
+      {
+        "asset": "NewNetworkDRC721",
+        "case": "topup",
+        "status": 1,
+        "height": 244,
+        "hash": "0x173058cb84f75560f844ee53aaaddc3ef18c002bae3e392dd048a7ade07e05d4"
+      },
+      {
+        "asset": "MintCandyIsolatedDRC1155",
+        "case": "collection",
+        "status": 1,
+        "height": 248,
+        "hash": "0xb0275d8209dbe322c2a0ebdac4951ce0590bbd274faecc4bcdcd97f703963b64"
+      },
+      {
+        "asset": "MintCandyIsolatedDRC1155",
+        "case": "mint",
+        "status": 1,
+        "height": 252,
+        "hash": "0x9a48d477ba37cad7392db3456d83812dcd03f6b15d16a10dc0ddae91817e52d4"
+      },
+      {
+        "asset": "MintCandyIsolatedDRC1155",
+        "case": "mint",
+        "status": 1,
+        "height": 256,
+        "hash": "0xebc61ef84df3ac4c3b4b1a8cc7e033fc39e536d8d7f42d5a3efaec2fe89e27a3"
+      },
+      {
+        "asset": "MintCandyIsolatedDRC1155",
+        "case": "unauthorized-batch",
+        "status": 0,
+        "height": 260,
+        "hash": "0x7793414620252cc58ef2dd9c7089dcdd5267faba3e3a9d322ad21bea5be1d4db"
+      },
+      {
+        "asset": "MintCandyIsolatedDRC1155",
+        "case": "expired-permit",
+        "status": 0,
+        "height": 264,
+        "hash": "0x292c80dc3e6c4afbb9641e3ac952d102daee5569fd6f87c57199ab1cccce4cd3"
+      },
+      {
+        "asset": "MintCandyIsolatedDRC1155",
+        "case": "wrong-domain-permit",
+        "status": 0,
+        "height": 268,
+        "hash": "0xc5e10d3fbaaa65d3cb0c57b2c454ab585e9cecfd9c377df01aaec1990f21ac66"
+      },
+      {
+        "asset": "MintCandyIsolatedDRC1155",
+        "case": "permit",
+        "status": 1,
+        "height": 272,
+        "hash": "0xe9998f99fa0ea560488e0b22135098d005f5982e36b45469fbc9300bad8b2acc"
+      },
+      {
+        "asset": "MintCandyIsolatedDRC1155",
+        "case": "replayed-permit",
+        "status": 0,
+        "height": 276,
+        "hash": "0xb9ff84bc085d2af216670bf069f218570a200708c68612e08e2483402ef395a7"
+      },
+      {
+        "asset": "MintCandyIsolatedDRC1155",
+        "case": "zero-topup",
+        "status": 0,
+        "height": 280,
+        "hash": "0xfba92256ca0dc9a6cd3116b13d22545a2d9c6c20ef724067af46a7e975f53ef7"
+      },
+      {
+        "asset": "MintCandyIsolatedDRC1155",
+        "case": "nonuniform-topup",
+        "status": 0,
+        "height": 284,
+        "hash": "0xa86f5e9e34f65f0fd0144097f94b973e3edef0903b9190aa7301d1417c129852"
+      },
+      {
+        "asset": "MintCandyIsolatedDRC1155",
+        "case": "topup",
+        "status": 1,
+        "height": 288,
+        "hash": "0xc64c0ee887fbbd08bef92a875b6099fe54b8bffd723ddba423aa157d75fb5b89"
+      },
+      {
+        "asset": "MintCandyIsolatedDRC1155",
+        "case": "overspend-batch",
+        "status": 0,
+        "height": 292,
+        "hash": "0xdf2b2c205ab77301d62e6ae68fe25ff44ed97be1d64827aec53104d3d296387c"
+      },
+      {
+        "asset": "MintCandyIsolatedDRC1155",
+        "case": "batch",
+        "status": 1,
+        "height": 296,
+        "hash": "0x6e4c156c7184b84a4f5e6abd7f944c9c47c6bff5ac8536f2b38ee353ac9695a6"
+      },
+      {
+        "asset": "DRC721Reserveless",
+        "case": "collection",
+        "status": 1,
+        "height": 300,
+        "hash": "0xf586a675bb09bc5cdd2d56ac729eec79f57076f57020d8f9cb89aff145829b1b"
+      },
+      {
+        "asset": "DRC721Reserveless",
+        "case": "mint",
+        "status": 1,
+        "height": 304,
+        "hash": "0x89e45369e30a148d058450b1d1ac5994fc78b8cbfdad70641f6e3a4eacc99d87"
+      },
+      {
+        "asset": "DRC721Reserveless",
+        "case": "expired-permit",
+        "status": 0,
+        "height": 308,
+        "hash": "0x45c3fa8eb4ee2c9d1e7c04e26719551201c6b0e4ef863e61d51351123cecd34b"
+      },
+      {
+        "asset": "DRC721Reserveless",
+        "case": "wrong-domain-permit",
+        "status": 0,
+        "height": 312,
+        "hash": "0x06bdbdc78910b8dbdcd0543c4338ab1a6738b1ed76809e4cb588f0943a4f25a6"
+      },
+      {
+        "asset": "DRC721Reserveless",
+        "case": "permit",
+        "status": 1,
+        "height": 316,
+        "hash": "0xcb02744d33be488793efa9f1b67237afd257b2f330059cf208d1d313611a4dbb"
+      },
+      {
+        "asset": "DRC721Reserveless",
+        "case": "replayed-permit",
+        "status": 0,
+        "height": 320,
+        "hash": "0xadf658e8ceee64efa707a42dc552afeeabff74e446cf50ab4b830913eb6de559"
+      },
+      {
+        "asset": "DRC721Reserveless",
+        "case": "foreign-burn",
+        "status": 0,
+        "height": 324,
+        "hash": "0xbe6b3d330e8499ce9545bc27a456cf9da5558fbf9d101f31d2ff51abadc0ec74"
+      },
+      {
+        "asset": "DRC721Reserveless",
+        "case": "burn",
+        "status": 1,
+        "height": 328,
+        "hash": "0x55343d27e9eb77e8a0064d205144eccd528c974c43d783381b632e1075b205f4"
+      },
+      {
+        "asset": "DRC721Reserveless",
+        "case": "repeat-burn",
+        "status": 0,
+        "height": 332,
+        "hash": "0xff664009485140d8fde11c777c4d732b8fe58532ba3e4eebd5b7caeb5cf9233b"
+      },
+      {
+        "asset": "DRC1155Reserveless",
+        "case": "collection",
+        "status": 1,
+        "height": 336,
+        "hash": "0x7a0815f47c80d6990a65488bd861eef21534462e30ee04859a0c04bd411f3dc7"
+      },
+      {
+        "asset": "DRC1155Reserveless",
+        "case": "mint",
+        "status": 1,
+        "height": 340,
+        "hash": "0x83342bb674c678e9a3ac31b0ccb218044ce7eed954c832b4ef5b75b6ce9921c8"
+      },
+      {
+        "asset": "DRC1155Reserveless",
+        "case": "mint",
+        "status": 1,
+        "height": 344,
+        "hash": "0x1526b449e3fd0388c317ffc261e1c1225cbb9851f338d94cffbf0b87bc8804e5"
+      },
+      {
+        "asset": "DRC1155Reserveless",
+        "case": "unauthorized-batch",
+        "status": 0,
+        "height": 348,
+        "hash": "0x7ba9c2b55fabf45b017de27e0ff288b69d0640d7350f3396d026c10928028368"
+      },
+      {
+        "asset": "DRC1155Reserveless",
+        "case": "expired-permit",
+        "status": 0,
+        "height": 352,
+        "hash": "0x83cd4f37fbf5898520a4204b4281b37a943e4d985f9b632e38b1400bf10265f8"
+      },
+      {
+        "asset": "DRC1155Reserveless",
+        "case": "wrong-domain-permit",
+        "status": 0,
+        "height": 356,
+        "hash": "0x9a24d44e6807464b22994d422132db4e8141ca4b7a426f4aa9a43faf470e706f"
+      },
+      {
+        "asset": "DRC1155Reserveless",
+        "case": "permit",
+        "status": 1,
+        "height": 360,
+        "hash": "0xc5cc703540e07a53d194286ac9b694d793db4882576451d701bff1d0e51cc8e5"
+      },
+      {
+        "asset": "DRC1155Reserveless",
+        "case": "replayed-permit",
+        "status": 0,
+        "height": 364,
+        "hash": "0xd2e22c1ff8327732c005993d25a5ee9416d4cfee858b170fda2fe0a2526451ec"
+      },
+      {
+        "asset": "DRC1155Reserveless",
+        "case": "overspend-batch",
+        "status": 0,
+        "height": 368,
+        "hash": "0x799413ca340353a6216deb5375617a125cddc5d65b8b8181a6178f2286f02c14"
+      },
+      {
+        "asset": "DRC1155Reserveless",
+        "case": "batch",
+        "status": 1,
+        "height": 372,
+        "hash": "0xa0004e4d6c517eb6f2bc962bdbf5726a7e1c5f872c213379ce487d5baaecf05c"
+      },
+      {
+        "asset": "DRC1155Reserveless",
+        "case": "overburn",
+        "status": 0,
+        "height": 376,
+        "hash": "0x1a1731e08feb9b325cab53689d8b0863512dc9363a3c537fa469e6040917fac2"
+      },
+      {
+        "asset": "DRC1155Reserveless",
+        "case": "burn",
+        "status": 1,
+        "height": 380,
+        "hash": "0x0fe83ee760371182790078d468e6ae001db6bda318b6fbe443af363021767957"
+      },
+      {
+        "asset": "DRC1155Reserveless",
+        "case": "repeat-burn",
+        "status": 0,
+        "height": 384,
+        "hash": "0xb85da66ac635a3c3fd2a02e1804cf5213ad2d4a5a1b5693cd4218ff604f0f442"
+      }
+    ],
+    "observerMatched": true
+  },
+  "reserveTrades": {
+    "token": "0x9a821a5806ed858905d62fd4204168d09f13badf",
+    "outcomes": [
+      {
+        "case": "buy",
+        "height": 145,
+        "hash": "0x286a9fd4634556c212561c9b89a9e439c72c47d4f29811496fdea30a5d0afe56",
+        "status": 1,
+        "quote_atoms": "10000000000000000000"
+      },
+      {
+        "case": "sell",
+        "height": 149,
+        "hash": "0xa72d48698fc7af77796b73ed2dfbb6c60c1c4200c743b12f3e7b5f91925c11a5",
+        "status": 1,
+        "quote_atoms": "500000000000000000"
+      },
+      {
+        "case": "sell-reserve-floor",
+        "height": 153,
+        "hash": "0x2b8ebd4cd4f70c3b5a57ece364240b72dafb33d2ec4ad562dfdd364a46e92804",
+        "status": 0,
+        "quote_atoms": "600000000000000000"
+      },
+      {
+        "case": "sell-supply-floor",
+        "height": 157,
+        "hash": "0x219321508edb23f9ef36d745cd045074b0d2c170db5268ed44603e7fca062ea7",
+        "status": 0,
+        "quote_atoms": "1490000000000000000"
+      },
+      {
+        "case": "contract-recipient",
+        "height": 161,
+        "hash": "0xeba6103f5148034781a8f2903cadb9738790c52e45e0c26165d342f4efd83de1",
+        "status": 0,
+        "quote_atoms": "10000000000000000000"
+      },
+      {
+        "case": "buy-min-out",
+        "height": 165,
+        "hash": "0x187d35ce745f1450e297b784a7a9df894c12ee7d797085581e59128d8d0ef5a2",
+        "status": 0,
+        "quote_atoms": "10000000000000000000"
+      },
+      {
+        "case": "sell-min-out",
+        "height": 169,
+        "hash": "0x9267fa96c2aba8397131f4c30bf759732f954a93086132181d7de5968fda88ce",
+        "status": 0,
+        "quote_atoms": "100000000000000000"
+      },
+      {
+        "case": "buy-above-cap",
+        "height": 173,
+        "hash": "0x2078fa16dee59981eceeaf3181a862ebdfb2769fd050bb935a8e278c7765b704",
+        "status": 0,
+        "quote_atoms": "986000000000000000000"
+      },
+      {
+        "case": "approach-cap",
+        "height": 177,
+        "hash": "0x050d51910c76a20c9bb26e03d6ff69b3178bae6aa83d33870b39e778fc9cec8e",
+        "status": 1,
+        "quote_atoms": "980000000000000000000"
+      },
+      {
+        "case": "race-b",
+        "height": 181,
+        "hash": "0xa8c64de4fe375dcb1786a80f508233ca00d051f1f56a68559fcdc2644435d01a",
+        "status": 1,
+        "quote_atoms": "5000000000000000000"
+      },
+      {
+        "case": "race-a",
+        "height": 181,
+        "hash": "0x494c1160c6a81a2e1ec5bdbfa0839a974ead914417324ce7def6186553c10d9d",
+        "status": 0,
+        "quote_atoms": "5000000000000000000"
+      }
+    ],
+    "unit": "tmsp",
+    "historicalProjectionVerified": true
+  }
+}
