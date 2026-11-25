@@ -29,6 +29,11 @@ def canonical(arg):
 
 def writes(role):
     abi = json.loads((ARTIFACTS / (ROLES[role] + ".json")).read_bytes())["abi"]
+    payment_entries = [(entry["type"], entry["stateMutability"]) for entry in abi
+                       if entry["type"] in {"receive", "fallback"}]
+    expected = [("receive", "payable")] if role in {"token-center", "nft-center", "drc20-backed"} else []
+    if payment_entries != expected:
+        raise ValueError(f"Unreviewed empty or unknown calldata entry point: {role} {payment_entries}")
     return {
         entry["name"] + "(" + ",".join(map(canonical, entry["inputs"])) + ")"
         for entry in abi if entry["type"] == "function"

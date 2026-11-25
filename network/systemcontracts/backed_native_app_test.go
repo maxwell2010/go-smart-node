@@ -3,6 +3,7 @@
 package systemcontracts_test
 
 import (
+	"crypto/ecdsa"
 	"encoding/json"
 	"math/big"
 	"os"
@@ -39,11 +40,12 @@ func assertNativeBackedTokenLifecycle(t *testing.T, l nativeHistoricalLifecycle,
 	require.NoError(t, err)
 	creator := crypto.PubkeyToAddress(private.PublicKey)
 	unit := new(big.Int).Exp(big.NewInt(10), big.NewInt(18), nil)
-	send := func(target common.Address, value *big.Int, data []byte, success bool) uint64 {
+	sendAs := func(signer *ecdsa.PrivateKey, target common.Address, value *big.Int, data []byte, success bool) uint64 {
 		t.Helper()
-		before := l.app.BankKeeper.GetBalance(l.snapshot(), sdk.AccAddress(creator.Bytes()), identity.BaseDenom).Amount.BigInt()
-		tx := ethtypes.NewTx(&ethtypes.LegacyTx{Nonce: l.app.EVMKeeper.GetNonce(l.snapshot(), creator), To: &target, Value: value, Gas: 24_000_000, GasPrice: big.NewInt(1_000_000_000_000), Data: data})
-		signed, err := ethtypes.SignTx(tx, ethtypes.NewEIP155Signer(big.NewInt(990001)), private)
+		from := crypto.PubkeyToAddress(signer.PublicKey)
+		before := l.app.BankKeeper.GetBalance(l.snapshot(), sdk.AccAddress(from.Bytes()), identity.BaseDenom).Amount.BigInt()
+		tx := ethtypes.NewTx(&ethtypes.LegacyTx{Nonce: l.app.EVMKeeper.GetNonce(l.snapshot(), from), To: &target, Value: value, Gas: 24_000_000, GasPrice: big.NewInt(1_000_000_000_000), Data: data})
+		signed, err := ethtypes.SignTx(tx, ethtypes.NewEIP155Signer(big.NewInt(990001)), signer)
 		require.NoError(t, err)
 		block, result := l.finalizeSignedEthereum(signed)
 		if success {
@@ -72,16 +74,20 @@ func assertNativeBackedTokenLifecycle(t *testing.T, l nativeHistoricalLifecycle,
 					amount = attribute.Value
 				}
 			}
-			if recipient == sdk.AccAddress(creator.Bytes()).String() {
+			if recipient == sdk.AccAddress(from.Bytes()).String() {
 				paid, err := sdk.ParseCoinNormalized(amount)
 				require.NoError(t, err)
 				require.Equal(t, identity.BaseDenom, paid.Denom)
 				before.Add(before, paid.Amount.BigInt())
 			}
 		}
-		after := l.app.BankKeeper.GetBalance(l.snapshot(), sdk.AccAddress(creator.Bytes()), identity.BaseDenom).Amount.BigInt()
+		after := l.app.BankKeeper.GetBalance(l.snapshot(), sdk.AccAddress(from.Bytes()), identity.BaseDenom).Amount.BigInt()
 		require.Zero(t, new(big.Int).Sub(before, after).Cmp(charged))
 		return result.GasUsed
+	}
+	send := func(target common.Address, value *big.Int, data []byte, success bool) uint64 {
+		t.Helper()
+		return sendAs(private, target, value, data, success)
 	}
 	supply := l.supply().String()
 	metadata := publicBackedMeta{InitialMint: new(big.Int).Mul(unit, big.NewInt(10)), MinTotalSupply: new(big.Int).Set(unit), MaxTotalSupply: new(big.Int).Mul(unit, big.NewInt(1000)), Creator: creator, Crr: 50, Identity: nativeAvatarMetadata, Symbol: "publicbx", Name: "PUBLIC RESERVE TOKEN"}
@@ -131,6 +137,29 @@ func assertNativeBackedTokenLifecycle(t *testing.T, l nativeHistoricalLifecycle,
 	data, err = tokenABI.Pack("transfer", common.HexToAddress(l.expect.Validators[0].EVM), unit)
 	require.NoError(t, err)
 	send(token, new(big.Int), data, true)
+	// A different signer spends only the approved units. After spending the
+	// allowance, the same transfer must revert without changing reserve or supply.
+	operatorKey, err := registryFixtureKey(4, true)
+	require.NoError(t, err)
+	operatorSigner, err := crypto.ToECDSA(operatorKey.Bytes())
+	require.NoError(t, err)
+	operator := crypto.PubkeyToAddress(operatorSigner.PublicKey)
+	beneficiary := crypto.CreateAddress(operator, 901)
+	approved, err := tokenABI.Pack("approve", operator, unit)
+	require.NoError(t, err)
+	spend, err := tokenABI.Pack("transferFrom", creator, beneficiary, unit)
+	require.NoError(t, err)
+	sendAs(operatorSigner, token, new(big.Int), spend, false)
+	send(token, new(big.Int), approved, true)
+	sendAs(operatorSigner, token, new(big.Int), spend, true)
+	sendAs(operatorSigner, token, new(big.Int), spend, false)
+	balances := common.HexToHash("0x52c63247e1f47db19d5ce0460030c497f067ca4cebf71ba98eeadabe20bace00")
+	beneficiarySlot := crypto.Keccak256Hash(common.BytesToHash(beneficiary.Bytes()).Bytes(), balances.Bytes())
+	require.Equal(t, unit.String(), l.app.EVMKeeper.GetState(l.snapshot(), token, beneficiarySlot).Big().String())
+	after, err := l.app.NativeCoinKeeper.GetCoinByDRC(l.snapshot(), token.Hex())
+	require.NoError(t, err)
+	require.Equal(t, coin.Reserve, after.Reserve)
+	require.Equal(t, coin.Volume, after.Volume)
 	bad := metadata
 	bad.Symbol = "badbackx"
 	bad.Name = "BAD BACKED METADATA"
