@@ -102,6 +102,13 @@ func (s nativeLaunchSpec) emptyAssets() bool {
 func (s nativeLaunchSpec) sponsoredFounder() bool { return s.evmID == nativeSponsoredLaunchEVMID }
 
 func nativeSponsoredFounderAddress() common.Address {
+	if path := os.Getenv("MCND_TESTNET_TARIFF_FOUNDER_FILE"); path != "" {
+		key, err := crypto.LoadECDSA(path)
+		if err != nil {
+			panic("invalid disposable tariff fixture key")
+		}
+		return crypto.PubkeyToAddress(key.PublicKey)
+	}
 	return common.BytesToAddress(crypto.Keccak256([]byte(nativeSponsoredLaunchChainID + "/address-only-beneficiary")))
 }
 

@@ -61,6 +61,14 @@ func issuanceCalldata(ctx sdk.Context, data []byte) []byte {
 
 func symbolKey(symbol string) []byte { return append([]byte{issuanceSymbolPrefix}, []byte(symbol)...) }
 
+func (r *customCollateralRegistry) preflightIssuanceSymbols(ctx sdk.Context) error {
+	if !testIssuanceActive(ctx.ChainID()) {
+		return nil
+	}
+	disposable, _ := ctx.CacheContext()
+	return r.indexIssuanceSymbols(disposable)
+}
+
 func (r *customCollateralRegistry) indexIssuanceSymbols(ctx sdk.Context) error {
 	store := ctx.KVStore(r.store)
 	if store.Has(symbolKey("")) {

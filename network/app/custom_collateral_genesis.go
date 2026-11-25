@@ -89,6 +89,9 @@ func (r *customCollateralRegistry) verifyRestored(ctx sdk.Context, expected []by
 	if expected != nil && !bytes.Equal(manifest, expected) {
 		return errors.New("restored DRC20 manifest differs from the configured genesis")
 	}
+	if err := r.preflightIssuanceSymbols(ctx); err != nil {
+		return err
+	}
 	return r.verifyManifest(ctx, manifest)
 }
 

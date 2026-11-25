@@ -140,7 +140,14 @@ jobs:
             jq -s -e 'any(.[]; .Action == "pass" and .Test == "TestMainnetICS20DenomAdmission")' \
               "$work/evidence/ics20-admission.jsonl" >/dev/null
           fi
+          if [[ "$PROFILE" == testnet ]]; then
+            go test -mod=readonly -p 2 -tags "$tags" -count=1 -run '^TestIssuanceHistoricalSymbols$' ./app
+          fi
           # Generate disposable signing identities through the existing sponsored CI fixture.
+          if [[ "$PROFILE" == testnet ]]; then
+            export MCND_TESTNET_TARIFF_FOUNDER_FILE="$work/tariff-founder.key"
+            openssl rand -hex 32 | tr -d '\n' > "$MCND_TESTNET_TARIFF_FOUNDER_FILE"
+          fi
           export MCND_NATIVE_CONSENSUS_FIXTURE_DIR="$work/fixture"
           export MCND_NATIVE_LAUNCH_REHEARSAL=4-empty-sponsored
           if ! go test -mod=readonly -p 2 -count=1 -timeout 8m -json \

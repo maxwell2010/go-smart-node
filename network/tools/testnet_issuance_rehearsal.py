@@ -29,8 +29,10 @@ def rehearse_issuance(signer, root, nodes, expected, env, report):
     check(len(policy['tariffs']) == 8, 'incomplete tariff')
     treasury = policy['treasury']
     subprocess.run([str(signer), '-test.run=^TestSignTestnetIssuance$'], check=True, timeout=35,
-                   env=dict(env, MCND_TARIFF_FACTORY=policy['token_center'], MCND_TARIFF_FIXTURE=str(directory)))
+                   env=dict(env, MCND_TESTNET_TARIFF_FOUNDER_FILE=str(root.parent / 'tariff-founder.key'),
+                            MCND_TARIFF_FACTORY=policy['token_center'], MCND_TARIFF_FIXTURE=str(directory)))
     fixtures = json.loads(private_bytes(directory / 'issues.json', 160000))
+    check(fixtures[0]['creator'].lower() == expected['actor'].lower(), 'funded founder differs from test signer')
     outcomes = []
 
     def verify(batch):

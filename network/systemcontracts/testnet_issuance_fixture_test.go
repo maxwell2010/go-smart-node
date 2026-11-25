@@ -49,6 +49,10 @@ func TestSignTestnetIssuance(t *testing.T) {
 	add := func(label, symbol string, backed, success bool, account int, signedFee int64) {
 		key, err := crypto.ToECDSA(nativeLaunchAccountKey(account, spec).Bytes())
 		require.NoError(t, err)
+		if account == 3 {
+			key, err = crypto.LoadECDSA(os.Getenv("MCND_TESTNET_TARIFF_FOUNDER_FILE"))
+			require.NoError(t, err)
+		}
 		creator := crypto.PubkeyToAddress(key.PublicKey)
 		n := nonces[account]
 		nonces[account]++
