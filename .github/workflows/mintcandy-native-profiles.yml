@@ -142,10 +142,19 @@ jobs:
               "$work/evidence/ics20-admission.jsonl" >/dev/null
           fi
           if [[ "$PROFILE" == testnet ]]; then
-            go test -mod=readonly -p 2 -tags appstate -count=1 -timeout 12m -json \
-              -run '^TestOwnedAppNative(UserNFTLifecycle|UserNFTRefundLifecycle|ReservelessTokenLifecycle)$' ./systemcontracts \
-              > "$work/assets.jsonl" || { jq -r 'select(.Action == "fail" or (.Output // "" | test("expected=|Error Trace|Error:|VmError|FAIL|native_app_test.go:"))) | (.Output // .Test)' "$work/assets.jsonl" | tail -80; exit 1; }
-            jq -se '[.[] | select(.Action == "pass" and (.Test // "" | startswith("TestOwnedAppNative")))] | length == 3' "$work/assets.jsonl" >/dev/null
+            go test -mod=readonly -p 2 -tags appstate -c -o "$work/assets-before.test" ./systemcontracts
+            go test -mod=readonly -p 2 -tags appstate,mcnd_native_sdk_migration_v1 -c -o "$work/assets-after.test" ./systemcontracts
+            run_asset_suite() {
+              local program="$1" suite="$2"
+              if ! "$program" -test.v -test.timeout=12m -test.run "^$suite$" > "$work/$suite.log" 2>&1; then
+                grep -E 'expected=|Error Trace|Error:|VmError|FAIL|native_app_test.go:' "$work/$suite.log" | tail -80
+                return 1
+              fi
+              grep -F -- "--- PASS: $suite (" "$work/$suite.log" >> "$work/evidence/asset-lifecycle.txt"
+            }
+            run_asset_suite "$work/assets-before.test" TestOwnedAppNativeUserNFTLifecycle
+            run_asset_suite "$work/assets-before.test" TestOwnedAppNativeReservelessTokenLifecycle
+            MCND_USER_NFT_REFUND_PREDECESSOR="$work/assets-before.test" run_asset_suite "$work/assets-after.test" TestOwnedAppNativeUserNFTRefundLifecycle
             go test -mod=readonly -p 2 -tags "$tags" -count=1 -run '^TestIssuanceHistoricalSymbols$' ./app
           fi
           # Generate disposable signing identities through the existing sponsored CI fixture.
