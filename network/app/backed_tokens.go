@@ -63,6 +63,10 @@ func (c *withdrawalController) admitBackedToken(ctx sdk.Context, sender common.A
 		}
 		switch method.Sig {
 		case "transfer(address,uint256)", "approve(address,uint256)", "transferFrom(address,address,uint256)":
+		case "permit(address,address,uint256,uint256,uint8,bytes32,bytes32)":
+			if !testIssuanceActive(ctx.ChainID()) {
+				return true, errors.New("backed operation is outside approved ERC20 transfers")
+			}
 		default:
 			return true, errors.New("backed operation is outside approved ERC20 transfers")
 		}

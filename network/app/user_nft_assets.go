@@ -304,6 +304,22 @@ func (c *withdrawalController) admitUserNFTOperation(ctx sdk.Context, msg core.M
 	if err != nil {
 		return err
 	}
+	if testIssuanceActive(ctx.ChainID()) {
+		switch method.RawName {
+		case "permit":
+			return c.admitAssetPermit(ctx, msg, receipt, asset, family, args)
+		case "safeBatchTransferFrom":
+			return c.admitUserNFTBatch(ctx, msg, receipt, asset, family, args)
+		case "burn":
+			if family == 4 || family == 5 {
+				return c.admitReservelessNFTBurn(ctx, msg, receipt, asset, family, args)
+			}
+		case "addReserveByDEL":
+			if family == 2 || family == 3 {
+				return c.admitNFTNativeTopup(ctx, msg, receipt, asset, family, args)
+			}
+		}
+	}
 	switch method.RawName {
 	case "approve", "setApprovalForAll":
 		if msg.Value.Sign() != 0 || len(receipt.Logs) != 1 || receipt.Logs[0].Address != target {

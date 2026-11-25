@@ -35,7 +35,7 @@ func reservelessMembershipKey(token common.Address) []byte {
 
 // admitReservelessToken accepts only a signed direct factory creation or a
 // small ERC20 operation on a token previously admitted by that creation path.
-// Nested calls, permit, ownership changes and arbitrary contract calls remain
+// Nested calls, ownership changes and arbitrary contract calls remain
 // outside this isolated native profile.
 func (c *withdrawalController) admitReservelessToken(ctx sdk.Context, sender common.Address, msg core.Message, receipt *ethtypes.Receipt) (bool, error) {
 	r := c.customCollateral
@@ -232,6 +232,9 @@ func (c *withdrawalController) admitReservelessOperation(ctx sdk.Context, msg co
 	args, err := canonicalReservelessArgs(*method, msg.Data)
 	if err != nil {
 		return err
+	}
+	if testIssuanceActive(ctx.ChainID()) && method.RawName == "permit" {
+		return c.admitAssetPermit(ctx, msg, receipt, tokenABI, 0, args)
 	}
 	from, to, event := msg.From, common.Address{}, "Transfer"
 	var amount *big.Int
