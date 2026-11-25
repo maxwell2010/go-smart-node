@@ -96,7 +96,7 @@ func (c *withdrawalController) admitBackedToken(ctx sdk.Context, sender common.A
 	if r.evm.GetState(ctx, r.profile.TokenCenter, reservelessPauseSlot) != (common.Hash{}) {
 		return true, errors.New("backed TokenCenter is paused")
 	}
-	args, err := canonicalReservelessArgs(method, msg.Data)
+	args, err := canonicalReservelessArgs(method, issuanceCalldata(ctx, msg.Data))
 	if err != nil {
 		return true, err
 	}
@@ -183,6 +183,9 @@ func (c *withdrawalController) admitBackedToken(ctx sdk.Context, sender common.A
 		return true, err
 	}
 	if err := r.reservePublicTokenName(ctx, meta.Name); err != nil {
+		return true, err
+	}
+	if err := r.settleIssuance(ctx, sender, token, meta.Symbol, msg.Data, commission); err != nil {
 		return true, err
 	}
 	if err := r.keeper.SetCoin(ctx, coin); err != nil {

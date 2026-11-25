@@ -119,7 +119,7 @@ func (c *withdrawalController) admitReservelessCreation(ctx sdk.Context, msg cor
 	if err != nil {
 		return err
 	}
-	args, err := canonicalReservelessArgs(centerABI.Methods["createTokenReserveless"], msg.Data)
+	args, err := canonicalReservelessArgs(centerABI.Methods["createTokenReserveless"], issuanceCalldata(ctx, msg.Data))
 	if err != nil {
 		return err
 	}
@@ -186,6 +186,9 @@ func (c *withdrawalController) admitReservelessCreation(ctx sdk.Context, msg cor
 		return errors.New("reserveless creation logs differ from the signed factory initialization")
 	}
 	if err := r.reservePublicTokenName(ctx, name); err != nil {
+		return err
+	}
+	if err := r.settleIssuance(ctx, msg.From, token, symbol, msg.Data, new(big.Int)); err != nil {
 		return err
 	}
 	ctx.KVStore(r.store).Set(key, []byte{1})

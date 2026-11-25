@@ -719,6 +719,9 @@ def run_launch(binary, root, genesis, expected, keys, env, owner, report, *, fou
         from native_profile_fees import rehearse_profile_fees
 
         rehearse_profile_fees(binary, fee_signer, root, nodes, expected, env, report)
+        if expected['nativeDenom'] == 'tmsp':
+            from testnet_issuance_rehearsal import rehearse_issuance
+            rehearse_issuance(fee_signer, root, nodes, expected, env, report)
     if media_fixture is not None:
         from native_launch_media import rehearse_media
 

@@ -2,7 +2,7 @@ name: MintCandy native profile rehearsal
 
 on:
   push:
-    branches: ['codex/mintcandy-native-denoms', 'integration/mintcandy-native-denoms', 'integration/mintcandy-mainnet*']
+    branches: ['testnet/drc20-issuance-tariff', 'codex/mintcandy-native-denoms', 'integration/mintcandy-native-denoms', 'integration/mintcandy-mainnet*']
     paths: ['network/**', '.github/workflows/mintcandy-native-profiles.yml']
   workflow_dispatch:
     inputs:
