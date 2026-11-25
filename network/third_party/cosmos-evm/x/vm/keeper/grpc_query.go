@@ -414,6 +414,9 @@ func (k Keeper) EstimateGasInternal(c context.Context, req *types.EthCallRequest
 				return true, nil, err
 			}
 		}
+		if k.transactionContext != nil {
+			tmpCtx = k.transactionContext(tmpCtx, *msg)
+		}
 		stateDB := statedb.New(tmpCtx, &k, txConfig)
 		rsp, err = k.ApplyMessageWithConfig(tmpCtx, stateDB, *msg, nil, k.HasHooks(), false, executionCfg, txConfig, false, nil)
 		if err != nil {

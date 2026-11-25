@@ -218,6 +218,9 @@ func (app *App) installWithdrawalController(controller *withdrawalController) {
 	if controller.customCollateral != nil {
 		app.BankKeeper.AppendSendRestriction(controller.customCollateral.restrictReserveCredit)
 	}
+	if testIssuanceActive(app.chainID) {
+		app.EVMKeeper.SetTransactionContext(reserveTradeContext)
+	}
 	app.EVMKeeper.SetInternalCommitGuard(controller.guardInternalCommit)
 	app.EVMKeeper.AppendHooks(controller)
 	app.withdrawals = controller

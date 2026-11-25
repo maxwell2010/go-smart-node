@@ -13,6 +13,14 @@ import (
 	"github.com/ethereum/go-ethereum/core/vm"
 )
 
+// SetTransactionContext scopes a native capability to a single outer EVM call.
+func (k *Keeper) SetTransactionContext(prepare func(sdk.Context, core.Message) sdk.Context) {
+	if prepare == nil || k.transactionContext != nil {
+		panic("invalid EVM transaction context registration")
+	}
+	k.transactionContext = prepare
+}
+
 // SetInternalCommitGuard installs the application's check for internal EVM
 // state transitions that do not pass through signed transaction hooks.
 func (k *Keeper) SetInternalCommitGuard(guard func(sdk.Context, core.Message, []*ethtypes.Log) error) {

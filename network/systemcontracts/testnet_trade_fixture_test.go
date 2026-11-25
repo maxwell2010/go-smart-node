@@ -65,13 +65,14 @@ func TestSignTestnetTrades(t *testing.T) {
 		require.NoError(t, err)
 		raw, err := tx.MarshalBinary()
 		require.NoError(t, err)
-		rows = append(rows, map[string]any{"label": label, "side": side, "input": tenth(input).String(), "min_out": tenth(minOut).String(), "success": success, "nonce": n, "creator": crypto.PubkeyToAddress(key.PublicKey).Hex(), "recipient": receiver.Hex(), "target": target.Hex(), "hash": tx.Hash().Hex(), "raw": hexutil.Encode(raw)})
+		rows = append(rows, map[string]any{"label": label, "side": side, "input": tenth(input).String(), "min_out": tenth(minOut).String(), "success": success, "nonce": n, "creator": crypto.PubkeyToAddress(key.PublicKey).Hex(), "recipient": receiver.Hex(), "target": target.Hex(), "hash": tx.Hash().Hex(), "raw": hexutil.Encode(raw), "data": hexutil.Encode(data), "value": hexutil.EncodeBig(value)})
 	}
 	// At CRR=100 this fixture starts at 10 tokens per native unit, with supply=10, reserve=1 and cap=1000.
 	add("buy", "buy", true, a, 10, 100, true)
 	add("sell", "sell", false, b, 50, 5, true)
 	add("sell-reserve-floor", "sell", false, a, 60, 0, false)
 	add("sell-supply-floor", "sell", false, a, 149, 0, false)
+	add("contract-recipient", "buy", false, target, 10, 1, false)
 	add("buy-min-out", "buy", false, a, 10, 101, false)
 	add("sell-min-out", "sell", false, b, 10, 2, false)
 	add("buy-above-cap", "buy", false, a, 986, 0, false)

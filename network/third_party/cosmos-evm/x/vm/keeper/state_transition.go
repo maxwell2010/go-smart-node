@@ -220,6 +220,9 @@ func (k *Keeper) ApplyTransaction(ctx sdk.Context, tx *ethtypes.Transaction) (*t
 	// Didn't use `Snapshot` because the context stack has exponential complexity on certain operations,
 	// thus restricted to be used only inside `ApplyMessage`.
 	tmpCtx, commitFn := ctx.CacheContext()
+	if k.transactionContext != nil {
+		tmpCtx = k.transactionContext(tmpCtx, *msg)
+	}
 
 	// pass true to commit the StateDB
 	stateDB := statedb.New(tmpCtx, k, txConfig)

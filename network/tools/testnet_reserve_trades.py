@@ -88,6 +88,19 @@ def rehearse_trades(signer, root, nodes, expected, env, report, token, other):
             check(after['volume']==1000*UNIT,'successful boundary trade must reach the exact cap')
     for op in ops[:-2]:
         report['phase']='market-'+op['label']
+        call = {'from':op['creator'], 'to':token, 'data':op['data'], 'value':op['value'], 'gas':hex(3_000_000)}
+        if op['success']:
+            gas = int(ethereum('eth_estimateGas', [call], base=source.evm),16)
+            check(21000 < gas <= 3_000_000,'invalid wallet gas estimate')
+        elif op['label'] == 'contract-recipient':
+            rpc, _ = request(source.evm, {'jsonrpc':'2.0','id':1,'method':'eth_estimateGas','params':[call]})
+            check('MC_TRADE_RECIPIENT' in str(rpc.get('error',{})), 'native recipient restriction missing')
+        else:
+            rpc, _ = request(source.evm, {'jsonrpc':'2.0','id':1,'method':'eth_call','params':[call,'latest']})
+            selectors = {'sell-reserve-floor':'0x7da7f44d','sell-supply-floor':'0xc9f16362',
+                         'buy-above-cap':'0x763303a6','buy-min-out':'0x6594b822','sell-min-out':'0x6594b822'}
+            check(rpc.get('error',{}).get('data') == selectors[op['label']],
+                  f"unexpected revert for {op['label']}: {str(rpc.get('error'))[:200]}")
         rc=commit_media_transaction(source,nodes,op,op['nonce'],report,status=int(op['success']))
         verify([(op,rc)])
     report['phase']='market-race'

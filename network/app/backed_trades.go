@@ -32,6 +32,15 @@ type reserveBuyCredit struct {
 	amount *big.Int
 }
 
+// The keeper supplies a fresh transaction cache after EIP-155 recovery, or a discarded
+// estimation cache. Internal module EVM calls do not pass through this entry point.
+func reserveTradeContext(ctx sdk.Context, msg core.Message) sdk.Context {
+	if msg.To != nil && msg.Value != nil && msg.Value.Sign() > 0 && len(msg.Data) == 68 && bytes.Equal(msg.Data[:4], buySelector) {
+		return ctx.WithValue(reserveBuyCreditKey{}, reserveBuyCredit{*msg.To, new(big.Int).Set(msg.Value)})
+	}
+	return ctx
+}
+
 // Only the EVM balance wrapper may credit this exact signed buy into its target reserve.
 // Other transfers, including SDK bank, IBC, and credits to a different reserve, keep the existing restriction.
 func signedReserveCredit(ctx sdk.Context, from, to sdk.AccAddress, coins sdk.Coins) bool {
