@@ -106,6 +106,12 @@ def rehearse_issuance(signer, root, nodes, expected, env, report):
 
 
     from testnet_reserve_trades import rehearse_trades
-    first = ethereum('eth_getTransactionReceipt', [fixtures[0]['hash']], base=observer.evm)
-    event = next(e for e in first['logs'] if e['address'].lower() == policy['token_center'].lower())
-    rehearse_trades(signer, root, nodes, expected, env, report, '0x' + event['data'][26:66], race[1]['creator'])
+    from testnet_asset_bundle import rehearse_bundle
+    token_pair = []
+    for issue in fixtures[:2]:
+        receipt = ethereum('eth_getTransactionReceipt', [issue['hash']], base=observer.evm)
+        event = next(e for e in receipt['logs'] if e['address'].lower() == policy['token_center'].lower())
+        token_pair.append('0x' + event['data'][26:66])
+    other = race[1]['creator']
+    rehearse_trades(signer, root, nodes, expected, env, report, token_pair[0], other)
+    rehearse_bundle(signer, root, nodes, expected, env, report, token_pair, other)
