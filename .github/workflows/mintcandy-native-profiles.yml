@@ -108,6 +108,7 @@ jobs:
           go mod download
           go mod verify
           git diff --exit-code -- go.mod go.sum
+          python3 -B tools/check_asset_operations.py
           python3 scripts/verify_owned_evm.py
           python3 scripts/verify_owned_geth.py
           python3 scripts/verify_owned_sdk.py --compiled
@@ -141,6 +142,10 @@ jobs:
               "$work/evidence/ics20-admission.jsonl" >/dev/null
           fi
           if [[ "$PROFILE" == testnet ]]; then
+            go test -mod=readonly -p 2 -tags appstate -count=1 -timeout 12m -json \
+              -run '^TestOwnedAppNative(UserNFTLifecycle|UserNFTRefundLifecycle|ReservelessTokenLifecycle)$' ./systemcontracts \
+              > "$work/assets.jsonl" || { jq -r 'select(.Action == "fail" or (.Output // "" | test("expected=|Error Trace|Error:|VmError|FAIL|native_app_test.go:"))) | (.Output // .Test)' "$work/assets.jsonl" | tail -80; exit 1; }
+            jq -se '[.[] | select(.Action == "pass" and (.Test // "" | startswith("TestOwnedAppNative")))] | length == 3' "$work/assets.jsonl" >/dev/null
             go test -mod=readonly -p 2 -tags "$tags" -count=1 -run '^TestIssuanceHistoricalSymbols$' ./app
           fi
           # Generate disposable signing identities through the existing sponsored CI fixture.

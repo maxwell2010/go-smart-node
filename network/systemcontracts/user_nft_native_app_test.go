@@ -187,6 +187,53 @@ func runNativeUserNFTLifecycle(t *testing.T, l nativeHistoricalLifecycle, dir, p
 		before, err := l.app.NativeNFTKeeper.GetToken(l.snapshot(), nativeID)
 		require.NoError(t, err)
 		require.Equal(t, token.Minted, before.Minted)
+		// Exercise each public approval and single-transfer overload on all four
+		// families. Submit as the other wallet before, during and after approval.
+		call := func(signer int, signature string, success bool, args ...interface{}) {
+			t.Helper()
+			for _, method := range asset.Methods {
+				if method.Sig == signature {
+					payload, err := asset.Pack(method.Name, args...)
+					require.NoError(t, err)
+					t.Logf("%s %s signer=%d expected=%v", name, signature, signer, success)
+					send(signer, target, payload, new(big.Int), success)
+					return
+				}
+			}
+			t.Fatalf("compiled %s has no %s", name, signature)
+		}
+		approval := "setApprovalForAll(address,bool)"
+		if is1155 {
+			single := "safeTransferFrom(address,address,uint256,uint256,bytes)"
+			unit := big.NewInt(1)
+			call(4, single, false, owner, other, id, unit, []byte{})
+			call(3, approval, true, other, true)
+			call(4, single, true, owner, other, id, unit, []byte{})
+			call(4, single, true, other, owner, id, unit, []byte{})
+			call(3, approval, true, other, false)
+			call(4, single, false, owner, other, id, unit, []byte{})
+			call(3, single, false, owner, other, id, unit, []byte{1})
+			call(3, "safeBatchTransferFrom(address,address,uint256[],uint256[],bytes)", false,
+				owner, other, []*big.Int{id}, []*big.Int{unit}, []byte{})
+		} else {
+			single := "safeTransferFrom(address,address,uint256)"
+			withData := "safeTransferFrom(address,address,uint256,bytes)"
+			call(4, single, false, owner, other, id)
+			call(3, "approve(address,uint256)", true, other, id)
+			call(4, single, true, owner, other, id)
+			call(4, withData, true, other, owner, id, []byte{})
+			call(3, approval, true, other, true)
+			call(3, approval, true, other, false)
+			call(4, single, false, owner, other, id)
+			call(3, withData, false, owner, other, id, []byte{1})
+		}
+		if i >= 2 {
+			if is1155 {
+				call(3, "burn(uint256,uint256)", false, id, big.NewInt(1))
+			} else {
+				call(3, "burn(uint256)", false, id)
+			}
+		}
 		if is1155 {
 			data, err = asset.Pack("safeTransferFrom", owner, other, id, big.NewInt(1), []byte{})
 		} else {

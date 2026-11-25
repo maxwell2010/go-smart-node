@@ -1,0 +1,89 @@
+{
+  "source": "https://github.com/maxwell2010/go-smart-node/actions/runs/45667636127",
+  "revision": "6bfdbad7f94ae8dc510ffb4a25f744c60966cf11",
+  "chain_id": "mintcandy_990098-1",
+  "reserveTrades": {
+    "token": "0x17605623b72401b0f1e14fd5839b1228b7dc8f1a",
+    "outcomes": [
+      {
+        "case": "buy",
+        "height": 145,
+        "hash": "0x7e908d96f8244146945f2d2cd9d245821a515b9bd79af1d884d86605f5ba58db",
+        "status": 1,
+        "quote_atoms": "10000000000000000000"
+      },
+      {
+        "case": "sell",
+        "height": 149,
+        "hash": "0x85a8b585fef1f4973e9b62bbfbedadeebbcb508cdb99d0035b3e6fc2b7c615ed",
+        "status": 1,
+        "quote_atoms": "500000000000000000"
+      },
+      {
+        "case": "sell-reserve-floor",
+        "height": 153,
+        "hash": "0xec48ae6ef41427c6deb1f938d38e780b33b63f16ce27e1f382e94d5735cfba0f",
+        "status": 0,
+        "quote_atoms": "600000000000000000"
+      },
+      {
+        "case": "sell-supply-floor",
+        "height": 157,
+        "hash": "0xd4dac14cad6cdd44cd437e7749636f5c9c174d9e0bada680534885fbccb67703",
+        "status": 0,
+        "quote_atoms": "1490000000000000000"
+      },
+      {
+        "case": "contract-recipient",
+        "height": 161,
+        "hash": "0xcc6533bf7cc1c069948c5e6066b97286f5edcdd267dc7ee29e3fac7c811d3224",
+        "status": 0,
+        "quote_atoms": "10000000000000000000"
+      },
+      {
+        "case": "buy-min-out",
+        "height": 165,
+        "hash": "0x7a97079f2f9837f8b80095e508a33f474c89172918e21fae10d8380cc517eb30",
+        "status": 0,
+        "quote_atoms": "10000000000000000000"
+      },
+      {
+        "case": "sell-min-out",
+        "height": 169,
+        "hash": "0x26a1f5f1959e49876963d20a043bc1e8fa2ed2c4d1a9fb6112321cab77b36613",
+        "status": 0,
+        "quote_atoms": "100000000000000000"
+      },
+      {
+        "case": "buy-above-cap",
+        "height": 173,
+        "hash": "0x179c32795061a81362ca882de15f87b66a35cf2c1301f6e126f904ff9bd31e1b",
+        "status": 0,
+        "quote_atoms": "986000000000000000000"
+      },
+      {
+        "case": "approach-cap",
+        "height": 177,
+        "hash": "0xd3ec7e6b09a72a988c197c6d2d2ec2809c21a3ae25c409ceff01923a9cfd27e4",
+        "status": 1,
+        "quote_atoms": "980000000000000000000"
+      },
+      {
+        "case": "race-a",
+        "height": 181,
+        "hash": "0xdbffdfccfa9ce2f40bca2d1c7cd2b654b9e5c3b0a07bca828bf94c70d18cdf90",
+        "status": 1,
+        "quote_atoms": "5000000000000000000"
+      },
+      {
+        "case": "race-b",
+        "height": 181,
+        "hash": "0xaceec92d9a2a705965b67703de40025ea4b444064f038e782b776a8e1f2bba05",
+        "status": 0,
+        "quote_atoms": "5000000000000000000"
+      }
+    ],
+    "unit": "tmsp",
+    "historicalProjectionVerified": true
+  }
+}
