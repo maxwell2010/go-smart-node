@@ -139,11 +139,18 @@ func (k *StateKeeper) RetireUserNFTUnits(ctx sdk.Context, nativeID string, owner
 	if err != nil {
 		return nil, err
 	}
-	before := token.Minted - token.Burnt
-	if quantity == 0 || quantity > 128 || quantity > before || token.ReserveLess || token.IsolatedReceipt ||
-		token.Reserve.Denom != identity.BaseDenom {
+	if token.ReserveLess || token.Reserve.Denom != identity.BaseDenom {
 		return nil, errors.New("invalid refundable native NFT units")
 	}
+	return k.retireUserNFTUnits(ctx, token, owner, quantity)
+}
+
+func (k *StateKeeper) retireUserNFTUnits(ctx sdk.Context, token types.Token, owner sdk.AccAddress, quantity uint32) ([]uint32, error) {
+	before := token.Minted - token.Burnt
+	if quantity == 0 || quantity > 128 || quantity > before || token.IsolatedReceipt {
+		return nil, errors.New("invalid native NFT retirement")
+	}
+	nativeID := token.ID
 	child, commit := ctx.CacheContext()
 	indexed, err := k.hasActiveSubTokenCounts(child)
 	if err != nil {
