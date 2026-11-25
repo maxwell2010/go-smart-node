@@ -104,3 +104,8 @@ def rehearse_issuance(signer, root, nodes, expected, env, report):
     report['testnetIssuance'] = {'denom': 'tmsp', 'treasury': treasury, 'outcomes': outcomes,
                                 'observerMatched': True, 'treasuryAndBurnVerified': True}
 
+
+    from testnet_reserve_trades import rehearse_trades
+    first = ethereum('eth_getTransactionReceipt', [fixtures[0]['hash']], base=observer.evm)
+    event = next(e for e in first['logs'] if e['address'].lower() == policy['token_center'].lower())
+    rehearse_trades(signer, root, nodes, expected, env, report, '0x' + event['data'][26:66], race[1]['creator'])

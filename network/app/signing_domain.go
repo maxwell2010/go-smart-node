@@ -1,6 +1,7 @@
 package app
 
 import (
+	"bytes"
 	"math/big"
 
 	sdk "github.com/cosmos/cosmos-sdk/types"
@@ -14,7 +15,8 @@ import (
 func protectEthereumDomain(next sdk.AnteHandler, evmID uint64) sdk.AnteHandler {
 	expected := new(big.Int).SetUint64(evmID)
 	return func(ctx sdk.Context, tx sdk.Tx, simulate bool) (sdk.Context, error) {
-		for _, msg := range tx.GetMsgs() {
+		messages := tx.GetMsgs()
+		for _, msg := range messages {
 			eth, ok := msg.(*evmtypes.MsgEthereumTx)
 			if !ok {
 				continue
@@ -25,6 +27,9 @@ func protectEthereumDomain(next sdk.AnteHandler, evmID uint64) sdk.AnteHandler {
 			raw := eth.AsTransaction()
 			if raw == nil || !raw.Protected() || raw.ChainId().Cmp(expected) != 0 {
 				return ctx, sdkerrors.ErrUnauthorized.Wrap("a protected Ethereum signature for this network's EVM chain ID is required")
+			}
+			if testIssuanceActive(ctx.ChainID()) && len(messages) == 1 && raw.To() != nil && len(raw.Data()) == 68 && bytes.Equal(raw.Data()[:4], buySelector) && raw.Value().Sign() > 0 {
+				ctx = ctx.WithValue(reserveBuyCreditKey{}, reserveBuyCredit{token: *raw.To(), amount: raw.Value()})
 			}
 		}
 		return next(ctx, tx, simulate)

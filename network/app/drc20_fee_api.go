@@ -196,6 +196,7 @@ func (app *App) registerDRC20FeeRoutes(router *mux.Router) {
 		return
 	}
 	if identity.ProfileChainID == identity.TestnetChainID {
+		router.HandleFunc("/mintcandy/markets/v1/reserve", app.handleReserveMarket)
 		router.HandleFunc("/mintcandy/issuance/v1/tariff", app.handleIssuanceTariff)
 	}
 	router.HandleFunc("/mintcandy/fees/v1/quote", app.handleDRC20FeeQuote)
