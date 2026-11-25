@@ -56,7 +56,9 @@ def rehearse_bundle(signer, root, nodes, expected, env, report, token_pair, othe
     fixture = json.loads(private_bytes(directory / "bundle.json", 360000))
     check(wallets == [fixture["owner"].lower(), fixture["operator"].lower()], "incorrect fixture signers")
     assets = {a["asset"]: a for a in fixture["assets"]}
+    check(0 < len(fixture["rows"]) <= 64, "asset suite exceeds its block budget")
     outcomes = []
+    report["assetBundle"] = {"chainId": CHAIN, "outcomes": outcomes, "observerMatched": False}
     minted = Counter()
     for row in fixture["rows"]:
         label, family = row["label"], row["asset"]
@@ -112,8 +114,20 @@ def rehearse_bundle(signer, root, nodes, expected, env, report, token_pair, othe
                 heights = (hex(height - 1), hex(height))
                 escrow = [int(ethereum("eth_getBalance", [token, h], base=observer.evm), 16) for h in heights]
                 check(escrow[1] - escrow[0] == (2*UNIT if label == "topup" else 0), "incorrect custody delta")
+                if "topup" in label:
+                    donor = row["creator"].lower()
+                    balances = [int(ethereum("eth_getBalance", [donor, h], base=observer.evm), 16) for h in heights]
+                    gas = int(receipt["gasUsed"], 16) * int(receipt["effectiveGasPrice"], 16)
+                    reward = 0
+                    for event in observer.rpc(f"block_results?height={height}").get("finalize_block_events") or []:
+                        if event["type"] == "decimal_native_fee_reward":
+                            attrs = {x["key"]: x["value"] for x in event["attributes"]}
+                            if bech32_payload(attrs["recipient"]) == donor:
+                                reward += int(attrs["amount"].removesuffix("tmsp"))
+                    check(balances[1] - balances[0] == reward - gas - (escrow[1] - escrow[0]),
+                          "donor debit differs from reserve payment and fee")
         outcomes.append({"asset": family, "case": label, "status": int(receipt["status"], 16),
                          "height": height, "hash": row["hash"]})
     check(len(assets) == 6 and sum(x["case"] == "permit" and x["status"] for x in outcomes) == 6,
           "missing permit family")
-    report["assetBundle"] = {"chainId": CHAIN, "outcomes": outcomes, "observerMatched": True}
+    report["assetBundle"]["observerMatched"] = True
