@@ -40,7 +40,11 @@ func (k *StateKeeper) IncreaseUserNFTReserve(ctx sdk.Context, nativeID string, p
 		if err != nil {
 			return err
 		}
-		if sub.Reserve != nil || sub.Owner == gateway.String() || sub.Owner == vault.String() {
+		owner, err := account(sub.Owner)
+		if err != nil {
+			return err
+		}
+		if sub.Reserve != nil || owner.Equals(gateway) || owner.Equals(vault) {
 			return errors.New("NFT top-up requires uniform wallet origin units")
 		}
 		active++
