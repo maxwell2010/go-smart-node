@@ -204,6 +204,9 @@ func TestOfflineMainnetTickerIndex(t *testing.T) {
 		return ctx.WithBlockHeight(h).WithExecMode(sdk.ExecModeFinalize).WithHeaderInfo(coreheader.Info{ChainID: identity.MainnetChainID, Height: h, Time: next.Time})
 	}
 	missing, _ := virtual(forkHeight).CacheContext()
+	reserveTradesActive := a.withdrawals.customCollateral.reserveTradesActive
+	require.False(t, reserveTradesActive(ctx))
+	require.False(t, reserveTradesActive(missing))
 	require.Error(t, a.applyCoordinatedAssets(missing))
 	require.False(t, ctx.KVStore(vk).Has([]byte{coordinatedAssetsMarker}))
 	// The real H60000 completion is still in the future in this fixture.
@@ -221,6 +224,10 @@ func TestOfflineMainnetTickerIndex(t *testing.T) {
 	require.False(t, occupied.KVStore(vk).Has(symbolKey("")))
 	require.False(t, occupied.KVStore(vk).Has([]byte{coordinatedAssetsMarker}))
 	require.NoError(t, a.applyCoordinatedAssets(virtual(forkHeight)))
+	require.True(t, reserveTradesActive(virtual(forkHeight)))
+	require.True(t, reserveTradesActive(virtual(forkHeight+1)))
+	require.False(t, reserveTradesActive(virtual(forkHeight-1)))
+	require.False(t, reserveTradesActive(virtual(forkHeight).WithChainID(identity.TestnetChainID)))
 	require.ErrorContains(t, a.applyCoordinatedAssets(virtual(forkHeight)), "already applied")
 	require.NoError(t, a.applyCoordinatedAssets(virtual(forkHeight+1)))
 	// Persist through a complete ABCI block so native consensus anchors, restart
@@ -274,6 +281,7 @@ func TestOfflineMainnetTickerIndex(t *testing.T) {
 	require.NoError(t, err)
 	require.JSONEq(t, string(data), string(restored))
 	result := map[string]interface{}{"height": pre.Version, "inputAppHash": fmt.Sprintf("%X", pre.Hash), "offlineMigratedAppHash": fmt.Sprintf("%X", post.Hash), "canonicalControlAppHash": canonicalAppHash, "replayedHeight": next.Height, "tickers": tokens, "storesComparedOutsideExpectedChanges": len(controlStores), "virtualForkHeight": forkHeight, "syntheticPriorUpgradeHeight": 60000, "physicalCommitVersion": post.Version, "pool": pin.Address.Hex(), "cusdt": pin.CUSDT.Hex(), "issuer": pin.Initializer.Hex(), "cusdtSupply": cusdtSupply, "poolLP": "0", "custodyCUSDT": "0", "custodyWMSP": "0", "runtimeHash": runtimeHash.Hex(), "approval": "none; coordinated fork method in virtual context on historical state", "restoredBackupCanonicalReplay": true}
+	result["reserveTradesActiveOnMainnetAtVirtualFork"] = true
 	encoded, err := json.Marshal(result)
 	require.NoError(t, err)
 	_, err = io.WriteString(os.Stdout, "TICKER_COPY_AUDIT "+string(encoded)+"\n")
