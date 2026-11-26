@@ -72,7 +72,7 @@ func TestOfflineMainnetTickerIndex(t *testing.T) {
 		require.Equal(t, historicalHeight, pre.Version)
 		require.Equal(t, historicalAppHash, fmt.Sprintf("%X", pre.Hash))
 	} else {
-		require.Equal(t, historicalHeight+2, pre.Version)
+		require.Equal(t, historicalHeight+1, pre.Version)
 		require.Equal(t, os.Getenv("MINTCANDY_AUDIT_POST_HASH"), hex.EncodeToString(pre.Hash))
 	}
 	header := cmtproto.Header{ChainID: identity.MainnetChainID, Height: pre.Version}
@@ -198,10 +198,8 @@ func TestOfflineMainnetTickerIndex(t *testing.T) {
 	require.NoError(t, json.Unmarshal(data, &controlStores))
 	require.False(t, ctx.KVStore(vk).Has(symbolKey("")))
 	require.False(t, ctx.KVStore(vk).Has([]byte{issuanceActivationKey}))
-	// First replay the unmodified historical block on the candidate as a control.
-	replay()
-	require.Equal(t, strings.ToLower(canonicalAppHash), hex.EncodeToString(a.LastCommitID().Hash))
-	ctx = a.NewUncachedContext(false, cmtproto.Header{ChainID: identity.MainnetChainID, Height: next.Height, Time: next.Time})
+	// Exercise the actual fork hook in a virtual-height context on the verified
+	// historical state. The independent control replays the canonical next block.
 	virtual := func(h int64) sdk.Context {
 		return ctx.WithBlockHeight(h).WithExecMode(sdk.ExecModeFinalize).WithHeaderInfo(coreheader.Info{ChainID: identity.MainnetChainID, Height: h, Time: next.Time})
 	}
@@ -225,10 +223,11 @@ func TestOfflineMainnetTickerIndex(t *testing.T) {
 	require.NoError(t, a.applyCoordinatedAssets(virtual(forkHeight)))
 	require.ErrorContains(t, a.applyCoordinatedAssets(virtual(forkHeight)), "already applied")
 	require.NoError(t, a.applyCoordinatedAssets(virtual(forkHeight+1)))
-	// Persist the isolated experiment as a new IAVL version, without forging
-	// a mainnet block or representing its AppHash as a canonical block hash.
-	post := a.CommitMultiStore().Commit()
-	require.Equal(t, historicalHeight+2, post.Version)
+	// Persist through a complete ABCI block so native consensus anchors, restart
+	// and backup recovery are exercised using the real database lifecycle.
+	replay()
+	post := a.LastCommitID()
+	require.Equal(t, historicalHeight+1, post.Version)
 	after := a.NewUncachedContext(false, cmtproto.Header{ChainID: identity.MainnetChainID, Height: post.Version})
 	require.Equal(t, []byte{1}, after.KVStore(vk).Get([]byte{coordinatedAssetsMarker}))
 	pool, err := a.withdrawals.nativeLiquidityPoolAt(after)

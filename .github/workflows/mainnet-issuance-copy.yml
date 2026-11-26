@@ -80,7 +80,7 @@ jobs:
           for run in 1 2; do
             sudo -n unshare --net -- setpriv --reuid="$(id -u)" --regid="$(id -g)" --clear-groups --no-new-privs -- env -i PATH=/usr/bin:/bin HOME="$bindir" MINTCANDY_AUDIT_DB="$bindir/application.db" "$bindir/audit.test" -test.run='^TestOfflineMainnetTickerIndex$' -test.v -test.timeout=8m | tee "$bindir/run-$run.log"
             sed -n 's/^TICKER_COPY_AUDIT //p' "$bindir/run-$run.log" > "$bindir/result-$run.json"
-            jq -e '.virtualForkHeight == 62000 and .physicalCommitVersion == 37997 and .storesComparedOutsideExpectedChanges == 20 and (.tickers|length) == 3' "$bindir/result-$run.json"
+            jq -e '.virtualForkHeight == 62000 and .physicalCommitVersion == 37996 and .storesComparedOutsideExpectedChanges == 20 and (.tickers|length) == 3' "$bindir/result-$run.json"
           done
           cmp "$bindir/result-1.json" "$bindir/result-2.json"
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
