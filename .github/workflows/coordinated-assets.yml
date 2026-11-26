@@ -1,0 +1,67 @@
+name: Coordinated assets rehearsal on tMSP
+on:
+  push:
+    branches: [feat/mainnet-issuance-pool-rehearsal]
+    paths: ['network/**', '.github/workflows/coordinated-assets.yml']
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  rehearsal:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 50
+    env:
+      GOWORK: 'off'
+      GOTOOLCHAIN: local
+      GOMAXPROCS: '2'
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e
+        with:
+          go-version: '1.26.11'
+          cache-dependency-path: network/go.sum
+      - name: Build both roles and rehearse signed transactions on four disposable tMSP validators
+        working-directory: network
+        run: bash tools/ci_coordinated_assets.sh
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+        with:
+          name: mintcandy-coordinated-assets-${{ github.sha }}
+          path: ${{ runner.temp }}/coordinated-assets-results/rehearsal.json
+          if-no-files-found: error
+          retention-days: 30
+
+  mainnet-candidate:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e
+        with:
+          go-version: '1.26.11'
+          cache-dependency-path: network/go.sum
+      - name: Compile the fixed-height production profile for operator review
+        working-directory: network
+        env:
+          GOWORK: 'off'
+          GOTOOLCHAIN: local
+        run: |
+          set -euo pipefail
+          out="$RUNNER_TEMP/msp-operator-review"
+          mkdir "$out"
+          tags=mintcandy_mainnet,mintcandy_coordinated_assets
+          go build -mod=readonly -p 2 -trimpath -tags "$tags" -ldflags "-X main.buildCommit=$GITHUB_SHA" -o "$out/mcnd" ./cmd/mcnd
+          cd "$out"
+          echo "$GITHUB_SHA" > SOURCE_COMMIT
+          go version -m mcnd > GO_BUILD_INFO
+          sha256sum mcnd SOURCE_COMMIT GO_BUILD_INFO > SHA256SUMS
+          tar -czf "$RUNNER_TEMP/mintcandy-msp-coordinated-assets-linux-amd64.tar.gz" mcnd SHA256SUMS SOURCE_COMMIT GO_BUILD_INFO
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+        with:
+          name: mintcandy-msp-coordinated-assets-linux-amd64-${{ github.sha }}
+          path: ${{ runner.temp }}/mintcandy-msp-coordinated-assets-linux-amd64.tar.gz
+          if-no-files-found: error
+          retention-days: 30

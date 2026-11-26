@@ -5,6 +5,7 @@ import (
 	"math/big"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -51,6 +52,11 @@ func TestSignTestnetIssuance(t *testing.T) {
 	fees := []int64{100000, 10000, 1000, 100, 100, 100, 100, 10}
 	legacyQuarters := []int64{10000, 1000, 100, 10, 1, 1, 1, 1}
 	nonces := map[int]uint64{}
+	if first := os.Getenv("MCND_TARIFF_INITIAL_NONCE"); first != "" {
+		start, err := strconv.ParseUint(first, 10, 64)
+		require.NoError(t, err)
+		nonces[3] = start
+	}
 	var fixtures []map[string]any
 	add := func(label, symbol string, backed, success bool, account int, signedFee int64) {
 		key, err := crypto.ToECDSA(nativeLaunchAccountKey(account, spec).Bytes())

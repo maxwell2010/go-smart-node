@@ -31,7 +31,8 @@ def rehearse_issuance(signer, root, nodes, expected, env, report, *, mainnet=Fal
     check(len(policy['tariffs']) == 8, 'incomplete tariff')
     treasury = policy['treasury']
     subprocess.run([str(signer), '-test.run=^TestSignTestnetIssuance$'], check=True, timeout=35,
-                   env=dict(env, MCND_TESTNET_TARIFF_FOUNDER_FILE=str(root.parent / 'tariff-founder.key'),
+                   env=dict(env, MCND_TARIFF_INITIAL_NONCE=str(int(ethereum('eth_getTransactionCount', [expected['actor'], 'latest'], base=source.evm), 16)),
+                            MCND_TESTNET_TARIFF_FOUNDER_FILE=str(root.parent / 'tariff-founder.key'),
                             MCND_TARIFF_FACTORY=policy['token_center'], MCND_TARIFF_FIXTURE=str(directory)))
     fixtures = json.loads(private_bytes(directory / 'issues.json', 160000))
     check(fixtures[0]['creator'].lower() == expected['actor'].lower(), 'funded founder differs from test signer')

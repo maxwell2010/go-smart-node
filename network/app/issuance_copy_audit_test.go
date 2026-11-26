@@ -1,4 +1,4 @@
-//go:build mintcandy_mainnet && mintcandy_drc20_issuance
+//go:build mintcandy_mainnet && mintcandy_coordinated_assets
 
 package app
 
@@ -16,6 +16,7 @@ import (
 	"strings"
 	"testing"
 
+	coreheader "cosmossdk.io/core/header"
 	"cosmossdk.io/log"
 	upgradetypes "cosmossdk.io/x/upgrade/types"
 	abci "github.com/cometbft/cometbft/abci/types"
@@ -23,13 +24,15 @@ import (
 	dbm "github.com/cosmos/cosmos-db"
 	"github.com/cosmos/cosmos-sdk/client/flags"
 	sdk "github.com/cosmos/cosmos-sdk/types"
-	govtypes "github.com/cosmos/cosmos-sdk/x/gov/types"
-	govv1 "github.com/cosmos/cosmos-sdk/x/gov/types/v1"
+	authtypes "github.com/cosmos/cosmos-sdk/x/auth/types"
 	srvflags "github.com/cosmos/evm/server/flags"
+	evmtypes "github.com/cosmos/evm/x/vm/types"
 	"github.com/cosmos/gogoproto/jsonpb"
 	"github.com/ethereum/go-ethereum/common"
+	"github.com/ethereum/go-ethereum/crypto"
 	validatortypes "github.com/maxwell2010/go-smart-node/network/decimal/validator/types"
 	"github.com/maxwell2010/go-smart-node/network/identity"
+	contracts "github.com/maxwell2010/go-smart-node/network/systemcontracts"
 	"github.com/stretchr/testify/require"
 )
 
@@ -41,7 +44,7 @@ func TestOfflineMainnetTickerIndex(t *testing.T) {
 		t.Skip("requires a verified offline application.db")
 	}
 	const historicalHeight int64 = 37995
-	const proposedID uint64 = 990990
+	const forkHeight int64 = 62000
 	const historicalAppHash = "0E4105EE5A66F8062919EB91CA85165DDB91BB9FC06F2C1BD51DAD5EE6962793"
 	const canonicalAppHash = "24CC83BBE8443F38E201A9D30868F93D9022C1BC258A1DA6F28ADB31A7006AAD"
 	dir := t.TempDir()
@@ -69,27 +72,47 @@ func TestOfflineMainnetTickerIndex(t *testing.T) {
 		require.Equal(t, historicalHeight, pre.Version)
 		require.Equal(t, historicalAppHash, fmt.Sprintf("%X", pre.Hash))
 	} else {
-		require.Equal(t, historicalHeight+1, pre.Version)
+		require.Equal(t, historicalHeight+2, pre.Version)
 		require.Equal(t, os.Getenv("MINTCANDY_AUDIT_POST_HASH"), hex.EncodeToString(pre.Hash))
 	}
 	header := cmtproto.Header{ChainID: identity.MainnetChainID, Height: pre.Version}
+	pin := mainnetDRC20PoolPin()
+	code, err := contracts.LiquidityPoolRuntime(pin.Initializer)
+	require.NoError(t, err)
+	runtimeHash := crypto.Keccak256Hash(code)
+	doneKey := append(binary.BigEndian.AppendUint64([]byte{upgradetypes.DoneByte}, 60000), []byte(nativeSDKMigrationPlan)...)
 	// Digest every record outside the new index, including all bank and EVM
 	// data. Length prefixes distinguish arbitrary binary keys and values.
 	state := func(a *App, ctx sdk.Context) map[string]string {
 		out := map[string]string{}
+		poolAccount := a.AccountKeeper.GetAccount(ctx, sdk.AccAddress(pin.Address.Bytes()))
+		num, err := a.AccountKeeper.AccountNumber.Peek(ctx)
+		require.NoError(t, err)
+		if poolAccount != nil {
+			num = poolAccount.GetAccountNumber()
+		}
+		skip := map[string][][]byte{
+			authtypes.StoreKey:      {append([]byte{1}, pin.Address.Bytes()...), {2}, binary.BigEndian.AppendUint64([]byte("accountNumber"), num)},
+			evmtypes.StoreKey:       {append(bytes.Clone(evmtypes.KeyPrefixCodeHash), pin.Address.Bytes()...), append(bytes.Clone(evmtypes.KeyPrefixCode), runtimeHash.Bytes()...)},
+			validatortypes.StoreKey: {{userNFTRefundActivationKey}, {issuanceActivationKey}, {nativeLiquidityPoolUpgradeKey}, {coordinatedAssetsMarker}},
+			upgradetypes.StoreKey:   {doneKey},
+		}
 		for name, key := range a.keys {
 			it := ctx.KVStore(key).Iterator(nil, nil)
 			h := sha256.New()
 			for ; it.Valid(); it.Next() {
 				k := it.Key()
-				if name == validatortypes.StoreKey && (bytes.HasPrefix(k, []byte{issuanceSymbolPrefix}) || bytes.Equal(k, []byte{issuanceActivationKey})) {
+				if name == validatortypes.StoreKey && bytes.HasPrefix(k, []byte{issuanceSymbolPrefix}) {
 					continue
 				}
-				if name == govtypes.StoreKey && bytes.Equal(k, binary.BigEndian.AppendUint64([]byte{0}, proposedID)) {
-					continue
+				excluded := false
+				for _, allowed := range skip[name] {
+					if bytes.Equal(k, allowed) {
+						excluded = true
+						break
+					}
 				}
-				doneKey := append(binary.BigEndian.AppendUint64([]byte{upgradetypes.DoneByte}, uint64(historicalHeight+1)), []byte(drc20IssuancePlan)...)
-				if name == upgradetypes.StoreKey && (bytes.Equal(k, doneKey) || bytes.Equal(k, []byte{upgradetypes.ProtocolVersionByte})) {
+				if excluded {
 					continue
 				}
 				for _, b := range [][]byte{k, it.Value()} {
@@ -127,6 +150,12 @@ func TestOfflineMainnetTickerIndex(t *testing.T) {
 		require.NoError(t, json.Unmarshal(encoded, &expected))
 		require.Equal(t, []byte{1}, ctx.KVStore(vk).Get(symbolKey("")))
 		require.Equal(t, []byte{1}, ctx.KVStore(vk).Get([]byte{issuanceActivationKey}))
+		pool, err := a.withdrawals.nativeLiquidityPoolAt(ctx)
+		require.NoError(t, err)
+		require.NotNil(t, pool)
+		require.NoError(t, pool.verifySnapshot(ctx, true))
+		require.Equal(t, pin, pool.pin)
+		require.Equal(t, []byte{1}, ctx.KVStore(vk).Get([]byte{coordinatedAssetsMarker}))
 		require.Equal(t, expected.Tokens, index(ctx))
 		require.Equal(t, expected.Stores, state(a, ctx))
 		require.NoError(t, a.Close())
@@ -169,39 +198,52 @@ func TestOfflineMainnetTickerIndex(t *testing.T) {
 	require.NoError(t, json.Unmarshal(data, &controlStores))
 	require.False(t, ctx.KVStore(vk).Has(symbolKey("")))
 	require.False(t, ctx.KVStore(vk).Has([]byte{issuanceActivationKey}))
-	exists, err := a.GovKeeper.Proposals.Has(ctx, proposedID)
-	require.NoError(t, err)
-	require.False(t, exists)
-	beforeProtocol := ctx.KVStore(a.keys[upgradetypes.StoreKey]).Get([]byte{upgradetypes.ProtocolVersionByte})
-	var protocol uint64
-	if len(beforeProtocol) > 0 {
-		require.Len(t, beforeProtocol, 8)
-		protocol = binary.BigEndian.Uint64(beforeProtocol)
-	}
-	// Synthesize only the completed vote and scheduled plan in this disposable copy.
-	// FinalizeBlock then exercises the regular x/upgrade PreBlock and keeper handler.
-	manifest := nativeUpgradeManifest{Name: drc20IssuancePlan, Height: next.Height}
-	encodedManifest, err := json.Marshal(manifest)
-	require.NoError(t, err)
-	proposal := govv1.Proposal{Id: proposedID, Status: govv1.StatusPassed, FinalTallyResult: &govv1.TallyResult{YesCount: "40000000000000000000000", NoCount: "0", NoWithVetoCount: "0", AbstainCount: "0"}, Metadata: nativeUpgradeSchema + ":" + string(encodedManifest)}
-	require.NoError(t, a.GovKeeper.Proposals.Set(ctx, proposedID, proposal))
-	require.NoError(t, a.scheduleNativeUpgrade(ctx, proposal, manifest))
-	plan, err := a.UpgradeKeeper.GetUpgradePlan(ctx)
-	require.NoError(t, err)
-	require.Equal(t, manifest.Height, plan.Height)
+	// First replay the unmodified historical block on the candidate as a control.
 	replay()
-	post := a.LastCommitID()
-	after := a.NewUncachedContext(false, cmtproto.Header{ChainID: identity.MainnetChainID, Height: next.Height})
-	require.Equal(t, []byte{1}, after.KVStore(vk).Get([]byte{issuanceActivationKey}))
-	require.Equal(t, []byte{1}, after.KVStore(vk).Get(symbolKey("")))
-	done, err := a.UpgradeKeeper.GetDoneHeight(after, drc20IssuancePlan)
+	require.Equal(t, strings.ToLower(canonicalAppHash), hex.EncodeToString(a.LastCommitID().Hash))
+	ctx = a.NewUncachedContext(false, cmtproto.Header{ChainID: identity.MainnetChainID, Height: next.Height, Time: next.Time})
+	virtual := func(h int64) sdk.Context {
+		return ctx.WithBlockHeight(h).WithExecMode(sdk.ExecModeFinalize).WithHeaderInfo(coreheader.Info{ChainID: identity.MainnetChainID, Height: h, Time: next.Time})
+	}
+	missing, _ := virtual(forkHeight).CacheContext()
+	require.Error(t, a.applyCoordinatedAssets(missing))
+	require.False(t, ctx.KVStore(vk).Has([]byte{coordinatedAssetsMarker}))
+	// The real H60000 completion is still in the future in this fixture.
+	// Model its receipts, without adding a proposal or changing user balances.
+	ctx.KVStore(a.keys[upgradetypes.StoreKey]).Set(doneKey, []byte{1})
+	require.ErrorContains(t, a.applyCoordinatedAssets(virtual(forkHeight)), "completed height 60000")
+	ctx.KVStore(vk).Set([]byte{userNFTRefundActivationKey}, []byte{1})
+	require.NoError(t, a.applyCoordinatedAssets(virtual(forkHeight-1)))
+	require.False(t, ctx.KVStore(vk).Has([]byte{coordinatedAssetsMarker}))
+	require.Error(t, a.applyCoordinatedAssets(virtual(forkHeight+1)))
+	occupied, _ := virtual(forkHeight).CacheContext()
+	a.EVMKeeper.SetCodeHash(occupied, pin.Address.Bytes(), crypto.Keccak256([]byte("occupied fixture")))
+	require.ErrorContains(t, a.applyCoordinatedAssets(occupied), "pool")
+	require.False(t, occupied.KVStore(vk).Has([]byte{issuanceActivationKey}))
+	require.False(t, occupied.KVStore(vk).Has(symbolKey("")))
+	require.False(t, occupied.KVStore(vk).Has([]byte{coordinatedAssetsMarker}))
+	require.NoError(t, a.applyCoordinatedAssets(virtual(forkHeight)))
+	require.ErrorContains(t, a.applyCoordinatedAssets(virtual(forkHeight)), "already applied")
+	require.NoError(t, a.applyCoordinatedAssets(virtual(forkHeight+1)))
+	// Persist the isolated experiment as a new IAVL version, without forging
+	// a mainnet block or representing its AppHash as a canonical block hash.
+	post := a.CommitMultiStore().Commit()
+	require.Equal(t, historicalHeight+2, post.Version)
+	after := a.NewUncachedContext(false, cmtproto.Header{ChainID: identity.MainnetChainID, Height: post.Version})
+	require.Equal(t, []byte{1}, after.KVStore(vk).Get([]byte{coordinatedAssetsMarker}))
+	pool, err := a.withdrawals.nativeLiquidityPoolAt(after)
 	require.NoError(t, err)
-	require.Equal(t, next.Height, done)
-	require.Equal(t, binary.BigEndian.AppendUint64(nil, protocol+1), after.KVStore(a.keys[upgradetypes.StoreKey]).Get([]byte{upgradetypes.ProtocolVersionByte}))
-	got, err := a.GovKeeper.Proposals.Get(after, proposedID)
-	require.NoError(t, err)
-	require.Equal(t, proposal.Metadata, got.Metadata)
-	require.Equal(t, proposal.Status, got.Status)
+	require.NotNil(t, pool)
+	require.Equal(t, pin, pool.pin)
+	require.NoError(t, pool.verifySnapshot(after, true))
+	require.Equal(t, runtimeHash, a.EVMKeeper.GetCodeHash(after, pin.Address))
+	require.Equal(t, uint64(1), a.AccountKeeper.GetAccount(after, sdk.AccAddress(pin.Address.Bytes())).GetSequence())
+	cusdtSupply := a.EVMKeeper.GetState(after, pin.CUSDT, customSlotOffset(customERC20Slot, 2)).Big().String()
+	require.Equal(t, "5000000000000000000000", cusdtSupply)
+	poolBalanceKey := crypto.Keccak256Hash(customAddressWord(pin.Address).Bytes(), customERC20Slot.Bytes())
+	for _, token := range []common.Address{pin.CUSDT, pool.wrapper} {
+		require.Equal(t, common.Hash{}, a.EVMKeeper.GetState(after, token, poolBalanceKey))
+	}
 	tokens := index(after)
 	require.Equal(t, map[string]string{"test": "0xdB6E89eB27131c6b0FC226f9A4E241c1A84f7628", "cusdt": "0x16c1e12e5F0f338E9521082Fd671559845406B96", "cdel": "0x92Fe7b1A7558278634154E3972C87c1355A43c27"}, tokens)
 	require.Equal(t, controlStores, state(a, after))
@@ -232,7 +274,7 @@ func TestOfflineMainnetTickerIndex(t *testing.T) {
 	restored, err := os.ReadFile(restoredFile)
 	require.NoError(t, err)
 	require.JSONEq(t, string(data), string(restored))
-	result := map[string]interface{}{"height": pre.Version, "inputAppHash": fmt.Sprintf("%X", pre.Hash), "offlineMigratedAppHash": fmt.Sprintf("%X", post.Hash), "canonicalControlAppHash": canonicalAppHash, "replayedHeight": next.Height, "tickers": tokens, "storesComparedOutsideExpectedChanges": len(controlStores), "approval": "synthetic passed vote on offline clone", "scheduledPlan": drc20IssuancePlan, "appliedHeight": done, "restoredBackupCanonicalReplay": true}
+	result := map[string]interface{}{"height": pre.Version, "inputAppHash": fmt.Sprintf("%X", pre.Hash), "offlineMigratedAppHash": fmt.Sprintf("%X", post.Hash), "canonicalControlAppHash": canonicalAppHash, "replayedHeight": next.Height, "tickers": tokens, "storesComparedOutsideExpectedChanges": len(controlStores), "virtualForkHeight": forkHeight, "syntheticPriorUpgradeHeight": 60000, "physicalCommitVersion": post.Version, "pool": pin.Address.Hex(), "cusdt": pin.CUSDT.Hex(), "issuer": pin.Initializer.Hex(), "cusdtSupply": cusdtSupply, "poolLP": "0", "custodyCUSDT": "0", "custodyWMSP": "0", "runtimeHash": runtimeHash.Hex(), "approval": "none; coordinated fork method in virtual context on historical state", "restoredBackupCanonicalReplay": true}
 	encoded, err := json.Marshal(result)
 	require.NoError(t, err)
 	_, err = io.WriteString(os.Stdout, "TICKER_COPY_AUDIT "+string(encoded)+"\n")

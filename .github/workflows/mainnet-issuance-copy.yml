@@ -1,8 +1,8 @@
-name: Governed MSP tariff on the H37995 application copy
+name: Coordinated MSP tariff and empty pool on the H37995 application copy
 
 on:
   push:
-    branches: ['feat/mainnet-drc20-issuance']
+    branches: ['feat/mainnet-issuance-pool-rehearsal']
   workflow_dispatch:
 
 permissions:
@@ -10,7 +10,7 @@ permissions:
 
 jobs:
   governed-copy:
-    if: github.repository == 'maxwell2010/go-smart-node' && github.ref == 'refs/heads/feat/mainnet-drc20-issuance'
+    if: github.repository == 'maxwell2010/go-smart-node' && github.ref == 'refs/heads/feat/mainnet-issuance-pool-rehearsal'
     runs-on: ubuntu-24.04
     timeout-minutes: 55
     # The encrypted one-run transfer uses a draft release visible to repository writers.
@@ -44,7 +44,7 @@ jobs:
         env:
           GOWORK: 'off'
           GOTOOLCHAIN: local
-        run: go test -mod=readonly -p 2 -tags mintcandy_mainnet,mintcandy_drc20_issuance -c -o "$RUNNER_TEMP/issuance-copy/audit.test" ./app
+        run: go test -mod=readonly -p 2 -tags mintcandy_mainnet,mintcandy_coordinated_assets -c -o "$RUNNER_TEMP/issuance-copy/audit.test" ./app
       - name: Retrieve encrypted application copy
         env:
           GH_TOKEN: ${{ github.token }}
@@ -80,11 +80,11 @@ jobs:
           for run in 1 2; do
             sudo -n unshare --net -- setpriv --reuid="$(id -u)" --regid="$(id -g)" --clear-groups --no-new-privs -- env -i PATH=/usr/bin:/bin HOME="$bindir" MINTCANDY_AUDIT_DB="$bindir/application.db" "$bindir/audit.test" -test.run='^TestOfflineMainnetTickerIndex$' -test.v -test.timeout=8m | tee "$bindir/run-$run.log"
             sed -n 's/^TICKER_COPY_AUDIT //p' "$bindir/run-$run.log" > "$bindir/result-$run.json"
-            jq -e '.appliedHeight == 37996 and .storesComparedOutsideExpectedChanges == 20 and (.tickers|length) == 3' "$bindir/result-$run.json"
+            jq -e '.virtualForkHeight == 62000 and .physicalCommitVersion == 37997 and .storesComparedOutsideExpectedChanges == 20 and (.tickers|length) == 3' "$bindir/result-$run.json"
           done
           cmp "$bindir/result-1.json" "$bindir/result-2.json"
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
         with:
-          name: governed-mainnet-copy-${{ github.sha }}
+          name: coordinated-mainnet-copy-${{ github.sha }}
           path: ${{ runner.temp }}/issuance-copy/result-1.json
           retention-days: 14

@@ -1,0 +1,119 @@
+"""Exercise a coordinated activation and signed liquidity operations on four disposable tMSP nodes."""
+import argparse
+import hashlib
+import json
+import math
+import subprocess
+from pathlib import Path
+from tempfile import TemporaryDirectory
+from urllib.error import HTTPError
+from urllib.request import urlopen
+from native_launch_media import commit_media_transaction
+
+from del_delegation_smoke import write_config
+from mcnd_process_smoke import ProcessOwner, SignalGuard, private_environment, private_namespace
+from native_consensus_smoke import committed_header, create_replica, wait_replicas
+from native_governance_upgrade_smoke import current_plan, committed_height, find_four_signature_commit
+from native_launch_rehearsal import configure_peers, load_fixture
+from testnet_issuance_rehearsal import rehearse_issuance
+from withdrawal_genesis_smoke import check, ethereum
+
+
+def run(args, root, owner, report):
+    raw, expected, keys = load_fixture(args.fixture, four_validators=True, empty_user_assets=True,
+                                       assembly_report=args.assembly_report, network_profile='testnet')
+    genesis = json.loads(raw)
+    state = genesis['app_state']
+    profile = state['withdrawal_settlement']
+    env = private_environment(root)
+    rows = expected['validators']
+    report.update(activationHeight=80, chainId=expected['chainId'], genesisSha256=hashlib.sha256(raw).hexdigest(),
+                  predecessorSHA256=hashlib.file_digest(args.predecessor.open('rb'), 'sha256').hexdigest(),
+                  successorSHA256=hashlib.file_digest(args.successor.open('rb'), 'sha256').hexdigest(), transactions={})
+    nodes = [create_replica(str(args.predecessor), root, r['name'], i, raw, key, env,
+                            chain_id=expected['chainId'], evm_chain_id=990098)
+             for i, (r, key) in enumerate(zip(rows, keys, strict=True))]
+    for n in nodes:
+        configure_peers(n, [peer for peer in nodes if peer is not n])
+        write_config(n.home, 'config.toml', {('consensus', 'timeout_commit'): '"500ms"'})
+    for n in nodes:
+        n.start(str(args.predecessor), env, owner, 'admission')
+    wait_replicas(nodes, 5, 100, report)
+    source = nodes[0]
+    wallet = expected['actor']
+    wrapper = profile['wrapped_del']
+    token = ''
+    def tx(label):
+        nonce = int(ethereum('eth_getTransactionCount',[wallet,'latest'],base=source.evm), 16)
+        path = root / (label+'.json')
+        action = dict(Action=label, Nonce=nonce, Factory=profile['token_center'], Wrapper=wrapper, Token=token)
+        signer_env = dict(env, MCND_POOL_ACTION=json.dumps(action), MCND_POOL_OUTPUT=str(path),
+                          MCND_TESTNET_TARIFF_FOUNDER_FILE=str(root.parent / 'tariff-founder.key'))
+        subprocess.run([str(args.signer), '-test.run=^TestSignCoordinatedPoolAction$'], check=True, timeout=30, env=signer_env)
+        fixture = json.loads(path.read_text())
+        rc = commit_media_transaction(source, nodes, fixture, nonce, report)
+        report['transactions'][label] = dict(height=int(rc['blockNumber'],16),hash=rc['transactionHash'])
+        return rc, fixture['pool']
+    rc, pool = tx('create')
+    token = '0x' + [log for log in rc['logs'] if log['address'].lower()==profile['token_center'].lower()][0]['data'][26:66]
+    report.update(issuer=wallet, pool=pool, wrapped=wrapper, cusdt=token)
+    try:
+        with urlopen(source.rest + '/mintcandy/issuance/v1/tariff', timeout=5):
+            raise ValueError('tariff active before handoff')
+    except HTTPError as exc:
+        check(exc.code == 404,'unexpected inactive tariff response')
+    for n in nodes:
+        owner.stop(n.child)
+    for n in nodes:
+        n.start(str(args.successor), env, owner, 'successor')
+    wait_replicas(nodes, 82, 150, report)
+    for n in nodes:
+        check(ethereum('eth_getCode',[pool,hex(79)],base=n.evm)=='0x' and
+              ethereum('eth_getCode',[pool,hex(80)],base=n.evm)!='0x','wrong pool installation boundary')
+        check(current_plan(n,80) is None,'unexpected SDK upgrade plan')
+    report['activationHeader']=committed_header(nodes,81)
+    unit=10**18
+    def state_at(height):
+        result=[]
+        for n in nodes:
+            def slot(i):
+                return int(ethereum('eth_getStorageAt',[pool,hex(i),hex(height)],base=n.evm),16)
+            packed=slot(0)
+            result.append((packed%2**112,packed>>112,slot(1)))
+        check(all(x==result[0] for x in result),'pool state differs between nodes')
+        return result[0]
+    check(state_at(80)==(0,0,0),'activation moved liquidity')
+    for label in ['initialize','wrap','approve-wrapper','approve-token','deposit','swap','withdraw']:
+        rc,_=tx(label)
+        if label=='deposit':
+            r0,r1=50000*unit,5000*unit
+            shares=math.isqrt(r0*r1)
+        elif label=='swap':
+            net=9970*unit
+            output=r1*net//(r0*10000+net)
+            r0,r1=r0+unit,r1-output
+        elif label=='withdraw':
+            r0,r1,shares=r0-r0*unit//shares,r1-r1*unit//shares,shares-unit
+        else:
+            continue
+        check(state_at(int(rc['blockNumber'],16))==(r0,r1,shares),'wrong final reserves or LP shares after '+label)
+        report['transactions'][label].update(reserve0=str(r0),reserve1=str(r1),totalShares=str(shares))
+    rehearse_issuance(args.signer, root, nodes, expected, env, report)
+    tip = committed_height(nodes[0])
+    report['finalCommit'] = find_four_signature_commit(nodes, rows, args.commit_probe, tip, tip+8, report)
+
+
+if __name__ == '__main__':
+    parser = argparse.ArgumentParser(description=__doc__)
+    for arg in ('fixture', 'assembly-report', 'predecessor', 'successor', 'signer', 'commit-probe', 'home-parent', 'report'):
+        parser.add_argument('--' + arg, required=True, type=Path)
+    args = parser.parse_args()
+    private_namespace()
+    report = {'initialHeight': 1, 'loopbackOnlyNamespace': True}
+    with SignalGuard() as signals, TemporaryDirectory(dir=args.home_parent) as directory:
+        owner = ProcessOwner(signals)
+        try:
+            run(args, Path(directory), owner, report)
+        finally:
+            owner.close()
+    args.report.write_text(json.dumps(report, indent=2), encoding='utf-8')
