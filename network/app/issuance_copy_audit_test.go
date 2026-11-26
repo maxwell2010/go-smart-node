@@ -16,11 +16,13 @@ import (
 	"testing"
 
 	"cosmossdk.io/log"
+	abci "github.com/cometbft/cometbft/abci/types"
 	cmtproto "github.com/cometbft/cometbft/proto/tendermint/types"
 	dbm "github.com/cosmos/cosmos-db"
 	"github.com/cosmos/cosmos-sdk/client/flags"
 	sdk "github.com/cosmos/cosmos-sdk/types"
 	srvflags "github.com/cosmos/evm/server/flags"
+	"github.com/cosmos/gogoproto/jsonpb"
 	"github.com/ethereum/go-ethereum/common"
 	validatortypes "github.com/maxwell2010/go-smart-node/network/decimal/validator/types"
 	"github.com/maxwell2010/go-smart-node/network/identity"
@@ -114,6 +116,46 @@ func TestOfflineMainnetTickerIndex(t *testing.T) {
 		return
 	}
 	require.Empty(t, index(ctx))
+	readFixture := func(variable string, dest any) {
+		data, err := os.ReadFile(os.Getenv(variable))
+		require.NoError(t, err)
+		require.NoError(t, json.Unmarshal(data, dest))
+	}
+	var requests map[int64]json.RawMessage
+	readFixture("MINTCANDY_AUDIT_BLOCKS", &requests)
+	var next abci.RequestFinalizeBlock
+	require.NoError(t, jsonpb.UnmarshalString(string(requests[pre.Version]), &next))
+	require.Equal(t, pre.Version+1, next.Height)
+	replay := func() {
+		res, err := a.FinalizeBlock(&next)
+		require.NoError(t, err)
+		_, err = a.Commit()
+		require.NoError(t, err)
+		require.Equal(t, next.Height, a.LastBlockHeight())
+		require.Equal(t, res.AppHash, a.LastCommitID().Hash)
+	}
+	var canonical map[int64]string
+	readFixture("MINTCANDY_AUDIT_NEXT_HASHES", &canonical)
+	controlFile := filepath.Join(dir, "control-stores.json")
+	if control := os.Getenv("MINTCANDY_AUDIT_CONTROL_OUTPUT"); control != "" {
+		replay()
+		require.Equal(t, strings.ToLower(canonical[next.Height]), hex.EncodeToString(a.LastCommitID().Hash))
+		digests, err := json.Marshal(state(a, a.NewUncachedContext(false, cmtproto.Header{ChainID: identity.MainnetChainID, Height: next.Height})))
+		require.NoError(t, err)
+		require.NoError(t, os.WriteFile(control, digests, 0600))
+		require.NoError(t, a.Close())
+		return
+	}
+	executable, err := os.Executable()
+	require.NoError(t, err)
+	control := exec.Command(executable, "-test.run=^TestOfflineMainnetTickerIndex$", "-test.v")
+	control.Env = append(os.Environ(), "MINTCANDY_AUDIT_CONTROL_OUTPUT="+controlFile)
+	controlOut, err := control.CombinedOutput()
+	require.NoError(t, err, "%s", controlOut)
+	var controlStores map[string]string
+	data, err := os.ReadFile(controlFile)
+	require.NoError(t, err)
+	require.NoError(t, json.Unmarshal(data, &controlStores))
 	reg := customCollateralRegistry{evm: a.EVMKeeper, store: vk}
 	require.False(t, ctx.KVStore(vk).Has(symbolKey("")))
 	before := state(a, ctx)
@@ -126,15 +168,18 @@ func TestOfflineMainnetTickerIndex(t *testing.T) {
 	tokens := index(ctx)
 	require.Contains(t, tokens, "test")
 	require.Contains(t, tokens, "cusdt")
+	require.Contains(t, tokens, "cdel")
 	require.Equal(t, before, state(a, ctx))
 	require.NoError(t, reg.indexIssuanceSymbols(ctx))
 	require.Equal(t, tokens, index(ctx))
-	post := a.CommitMultiStore().Commit()
+	replay()
+	post := a.LastCommitID()
 	require.Equal(t, pre.Version+1, post.Version)
+	require.Equal(t, controlStores, state(a, a.NewUncachedContext(false, cmtproto.Header{ChainID: identity.MainnetChainID, Height: next.Height})))
 	require.NoError(t, a.Close())
 	// A fresh process exercises the actual on-disk reopen without sharing
 	// the process-global EVM chain configuration with the first instance.
-	expected.Stores, expected.Tokens = before, tokens
+	expected.Stores, expected.Tokens = controlStores, tokens
 	check := func(name string, value any) string {
 		encoded, err := json.Marshal(value)
 		require.NoError(t, err)
@@ -142,15 +187,13 @@ func TestOfflineMainnetTickerIndex(t *testing.T) {
 		require.NoError(t, os.WriteFile(path, encoded, 0600))
 		return path
 	}
-	executable, err := os.Executable()
-	require.NoError(t, err)
 	child := exec.Command(executable, "-test.run=^TestOfflineMainnetTickerIndex$", "-test.v")
 	child.Env = append(os.Environ(), "MINTCANDY_AUDIT_DB="+dst,
 		"MINTCANDY_AUDIT_CHECKPOINTS="+check("post.json", map[int64]string{post.Version: hex.EncodeToString(post.Hash)}),
 		"MINTCANDY_AUDIT_REOPEN="+check("expected.json", expected))
 	childOut, err := child.CombinedOutput()
 	require.NoError(t, err, "%s", childOut)
-	result := map[string]interface{}{"height": pre.Version, "inputAppHash": fmt.Sprintf("%X", pre.Hash), "offlineMigratedAppHash": fmt.Sprintf("%X", post.Hash), "tickers": tokens, "unchangedStoresOutsideIndex": len(before)}
+	result := map[string]interface{}{"height": pre.Version, "inputAppHash": fmt.Sprintf("%X", pre.Hash), "offlineMigratedAppHash": fmt.Sprintf("%X", post.Hash), "canonicalControlAppHash": canonical[next.Height], "replayedHeight": next.Height, "tickers": tokens, "unchangedStoresOutsideIndex": len(before)}
 	encoded, err := json.Marshal(result)
 	require.NoError(t, err)
 	_, err = io.WriteString(os.Stdout, "TICKER_COPY_AUDIT "+string(encoded)+"\n")
