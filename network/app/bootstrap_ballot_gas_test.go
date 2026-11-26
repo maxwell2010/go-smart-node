@@ -22,7 +22,7 @@ func TestBootstrapBallotSimulatesFinalGas(t *testing.T) {
 	a.withdrawals.profile.EnableNativeUpgradeGovernance = true
 	id, err := a.GovKeeper.ProposalID.Peek(ctx)
 	require.NoError(t, err)
-	submit, err := govv1.NewMsgSubmitProposal(nil, deposit, proposer.String(), "", "Test voting gas", "Isolated fixture", false)
+	submit, err := govv1.NewMsgSubmitProposal(nil, deposit, proposer.String(), "bootstrap-gas-signal", "Test voting gas", "Isolated fixture", false)
 	require.NoError(t, err)
 	_, err = a.MsgServiceRouter().Handler(submit)(ctx, submit)
 	require.NoError(t, err)
