@@ -1,5 +1,6 @@
 """Exercise a coordinated activation and signed liquidity operations on four disposable tMSP nodes."""
 import argparse
+import base64
 import hashlib
 import json
 import math
@@ -19,6 +20,50 @@ from testnet_reserve_trades import rehearse_trades
 from testnet_atomic_convert import rehearse_atomic_convert, snapshot
 from testnet_issuance_rehearsal import rehearse_issuance
 from withdrawal_genesis_smoke import check, ethereum
+
+
+def commit_inactive_market(nodes, fixture, report):
+    source = nodes[0]
+    start = committed_height(source)
+    raw = bytes.fromhex(fixture['raw'][2:])
+    tx_hash = ethereum('eth_sendRawTransaction', [fixture['raw']], base=source.evm)
+    check(tx_hash == fixture['hash'], 'submitted Ethereum hash differs')
+    for height in range(start + 1, min(start + 12, 80)):
+        wait_replicas(nodes, height + 1, 30, report)
+        block = source.rpc(f'block?height={height}')
+        txs = [base64.b64decode(tx, validate=True) for tx in block['block']['data'].get('txs') or []]
+        matches = [index for index, tx_bytes in enumerate(txs) if raw in tx_bytes]
+        if not matches:
+            continue
+        check(len(matches) == 1, 'ambiguous signed transaction in block')
+        index = matches[0]
+        evidence = dict(height=height, hash=tx_hash, cometTxSha256=hashlib.sha256(txs[index]).hexdigest())
+        header = committed_header(nodes, height)
+        result = source.rpc(f'block_results?height={height}')['txs_results'][index]
+        code = int(result.get('code', 0))
+        evidence['abciCode'] = code
+        if code:
+            reason = result.get('log', '')
+            check('failed to set account' in reason or 'failed to commit stateDB' in reason,
+                  f'unexpected native failure on signed transaction at {height}: {reason[:400]}')
+        else:
+            receipt = ethereum('eth_getTransactionReceipt', [tx_hash], base=source.evm)
+            check(receipt and receipt['transactionHash'] == tx_hash and int(receipt['status'], 16) == 0
+                  and receipt['blockHash'][2:].lower() == header['block_hash'].lower(), 'expected failed EVM receipt')
+            evidence['receiptStatus'] = 0
+        return evidence
+    raise ValueError('signed pre-activation transaction missing from committed blocks')
+
+
+def inactive_balances(node, height, tokens, actor, center):
+    def raw_call(token, data):
+        return read_words(token, data, height, 1, node.evm)[0]
+    def word(address):
+        return address[2:].rjust(64, '0')
+    return [(int(ethereum('eth_getBalance', [t, hex(height)], base=node.evm), 16),
+             raw_call(t, '0x18160ddd'), raw_call(t, '0xcd3293de'),
+             raw_call(t, '0x70a08231' + word(actor)), raw_call(t, '0x70a08231' + word(center)),
+             raw_call(t, '0xdd62ed3e' + word(actor) + word(center))) for t in tokens]
 
 
 def run(args, root, owner, report):
@@ -53,6 +98,15 @@ def run(args, root, owner, report):
                           MCND_TESTNET_TARIFF_FOUNDER_FILE=str(root.parent / 'tariff-founder.key'))
         subprocess.run([str(args.signer), '-test.run=^TestSignCoordinatedPoolAction$'], check=True, timeout=30, env=signer_env)
         fixture = json.loads(path.read_text())
+        if label.startswith('before-'):
+            evidence = commit_inactive_market(nodes, fixture, report)
+            height = evidence['height']
+            reference = inactive_balances(source, height - 1, historical, wallet, profile['token_center'])
+            for node in nodes:
+                check(inactive_balances(node, height, historical, wallet, profile['token_center']) == reference,
+                      'pre-activation trade moved reserve, supply, balance or allowance')
+            report['transactions'][label] = evidence
+            return None, fixture['pool']
         rc = commit_media_transaction(source, nodes, fixture, nonce, report, status=status)
         report['transactions'][label] = dict(height=int(rc['blockNumber'],16),hash=rc['transactionHash'],status=int(rc['status'],16))
         return rc, fixture['pool']
@@ -77,8 +131,7 @@ def run(args, root, owner, report):
         n.start(str(args.successor), env, owner, 'successor')
     wait_replicas(nodes, handoff + 1, 60, report)
     for label in ('buy', 'sell', 'convert'):
-        rc, _ = tx('before-' + label, target_token=historical[0], output_token=historical[1], status=0)
-        check(int(rc['blockNumber'], 16) < 80, 'pre-activation operation crossed the fork height')
+        tx('before-' + label, target_token=historical[0], output_token=historical[1], status=0)
     wait_replicas(nodes, 82, 150, report)
     for n in nodes:
         check(ethereum('eth_getCode',[pool,hex(79)],base=n.evm)=='0x' and
