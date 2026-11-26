@@ -10,6 +10,10 @@ import (
 	cmtproto "github.com/cometbft/cometbft/proto/tendermint/types"
 	"github.com/cosmos/cosmos-sdk/crypto/keys/ed25519"
 	sdk "github.com/cosmos/cosmos-sdk/types"
+	authtypes "github.com/cosmos/cosmos-sdk/x/auth/types"
+	banktypes "github.com/cosmos/cosmos-sdk/x/bank/types"
+	"github.com/cosmos/cosmos-sdk/x/gov"
+	govtypes "github.com/cosmos/cosmos-sdk/x/gov/types"
 	govv1 "github.com/cosmos/cosmos-sdk/x/gov/types/v1"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/crypto"
@@ -152,6 +156,62 @@ func TestBootstrapUnanimityFourLaunchOperatorsAndFounder(t *testing.T) {
 		require.True(t, enabled)
 		require.ElementsMatch(t, ops[:], actual[:])
 	}
+	t.Run("saved ballots reach SDK final tally through native hooks", func(t *testing.T) {
+		s, _ := ctx.CacheContext()
+		s = s.WithExecMode(sdk.ExecModeFinalize)
+		a.withdrawals = &withdrawalController{profile: WithdrawalProfile{EnableNativeGovernance: true, EnableNativeUpgradeGovernance: true}}
+		t.Cleanup(func() { a.withdrawals = nil })
+		proposer := sdk.AccAddress(founder[:])
+		defaults := a.DefaultGenesis()
+		var govInit govv1.GenesisState
+		a.appCodec.MustUnmarshalJSON(defaults[govtypes.ModuleName], &govInit)
+		deposit := sdk.NewCoins(govInit.Params.MinDeposit...)
+		a.AccountKeeper.InitGenesis(s, *authtypes.NewGenesisState(authtypes.DefaultParams(), authtypes.GenesisAccounts{authtypes.NewBaseAccountWithAddress(proposer)}))
+		var bankInit banktypes.GenesisState
+		a.appCodec.MustUnmarshalJSON(defaults[banktypes.ModuleName], &bankInit)
+		bankInit.Balances = []banktypes.Balance{{Address: proposer.String(), Coins: deposit}}
+		a.BankKeeper.InitGenesis(s, &bankInit)
+		gov.InitGenesis(s, a.AccountKeeper, a.BankKeeper, &a.GovKeeper, &govInit)
+		pid, err := a.GovKeeper.ProposalID.Peek(s)
+		require.NoError(t, err)
+		require.NoError(t, k.InitializeBootstrapUnanimity(s, pid))
+		msg, err := govv1.NewMsgSubmitProposal(nil, deposit, proposer.String(), "bootstrap-test", "Bootstrap vote", "Isolated signal", false)
+		require.NoError(t, err)
+		_, err = a.MsgServiceRouter().Handler(msg)(s, msg)
+		require.NoError(t, err)
+		proposal, err := a.GovKeeper.Proposals.Get(s, pid)
+		require.NoError(t, err)
+		deadline := *proposal.VotingEndTime
+		cast := func(who common.Address, opt govv1.VoteOption) {
+			t.Helper()
+			m := govv1.NewMsgVote(sdk.AccAddress(who[:]), pid, opt, "")
+			_, err := a.MsgServiceRouter().Handler(m)(s, m)
+			require.NoError(t, err)
+		}
+		for _, op := range ops {
+			cast(op, govv1.OptionYes)
+		}
+		cast(founder, govv1.OptionNo)
+		require.NoError(t, a.endNativeGovernance(s))
+		proposal, err = a.GovKeeper.Proposals.Get(s, pid)
+		require.NoError(t, err)
+		require.Equal(t, govv1.StatusVotingPeriod, proposal.Status)
+		require.True(t, proposal.VotingEndTime.Equal(deadline))
+		s = s.WithBlockHeight(s.BlockHeight() + 1).WithBlockTime(s.BlockTime().Add(time.Second))
+		cast(founder, govv1.OptionYes)
+		require.NoError(t, a.endNativeGovernance(s))
+		proposal, err = a.GovKeeper.Proposals.Get(s, pid)
+		require.NoError(t, err)
+		if identity.BootstrapUnanimityExecution {
+			require.Equal(t, govv1.StatusPassed, proposal.Status)
+			require.True(t, proposal.VotingEndTime.Equal(s.BlockTime()))
+			require.Equal(t, sdkmath.NewInt(nativekeeper.NativeDELAtomsPerPower).MulRaw(4).String(), proposal.FinalTallyResult.YesCount)
+			require.Equal(t, deposit[0], a.BankKeeper.GetBalance(s, proposer, identity.BaseDenom))
+		} else {
+			require.Equal(t, govv1.StatusVotingPeriod, proposal.Status)
+			require.True(t, proposal.VotingEndTime.Equal(deadline))
+		}
+	})
 	var expected [4]string
 	copy(expected[:], roster)
 	for i := 1; i <= int(validatortypes.MaxBindingPageSize); i++ {

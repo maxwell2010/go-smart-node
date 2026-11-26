@@ -34,7 +34,15 @@ jobs:
           cache-dependency-path: network/go.sum
       - name: Exercise bootstrap decisions and governance settlement in memory
         run: |
+          set -euo pipefail
           for tags in "${{ matrix.profile }}" "${{ matrix.profile }},mintcandy_bootstrap_unanimity"; do
-            go test -mod=readonly -p 2 -tags "$tags" -count=1 -timeout 8m -v \
-              -run 'Bootstrap|Unanimous' ./app ./decimal/validator/keeper ./decimal/validator/governance
+            args=(-mod=readonly -p 2 -tags "$tags" -count=1 -timeout 8m -v)
+            # The EVM chain configuration may only be initialized once per process.
+            go test "${args[@]}" -run '^TestBootstrapUnanimity(Vote|StakeOwners)$' ./app
+            go test "${args[@]}" -run '^TestBootstrapUnanimityFourLaunchOperatorsAndFounder$' ./app
+            go test "${args[@]}" -run '^TestBootstrapUnanimousQueueAndSDKSettlement$' ./app
+            go test "${args[@]}" -run 'Bootstrap|Unanimous' ./decimal/validator/keeper
+            if [[ "$tags" == mintcandy_testnet,mintcandy_bootstrap_unanimity ]]; then
+              go test "${args[@]}" -run '^TestBootstrapUnanimityUpgradeApproval$' ./app
+            fi
           done
