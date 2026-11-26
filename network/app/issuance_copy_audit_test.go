@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -86,15 +87,6 @@ func TestOfflineMainnetTickerIndex(t *testing.T) {
 	}
 	ctx := a.NewUncachedContext(false, header)
 	vk := a.keys[validatortypes.StoreKey]
-	reg := customCollateralRegistry{evm: a.EVMKeeper, store: vk}
-	require.False(t, ctx.KVStore(vk).Has(symbolKey("")))
-	before := state(a, ctx)
-	cache, _ := ctx.CacheContext()
-	require.NoError(t, reg.indexIssuanceSymbols(cache))
-	require.False(t, ctx.KVStore(vk).Has(symbolKey("")))
-	cache, write := ctx.CacheContext()
-	require.NoError(t, reg.indexIssuanceSymbols(cache))
-	write()
 	index := func(ctx sdk.Context) map[string]string {
 		it := ctx.KVStore(vk).Iterator([]byte{issuanceSymbolPrefix}, []byte{issuanceSymbolPrefix + 1})
 		defer it.Close()
@@ -107,6 +99,30 @@ func TestOfflineMainnetTickerIndex(t *testing.T) {
 		}
 		return out
 	}
+	var expected struct {
+		Stores map[string]string
+		Tokens map[string]string
+	}
+	if file := os.Getenv("MINTCANDY_AUDIT_REOPEN"); file != "" {
+		encoded, err := os.ReadFile(file)
+		require.NoError(t, err)
+		require.NoError(t, json.Unmarshal(encoded, &expected))
+		require.Equal(t, []byte{1}, ctx.KVStore(vk).Get(symbolKey("")))
+		require.Equal(t, expected.Tokens, index(ctx))
+		require.Equal(t, expected.Stores, state(a, ctx))
+		require.NoError(t, a.Close())
+		return
+	}
+	require.Empty(t, index(ctx))
+	reg := customCollateralRegistry{evm: a.EVMKeeper, store: vk}
+	require.False(t, ctx.KVStore(vk).Has(symbolKey("")))
+	before := state(a, ctx)
+	cache, _ := ctx.CacheContext()
+	require.NoError(t, reg.indexIssuanceSymbols(cache))
+	require.False(t, ctx.KVStore(vk).Has(symbolKey("")))
+	cache, write := ctx.CacheContext()
+	require.NoError(t, reg.indexIssuanceSymbols(cache))
+	write()
 	tokens := index(ctx)
 	require.Contains(t, tokens, "test")
 	require.Contains(t, tokens, "cusdt")
@@ -116,14 +132,24 @@ func TestOfflineMainnetTickerIndex(t *testing.T) {
 	post := a.CommitMultiStore().Commit()
 	require.Equal(t, pre.Version+1, post.Version)
 	require.NoError(t, a.Close())
-	a = open()
-	defer a.Close()
-	vk = a.keys[validatortypes.StoreKey]
-	ctx = a.NewUncachedContext(false, cmtproto.Header{ChainID: identity.MainnetChainID, Height: post.Version})
-	require.Equal(t, post, a.LastCommitID())
-	require.Equal(t, []byte{1}, ctx.KVStore(vk).Get(symbolKey("")))
-	require.Equal(t, tokens, index(ctx))
-	require.Equal(t, before, state(a, ctx))
+	// A fresh process exercises the actual on-disk reopen without sharing
+	// the process-global EVM chain configuration with the first instance.
+	expected.Stores, expected.Tokens = before, tokens
+	check := func(name string, value any) string {
+		encoded, err := json.Marshal(value)
+		require.NoError(t, err)
+		path := filepath.Join(dir, name)
+		require.NoError(t, os.WriteFile(path, encoded, 0600))
+		return path
+	}
+	executable, err := os.Executable()
+	require.NoError(t, err)
+	child := exec.Command(executable, "-test.run=^TestOfflineMainnetTickerIndex$", "-test.v")
+	child.Env = append(os.Environ(), "MINTCANDY_AUDIT_DB="+dst,
+		"MINTCANDY_AUDIT_CHECKPOINTS="+check("post.json", map[int64]string{post.Version: hex.EncodeToString(post.Hash)}),
+		"MINTCANDY_AUDIT_REOPEN="+check("expected.json", expected))
+	childOut, err := child.CombinedOutput()
+	require.NoError(t, err, "%s", childOut)
 	result := map[string]interface{}{"height": pre.Version, "inputAppHash": fmt.Sprintf("%X", pre.Hash), "offlineMigratedAppHash": fmt.Sprintf("%X", post.Hash), "tickers": tokens, "unchangedStoresOutsideIndex": len(before)}
 	encoded, err := json.Marshal(result)
 	require.NoError(t, err)
