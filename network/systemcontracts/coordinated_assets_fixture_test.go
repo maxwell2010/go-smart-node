@@ -63,11 +63,11 @@ func TestSignCoordinatedPoolAction(t *testing.T) {
 		to = common.HexToAddress(input.Factory)
 		factory, err := contracts.CompiledABI("NewNetworkTokenCenter")
 		require.NoError(t, err)
-		symbol, name := "legacycoinx", "LEGACY COIN X"
+		symbol, name := "legacymktx", "LEGACY COIN X"
 		crr := uint8(100)
 		if input.Action == "legacy-coin-b" {
 			crr = 50
-			symbol, name = "legacycoiny", "LEGACY COIN Y"
+			symbol, name = "legacymkty", "LEGACY COIN Y"
 		}
 		meta := struct {
 			InitialMint, MinTotalSupply, MaxTotalSupply *big.Int
