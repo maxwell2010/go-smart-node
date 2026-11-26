@@ -28,6 +28,7 @@ func TestSignCoordinatedPoolAction(t *testing.T) {
 		Action                          string
 		Factory, Wrapper, Token, Output string
 		Nonce                           uint64
+		Minimum                         string
 	}
 	require.NoError(t, json.Unmarshal([]byte(os.Getenv("MCND_POOL_ACTION")), &input))
 	key, err := crypto.LoadECDSA(os.Getenv("MCND_TESTNET_TARIFF_FOUNDER_FILE"))
@@ -63,7 +64,9 @@ func TestSignCoordinatedPoolAction(t *testing.T) {
 		factory, err := contracts.CompiledABI("NewNetworkTokenCenter")
 		require.NoError(t, err)
 		symbol, name := "legacycoinx", "LEGACY COIN X"
+		crr := uint8(100)
 		if input.Action == "legacy-coin-b" {
+			crr = 50
 			symbol, name = "legacycoiny", "LEGACY COIN Y"
 		}
 		meta := struct {
@@ -71,7 +74,7 @@ func TestSignCoordinatedPoolAction(t *testing.T) {
 			Creator                                     common.Address
 			Crr                                         uint8
 			Identity, Symbol, Name                      string
-		}{amount(20), amount(1), amount(1000), sender, 100, "", symbol, name}
+		}{amount(20), amount(1), amount(1000), sender, crr, "", symbol, name}
 		value.Add(amount(2), new(big.Int).Div(amount(1), big.NewInt(4)))
 		data, err = factory.Pack("createToken", meta)
 		require.NoError(t, err)
@@ -81,9 +84,17 @@ func TestSignCoordinatedPoolAction(t *testing.T) {
 		to, value, data = token, amount(1), call("buy(uint256,address)", word(amount(10)), address(sender))
 	case "before-sell", "after-sell":
 		to, data = token, call("sell(uint256,uint256,address)", word(amount(1)), one, address(sender))
-	case "before-convert", "after-convert":
+	case "before-convert", "after-convert", "nonlinear-min-out":
+		minimum := one
+		if input.Minimum != "" {
+			n, ok := new(big.Int).SetString(input.Minimum, 10)
+			require.True(t, ok)
+			require.Positive(t, n.Sign())
+			require.LessOrEqual(t, n.BitLen(), 256)
+			minimum = word(n)
+		}
 		to = common.HexToAddress(input.Factory)
-		data = call("convert(address,address,uint256,uint256,address)", address(token), address(common.HexToAddress(input.Output)), word(amount(1)), one, address(sender))
+		data = call("convert(address,address,uint256,uint256,address)", address(token), address(common.HexToAddress(input.Output)), word(amount(1)), minimum, address(sender))
 	case "initialize":
 		data = call("initialize(address,address)", address(wrapper), address(token))
 	case "wrap":

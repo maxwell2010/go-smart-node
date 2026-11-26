@@ -16,7 +16,7 @@ def word(address):
     return address[2:].rjust(64, '0')
 
 
-def snapshot(node, height, tokens, actor, receiver, center):
+def snapshot(node, height, tokens, actor, receiver, center, expected_crr=None):
     accounts = (actor, receiver, center)
     def balance(address):
         return int(ethereum('eth_getBalance', [address, hex(height)], base=node.evm), 16)
@@ -34,7 +34,7 @@ def snapshot(node, height, tokens, actor, receiver, center):
               and market['token_center'].lower() == center and market['atomic_convert_version'] == 1,
               'unexpected registry market identity or atomic conversion version')
         check(market['supply_atoms'] == str(volume) and market['reserve_atoms'] == str(reserve)
-              and balance(token) == reserve and market['crr'] == 100, 'reserve or supply differs across ledgers')
+              and balance(token) == reserve and market['crr'] == (expected_crr or {}).get(token, 100), 'reserve or supply differs across ledgers')
         snapshot['tokens'][token] = {
             'volume': volume, 'reserve': reserve, 'allowance': read('0xdd62ed3e' + word(actor) + word(center)),
             'balances': {a: read('0x70a08231' + word(a)) for a in accounts},

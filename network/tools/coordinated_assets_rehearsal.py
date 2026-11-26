@@ -10,13 +10,13 @@ from urllib.error import HTTPError
 from urllib.request import urlopen
 from native_launch_media import commit_media_transaction
 
-from del_delegation_smoke import write_config
+from del_delegation_smoke import read_words, write_config
 from mcnd_process_smoke import ProcessOwner, SignalGuard, private_environment, private_namespace
 from native_consensus_smoke import committed_header, create_replica, wait_replicas
 from native_governance_upgrade_smoke import current_plan, committed_height, find_four_signature_commit
 from native_launch_rehearsal import configure_peers, load_fixture
 from testnet_reserve_trades import rehearse_trades
-from testnet_atomic_convert import rehearse_atomic_convert
+from testnet_atomic_convert import rehearse_atomic_convert, snapshot
 from testnet_issuance_rehearsal import rehearse_issuance
 from withdrawal_genesis_smoke import check, ethereum
 
@@ -45,10 +45,10 @@ def run(args, root, owner, report):
     wallet = expected['actor']
     wrapper = profile['wrapped_del']
     token = ''
-    def tx(label, *, target_token=None, output_token='', status=1):
+    def tx(label, *, target_token=None, output_token='', status=1, minimum=''):
         nonce = int(ethereum('eth_getTransactionCount',[wallet,'latest'],base=source.evm), 16)
         path = root / (label+'.json')
-        action = dict(Action=label, Nonce=nonce, Factory=profile['token_center'], Wrapper=wrapper, Token=token if target_token is None else target_token, Output=output_token)
+        action = dict(Action=label, Nonce=nonce, Factory=profile['token_center'], Wrapper=wrapper, Token=token if target_token is None else target_token, Output=output_token, Minimum=minimum)
         signer_env = dict(env, MCND_POOL_ACTION=json.dumps(action), MCND_POOL_OUTPUT=str(path),
                           MCND_TESTNET_TARIFF_FOUNDER_FILE=str(root.parent / 'tariff-founder.key'))
         subprocess.run([str(args.signer), '-test.run=^TestSignCoordinatedPoolAction$'], check=True, timeout=30, env=signer_env)
@@ -111,8 +111,43 @@ def run(args, root, owner, report):
             continue
         check(state_at(int(rc['blockNumber'],16))==(r0,r1,shares),'wrong final reserves or LP shares after '+label)
         report['transactions'][label].update(reserve0=str(r0),reserve1=str(r1),totalShares=str(shares))
-    for label in ('buy', 'sell', 'convert'):
-        tx('after-' + label, target_token=historical[0], output_token=historical[1])
+    for label in ('buy', 'sell'):
+        tx('after-' + label, target_token=historical[0])
+    # The source has CRR 100 and the destination CRR 50. Price both legs from
+    # one committed state. The curved mint must deliver less than half the
+    # proportional linear estimate for a positive deposit (concavity).
+    left, right = [asset.lower() for asset in historical]
+    actor, center = wallet.lower(), profile['token_center'].lower()
+    def curve_states(height):
+        rows = [snapshot(node, height, [left, right], actor, actor, center, {right: 50})['tokens']
+                for node in nodes]
+        check(all(s == rows[0] for s in rows), 'historical curve states disagree')
+        return rows[0]
+
+    h = committed_height(source) - 1
+    # The two direct trades must be reflected at the quotation height.
+    h = max(h, report['transactions']['after-sell']['height'])
+    initial = curve_states(h)
+    middle = read_words(left, '0xc193d62e' + f'{unit:064x}', h, 1, source.evm)[0]
+    output = read_words(right, '0x6cc94a2b' + f'{middle:064x}', h, 1, source.evm)[0]
+    dst = initial[right]
+    check(middle > 0 and 0 < 2 * output * dst['reserve'] < middle * dst['volume'],
+          'CRR 50 conversion quote is inconsistent with a concave purchase curve')
+    for name, minimum, success in [('nonlinear-min-out', output + 1, 0), ('after-convert', output, 1)]:
+        rc, _ = tx(name, target_token=left, output_token=right, status=success, minimum=str(minimum))
+        height = int(rc['blockNumber'], 16)
+        states = curve_states(height)
+        if success:
+            initial[left]['balances'][actor] -= unit
+            initial[left]['volume'] -= unit
+            initial[left]['reserve'] -= middle
+            initial[left]['allowance'] -= unit
+            initial[right]['balances'][actor] += output
+            initial[right]['volume'] += output
+            initial[right]['reserve'] += middle
+        check(states == initial, 'historical nonlinear conversion balances, allowance or reserves differ')
+        report['transactions'][name].update(crrIn=100, crrOut=50, nativeAtoms=str(middle),
+                                            outputAtoms=str(output), minOutAtoms=str(minimum), quoteHeight=h)
     factory, backed, other = rehearse_issuance(args.signer, root, nodes, expected, env, report)
     rehearse_trades(args.signer, root, nodes, expected, env, report, backed[0], other)
     rehearse_atomic_convert(args.signer, root, nodes, expected, env, report, factory, backed[:3], other)
