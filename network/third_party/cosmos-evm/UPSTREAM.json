@@ -1,6 +1,7 @@
 {
   "addedFiles": {
     "mempool/reserve_fee_test.go": "06c28e5e870e5af8d794999939a7bbc062ab3bade1ee0717ff783967841f020c",
+    "x/vm/keeper/native_preflight_test.go": "a4de8c4506c7b6f0702bd8af2b461df980af4a91d74d24c9366a1e48215d0bd3",
     "x/vm/keeper/native_work.go": "3d8d364ae5ad3a4beba3c24081a8f2091fc496a06eeae4d8e03dd9d75753b10d"
   },
   "canonicalFiles": {
