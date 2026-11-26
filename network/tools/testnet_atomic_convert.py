@@ -88,7 +88,8 @@ def rehearse_atomic_convert(signer, root, nodes, expected, env, report, center, 
         after = snapshot(observer, height, tokens, actor, receiver, center)
         check(after == snapshot(validator, height, tokens, actor, receiver, center), 'observer disagrees with validator')
         before['bank'][actor] -= int(receipt['gasUsed'], 16) * int(receipt['effectiveGasPrice'], 16)
-        for event in observer.rpc(f'block_results?height={height}').get('finalize_block_events') or []:
+        block = observer.rpc(f'block_results?height={height}')
+        for event in block.get('finalize_block_events') or []:
             if event['type'] == 'decimal_native_fee_reward':
                 fields = {a['key']: a['value'] for a in event['attributes']}
                 address = bech32_payload(fields['recipient'])
@@ -127,6 +128,18 @@ def rehearse_atomic_convert(signer, root, nodes, expected, env, report, center, 
         else:
             check(not receipt['logs'], 'failed conversion retained EVM effects')
         check(before == after, f'{label} balance, escrow, allowance or native state delta differs at {height}')
+        events = [e for tx in block['txs_results'] for e in tx['events'] if e['type'] == 'mintcandy_drc20_convert']
+        if action == 'convert' and expected_success:
+            check(len(events) == 1, 'missing native conversion event')
+            fields = {attr['key']: attr['value'].lower() for attr in events[0]['attributes']}
+            required = {'payer': actor, 'recipient': receiver, 'token_in': src, 'token_out': dst,
+                        'input_atoms': str(amount), 'native_atoms': str(bridge), 'output_atoms': str(output),
+                        'min_output_atoms': row['minimum'], 'in_volume': str(debit['volume']),
+                        'in_reserve': str(debit['reserve']), 'out_volume': str(credit['volume']),
+                        'out_reserve': str(credit['reserve'])}
+            check(all(fields.get(k) == v for k, v in required.items()), 'native conversion event differs from settled balances')
+        else:
+            check(not events, 'unexpected native conversion event')
         if label == 'exact-cap':
             check(after['tokens'][dst]['volume'] == 1000*UNIT, 'exact-output-cap fixture missed the boundary')
         evidence.append({'case': label, 'height': height, 'hash': receipt['transactionHash'],
