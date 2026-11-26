@@ -1,0 +1,42 @@
+{
+  "txs": [],
+  "decided_last_commit": {
+    "round": 0,
+    "votes": [
+      {
+        "validator": {
+          "address": "RhnucCIdbm5LSl/vo/2A58E0np8=",
+          "power": "10010"
+        },
+        "block_id_flag": "BLOCK_ID_FLAG_COMMIT"
+      },
+      {
+        "validator": {
+          "address": "jgR3PZr5YMqcwFhhIVNuCJujjTk=",
+          "power": "10002"
+        },
+        "block_id_flag": "BLOCK_ID_FLAG_COMMIT"
+      },
+      {
+        "validator": {
+          "address": "nKttTNxTgp/h65jiR2PfLnGr+4c=",
+          "power": "10000"
+        },
+        "block_id_flag": "BLOCK_ID_FLAG_COMMIT"
+      },
+      {
+        "validator": {
+          "address": "2VpmZYKHkrmombSQ4CpdKS+OHzw=",
+          "power": "10000"
+        },
+        "block_id_flag": "BLOCK_ID_FLAG_COMMIT"
+      }
+    ]
+  },
+  "misbehavior": [],
+  "hash": "EqXAFKvgRts4Ln9OvT8iurrPHLvnqYCq/T7cxRtSRmc=",
+  "height": "37996",
+  "time": "2026-11-26T03:58:15.353812531Z",
+  "next_validators_hash": "rJgGKjGhdp89umHvJ08L2OnbH8o3GmLDfp4q96zC20A=",
+  "proposer_address": "RhnucCIdbm5LSl/vo/2A58E0np8="
+}

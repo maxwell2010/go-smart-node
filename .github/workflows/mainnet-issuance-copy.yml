@@ -1,0 +1,90 @@
+name: Governed MSP tariff on the H37995 application copy
+
+on:
+  push:
+    branches: ['feat/mainnet-drc20-issuance']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  governed-copy:
+    if: github.repository == 'maxwell2010/go-smart-node' && github.ref == 'refs/heads/feat/mainnet-drc20-issuance'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 55
+    # The encrypted one-run transfer uses a draft release visible to repository writers.
+    permissions:
+      contents: write
+    defaults:
+      run:
+        working-directory: network
+        shell: bash
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - name: Create ephemeral recipient
+        run: |
+          umask 077
+          mkdir -m 700 "$RUNNER_TEMP/issuance-copy"
+          cd "$RUNNER_TEMP/issuance-copy"
+          openssl genpkey -quiet -algorithm RSA -pkeyopt rsa_keygen_bits:3072 -out receiver.key
+          openssl pkey -in receiver.key -pubout -out recipient.pem
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+        with:
+          name: copy-recipient-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/issuance-copy/recipient.pem
+          retention-days: 1
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e
+        with:
+          go-version: '1.26.11'
+          cache-dependency-path: network/go.sum
+      - name: Compile actual mainnet successor and copy harness
+        env:
+          GOWORK: 'off'
+          GOTOOLCHAIN: local
+        run: go test -mod=readonly -p 2 -tags mintcandy_mainnet,mintcandy_drc20_issuance -c -o "$RUNNER_TEMP/issuance-copy/audit.test" ./app
+      - name: Retrieve encrypted application copy
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          cd "$RUNNER_TEMP/issuance-copy"
+          tag="issuance-copy-inbox-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"
+          deadline=$((SECONDS+1200))
+          until gh release download "$tag" --repo "$GITHUB_REPOSITORY" --clobber --pattern application.enc --pattern session.oaep >/dev/null 2>&1 && [[ -s application.enc && -s session.oaep ]]; do
+            (( SECONDS < deadline )) || exit 1
+            sleep 10
+          done
+      - name: Verify copy, activate twice and restore control without network
+        run: |
+          set -euo pipefail
+          umask 077
+          bindir="$RUNNER_TEMP/issuance-copy"
+          cd "$bindir"
+          openssl pkeyutl -decrypt -inkey receiver.key -in session.oaep -out session.bin -pkeyopt rsa_padding_mode:oaep -pkeyopt rsa_oaep_md:sha256 -pkeyopt rsa_mgf1_md:sha256
+          test "$(wc -c <session.bin)" -eq 48
+          openssl enc -d -aes-256-ctr -K "$(xxd -p -c32 -l32 session.bin)" -iv "$(xxd -p -s32 session.bin)" -in application.enc -out copy.tar.gz
+          echo 'c69fe57509bdbdb44a7c9c6895419adcb7313d0c1670bdb4523c275164dfd781  copy.tar.gz' | sha256sum -c
+          python3 - <<'PY'
+          import pathlib, re, shutil, tarfile
+          pathlib.Path("application.db").mkdir()
+          with tarfile.open("copy.tar.gz") as tar:
+              for member in tar:
+                  assert member.isfile() and re.fullmatch(r"application\.db/(?:CURRENT|MANIFEST-[0-9]+|[0-9]+\.(?:log|ldb|sst))", member.name)
+                  with open(member.name, "xb") as out:
+                      shutil.copyfileobj(tar.extractfile(member), out)
+          PY
+          cd "$GITHUB_WORKSPACE/network/app"
+          for run in 1 2; do
+            sudo -n unshare --net -- setpriv --reuid="$(id -u)" --regid="$(id -g)" --clear-groups --no-new-privs -- env -i PATH=/usr/bin:/bin HOME="$bindir" MINTCANDY_AUDIT_DB="$bindir/application.db" "$bindir/audit.test" -test.run='^TestOfflineMainnetTickerIndex$' -test.v -test.timeout=8m | tee "$bindir/run-$run.log"
+            sed -n 's/^TICKER_COPY_AUDIT //p' "$bindir/run-$run.log" > "$bindir/result-$run.json"
+            jq -e '.appliedHeight == 37996 and .storesComparedOutsideExpectedChanges == 20 and (.tickers|length) == 3' "$bindir/result-$run.json"
+          done
+          cmp "$bindir/result-1.json" "$bindir/result-2.json"
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+        with:
+          name: governed-mainnet-copy-${{ github.sha }}
+          path: ${{ runner.temp }}/issuance-copy/result-1.json
+          retention-days: 14
