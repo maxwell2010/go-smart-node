@@ -43,6 +43,7 @@ func TestExportMainnetNFTUpgradeAction(t *testing.T) {
 		Sequence      uint64 `json:"sequence"`
 		ProposalID    uint64 `json:"proposalId"`
 		Height        int64  `json:"height"`
+		Issuance      bool   `json:"issuance"`
 	}
 	require.NoError(t, json.Unmarshal([]byte(os.Getenv("MCND_NFT_GOV_ACTION")), &input))
 	require.GreaterOrEqual(t, input.Index, 0)
@@ -82,8 +83,15 @@ func TestExportMainnetNFTUpgradeAction(t *testing.T) {
 		body := fmt.Sprintf(`mintcandy-sdk-upgrade/v1:{"name":"mintcandy-native-sdk-migrations-v1","height":%d}`, input.Height)
 		deposit, err := sdk.ParseCoinsNormalized("10000000000000000000msp")
 		require.NoError(t, err)
-		msg, err = govv1.NewMsgSubmitProposal(nil, deposit, signer, body, "MintCandy NFT reserve refunds",
-			"Exercise a governed update in an isolated MSP network.", false)
+		title := "MintCandy NFT reserve refunds"
+		if input.Issuance {
+			title = "MintCandy DRC20 issuance tariff"
+			body = fmt.Sprintf(`mintcandy-sdk-upgrade/v1:{"name":"mintcandy-drc20-issuance-v1","height":%d}`, input.Height)
+			deposit, err = sdk.ParseCoinsNormalized("50000000000000000000msp")
+			require.NoError(t, err)
+		}
+		msg, err = govv1.NewMsgSubmitProposal(nil, deposit, signer, body, title,
+			"Exercise a governed update in an isolated MSP network.", input.Issuance)
 		require.NoError(t, err)
 	} else {
 		require.Zero(t, input.Height)

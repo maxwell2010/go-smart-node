@@ -136,8 +136,8 @@ def query_proposal(node, proposal_id, height):
     return native(f'{PROPOSALS_API}/{proposal_id}', height, base=node.rest)['proposal']
 
 
-def wait_tally(node, proposal_id, minimum, report):
-    deadline = time.monotonic() + 45
+def wait_tally(node, proposal_id, minimum, report, *, timeout=45):
+    deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:
         if node.child.poll() is not None:
             raise RuntimeError('daemon stopped before native governance tally: ' + readiness_diagnostic(node.log, report))
@@ -158,8 +158,8 @@ def current_plan(node, height):
     return native(f'{UPGRADE_API}/current_plan', height, base=node.rest).get('plan')
 
 
-def applied_height(node, height):
-    return int(native(f'{UPGRADE_API}/applied_plan/{PLAN}', height, base=node.rest).get('height', '0'))
+def applied_height(node, height, plan_name=PLAN):
+    return int(native(f'{UPGRADE_API}/applied_plan/{plan_name}', height, base=node.rest).get('height', '0'))
 
 
 def check_proposal(replicas, proposal_id, height, manifest, accepted, voting_weight=VOTING_WEIGHT):
@@ -189,17 +189,17 @@ def schedule_event(node, height):
     return {key: fields.get(key) for key in ('proposal_id', 'name', 'height')}
 
 
-def check_schedule(replicas, action, height):
+def check_schedule(replicas, action, height, plan_name=PLAN):
     expected_info = {'schema': SCHEMA, 'proposal_id': action['passedID']}
     for node in replicas:
         plan = current_plan(node, height)
-        check(plan is not None and plan['name'] == PLAN and int(plan['height']) == action['planHeight'] and
+        check(plan is not None and plan['name'] == plan_name and int(plan['height']) == action['planHeight'] and
               plan['info'] == json.dumps(expected_info, separators=(',', ':')) and not plan.get('upgraded_client_state'),
               'stored SDK plan differs from its exact approved governance manifest')
-        check(applied_height(node, height) == 0, 'SDK migration executed before its scheduled height')
+        check(applied_height(node, height, plan_name) == 0, 'SDK migration executed before its scheduled height')
 
 
-def wait_predecessor_halt(replicas, action, report):
+def wait_predecessor_halt(replicas, action, report, plan_name=PLAN):
     target = action['planHeight']
     expected_info = json.dumps({'schema': SCHEMA, 'proposal_id': action['passedID']}, separators=(',', ':'))
     started = time.monotonic()
@@ -227,7 +227,7 @@ def wait_predecessor_halt(replicas, action, report):
             except (OSError, json.JSONDecodeError):
                 ready = False
                 continue
-            check(hint['name'] == PLAN and int(hint['height']) == target and hint['info'] == expected_info,
+            check(hint['name'] == plan_name and int(hint['height']) == target and hint['info'] == expected_info,
                   'SDK upgrade hint differs from the exact approved plan')
             state['upgradeHint'] = True
             ready &= height == target - 1

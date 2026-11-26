@@ -12,6 +12,7 @@ import (
 )
 
 func (app *App) registerNativeGovernanceUpgradeHandlers() {
+	app.registerDRC20IssuanceHandler()
 	app.UpgradeKeeper.SetUpgradeHandler(nativeSDKMigrationPlan, func(ctx context.Context, plan upgradetypes.Plan, from module.VersionMap) (module.VersionMap, error) {
 		versions, err := app.runNativeSDKMigration(ctx, plan, from)
 		if err != nil {

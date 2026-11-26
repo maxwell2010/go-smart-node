@@ -96,7 +96,7 @@ func (c *withdrawalController) admitBackedToken(ctx sdk.Context, sender common.A
 	if r.evm.GetState(ctx, r.profile.TokenCenter, reservelessPauseSlot) != (common.Hash{}) {
 		return true, errors.New("backed TokenCenter is paused")
 	}
-	args, err := canonicalReservelessArgs(method, issuanceCalldata(ctx, msg.Data))
+	args, err := canonicalReservelessArgs(method, r.issuanceCalldata(ctx, msg.Data))
 	if err != nil {
 		return true, err
 	}

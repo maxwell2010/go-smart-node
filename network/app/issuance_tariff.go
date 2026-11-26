@@ -7,6 +7,8 @@ import (
 	"math/big"
 	"net/http"
 
+	storetypes "cosmossdk.io/store/types"
+
 	sdkmath "cosmossdk.io/math"
 	sdk "github.com/cosmos/cosmos-sdk/types"
 	evmtypes "github.com/cosmos/evm/x/vm/types"
@@ -16,12 +18,56 @@ import (
 	"github.com/maxwell2010/go-smart-node/network/identity"
 )
 
-// Rehearsal-only terms. A production treasury and activation are separate governance decisions.
+const issuanceTreasuryMain = "0x40900a48273644768c09183e00e43528c17a29f6"
 const issuanceTreasuryTest = "0x00000000000000000000000000000000Cafe9900"
-const issuanceSymbolPrefix byte = 0x85
+const issuanceActivationKey byte = 0x87
 
 func testIssuanceActive(chain string) bool {
 	return identity.ProfileChainID == identity.TestnetChainID && chain == identity.TestnetChainID
+}
+
+// Read only a single fixed key without changing the historical gas charged
+// to an issuance that is replayed from a block before tariff activation.
+func (r *customCollateralRegistry) issuanceTreasury(ctx sdk.Context) (common.Address, bool) {
+	if testIssuanceActive(ctx.ChainID()) {
+		return common.HexToAddress(issuanceTreasuryTest), true
+	}
+	if ctx.ChainID() == identity.MainnetChainID && identity.ProfileChainID == identity.MainnetChainID {
+		read := ctx.WithGasMeter(storetypes.NewInfiniteGasMeter())
+		if read.KVStore(r.store).Has([]byte{issuanceActivationKey}) {
+			return common.HexToAddress(issuanceTreasuryMain), true
+		}
+	}
+	return common.Address{}, false
+}
+
+// activateDRC20IssuanceTariff runs only from the approved upgrade handler.
+// The index, including zero-supply tokens, and the effective tariff commit together.
+func (app *App) activateDRC20IssuanceTariff(ctx sdk.Context) error {
+	if identity.ProfileChainID != identity.MainnetChainID || ctx.ChainID() != identity.MainnetChainID ||
+		ctx.ExecMode() != sdk.ExecModeFinalize || app.withdrawals == nil || app.withdrawals.customCollateral == nil {
+		return errors.New("DRC20 tariff activation requires the mainnet native collateral profile")
+	}
+	registry := app.withdrawals.customCollateral
+	child, write := ctx.CacheContext()
+	store := child.KVStore(registry.store)
+	if store.Has([]byte{issuanceActivationKey}) {
+		return errors.New("DRC20 issuance tariff already initialized")
+	}
+	entries := store.Iterator([]byte{issuanceSymbolPrefix}, []byte{issuanceSymbolPrefix + 1})
+	occupied := entries.Valid()
+	if err := entries.Close(); err != nil {
+		return err
+	}
+	if occupied {
+		return errors.New("DRC20 issuance index namespace already occupied")
+	}
+	if err := registry.indexIssuanceSymbols(child); err != nil {
+		return err
+	}
+	store.Set([]byte{issuanceActivationKey}, []byte{1})
+	write()
+	return nil
 }
 
 func issuanceFee(length int) (*big.Int, error) {
@@ -46,14 +92,14 @@ func issuanceFee(length int) (*big.Int, error) {
 // A signed, fixed-width trailer authorizes the native debit beyond call value.
 // Solidity receives its original ABI call. Admission checks both the exact ABI encoding
 // and this trailer, binding destination and total tariff even when call value is zero.
-func issuanceApproval(fee *big.Int) []byte {
+func issuanceApproval(fee *big.Int, treasury common.Address) []byte {
 	b := crypto.Keccak256([]byte("MintCandy DRC20 issuance v1"))
-	b = append(b, common.LeftPadBytes(common.HexToAddress(issuanceTreasuryTest).Bytes(), 32)...)
+	b = append(b, common.LeftPadBytes(treasury.Bytes(), 32)...)
 	return append(b, common.BigToHash(fee).Bytes()...)
 }
 
-func issuanceCalldata(ctx sdk.Context, data []byte) []byte {
-	if testIssuanceActive(ctx.ChainID()) && len(data) >= 4+96 {
+func (r *customCollateralRegistry) issuanceCalldata(ctx sdk.Context, data []byte) []byte {
+	if _, active := r.issuanceTreasury(ctx); active && len(data) >= 4+96 {
 		return data[:len(data)-96]
 	}
 	return data
@@ -142,14 +188,15 @@ func (r *customCollateralRegistry) indexIssuanceSymbols(ctx sdk.Context) error {
 
 // Called inside the successful EVM transaction's existing SDK cache, before insertion of membership.
 func (r *customCollateralRegistry) settleIssuance(ctx sdk.Context, sender, token common.Address, symbol string, data []byte, legacy *big.Int) error {
-	if !testIssuanceActive(ctx.ChainID()) {
+	destination, active := r.issuanceTreasury(ctx)
+	if !active {
 		return nil
 	}
 	fee, err := issuanceFee(len(symbol))
 	if err != nil {
 		return err
 	}
-	if !bytes.HasSuffix(data, issuanceApproval(fee)) {
+	if !bytes.HasSuffix(data, issuanceApproval(fee, destination)) {
 		return errors.New("missing signed DRC20 issuance tariff approval")
 	}
 	if err := r.indexIssuanceSymbols(ctx); err != nil {
@@ -160,7 +207,7 @@ func (r *customCollateralRegistry) settleIssuance(ctx sdk.Context, sender, token
 	if store.Has(key) {
 		return errors.New("DRC20 ticker already registered")
 	}
-	treasury := sdk.AccAddress(common.HexToAddress(issuanceTreasuryTest).Bytes())
+	treasury := sdk.AccAddress(destination.Bytes())
 	payer := sdk.AccAddress(sender.Bytes())
 	burn := new(big.Int).Quo(fee, big.NewInt(5))
 	share := new(big.Int).Sub(fee, burn)
@@ -199,14 +246,19 @@ func (app *App) handleIssuanceTariff(w http.ResponseWriter, r *http.Request) {
 		feeAPIError(w, 503, "latest committed state unavailable")
 		return
 	}
-	if !testIssuanceActive(ctx.ChainID()) || app.withdrawals == nil || app.withdrawals.customCollateral == nil {
-		feeAPIError(w, 404, "test tariff inactive")
+	if app.withdrawals == nil || app.withdrawals.customCollateral == nil {
+		feeAPIError(w, 404, "issuance tariff inactive")
+		return
+	}
+	destination, active := app.withdrawals.customCollateral.issuanceTreasury(ctx)
+	if !active {
+		feeAPIError(w, 404, "issuance tariff inactive")
 		return
 	}
 	rows := make([]map[string]any, 0, 8)
 	for length := 3; length <= 10; length++ {
 		fee, _ := issuanceFee(length)
-		rows = append(rows, map[string]any{"length": length, "fee_atoms": fee.String(), "backed_factory_component_atoms": backedSymbolCommission(length).String(), "approval_suffix": hexutil.Encode(issuanceApproval(fee))})
+		rows = append(rows, map[string]any{"length": length, "fee_atoms": fee.String(), "backed_factory_component_atoms": backedSymbolCommission(length).String(), "approval_suffix": hexutil.Encode(issuanceApproval(fee, destination))})
 	}
-	feeAPIJSON(w, 200, map[string]any{"version": 1, "chain_id": ctx.ChainID(), "denom": identity.BaseDenom, "height": ctx.BlockHeight(), "token_center": app.withdrawals.profile.TokenCenter.Hex(), "treasury": common.HexToAddress(issuanceTreasuryTest).Hex(), "treasury_percent": 80, "burn_percent": 20, "tariffs": rows})
+	feeAPIJSON(w, 200, map[string]any{"version": 1, "chain_id": ctx.ChainID(), "denom": identity.BaseDenom, "height": ctx.BlockHeight(), "token_center": app.withdrawals.profile.TokenCenter.Hex(), "treasury": destination.Hex(), "treasury_percent": 80, "burn_percent": 20, "tariffs": rows})
 }

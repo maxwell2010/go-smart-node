@@ -14,15 +14,17 @@ ZERO = '0x' + '00' * 20
 FEES = (100000, 10000, 1000, 100, 100, 100, 100, 10)
 
 
-def rehearse_issuance(signer, root, nodes, expected, env, report):
+def rehearse_issuance(signer, root, nodes, expected, env, report, *, mainnet=False):
     source, observer = nodes[0], nodes[-1]
-    check(expected['chainId'] == 'mintcandy_990098-1' and expected['nativeDenom'] == 'tmsp'
-          and report['loopbackOnlyNamespace'], 'testnet issuance requires isolated tMSP')
+    chain, denom, recipient = (('mintcandy_9905401-1', 'msp', '0x40900a48273644768c09183e00e43528c17a29f6')
+                               if mainnet else ('mintcandy_990098-1', 'tmsp', '0x00000000000000000000000000000000cafe9900'))
+    check(expected['chainId'] == chain and expected['nativeDenom'] == denom
+          and report['loopbackOnlyNamespace'], 'issuance requires the matching isolated profile')
     directory = root / 'testnet-issuance'
     directory.mkdir(mode=0o700)
     path = '/mintcandy/issuance/v1/tariff'
     policy, _ = request(observer.rest + path)
-    check(policy['chain_id'] == expected['chainId'] and policy['denom'] == 'tmsp'
+    check(policy['chain_id'] == expected['chainId'] and policy['denom'] == denom and policy['treasury'].lower() == recipient
           and policy['treasury_percent'] == 80 and policy['burn_percent'] == 20, 'unexpected tariff domain or split')
     for length, row in enumerate(policy['tariffs'], 3):
         check(row['length'] == length and int(row['fee_atoms']) == FEES[length-3]*UNIT, 'wrong quote')
@@ -66,13 +68,13 @@ def rehearse_issuance(signer, root, nodes, expected, env, report):
                 attrs = {a['key']: a['value'] for a in event['attributes']}
                 addr = bech32_payload(attrs['recipient'])
                 if addr in totals:
-                    check(attrs['amount'].endswith('tmsp'), 'foreign payout')
-                    totals[addr] += int(attrs['amount'][:-4])
+                    check(attrs['amount'].endswith(denom), 'foreign payout')
+                    totals[addr] += int(attrs['amount'].removesuffix(denom))
         for node in (source, observer):
             for addr, delta in totals.items():
                 amounts = [int(ethereum('eth_getBalance', [addr, hex(h)], base=node.evm), 16) for h in (height-1, height)]
                 check(amounts[1]-amounts[0] == delta, f'wrong {addr} balance delta at {height}: {amounts[1]-amounts[0]} != {delta}')
-            supplies = [int(native('/cosmos/bank/v1beta1/supply/by_denom?denom=tmsp', h, base=node.rest)['amount']['amount'])
+            supplies = [int(native('/cosmos/bank/v1beta1/supply/by_denom?denom=' + denom, h, base=node.rest)['amount']['amount'])
                         for h in (height-1, height)]
             check(supplies[0]-supplies[1] == burned, 'bank supply change differs from burn')
     for op in fixtures[:-2]:
@@ -101,6 +103,6 @@ def rehearse_issuance(signer, root, nodes, expected, env, report):
     wait_replicas(nodes, max(groups)+2, 65, report)
     for batch in groups.values():
         verify(batch)
-    report['testnetIssuance'] = {'denom': 'tmsp', 'treasury': treasury, 'outcomes': outcomes,
+    report['mainnetIssuance' if mainnet else 'testnetIssuance'] = {'denom': denom, 'treasury': treasury, 'outcomes': outcomes,
                                 'observerMatched': True, 'treasuryAndBurnVerified': True}
 

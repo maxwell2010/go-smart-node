@@ -86,7 +86,7 @@ func TestSignNativeFeeRehearsal(t *testing.T) {
 		data, err := factory.Pack("createToken", meta)
 		require.NoError(t, err)
 		if doc.ChainID == identity.TestnetChainID {
-			data = append(data, testTariffApproval(unit(10))...)
+			data = append(data, testTariffApproval(unit(10), "0x00000000000000000000000000000000Cafe9900")...)
 		}
 		tx, raw := sign(0, 16_000_000, center, new(big.Int).Add(unit(10), big.NewInt(250_000_000_000_000_000)), data)
 		write("create", map[string]string{"creator": payer.Hex(), "target": center.Hex(), "hash": tx.Hash().Hex(),

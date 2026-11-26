@@ -1,0 +1,33 @@
+name: MSP issuance candidate and expedited upgrade
+on:
+  push:
+    branches: [feat/mainnet-drc20-issuance]
+    paths: ['network/**', '.github/workflows/mainnet-issuance-candidate.yml']
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  rehearsal:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 50
+    env:
+      GOWORK: 'off'
+      GOTOOLCHAIN: local
+      GOMAXPROCS: '2'
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e
+        with:
+          go-version: '1.26.11'
+          cache-dependency-path: network/go.sum
+      - name: Build both roles and rehearse signed transactions on disposable MSP validators
+        working-directory: network
+        run: bash tools/ci_mainnet_issuance.sh
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+        with:
+          name: mintcandy-mainnet-issuance-linux-amd64-${{ github.sha }}
+          path: ${{ runner.temp }}/mintcandy-mainnet-issuance-linux-amd64.tar.gz
+          if-no-files-found: error
+          retention-days: 30

@@ -18,9 +18,9 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func testTariffApproval(fee *big.Int) []byte {
+func testTariffApproval(fee *big.Int, treasury string) []byte {
 	raw := crypto.Keccak256([]byte("MintCandy DRC20 issuance v1"))
-	raw = append(raw, common.LeftPadBytes(common.HexToAddress("0x00000000000000000000000000000000Cafe9900").Bytes(), 32)...)
+	raw = append(raw, common.LeftPadBytes(common.HexToAddress(treasury).Bytes(), 32)...)
 	return append(raw, common.BigToHash(fee).Bytes()...)
 }
 
@@ -30,7 +30,13 @@ func TestSignTestnetIssuance(t *testing.T) {
 		t.Skip("loopback tMSP rehearsal only")
 	}
 	requirePrivateMainnetFixture(t)
-	require.Equal(t, identity.TestnetChainID, identity.ProfileChainID)
+	const testTreasury = "0x00000000000000000000000000000000Cafe9900"
+	treasury, evmID := testTreasury, int64(identity.TestnetEVMChainID)
+	if identity.ProfileChainID == identity.MainnetChainID {
+		treasury, evmID = "0x40900a48273644768c09183e00e43528c17a29f6", identity.MainnetEVMChainID
+	} else {
+		require.Equal(t, identity.TestnetChainID, identity.ProfileChainID)
+	}
 	require.True(t, filepath.IsAbs(dir))
 	info, err := os.Stat(dir)
 	require.NoError(t, err)
@@ -73,9 +79,13 @@ func TestSignTestnetIssuance(t *testing.T) {
 		}
 		require.NoError(t, err)
 		if signedFee >= 0 {
-			data = append(data, testTariffApproval(atoms(signedFee))...)
+			recipient := treasury
+			if label == "wrong treasury" {
+				recipient = testTreasury
+			}
+			data = append(data, testTariffApproval(atoms(signedFee), recipient)...)
 		}
-		tx, err := ethtypes.SignTx(ethtypes.NewTx(&ethtypes.LegacyTx{To: &target, Nonce: n, Value: value, Gas: 16_000_000, GasPrice: big.NewInt(2_000_000_000), Data: data}), ethtypes.NewEIP155Signer(big.NewInt(identity.TestnetEVMChainID)), key)
+		tx, err := ethtypes.SignTx(ethtypes.NewTx(&ethtypes.LegacyTx{To: &target, Nonce: n, Value: value, Gas: 16_000_000, GasPrice: big.NewInt(2_000_000_000), Data: data}), ethtypes.NewEIP155Signer(big.NewInt(evmID)), key)
 		require.NoError(t, err)
 		raw, err := tx.MarshalBinary()
 		require.NoError(t, err)
@@ -92,6 +102,9 @@ func TestSignTestnetIssuance(t *testing.T) {
 	add("free on backed", "baa", false, false, 3, 100000)
 	add("backed on free", "raa", true, false, 3, 100000)
 	add("no approval", "rollback", false, false, 3, -1)
+	if identity.ProfileChainID == identity.MainnetChainID {
+		add("wrong treasury", "rollback", false, false, 3, 100)
+	}
 	add("wrong price", "rollback", true, false, 3, 99)
 	add("reserved", "tmsp", false, false, 3, 10000)
 	add("insufficient", "low", false, false, 5, 100000)

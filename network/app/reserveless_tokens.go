@@ -119,7 +119,7 @@ func (c *withdrawalController) admitReservelessCreation(ctx sdk.Context, msg cor
 	if err != nil {
 		return err
 	}
-	args, err := canonicalReservelessArgs(centerABI.Methods["createTokenReserveless"], issuanceCalldata(ctx, msg.Data))
+	args, err := canonicalReservelessArgs(centerABI.Methods["createTokenReserveless"], r.issuanceCalldata(ctx, msg.Data))
 	if err != nil {
 		return err
 	}
