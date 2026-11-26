@@ -53,6 +53,7 @@ jobs:
           out="$RUNNER_TEMP/msp-operator-review"
           mkdir "$out"
           tags=mintcandy_mainnet,mintcandy_coordinated_assets
+          go test -mod=readonly -p 2 -count=1 -tags "$tags" -run '^TestMintCandyPreflightGas$' github.com/cosmos/evm/x/vm/keeper
           go build -mod=readonly -p 2 -trimpath -tags "$tags" -ldflags "-X main.buildVersion=1.2.4-rc.1 -X main.buildCommit=$GITHUB_SHA" -o "$out/mcnd" ./cmd/mcnd
           cd "$out"
           echo "$GITHUB_SHA" > SOURCE_COMMIT
