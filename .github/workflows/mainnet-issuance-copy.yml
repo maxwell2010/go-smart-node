@@ -1,8 +1,8 @@
-name: Coordinated MSP tariff and empty pool on the H37995 application copy
+name: Coordinated MSP reserve trades, tariff and empty pool on the H37995 application copy
 
 on:
   push:
-    branches: ['feat/mainnet-issuance-pool-rehearsal']
+    branches: ['feat/mainnet-full-assets']
   workflow_dispatch:
 
 permissions:
@@ -10,7 +10,7 @@ permissions:
 
 jobs:
   governed-copy:
-    if: github.repository == 'maxwell2010/go-smart-node' && github.ref == 'refs/heads/feat/mainnet-issuance-pool-rehearsal'
+    if: github.repository == 'maxwell2010/go-smart-node' && github.ref == 'refs/heads/feat/mainnet-full-assets'
     runs-on: ubuntu-24.04
     timeout-minutes: 55
     # The encrypted one-run transfer uses a draft release visible to repository writers.
