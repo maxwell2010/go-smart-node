@@ -1,0 +1,209 @@
+{
+  "run": "https://github.com/maxwell2010/go-smart-node/actions/runs/45743116393",
+  "candidate": "https://github.com/maxwell2010/go-smart-node/actions/runs/45743116393/artifacts/15082548860",
+  "status": "PASS",
+  "package": {
+    "archiveSha256": "d029836a305f159d52bd5518011327fe8be38f3b8069d1cb5f7e331f305a4b1a",
+    "binarySha256": "4df363690df7dd632df5511baa50038a289d5dd8344cb7c54a6122180a854a99",
+    "chainId": "mintcandy_990098-1",
+    "genesisSha256": "3077c51c4aee0592e0d196fa2a267d842fb3e95d47b16bb99011a20619839e65",
+    "manifestSha256": "22cfb54891d999fc747cb0a44c25c725c2105400553ac4bccaa8897e704689d0",
+    "platform": "linux/amd64",
+    "schemaVersion": 1,
+    "signerFingerprint": "14CB453B3C8C9766C6EAFC50BB59BFCB38296644",
+    "sourceCommit": "26d7501688db5da479d6acadd555ec45f38c4619",
+    "status": "test-launch-rehearsal"
+  },
+  "validatorCount": 4,
+  "atomicConvert": {
+    "outcomes": [
+      {
+        "case": "fund-input",
+        "height": 184,
+        "hash": "0x85a5a34f6fc1b1ae117e1c1d8c6c2ce19d76c65dae91c45c9ac7456805d8eb81",
+        "status": 1
+      },
+      {
+        "case": "missing-allowance",
+        "height": 188,
+        "hash": "0xb4ca9cc453e900d198a82ec4d4af2ee3d649da936ecd3308e7f723e7a3bff1eb",
+        "status": 0,
+        "native_atoms": "500000000000000000",
+        "output_atoms": "5000000000000000000",
+        "quote_height": 187
+      },
+      {
+        "case": "approve",
+        "height": 192,
+        "hash": "0x7aa15892f2a00eba742d8d0e494267d037171ab610fe5788c9fc472e31a941f2",
+        "status": 1
+      },
+      {
+        "case": "convert",
+        "height": 196,
+        "hash": "0x91210ff970d82d06bad75c87a20953111065b52dbd7c13975abe1dadb8afd904",
+        "status": 1,
+        "native_atoms": "500000000000000000",
+        "output_atoms": "5000000000000000000",
+        "quote_height": 195
+      },
+      {
+        "case": "min-out",
+        "height": 200,
+        "hash": "0x3c37bb505f60d1c8152b2b98a25634a167cb456c5072e1c9a4a139d546aee34f",
+        "status": 0,
+        "native_atoms": "500000000000000000",
+        "output_atoms": "5000000000000000000",
+        "quote_height": 199
+      },
+      {
+        "case": "input-reserve-floor",
+        "height": 204,
+        "hash": "0x46962fc48d54ad9e189d96ca465d78933ce4e72dc628389e7104fbbdd9a4c935",
+        "status": 0,
+        "native_atoms": "2000000000000000000",
+        "output_atoms": "20000000000000000000",
+        "quote_height": 203
+      },
+      {
+        "case": "output-cap",
+        "height": 208,
+        "hash": "0xfe67507283532bf73a1d26cdc373dbc51c9075786b00bb78e9a7a86b016b20a9",
+        "status": 0,
+        "native_atoms": "100000000000000000",
+        "output_atoms": "1000000000000000000",
+        "quote_height": 207
+      },
+      {
+        "case": "same-token",
+        "height": 212,
+        "hash": "0x5994a73260ed946564a32ad13d5e994d52ba94a0f09888e4e8fdd9edbce8b58d",
+        "status": 0
+      },
+      {
+        "case": "unregistered-out",
+        "height": 216,
+        "hash": "0xa9a282e213bf8a14532a51c25848b12fbc6d27c2a9696999e32e0e61b483bf21",
+        "status": 0
+      },
+      {
+        "case": "unregistered-in",
+        "height": 220,
+        "hash": "0x8ec68abbd30ebc1e523f84c44673ddda5f0ec9c594baf4dbd23818b6949e0146",
+        "status": 0
+      },
+      {
+        "case": "seed-output-near-cap",
+        "height": 224,
+        "hash": "0xe365f80e52448a58590de40ed414433c49c320e9ab07c78f1dfadd519ab418b6",
+        "status": 1
+      },
+      {
+        "case": "exact-cap",
+        "height": 228,
+        "hash": "0xdf4aeb5d4f8984b6824a60c584207d3e0577cb95dea2552d4a4decfd2882aaec",
+        "status": 1,
+        "native_atoms": "500000000000000000",
+        "output_atoms": "5000000000000000000",
+        "quote_height": 227
+      },
+      {
+        "case": "above-cap",
+        "height": 232,
+        "hash": "0x651fe5cedcd5b33130f5c39d56b5e871e60f02bdbd795ff2ec6bae96f2ffa6ce",
+        "status": 0,
+        "native_atoms": "100000000000000000",
+        "output_atoms": "1000000000000000000",
+        "quote_height": 231
+      }
+    ],
+    "center": "0x386aa819cc47d6984aa0a1fa802c2fd11cf8e738",
+    "observerMatched": true
+  },
+  "reserveTrades": {
+    "token": "0xb7e0c83b9a4bc9b5a0166465e3376ff3331cc747",
+    "outcomes": [
+      {
+        "case": "buy",
+        "height": 145,
+        "hash": "0xe786b625f3872fd2af159bfc051665b1c47e2a2660b334fe8b52124de6ffbf8f",
+        "status": 1,
+        "quote_atoms": "10000000000000000000"
+      },
+      {
+        "case": "sell",
+        "height": 149,
+        "hash": "0x8b9d79eb75c217f40c0b0db326b694e3938f1fdf011a607fafb8a1a63a000f07",
+        "status": 1,
+        "quote_atoms": "500000000000000000"
+      },
+      {
+        "case": "sell-reserve-floor",
+        "height": 153,
+        "hash": "0xe1fd7e2498502208d43111d951502d6fcca9548fc87cd9a24bde99efb19878ed",
+        "status": 0,
+        "quote_atoms": "600000000000000000"
+      },
+      {
+        "case": "sell-supply-floor",
+        "height": 157,
+        "hash": "0x19d22a95195a6c80b8a8fd7c1cd2d8087dc4e876cb3db69365f9cf2da2ccb723",
+        "status": 0,
+        "quote_atoms": "1490000000000000000"
+      },
+      {
+        "case": "contract-recipient",
+        "height": 161,
+        "hash": "0x43b4fbfe620f5542540345a2bba758f2d1005cac75eb0c40be3ccc2cf43d4a90",
+        "status": 0,
+        "quote_atoms": "10000000000000000000"
+      },
+      {
+        "case": "buy-min-out",
+        "height": 165,
+        "hash": "0x062d6de26d351ee4e3edb662f03eb7535c1a7709d71de95927c0c507a74c1a94",
+        "status": 0,
+        "quote_atoms": "10000000000000000000"
+      },
+      {
+        "case": "sell-min-out",
+        "height": 169,
+        "hash": "0xe118cf4c0c6d5711a1ae189fb7a23b23a250dca99682c894889521f5214a7951",
+        "status": 0,
+        "quote_atoms": "100000000000000000"
+      },
+      {
+        "case": "buy-above-cap",
+        "height": 173,
+        "hash": "0xcde52b04107bfc8a9584093ea6055cbaa5ac9f3f8ff7f3692fe6ef6863c34600",
+        "status": 0,
+        "quote_atoms": "986000000000000000000"
+      },
+      {
+        "case": "approach-cap",
+        "height": 177,
+        "hash": "0x4f6c20c64d63771909763aff6091f155c7c35d9089167fc0bab9805cd78d68ce",
+        "status": 1,
+        "quote_atoms": "980000000000000000000"
+      },
+      {
+        "case": "race-b",
+        "height": 181,
+        "hash": "0xb65ab8ba6c8a14c4463284773391c84919c6d2ae27bc199362b8362014412380",
+        "status": 1,
+        "quote_atoms": "5000000000000000000"
+      },
+      {
+        "case": "race-a",
+        "height": 181,
+        "hash": "0x1a3e02f2e0222ad208fe714eba6c6781fdc8a8c2da8bae8f964be63f022c550f",
+        "status": 0,
+        "quote_atoms": "5000000000000000000"
+      }
+    ],
+    "unit": "tmsp",
+    "historicalProjectionVerified": true
+  },
+  "walletBundleCases": 51,
+  "walletBundleObserverMatched": true
+}
