@@ -16,6 +16,7 @@ import (
 	"github.com/cosmos/cosmos-sdk/types/tx/signing"
 	authsigning "github.com/cosmos/cosmos-sdk/x/auth/signing"
 	govv1 "github.com/cosmos/cosmos-sdk/x/gov/types/v1"
+	"github.com/cosmos/evm/crypto/ethsecp256k1"
 	ownedapp "github.com/maxwell2010/go-smart-node/network/app"
 	"github.com/maxwell2010/go-smart-node/network/identity"
 	"github.com/stretchr/testify/require"
@@ -90,17 +91,22 @@ func TestExportMainnetNFTUpgradeAction(t *testing.T) {
 		require.Equal(t, uint64(1), input.ProposalID)
 		msg = &govv1.MsgVote{ProposalId: input.ProposalID, Voter: signer, Option: govv1.OptionYes}
 	}
-	config := ownedapp.MakeEncodingConfig(identity.MainnetEVMChainID).TxConfig
+	writeFixtureGovernanceTx(t, output, genesis, doc.ChainID, identity.MainnetEVMChainID, "msp", signer, key, input.AccountNumber, input.Sequence, msg)
+}
+
+func writeFixtureGovernanceTx(t *testing.T, output string, genesis []byte, chain string, evm uint64, denom, signer string, key *ethsecp256k1.PrivKey, account, sequence uint64, msg sdk.Msg) {
+	t.Helper()
+	config := ownedapp.MakeEncodingConfig(evm).TxConfig
 	builder := config.NewTxBuilder()
 	require.NoError(t, builder.SetMsgs(msg))
 	builder.SetGasLimit(500_000)
-	builder.SetFeeAmount(sdk.NewCoins(sdk.NewInt64Coin("msp", 500_000_000_000_000_000)))
+	builder.SetFeeAmount(sdk.NewCoins(sdk.NewInt64Coin(denom, 500_000_000_000_000_000)))
 	mode := signing.SignMode_SIGN_MODE_DIRECT
-	require.NoError(t, builder.SetSignatures(signing.SignatureV2{PubKey: key.PubKey(), Sequence: input.Sequence,
+	require.NoError(t, builder.SetSignatures(signing.SignatureV2{PubKey: key.PubKey(), Sequence: sequence,
 		Data: &signing.SingleSignatureData{SignMode: mode}}))
 	signature, err := clienttx.SignWithPrivKey(t.Context(), mode, authsigning.SignerData{
-		Address: signer, ChainID: doc.ChainID, AccountNumber: input.AccountNumber, Sequence: input.Sequence, PubKey: key.PubKey(),
-	}, builder, key, config, input.Sequence)
+		Address: signer, ChainID: chain, AccountNumber: account, Sequence: sequence, PubKey: key.PubKey(),
+	}, builder, key, config, sequence)
 	require.NoError(t, err)
 	require.NoError(t, builder.SetSignatures(signature))
 	raw, err := config.TxEncoder()(builder.GetTx())

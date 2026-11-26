@@ -116,13 +116,13 @@ def prove_burn(args, root, env, nodes, report, nft, nonce, *, accept):
             'remainingAtomic': str(after[1]), 'activeSerials': after[2]}
 
 
-def governance_tx(args, source, root, env, report, action, index, signer, label):
+def governance_tx(args, source, root, env, report, action, index, signer, label, *, fixture_test='TestExportMainnetNFTUpgradeAction'):
     at = committed_height(source)
     account = native(f'/cosmos/auth/v1beta1/accounts/{signer}', at, base=source.rest)['account']
     check(account['address'] == signer, 'governance fixture queried a different account')
     name = label + '.json'
     action.update(index=index, accountNumber=int(account['account_number']), sequence=int(account['sequence']))
-    path = sign_fixture(args, root, env, 'TestExportMainnetNFTUpgradeAction', name,
+    path = sign_fixture(args, root, env, fixture_test, name,
                         MCND_NFT_GOV_GENESIS=str(source.home / 'config/genesis.json'),
                         MCND_NFT_GOV_OUTPUT=str(root / name), MCND_NFT_GOV_ACTION=json.dumps(action))
     signed = json.loads(private_bytes(path, 4096))

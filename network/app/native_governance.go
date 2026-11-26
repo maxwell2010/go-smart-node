@@ -180,7 +180,10 @@ func (h nativeGovernanceHooks) AfterProposalVote(ctx context.Context, id uint64,
 		return err
 	}
 	s := sdk.UnwrapSDKContext(ctx)
-	if identity.BootstrapUnanimityExecution && s.ExecMode() == sdk.ExecModeFinalize && h.app.usesNativeUpgradeGovernance() {
+	// Simulation executes in a discarded cache but must pay for the same
+	// transient marker write as the finalized transaction.
+	marksVote := s.ExecMode() == sdk.ExecModeFinalize || s.ExecMode() == sdk.ExecModeSimulate
+	if identity.BootstrapUnanimityExecution && marksVote && h.app.usesNativeUpgradeGovernance() {
 		minimum, err := h.app.NativeValidatorKeeper.BootstrapUnanimityMinimumID(s)
 		if err != nil {
 			return err

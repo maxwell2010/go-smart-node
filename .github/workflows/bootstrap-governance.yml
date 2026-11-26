@@ -41,8 +41,22 @@ jobs:
             go test "${args[@]}" -run '^TestBootstrapUnanimity(Vote|StakeOwners)$' ./app
             go test "${args[@]}" -run '^TestBootstrapUnanimityFourLaunchOperatorsAndFounder$' ./app
             go test "${args[@]}" -run '^TestBootstrapUnanimousQueueAndSDKSettlement$' ./app
+            if [[ "$tags" == *,mintcandy_bootstrap_unanimity ]]; then
+              go test "${args[@]}" -run '^TestBootstrapBallotSimulatesFinalGas$' ./app
+            fi
             go test "${args[@]}" -run 'Bootstrap|Unanimous' ./decimal/validator/keeper
             if [[ "$tags" == mintcandy_testnet,mintcandy_bootstrap_unanimity ]]; then
               go test "${args[@]}" -run '^TestBootstrapUnanimityUpgradeApproval$' ./app
             fi
           done
+      - name: Rehearse a voted upgrade and unanimous close on four loopback validators
+        if: matrix.profile == 'mintcandy_testnet'
+        run: bash tools/ci_bootstrap_governance.sh
+      - name: Export public receipts and matching headers
+        if: matrix.profile == 'mintcandy_testnet' && success()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+        with:
+          name: bootstrap-governance-tmsp-${{ github.sha }}
+          path: ${{ runner.temp }}/bootstrap-governance-result.json
+          if-no-files-found: error
+          retention-days: 14
