@@ -2,7 +2,7 @@ name: MintCandy native profile rehearsal
 
 on:
   push:
-    branches: ['testnet/drc20-reserve-trades', 'testnet/drc20-issuance-tariff', 'codex/mintcandy-native-denoms', 'integration/mintcandy-native-denoms', 'integration/mintcandy-mainnet*']
+    branches: ['testnet/drc20-atomic-convert', 'testnet/drc20-reserve-trades', 'testnet/drc20-issuance-tariff', 'codex/mintcandy-native-denoms', 'integration/mintcandy-native-denoms', 'integration/mintcandy-mainnet*']
     paths: ['network/**', '.github/workflows/mintcandy-native-profiles.yml']
   workflow_dispatch:
     inputs:
@@ -157,6 +157,7 @@ jobs:
             MCND_USER_NFT_REFUND_PREDECESSOR="$work/assets-before.test" run_asset_suite "$work/assets-after.test" TestOwnedAppNativeUserNFTRefundLifecycle
             go test -mod=readonly -p 2 -tags "$tags" -count=1 -run '^Test(IssuanceHistoricalSymbols|UserNFTBatch|AssetPermitSignature)$' ./app
             go test -mod=readonly -p 2 -tags "$tags" -count=1 -run '^TestUserNFTWalletBurnAndTopup$' ./decimal/nft/keeper
+            go test -mod=readonly -p 2 -count=1 -run '^TestMintCandyPreflightGas$' github.com/cosmos/evm/x/vm/keeper
           fi
           # Generate disposable signing identities through the existing sponsored CI fixture.
           if [[ "$PROFILE" == testnet ]]; then

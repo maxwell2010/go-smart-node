@@ -107,11 +107,15 @@ def rehearse_issuance(signer, root, nodes, expected, env, report):
 
     from testnet_reserve_trades import rehearse_trades
     from testnet_asset_bundle import rehearse_bundle
-    token_pair = []
-    for issue in fixtures[:2]:
+    from testnet_atomic_convert import rehearse_atomic_convert
+    tokens = []
+    for issue in [fixtures[i] for i in (0, 1, 2, 4)]:
         receipt = ethereum('eth_getTransactionReceipt', [issue['hash']], base=observer.evm)
         event = next(e for e in receipt['logs'] if e['address'].lower() == policy['token_center'].lower())
-        token_pair.append('0x' + event['data'][26:66])
+        tokens.append('0x' + event['data'][26:66])
+    token_pair = tokens[:2]
     other = race[1]['creator']
     rehearse_trades(signer, root, nodes, expected, env, report, token_pair[0], other)
+    report["atomicConvert"] = {"status": "running"}
+    rehearse_atomic_convert(signer, root, nodes, expected, env, report, policy["token_center"], [tokens[0], tokens[2], tokens[3]], other)
     rehearse_bundle(signer, root, nodes, expected, env, report, token_pair, other)

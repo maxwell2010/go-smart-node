@@ -67,7 +67,7 @@
 
 | Сигнатура | Нода | SDK | Общая форма консоли |
 |---|---|---|---|
-| `convert(address,address,uint256,uint256,address)` | закрыто | нет | нет |
+| `convert(address,address,uint256,uint256,address)` | тестнет | нет | нет |
 | `convert(address,address,uint256,uint256,address,uint256,uint8,bytes32,bytes32)` | закрыто | нет | нет |
 | `createToken((uint256,uint256,uint256,address,uint8,string,string,string))` | кошелёк | да | профиль |
 | `createTokenReserveless(string,string,bool,bool,uint256,uint256,string)` | кошелёк | да | профиль |
