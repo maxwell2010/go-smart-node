@@ -43,6 +43,14 @@ func (c *withdrawalController) admitBackedToken(ctx sdk.Context, sender common.A
 	if r == nil || msg.To == nil || len(msg.Data) < 4 {
 		return false, nil
 	}
+	if r.reserveTradesActive(ctx) {
+		if *msg.To == r.profile.TokenCenter && bytes.Equal(msg.Data[:4], assetConvertSelector) {
+			return true, c.admitAssetConvert(ctx, sender, msg, receipt)
+		}
+		if *msg.To != r.profile.TokenCenter && (bytes.Equal(msg.Data[:4], buySelector) || bytes.Equal(msg.Data[:4], sellSelector)) {
+			return true, c.admitReserveTrade(ctx, sender, msg, receipt, bytes.Equal(msg.Data[:4], buySelector))
+		}
+	}
 	if *msg.To != r.profile.TokenCenter {
 		if !ctx.KVStore(r.store).Has(backedTokenMembershipKey(*msg.To)) {
 			return false, nil

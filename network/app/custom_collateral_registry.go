@@ -291,11 +291,14 @@ func (r *customCollateralRegistry) manifest(ctx sdk.Context) ([]byte, error) {
 
 // The native ledger is the DRC20 reserve. A direct SDK/IBC credit would
 // change the curve with no corresponding authenticated reserve event.
-func (r *customCollateralRegistry) restrictReserveCredit(ctx context.Context, _, recipient sdk.AccAddress, coins sdk.Coins) (sdk.AccAddress, error) {
+func (r *customCollateralRegistry) restrictReserveCredit(ctx context.Context, sender, recipient sdk.AccAddress, coins sdk.Coins) (sdk.AccAddress, error) {
 	if len(recipient) != common.AddressLength || !coins.AmountOf(identity.BaseDenom).IsPositive() {
 		return recipient, nil
 	}
 	sdkCtx := sdk.UnwrapSDKContext(ctx)
+	if signedReserveCredit(sdkCtx, sender, recipient, coins) {
+		return recipient, nil
+	}
 	if sdkCtx.KVStore(r.store).Has(backedTokenMembershipKey(common.BytesToAddress(recipient))) {
 		return nil, errors.New("direct DEL credits to user DRC20 reserves are not admitted")
 	}

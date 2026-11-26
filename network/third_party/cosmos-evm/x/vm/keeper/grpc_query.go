@@ -414,8 +414,7 @@ func (k Keeper) EstimateGasInternal(c context.Context, req *types.EthCallRequest
 				return true, nil, err
 			}
 		}
-		stateDB := statedb.New(tmpCtx, &k, txConfig)
-		rsp, err = k.ApplyMessageWithConfig(tmpCtx, stateDB, *msg, nil, k.HasHooks(), false, executionCfg, txConfig, false, nil)
+		tmpCtx, rsp, err = k.applyOuterMessage(tmpCtx, *msg, k.HasHooks(), executionCfg, txConfig)
 		if err != nil {
 			if errors.Is(err, core.ErrIntrinsicGas) || errors.Is(err, core.ErrFloorDataGas) {
 				return true, nil, nil // Special case, raise gas limit

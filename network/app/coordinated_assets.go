@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"strconv"
 
+	storetypes "cosmossdk.io/store/types"
 	upgradetypes "cosmossdk.io/x/upgrade/types"
 	sdk "github.com/cosmos/cosmos-sdk/types"
 	validatortypes "github.com/maxwell2010/go-smart-node/network/decimal/validator/types"
@@ -15,6 +16,15 @@ import (
 )
 
 const coordinatedAssetsMarker byte = 0x88
+
+// Read the committed fork marker without introducing a historical gas charge.
+func (r *customCollateralRegistry) reserveTradesActive(ctx sdk.Context) bool {
+	if r == nil || ctx.ChainID() != identity.ProfileChainID || ctx.BlockHeight() < coordinatedAssetsHeight {
+		return false
+	}
+	read := ctx.WithGasMeter(storetypes.NewInfiniteGasMeter())
+	return bytes.Equal(read.KVStore(r.store).Get([]byte{coordinatedAssetsMarker}), []byte{1})
+}
 
 // Chain identity and height are compiled into the candidate signed by operators.
 // No RPC, clock, local file or environment value participates in activation.

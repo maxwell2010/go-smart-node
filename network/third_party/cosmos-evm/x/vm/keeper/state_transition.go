@@ -220,10 +220,8 @@ func (k *Keeper) ApplyTransaction(ctx sdk.Context, tx *ethtypes.Transaction) (*t
 	// Didn't use `Snapshot` because the context stack has exponential complexity on certain operations,
 	// thus restricted to be used only inside `ApplyMessage`.
 	tmpCtx, commitFn := ctx.CacheContext()
-
-	// pass true to commit the StateDB
-	stateDB := statedb.New(tmpCtx, k, txConfig)
-	res, err := k.ApplyMessageWithConfig(tmpCtx, stateDB, *msg, nil, true, false, cfg, txConfig, false, nil)
+	// Prepare native capabilities and charge them against the signed EVM gas limit.
+	tmpCtx, res, err := k.applyOuterMessage(tmpCtx, *msg, true, cfg, txConfig)
 	if err != nil {
 		// when a transaction contains multiple msg, as long as one of the msg fails
 		// all gas will be deducted. so is not msg.Gas()

@@ -71,6 +71,7 @@ type Keeper struct {
 	tracer string
 
 	hooks               types.EvmHooks
+	transactionContext  func(sdk.Context, core.Message) sdk.Context
 	internalCommitGuard func(sdk.Context, core.Message, []*ethtypes.Log) error
 
 	// precompiles defines the map of all available precompiled smart contracts.
