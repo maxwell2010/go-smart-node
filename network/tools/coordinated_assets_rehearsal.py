@@ -15,6 +15,8 @@ from mcnd_process_smoke import ProcessOwner, SignalGuard, private_environment, p
 from native_consensus_smoke import committed_header, create_replica, wait_replicas
 from native_governance_upgrade_smoke import current_plan, committed_height, find_four_signature_commit
 from native_launch_rehearsal import configure_peers, load_fixture
+from testnet_reserve_trades import rehearse_trades
+from testnet_atomic_convert import rehearse_atomic_convert
 from testnet_issuance_rehearsal import rehearse_issuance
 from withdrawal_genesis_smoke import check, ethereum
 
@@ -43,16 +45,16 @@ def run(args, root, owner, report):
     wallet = expected['actor']
     wrapper = profile['wrapped_del']
     token = ''
-    def tx(label):
+    def tx(label, *, target_token=None, output_token='', status=1):
         nonce = int(ethereum('eth_getTransactionCount',[wallet,'latest'],base=source.evm), 16)
         path = root / (label+'.json')
-        action = dict(Action=label, Nonce=nonce, Factory=profile['token_center'], Wrapper=wrapper, Token=token)
+        action = dict(Action=label, Nonce=nonce, Factory=profile['token_center'], Wrapper=wrapper, Token=token if target_token is None else target_token, Output=output_token)
         signer_env = dict(env, MCND_POOL_ACTION=json.dumps(action), MCND_POOL_OUTPUT=str(path),
                           MCND_TESTNET_TARIFF_FOUNDER_FILE=str(root.parent / 'tariff-founder.key'))
         subprocess.run([str(args.signer), '-test.run=^TestSignCoordinatedPoolAction$'], check=True, timeout=30, env=signer_env)
         fixture = json.loads(path.read_text())
-        rc = commit_media_transaction(source, nodes, fixture, nonce, report)
-        report['transactions'][label] = dict(height=int(rc['blockNumber'],16),hash=rc['transactionHash'])
+        rc = commit_media_transaction(source, nodes, fixture, nonce, report, status=status)
+        report['transactions'][label] = dict(height=int(rc['blockNumber'],16),hash=rc['transactionHash'],status=int(rc['status'],16))
         return rc, fixture['pool']
     rc, pool = tx('create')
     token = '0x' + [log for log in rc['logs'] if log['address'].lower()==profile['token_center'].lower()][0]['data'][26:66]
@@ -62,10 +64,21 @@ def run(args, root, owner, report):
             raise ValueError('tariff active before handoff')
     except HTTPError as exc:
         check(exc.code == 404,'unexpected inactive tariff response')
+    historical = []
+    for label in ('legacy-coin-a', 'legacy-coin-b'):
+        rc, _ = tx(label)
+        created = next(log for log in rc['logs'] if log['address'].lower() == profile['token_center'].lower())
+        historical.append('0x' + created['data'][26:66])
+    tx('legacy-approval', target_token=historical[0])
+    handoff = committed_height(source)
     for n in nodes:
         owner.stop(n.child)
     for n in nodes:
         n.start(str(args.successor), env, owner, 'successor')
+    wait_replicas(nodes, handoff + 1, 60, report)
+    for label in ('buy', 'sell', 'convert'):
+        rc, _ = tx('before-' + label, target_token=historical[0], output_token=historical[1], status=0)
+        check(int(rc['blockNumber'], 16) < 80, 'pre-activation operation crossed the fork height')
     wait_replicas(nodes, 82, 150, report)
     for n in nodes:
         check(ethereum('eth_getCode',[pool,hex(79)],base=n.evm)=='0x' and
@@ -98,7 +111,12 @@ def run(args, root, owner, report):
             continue
         check(state_at(int(rc['blockNumber'],16))==(r0,r1,shares),'wrong final reserves or LP shares after '+label)
         report['transactions'][label].update(reserve0=str(r0),reserve1=str(r1),totalShares=str(shares))
-    rehearse_issuance(args.signer, root, nodes, expected, env, report)
+    for label in ('buy', 'sell', 'convert'):
+        tx('after-' + label, target_token=historical[0], output_token=historical[1])
+    factory, backed, other = rehearse_issuance(args.signer, root, nodes, expected, env, report)
+    rehearse_trades(args.signer, root, nodes, expected, env, report, backed[0], other)
+    rehearse_atomic_convert(args.signer, root, nodes, expected, env, report, factory, backed[:3], other)
+    check(state_at(committed_height(source)-1) == (r0, r1, shares), 'reserve trades changed pinned pool')
     tip = committed_height(nodes[0])
     report['finalCommit'] = find_four_signature_commit(nodes, rows, args.commit_probe, tip, tip+8, report)
 
@@ -109,7 +127,7 @@ if __name__ == '__main__':
         parser.add_argument('--' + arg, required=True, type=Path)
     args = parser.parse_args()
     private_namespace()
-    report = {'initialHeight': 1, 'loopbackOnlyNamespace': True}
+    report = {'initialHeight': 1, 'disposableBlockBudget': 415, 'loopbackOnlyNamespace': True}
     with SignalGuard() as signals, TemporaryDirectory(dir=args.home_parent) as directory:
         owner = ProcessOwner(signals)
         try:

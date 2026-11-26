@@ -1,7 +1,7 @@
 name: Coordinated assets rehearsal on tMSP
 on:
   push:
-    branches: [feat/mainnet-issuance-pool-rehearsal]
+    branches: [feat/mainnet-full-assets]
     paths: ['network/**', '.github/workflows/coordinated-assets.yml']
   workflow_dispatch:
 permissions:
@@ -53,9 +53,10 @@ jobs:
           out="$RUNNER_TEMP/msp-operator-review"
           mkdir "$out"
           tags=mintcandy_mainnet,mintcandy_coordinated_assets
-          go build -mod=readonly -p 2 -trimpath -tags "$tags" -ldflags "-X main.buildCommit=$GITHUB_SHA" -o "$out/mcnd" ./cmd/mcnd
+          go build -mod=readonly -p 2 -trimpath -tags "$tags" -ldflags "-X main.buildVersion=1.2.4-rc.1 -X main.buildCommit=$GITHUB_SHA" -o "$out/mcnd" ./cmd/mcnd
           cd "$out"
           echo "$GITHUB_SHA" > SOURCE_COMMIT
+          ./mcnd version --long --output json | jq -e --arg commit "$GITHUB_SHA" '.commit == $commit and .version == "1.2.4-rc.1"'
           go version -m mcnd > GO_BUILD_INFO
           sha256sum mcnd SOURCE_COMMIT GO_BUILD_INFO > SHA256SUMS
           tar -czf "$RUNNER_TEMP/mintcandy-msp-coordinated-assets-linux-amd64.tar.gz" mcnd SHA256SUMS SOURCE_COMMIT GO_BUILD_INFO

@@ -106,4 +106,10 @@ def rehearse_issuance(signer, root, nodes, expected, env, report, *, mainnet=Fal
         verify(batch)
     report['mainnetIssuance' if mainnet else 'testnetIssuance'] = {'denom': denom, 'treasury': treasury, 'outcomes': outcomes,
                                 'observerMatched': True, 'treasuryAndBurnVerified': True}
-
+    backed = []
+    for issue in fixtures:
+        if issue['backed'] and issue['success'] and len(backed) < 3:
+            receipt = ethereum('eth_getTransactionReceipt', [issue['hash']], base=observer.evm)
+            event = next(log for log in receipt['logs'] if log['address'].lower() == policy['token_center'].lower())
+            backed.append('0x' + event['data'][26:66])
+    return policy['token_center'], backed, race[1]['creator']
