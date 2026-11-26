@@ -22,8 +22,12 @@ const issuanceTreasuryMain = "0x40900a48273644768c09183e00e43528c17a29f6"
 const issuanceTreasuryTest = "0x00000000000000000000000000000000Cafe9900"
 const issuanceActivationKey byte = 0x87
 
+func tariffActivationDomain(chain string) bool {
+	return chain == identity.ProfileChainID && (chain == identity.MainnetChainID || (gatedTestnetAssets && chain == identity.TestnetChainID))
+}
+
 func testIssuanceActive(chain string) bool {
-	return identity.ProfileChainID == identity.TestnetChainID && chain == identity.TestnetChainID
+	return !gatedTestnetAssets && identity.ProfileChainID == identity.TestnetChainID && chain == identity.TestnetChainID
 }
 
 // Read only a single fixed key without changing the historical gas charged
@@ -32,19 +36,22 @@ func (r *customCollateralRegistry) issuanceTreasury(ctx sdk.Context) (common.Add
 	if testIssuanceActive(ctx.ChainID()) {
 		return common.HexToAddress(issuanceTreasuryTest), true
 	}
-	if ctx.ChainID() == identity.MainnetChainID && identity.ProfileChainID == identity.MainnetChainID {
+	if tariffActivationDomain(ctx.ChainID()) {
 		read := ctx.WithGasMeter(storetypes.NewInfiniteGasMeter())
 		if read.KVStore(r.store).Has([]byte{issuanceActivationKey}) {
+			if identity.ProfileChainID == identity.TestnetChainID {
+				return common.HexToAddress(issuanceTreasuryTest), true
+			}
 			return common.HexToAddress(issuanceTreasuryMain), true
 		}
 	}
 	return common.Address{}, false
 }
 
-// activateDRC20IssuanceTariff runs only from the approved upgrade handler.
+// activateDRC20IssuanceTariff is called inside the coordinated upgrade.
 // The index, including zero-supply tokens, and the effective tariff commit together.
 func (app *App) activateDRC20IssuanceTariff(ctx sdk.Context) error {
-	if identity.ProfileChainID != identity.MainnetChainID || ctx.ChainID() != identity.MainnetChainID ||
+	if !tariffActivationDomain(ctx.ChainID()) ||
 		ctx.ExecMode() != sdk.ExecModeFinalize || app.withdrawals == nil || app.withdrawals.customCollateral == nil {
 		return errors.New("DRC20 tariff activation requires the mainnet native collateral profile")
 	}

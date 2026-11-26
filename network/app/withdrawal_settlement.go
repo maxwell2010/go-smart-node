@@ -39,30 +39,31 @@ const (
 // WithdrawalProfile pins the system addresses for the isolated-position profile.
 // It is read from consensus state, never from node-local operator settings.
 type WithdrawalProfile struct {
-	Registry                        common.Address `json:"registry"`
-	Gateway                         common.Address `json:"gateway"`
-	Library                         common.Address `json:"library"`
-	NFTCenter                       common.Address `json:"nft_center"`
-	PositionVault                   common.Address `json:"position_vault"`
-	MasterValidator                 common.Address `json:"master_validator"`
-	WrappedDEL                      common.Address `json:"wrapped_del"`
-	TokenCenter                     common.Address `json:"token_center,omitzero"`
-	CurveConverter                  common.Address `json:"curve_converter,omitzero"`
-	SettlementOnly                  bool           `json:"settlement_only,omitempty"`
-	EnableDELDelegation             bool           `json:"enable_del_delegation,omitempty"`
-	EnableDELHold                   bool           `json:"enable_del_hold,omitempty"`
-	EnableDELHoldReset              bool           `json:"enable_del_hold_reset,omitempty"`
-	EnableNFTDelegation             bool           `json:"enable_nft_delegation,omitempty"`
-	EnableNativeConsensus           bool           `json:"enable_native_consensus,omitempty"`
-	EnableNativeFeeRewards          bool           `json:"enable_native_fee_rewards,omitempty"`
-	EnableNativeIBCV1               bool           `json:"enable_native_ibc_v1,omitempty"`
-	EnableNativeGovernance          bool           `json:"enable_native_governance,omitempty"`
-	EnableNativeUpgradeGovernance   bool           `json:"enable_native_upgrade_governance,omitempty"`
-	EnableNativeOrdinaryDELDowntime bool           `json:"enable_native_ordinary_del_downtime,omitempty"`
-	EnableNativeHeldDELDowntime     bool           `json:"enable_native_held_del_downtime,omitempty"`
-	EnableNativeNFTDowntime         bool           `json:"enable_native_nft_downtime,omitempty"`
-	EnableNativeDuplicateVote       bool           `json:"enable_native_duplicate_vote,omitempty"`
-	TestGraceUntilHeight            int64          `json:"test_grace_until_height,omitempty"`
+	Registry                        common.Address             `json:"registry"`
+	Gateway                         common.Address             `json:"gateway"`
+	Library                         common.Address             `json:"library"`
+	NFTCenter                       common.Address             `json:"nft_center"`
+	PositionVault                   common.Address             `json:"position_vault"`
+	MasterValidator                 common.Address             `json:"master_validator"`
+	WrappedDEL                      common.Address             `json:"wrapped_del"`
+	TokenCenter                     common.Address             `json:"token_center,omitzero"`
+	CurveConverter                  common.Address             `json:"curve_converter,omitzero"`
+	NativePool                      NativeLiquidityPoolProfile `json:"native_pool,omitzero"`
+	SettlementOnly                  bool                       `json:"settlement_only,omitempty"`
+	EnableDELDelegation             bool                       `json:"enable_del_delegation,omitempty"`
+	EnableDELHold                   bool                       `json:"enable_del_hold,omitempty"`
+	EnableDELHoldReset              bool                       `json:"enable_del_hold_reset,omitempty"`
+	EnableNFTDelegation             bool                       `json:"enable_nft_delegation,omitempty"`
+	EnableNativeConsensus           bool                       `json:"enable_native_consensus,omitempty"`
+	EnableNativeFeeRewards          bool                       `json:"enable_native_fee_rewards,omitempty"`
+	EnableNativeIBCV1               bool                       `json:"enable_native_ibc_v1,omitempty"`
+	EnableNativeGovernance          bool                       `json:"enable_native_governance,omitempty"`
+	EnableNativeUpgradeGovernance   bool                       `json:"enable_native_upgrade_governance,omitempty"`
+	EnableNativeOrdinaryDELDowntime bool                       `json:"enable_native_ordinary_del_downtime,omitempty"`
+	EnableNativeHeldDELDowntime     bool                       `json:"enable_native_held_del_downtime,omitempty"`
+	EnableNativeNFTDowntime         bool                       `json:"enable_native_nft_downtime,omitempty"`
+	EnableNativeDuplicateVote       bool                       `json:"enable_native_duplicate_vote,omitempty"`
+	TestGraceUntilHeight            int64                      `json:"test_grace_until_height,omitempty"`
 }
 
 type withdrawalController struct {
@@ -74,6 +75,8 @@ type withdrawalController struct {
 	executor            *settlement.Executor
 	assets              *withdrawalassets.Projector
 	customCollateral    *customCollateralRegistry
+	nativePool          *nativeLiquidityPool
+	nativePoolAddress   common.Address
 	delRecipientAllowed func(sdk.AccAddress) bool
 	consensusParams     func(sdk.Context) cmtproto.ConsensusParams
 }
@@ -113,13 +116,13 @@ func (app *App) LoadWithdrawalSettlement(ctx sdk.Context) error {
 		if app.withdrawals.profile != profile {
 			return errors.New("withdrawal profile changed without a coordinated restart")
 		}
-		return app.withdrawals.customCollateral.verifyRestored(ctx, nil)
+		return app.withdrawals.verifyRestoredAssets(ctx, nil)
 	}
 	controller, err := app.newWithdrawalController(profile)
 	if err != nil {
 		return err
 	}
-	if err := controller.customCollateral.verifyRestored(ctx, nil); err != nil {
+	if err := controller.verifyRestoredAssets(ctx, nil); err != nil {
 		return err
 	}
 	app.installWithdrawalController(controller)
@@ -131,6 +134,10 @@ func (app *App) newWithdrawalController(profile WithdrawalProfile) (*withdrawalC
 		return nil, err
 	}
 	customCollateral, err := newCustomCollateralRegistry(app, profile)
+	if err != nil {
+		return nil, err
+	}
+	nativePool, err := newNativeLiquidityPool(profile, customCollateral)
 	if err != nil {
 		return nil, err
 	}
@@ -205,8 +212,10 @@ func (app *App) newWithdrawalController(profile WithdrawalProfile) (*withdrawalC
 	controller := &withdrawalController{
 		profile: profile, abi: gatewayABI, topic: gatewayABI.Events["WithdrawCompleted"].ID,
 		keeper: app.NativeValidatorKeeper, nft: app.NativeNFTKeeper, executor: executor, assets: projector,
-		customCollateral: customCollateral,
-		consensusParams:  app.GetConsensusParams,
+		customCollateral:  customCollateral,
+		nativePool:        nativePool,
+		nativePoolAddress: nativeLiquidityPoolUpgradeAddress(app.chainID),
+		consensusParams:   app.GetConsensusParams,
 	}
 	if profile.EnableNativeFeeRewards || profile.EnableNFTDelegation {
 		controller.delRecipientAllowed = app.nativeDELRecipientPolicy(profile)
@@ -277,6 +286,16 @@ func (c *withdrawalController) isDELStakeCall(msg core.Message) bool {
 func (c *withdrawalController) PostTxProcessing(ctx sdk.Context, sender common.Address, msg core.Message, receipt *ethtypes.Receipt) error {
 	if receipt == nil || receipt.Status != ethtypes.ReceiptStatusSuccessful {
 		return nil
+	}
+	if msg.To != nil && (*msg.To == c.profile.WrappedDEL || *msg.To == c.nativePoolAddress ||
+		c.nativePool != nil && *msg.To == c.nativePool.pin.Address) {
+		pool, err := c.nativeLiquidityPoolAt(ctx)
+		if err != nil {
+			return err
+		}
+		if handled, err := pool.admit(ctx, sender, msg, receipt); handled {
+			return err
+		}
 	}
 	if handled, err := c.admitBackedToken(ctx, sender, msg, receipt); handled {
 		return err

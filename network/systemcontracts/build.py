@@ -11,6 +11,63 @@ COMPILER_SHA256 = "0479d44fdf9c501c25337fdc540419f1593b884a87b47f023da4f1c700fda
 COMPILER_VERSION = "0.8.20+commit.a1b79de6.Linux.g++"
 
 
+def build_liquidity_pool(compiler, directory):
+    # Keep the independent pool source out of the legacy batch, so it cannot
+    # renumber other contracts' compiler-generated immutable identifiers.
+    name = "MintCandyLiquidityPool"
+    unit = name + ".sol"
+    source = (ROOT / unit).read_bytes()
+    settings = {
+        "optimizer": {"enabled": True, "runs": 200},
+        "evmVersion": "paris",
+        "viaIR": False,
+        "metadata": {"bytecodeHash": "ipfs"},
+        "libraries": {},
+    }
+    fields = ["abi", "storageLayout", "evm.bytecode.object", "evm.bytecode.linkReferences",
+              "evm.deployedBytecode.object", "evm.deployedBytecode.linkReferences",
+              "evm.deployedBytecode.immutableReferences"]
+    request = {"language": "Solidity", "sources": {unit: {"content": source.decode("utf-8")}},
+               "settings": {**settings, "outputSelection": {unit: {"": ["ast"], name: fields}}}}
+    result = subprocess.run([str(compiler), "--standard-json"], input=json.dumps(request),
+                            text=True, capture_output=True, check=True, timeout=30)
+    response = json.loads(result.stdout)
+    errors = [error["formattedMessage"] for error in response.get("errors", []) if error["severity"] == "error"]
+    if errors:
+        raise RuntimeError("\n".join(errors))
+    contract = response["contracts"][unit][name]
+    storage = contract["storageLayout"]
+    layout = {item["label"]: (item["slot"], item["offset"], storage["types"][item["type"]]["label"])
+              for item in storage["storage"]}
+    expected = {"reserve0": ("0", 0, "uint112"), "reserve1": ("0", 14, "uint112"),
+                "totalShares": ("1", 0, "uint112"), "sharesOf": ("2", 0, "mapping(address => uint112)"),
+                "entered": ("3", 0, "bool"), "token0": ("3", 1, "contract PoolAsset"),
+                "token1": ("4", 0, "contract PoolAsset")}
+    if layout != expected:
+        raise RuntimeError("Liquidity pool storage layout differs from the native verifier")
+
+    definition = next(node for node in response["sources"][unit]["ast"]["nodes"]
+                      if node.get("nodeType") == "ContractDefinition" and node.get("name") == name)
+    immutable_variables = {str(node["id"]): {"key": f"{unit}:{name}.{node['name']}",
+                                                   "type": node["typeDescriptions"]["typeString"]}
+                           for node in definition["nodes"] if node.get("mutability") == "immutable"}
+    creation, runtime = contract["evm"]["bytecode"], contract["evm"]["deployedBytecode"]
+    if (set(immutable_variables) != set(runtime["immutableReferences"]) or
+            list(immutable_variables.values()) != [{"key": f"{unit}:{name}.initializer", "type": "address"}] or
+            not creation["object"] or not runtime["object"] or creation["linkReferences"] or runtime["linkReferences"]):
+        raise RuntimeError("Liquidity pool compiler references differ from the pinned constructor")
+    artifact = {"contractName": name, "sourceUnit": unit, "abi": contract["abi"],
+                "creationBytecode": creation["object"], "runtimeBytecode": runtime["object"],
+                "creationLinks": creation["linkReferences"], "runtimeLinks": runtime["linkReferences"],
+                "immutableReferences": runtime["immutableReferences"], "immutableVariables": immutable_variables,
+                "contractKind": definition["contractKind"], "compilerVersion": COMPILER_VERSION,
+                "compilerSha256": COMPILER_SHA256, "sourceSha256": hashlib.sha256(source).hexdigest(),
+                "settings": settings}
+    (directory / (name + ".json")).write_text(json.dumps(artifact, sort_keys=True, indent=2) + "\n",
+                                                encoding="utf-8", newline="\n")
+    print(name, "creation", len(creation["object"]) // 2, "runtime", len(runtime["object"]) // 2, flush=True)
+
+
 def main():
     compiler = Path(os.environ["SOLC"]).resolve(strict=True)
     if hashlib.sha256(compiler.read_bytes()).hexdigest() != COMPILER_SHA256:
@@ -184,6 +241,7 @@ def main():
                 raise RuntimeError("Unknown compiler immutable reference")
             (directory / (target + ".json")).write_text(json.dumps(artifact, sort_keys=True, indent=2) + "\n", encoding="utf-8", newline="\n")
             print(target, "creation", len(creation) // 2, "runtime", len(runtime) // 2, flush=True)
+    build_liquidity_pool(compiler, directory)
 
 
 if __name__ == "__main__":

@@ -110,3 +110,13 @@ func ReservelessTokenBeaconRuntime(factory common.Address) ([]byte, error) {
 	}
 	return ExpectedRuntime("NewNetworkReservelessTokenBeacon", nil, map[string]common.Hash{"NewNetworkTokenCenter.sol:NewNetworkReservelessTokenBeacon.TOKEN_CENTER": common.BytesToHash(factory.Bytes())})
 }
+
+// LiquidityPoolRuntime pins the one-time pair initializer in the pool runtime.
+func LiquidityPoolRuntime(initializer common.Address) ([]byte, error) {
+	if initializer == (common.Address{}) {
+		return nil, fmt.Errorf("invalid liquidity pool initializer")
+	}
+	return ExpectedRuntime("MintCandyLiquidityPool", nil, map[string]common.Hash{
+		"MintCandyLiquidityPool.sol:MintCandyLiquidityPool.initializer": common.BytesToHash(initializer.Bytes()),
+	})
+}

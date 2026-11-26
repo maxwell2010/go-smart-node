@@ -57,17 +57,9 @@ func (c *withdrawalController) admitReservelessToken(ctx sdk.Context, sender com
 	if r.evm.GetState(ctx, r.profile.TokenCenter, reservelessPauseSlot) != (common.Hash{}) {
 		return true, errors.New("reserveless TokenCenter is paused")
 	}
-	beaconWord := r.evm.GetState(ctx, r.profile.TokenCenter, customSlotOffset(customTokenCenterSlot, 2))
-	beacon := common.BytesToAddress(beaconWord[12:])
-	beaconCode, err := contracts.ReservelessTokenBeaconRuntime(r.profile.TokenCenter)
-	if err != nil || beaconWord != customAddressWord(beacon) || !r.exactCode(ctx, beacon, beaconCode) {
-		return true, errors.New("reserveless beacon differs from the pinned TokenCenter beacon")
-	}
-	logicWord := r.evm.GetState(ctx, r.profile.TokenCenter, customSlotOffset(customTokenCenterSlot, 1))
-	logic := common.BytesToAddress(logicWord[12:])
-	logicCode, err := contracts.ExpectedRuntime("DRC20Reserveless", nil, nil)
-	if err != nil || logicWord != customAddressWord(logic) || !r.exactCode(ctx, logic, logicCode) {
-		return true, errors.New("reserveless implementation differs from the pinned runtime")
+	beacon, err := r.authenticateReservelessFamily(ctx)
+	if err != nil {
+		return true, err
 	}
 	if create {
 		return true, c.admitReservelessCreation(ctx, msg, receipt, beacon)
@@ -76,6 +68,22 @@ func (c *withdrawalController) admitReservelessToken(ctx sdk.Context, sender com
 		return true, err
 	}
 	return true, c.admitReservelessOperation(ctx, msg, receipt)
+}
+
+func (r *customCollateralRegistry) authenticateReservelessFamily(ctx sdk.Context) (common.Address, error) {
+	beaconWord := r.evm.GetState(ctx, r.profile.TokenCenter, customSlotOffset(customTokenCenterSlot, 2))
+	beacon := common.BytesToAddress(beaconWord[12:])
+	beaconCode, err := contracts.ReservelessTokenBeaconRuntime(r.profile.TokenCenter)
+	if err != nil || beaconWord != customAddressWord(beacon) || !r.exactCode(ctx, beacon, beaconCode) {
+		return common.Address{}, errors.New("reserveless beacon differs from the pinned TokenCenter beacon")
+	}
+	logicWord := r.evm.GetState(ctx, r.profile.TokenCenter, customSlotOffset(customTokenCenterSlot, 1))
+	logic := common.BytesToAddress(logicWord[12:])
+	logicCode, err := contracts.ExpectedRuntime("DRC20Reserveless", nil, nil)
+	if err != nil || logicWord != customAddressWord(logic) || !r.exactCode(ctx, logic, logicCode) {
+		return common.Address{}, errors.New("reserveless implementation differs from the pinned runtime")
+	}
+	return beacon, nil
 }
 
 func (r *customCollateralRegistry) authenticateReservelessProxy(ctx sdk.Context, token, beacon common.Address) error {

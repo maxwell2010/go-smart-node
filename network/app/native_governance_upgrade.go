@@ -15,14 +15,12 @@ import (
 	"github.com/cosmos/cosmos-sdk/types/module"
 	sdkgov "github.com/cosmos/cosmos-sdk/x/gov"
 	govv1 "github.com/cosmos/cosmos-sdk/x/gov/types/v1"
-	"github.com/maxwell2010/go-smart-node/network/identity"
 )
 
 const (
 	nativeUpgradeNamespace = "mintcandy-sdk-upgrade/"
 	nativeUpgradeSchema    = nativeUpgradeNamespace + "v1"
 	nativeSDKMigrationPlan = "mintcandy-native-sdk-migrations-v1"
-	drc20IssuancePlan      = "mintcandy-drc20-issuance-v1"
 )
 
 type nativeUpgradeManifest struct {
@@ -62,8 +60,7 @@ func parseNativeUpgradeProposal(metadata string) (*nativeUpgradeManifest, error)
 	if err := decodeCanonicalNativeUpgrade(body, &manifest); err != nil {
 		return nil, err
 	}
-	issuance := manifest.Name == drc20IssuancePlan && identity.ProfileChainID == identity.MainnetChainID
-	if (manifest.Name != nativeSDKMigrationPlan && !issuance) || manifest.Height <= 0 {
+	if manifest.Name != nativeSDKMigrationPlan || manifest.Height <= 0 {
 		return nil, errors.New("native SDK upgrade proposal requires a listed handler and positive height")
 	}
 	return &manifest, nil
@@ -76,9 +73,6 @@ func (app *App) validateNativeUpgradeProposal(ctx sdk.Context, metadata string) 
 	}
 	if !app.usesNativeUpgradeGovernance() {
 		return errors.New("native SDK upgrade governance is disabled")
-	}
-	if manifest.Name == drc20IssuancePlan && ctx.ChainID() != identity.MainnetChainID {
-		return errors.New("DRC20 issuance plan requires MintCandy mainnet")
 	}
 	if manifest.Height <= ctx.BlockHeight() {
 		return errors.New("native SDK upgrade proposal requires a future height")
@@ -211,44 +205,37 @@ func (app *App) scheduleNativeUpgrade(ctx sdk.Context, proposal govv1.Proposal, 
 	return nil
 }
 
-func (app *App) verifyNativeUpgradeApproval(s sdk.Context, plan upgradetypes.Plan, expectedName string) error {
+func (app *App) runNativeSDKMigration(ctx context.Context, plan upgradetypes.Plan, from module.VersionMap) (module.VersionMap, error) {
+	s := sdk.UnwrapSDKContext(ctx)
 	if !app.usesNativeUpgradeGovernance() || s.ExecMode() != sdk.ExecModeFinalize ||
-		plan.Name != expectedName || plan.Height != s.BlockHeight() || plan.ValidateBasic() != nil {
-		return errors.New("native SDK upgrade handler requires its approved FinalizeBlock plan")
+		plan.Name != nativeSDKMigrationPlan || plan.Height != s.BlockHeight() || plan.ValidateBasic() != nil {
+		return nil, errors.New("native SDK upgrade handler requires its approved FinalizeBlock plan")
 	}
 	pending, err := app.UpgradeKeeper.GetUpgradePlan(s)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	if pending.Name != plan.Name || pending.Height != plan.Height || pending.Info != plan.Info {
-		return errors.New("native SDK upgrade handler does not match the scheduled plan")
+		return nil, errors.New("native SDK upgrade handler does not match the scheduled plan")
 	}
 	var approval nativeUpgradeApproval
 	if err := decodeCanonicalNativeUpgrade(plan.Info, &approval); err != nil {
-		return err
+		return nil, err
 	}
 	if approval.Schema != nativeUpgradeSchema || approval.ProposalID == 0 {
-		return errors.New("native SDK upgrade has no valid governance approval")
+		return nil, errors.New("native SDK upgrade has no valid governance approval")
 	}
 	proposal, err := app.GovKeeper.Proposals.Get(s, approval.ProposalID)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	manifest, err := parseNativeUpgradeProposal(proposal.Metadata)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	if proposal.Id != approval.ProposalID || proposal.Status != govv1.StatusPassed || proposal.FinalTallyResult == nil ||
 		len(proposal.Messages) != 0 || manifest == nil || manifest.Name != plan.Name || manifest.Height != plan.Height {
-		return errors.New("native SDK upgrade has no matching passed proposal")
-	}
-	return nil
-}
-
-func (app *App) runNativeSDKMigration(ctx context.Context, plan upgradetypes.Plan, from module.VersionMap) (module.VersionMap, error) {
-	s := sdk.UnwrapSDKContext(ctx)
-	if err := app.verifyNativeUpgradeApproval(s, plan, nativeSDKMigrationPlan); err != nil {
-		return nil, err
+		return nil, errors.New("native SDK upgrade has no matching passed proposal")
 	}
 	versions, err := app.ModuleManager.RunMigrations(ctx, app.configurator, from)
 	if err != nil {

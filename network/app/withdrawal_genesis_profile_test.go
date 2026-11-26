@@ -16,6 +16,10 @@ func TestWithdrawalGenesisProfileAcceptsBoundedIndentation(t *testing.T) {
 		PositionVault: common.HexToAddress("0x05"), MasterValidator: common.HexToAddress("0x06"),
 		WrappedDEL: common.HexToAddress("0x07"), SettlementOnly: true,
 		TokenCenter: common.HexToAddress("0x08"), CurveConverter: common.HexToAddress("0x09"),
+		NativePool: NativeLiquidityPoolProfile{
+			Address: common.HexToAddress("0x10"), Initializer: common.HexToAddress("0x11"),
+			CUSDTOwner: common.HexToAddress("0x12"), CUSDT: common.HexToAddress("0x13"),
+		},
 		TestGraceUntilHeight: 9223372036854775807,
 		EnableDELDelegation:  true, EnableDELHold: true, EnableDELHoldReset: true, EnableNFTDelegation: true,
 		EnableNativeConsensus: true, EnableNativeFeeRewards: true, EnableNativeIBCV1: true,
@@ -28,7 +32,7 @@ func TestWithdrawalGenesisProfileAcceptsBoundedIndentation(t *testing.T) {
 	require.LessOrEqual(t, len(compact), maxWithdrawalProfileJSON)
 	document, err := json.MarshalIndent(map[string]map[string]WithdrawalProfile{
 		"app_state": {WithdrawalGenesisKey: profile},
-	}, "", "  ")
+	}, "", "    ")
 	require.NoError(t, err)
 	var decoded map[string]map[string]json.RawMessage
 	require.NoError(t, json.Unmarshal(document, &decoded))

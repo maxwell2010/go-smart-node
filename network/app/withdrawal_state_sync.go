@@ -154,7 +154,7 @@ func (app *App) verifyRestoredWithdrawalProfile(offer *withdrawalSnapshotOffer) 
 	if err := app.verifyNativeDuplicateVoteState(ctx, app.withdrawals.profile.EnableNativeDuplicateVote); err != nil {
 		return err
 	}
-	if err := app.withdrawals.customCollateral.verifyRestored(ctx, app.stateSync.customManifest); err != nil {
+	if err := app.withdrawals.verifyRestoredAssets(ctx, app.stateSync.customManifest); err != nil {
 		return err
 	}
 	return app.verifyNativeIBCState(ctx, app.withdrawals.profile)

@@ -25,7 +25,7 @@ const (
 	WithdrawalGenesisKey     = "withdrawal_settlement"
 	maxWithdrawalGenesisRows = 16
 	withdrawalGenesisGas     = 192_000_000
-	maxWithdrawalProfileJSON = 1152
+	maxWithdrawalProfileJSON = 1408
 )
 
 func parseWithdrawalGenesisProfile(raw json.RawMessage) (*WithdrawalProfile, error) {
@@ -84,6 +84,9 @@ func parseWithdrawalGenesisProfile(raw json.RawMessage) (*WithdrawalProfile, err
 		return nil, err
 	}
 	if err := validateCustomCollateralProfile(profile); err != nil {
+		return nil, err
+	}
+	if err := validateNativeLiquidityPoolProfile(profile); err != nil {
 		return nil, err
 	}
 	seen := make(map[common.Address]bool)
@@ -425,6 +428,11 @@ func (app *App) initWithdrawalGenesis(ctx sdk.Context, req *abci.RequestInitChai
 	}
 	if err := controller.customCollateral.attestGenesis(child); err != nil {
 		return nil, fmt.Errorf("authenticate DRC20 genesis: %w", err)
+	}
+	if controller.nativePool != nil {
+		if err := controller.nativePool.verifySnapshot(child, true); err != nil {
+			return nil, fmt.Errorf("authenticate liquidity pool genesis: %w", err)
+		}
 	}
 	if profile.EnableNativeDuplicateVote {
 		if err := app.NativeValidatorKeeper.InitializeDELProvenance(child, profile.Gateway, profile.WrappedDEL); err != nil {

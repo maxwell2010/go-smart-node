@@ -938,6 +938,9 @@ func (app *App) InitChainer(ctx sdk.Context, req *abci.RequestInitChain) (*abci.
 }
 
 func (app *App) PreBlocker(ctx sdk.Context, _ *abci.RequestFinalizeBlock) (*sdk.ResponsePreBlock, error) {
+	if err := app.applyCoordinatedAssets(ctx); err != nil {
+		return nil, err
+	}
 	if app.usesNativeDuplicateVote() {
 		return app.preBlockNativeDuplicateVote(ctx)
 	}
