@@ -1,0 +1,175 @@
+{
+  "ci": "https://github.com/maxwell2010/go-smart-node/actions/runs/45743116393",
+  "sourceCommit": "26d7501688db5da479d6acadd555ec45f38c4619",
+  "chainId": "mintcandy_990098-1",
+  "issuance": {
+    "denom": "tmsp",
+    "treasury": "0x00000000000000000000000000000000cafe9900",
+    "outcomes": [
+      {
+        "case": "b BAA",
+        "height": 41,
+        "status": 1,
+        "tx": "0x439ce3e633e3c4e40703d2eeead6593003dae8a43fa37d0401455d936119d52a"
+      },
+      {
+        "case": "r RAA",
+        "height": 45,
+        "status": 1,
+        "tx": "0x8393dc19b014e0cd69b2dc7d9ed10de50d71db25f6f87d8d51f1f7c078d48eed"
+      },
+      {
+        "case": "b BAAA",
+        "height": 49,
+        "status": 1,
+        "tx": "0x4b0002a2faf50b6fcd77a379aa400c032d1cf2eb5de94a223ebf330ca0131b85"
+      },
+      {
+        "case": "r RAAA",
+        "height": 53,
+        "status": 1,
+        "tx": "0x4db56efd25c6a9ef3a57f13702b66850eafef73a5c09e44905fd6a5d819c1910"
+      },
+      {
+        "case": "b BAAAA",
+        "height": 57,
+        "status": 1,
+        "tx": "0xc51e5c00b66a8a6596b1dd75b67ae969ea68ecf26fd2c55aeac8ac6b15d98817"
+      },
+      {
+        "case": "r RAAAA",
+        "height": 61,
+        "status": 1,
+        "tx": "0xa630433704bf7a179d8f1bfb97d2fe8c07ed9dc6edd9f8d568d6ef367f389294"
+      },
+      {
+        "case": "b BAAAAA",
+        "height": 65,
+        "status": 1,
+        "tx": "0xaaca323ea50f05764d526a2cbc296f7fe6755c7571c8f75d8e949f92eadab7d8"
+      },
+      {
+        "case": "r RAAAAA",
+        "height": 69,
+        "status": 1,
+        "tx": "0x314c1bf96be536e69ea5bf5b9885b9cea1961b84045c10898c59147fa2c297d0"
+      },
+      {
+        "case": "b BAAAAAA",
+        "height": 73,
+        "status": 1,
+        "tx": "0x79989d721718dd1912682ed5e8c22e0c7efc778e4843637fada409978445caa6"
+      },
+      {
+        "case": "r RAAAAAA",
+        "height": 77,
+        "status": 1,
+        "tx": "0xb1dd7b6dedf76f1dc506ed34af523ab40b739e5532d76fa0c1946ab180f3542b"
+      },
+      {
+        "case": "b BAAAAAAA",
+        "height": 81,
+        "status": 1,
+        "tx": "0x347e561568ae48d27ebac68d974c81a12603a00c9f9c23412ebe12af836151dc"
+      },
+      {
+        "case": "r RAAAAAAA",
+        "height": 85,
+        "status": 1,
+        "tx": "0x50a39b7c6d12d345c3ce07a52e54c60f2b875373cb9b442291ae175f009adacb"
+      },
+      {
+        "case": "b BAAAAAAAA",
+        "height": 89,
+        "status": 1,
+        "tx": "0xc7e44f8fe635217042ae2d21f82854c7fc8236a205c8a74576bb0f5db76eaada"
+      },
+      {
+        "case": "r RAAAAAAAA",
+        "height": 93,
+        "status": 1,
+        "tx": "0x5865b1f1707feebbdb34b82fc5d577d5b97a0c12108dc3725a31d5af64a0c493"
+      },
+      {
+        "case": "b BAAAAAAAAA",
+        "height": 97,
+        "status": 1,
+        "tx": "0x44e172b3b0d51edcc55b8c741bc45731fcd16753b4ede59abca3f9c8ab747880"
+      },
+      {
+        "case": "r RAAAAAAAAA",
+        "height": 101,
+        "status": 1,
+        "tx": "0xec8eb661ed19f3c6ffc4b2af763120ec93aabb7cd1fcb139a4795e09b597412e"
+      },
+      {
+        "case": "backed duplicate",
+        "height": 105,
+        "status": 0,
+        "tx": "0xd32cbf3032795abadf2dffa97641525bccafd946cbd987b191655925e837b022"
+      },
+      {
+        "case": "free duplicate",
+        "height": 109,
+        "status": 0,
+        "tx": "0x1e6344e895938c58b96380e1988660566f87bc2140bb58ffb949b4e5c4f03a8c"
+      },
+      {
+        "case": "free on backed",
+        "height": 113,
+        "status": 0,
+        "tx": "0xd91074866c8b3648a05dff71da8b1ec138d3612620bcbab7c5f4c841a3a4634d"
+      },
+      {
+        "case": "backed on free",
+        "height": 117,
+        "status": 0,
+        "tx": "0x7101316f6311884973224967bd16258faf9427ed17b2bcba7bd80c9fe9cb8e26"
+      },
+      {
+        "case": "no approval",
+        "height": 121,
+        "status": 0,
+        "tx": "0x3227160b8578349aaf8941f30d55e3eb98e32dfeb17b8d4080ce193f39b714b5"
+      },
+      {
+        "case": "wrong price",
+        "height": 125,
+        "status": 0,
+        "tx": "0x4e5e0bbe7193f9663888955b52f8c576c33bdef8f69c19351b4b92fd9874cdaf"
+      },
+      {
+        "case": "reserved",
+        "height": 129,
+        "status": 0,
+        "tx": "0xa4a23597f9acc84f8107521d61842bf7fd84d4d094dc2f9fd91f687136dd5da7"
+      },
+      {
+        "case": "insufficient",
+        "height": 133,
+        "status": 0,
+        "tx": "0x7028aff09ed194cab1b85ec964509d1b54bc5bd600ce5b63d17c556bcc7f5771"
+      },
+      {
+        "case": "retry",
+        "height": 137,
+        "status": 1,
+        "tx": "0xa736d230456f3f92970832e794cf4aa27dd90972c04aa0281c5df702b112cfc4"
+      },
+      {
+        "case": "race backed",
+        "height": 142,
+        "status": 0,
+        "tx": "0x62c5f9c6df7d6b81f7a491adc15d2525edae58aad4bed4a4e17d172a50d59621"
+      },
+      {
+        "case": "race free",
+        "height": 141,
+        "status": 1,
+        "tx": "0xea7dbe91cf57f234baf3157c4108a25bf45822d8604256811b8f1aecd395511a"
+      }
+    ],
+    "observerMatched": true,
+    "treasuryAndBurnVerified": true
+  }
+}
