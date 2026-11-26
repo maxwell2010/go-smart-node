@@ -7,6 +7,7 @@ import (
 	sdk "github.com/cosmos/cosmos-sdk/types"
 	"github.com/ethereum/go-ethereum/accounts/abi"
 	"github.com/ethereum/go-ethereum/common"
+	ethmath "github.com/ethereum/go-ethereum/common/math"
 	"github.com/ethereum/go-ethereum/core"
 	ethtypes "github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/crypto"
@@ -64,9 +65,15 @@ func (c *withdrawalController) admitAssetConvert(ctx sdk.Context, sender common.
 		new(big.Int).Sub(out.Reserve.BigInt(), s.Out.Reserve.BigInt()).Cmp(s.Middle) != 0 {
 		return errors.New("MC_CONVERT_CURVE_DELTA")
 	}
+	// The pinned ERC20 does not decrement the max-uint approval. Finite
+	// approvals are consumed exactly once without emitting another Approval.
+	expectedAllowance := s.Allowance
+	if expectedAllowance.Cmp(ethmath.MaxBig256) != 0 {
+		expectedAllowance = new(big.Int).Sub(s.Allowance, s.Input)
+	}
 	if new(big.Int).Sub(s.HolderBalance, reservelessBalance(r, ctx, s.TokenIn, sender)).Cmp(s.Input) != 0 ||
 		new(big.Int).Sub(reservelessBalance(r, ctx, s.TokenOut, s.Recipient), s.RecipientBalance).Cmp(s.Output) != 0 ||
-		s.Allowance.Cmp(s.Input) != 0 || convertAllowance(ctx, r, s.TokenIn, sender, center).Sign() != 0 {
+		convertAllowance(ctx, r, s.TokenIn, sender, center).Cmp(expectedAllowance) != 0 {
 		return errors.New("MC_CONVERT_WALLET_DELTA")
 	}
 	native, err := r.spendableReserve(ctx, center)
