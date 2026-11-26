@@ -6,6 +6,7 @@ import (
 	"slices"
 
 	sdk "github.com/cosmos/cosmos-sdk/types"
+	"github.com/maxwell2010/go-smart-node/network/identity"
 )
 
 const (
@@ -177,5 +178,25 @@ func (k *StateKeeper) updateNativeLiveValidatorRoster(ctx sdk.Context, operator 
 		}
 		ids = slices.Delete(ids, i, i+1)
 	}
-	return k.writeNativeLiveValidatorRoster(ctx, ids)
+	if !identity.BootstrapUnanimityExecution {
+		return k.writeNativeLiveValidatorRoster(ctx, ids)
+	}
+	minimum, err := k.BootstrapUnanimityMinimumID(ctx)
+	if err != nil {
+		return err
+	}
+	if minimum == 0 {
+		return k.writeNativeLiveValidatorRoster(ctx, ids)
+	}
+	// A roster change permanently ends bootstrap voting, even if a later action
+	// restores the same roster before the next block.
+	child, commit := ctx.CacheContext()
+	if err := k.writeNativeLiveValidatorRoster(child, ids); err != nil {
+		return err
+	}
+	if err := k.service.OpenKVStore(child).Set([]byte{bootstrapUnanimityKey}, make([]byte, 8)); err != nil {
+		return err
+	}
+	commit()
+	return nil
 }

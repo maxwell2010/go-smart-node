@@ -29,7 +29,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func checkNativeGovernanceSignalRoutesAndTally(t *testing.T, a *App) {
+func nativeGovernanceTestState(t *testing.T, a *App) (sdk.Context, sdk.AccAddress, sdk.AccAddress, sdk.Coins) {
 	t.Helper()
 	previous := a.withdrawals
 	t.Cleanup(func() { a.withdrawals = previous })
@@ -105,7 +105,13 @@ func checkNativeGovernanceSignalRoutesAndTally(t *testing.T, a *App) {
 	bankGenesis.Balances = []banktypes.Balance{{Address: proposer.String(), Coins: deposit}}
 	a.BankKeeper.InitGenesis(ctx, &bankGenesis)
 	gov.InitGenesis(ctx, a.AccountKeeper, a.BankKeeper, &a.GovKeeper, &govGenesis)
+	return ctx, proposer, voter, deposit
+}
 
+func checkNativeGovernanceSignalRoutesAndTally(t *testing.T, a *App) {
+	t.Helper()
+	ctx, proposer, voter, deposit := nativeGovernanceTestState(t, a)
+	unit := sdkmath.NewInt(nativekeeper.NativeDELAtomsPerPower)
 	send, err := govv1.NewMsgSubmitProposal([]sdk.Msg{&banktypes.MsgSend{
 		FromAddress: authtypes.NewModuleAddress(govtypes.ModuleName).String(), ToAddress: proposer.String(), Amount: deposit,
 	}}, deposit, proposer.String(), "ipfs://signal", "Signal", "Test signal", false)
@@ -114,7 +120,7 @@ func checkNativeGovernanceSignalRoutesAndTally(t *testing.T, a *App) {
 	require.ErrorContains(t, err, "no executable messages")
 	id, err := a.GovKeeper.ProposalID.Peek(ctx)
 	require.NoError(t, err)
-	require.Equal(t, govGenesis.StartingProposalId, id)
+	require.Equal(t, govv1.DefaultStartingProposalID, id)
 	registrationKey := ed25519.GenPrivKeyFromSecret([]byte("new named operator"))
 	registration, err := BuildNativeValidatorRegistrationMetadata(a.chainID, a.evmChainID, proposer, 100, 5, registrationKey.Key)
 	require.NoError(t, err)

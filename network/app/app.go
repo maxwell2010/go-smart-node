@@ -278,6 +278,9 @@ func NewApp(
 	)
 
 	tkeys := storetypes.NewTransientStoreKeys(evmtypes.TransientKey, feemarkettypes.TransientKey)
+	if identity.BootstrapUnanimityExecution {
+		tkeys[bootstrapVoteStore] = storetypes.NewTransientStoreKey(bootstrapVoteStore)
+	}
 
 	// load state streaming if enabled
 	if err := bApp.RegisterStreamingServices(appOpts, keys); err != nil {

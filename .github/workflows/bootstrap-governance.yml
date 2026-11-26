@@ -1,0 +1,40 @@
+name: MintCandy bootstrap governance
+
+on:
+  push:
+    branches: ['feat/bootstrap-unanimous-governance']
+    paths: ['network/**', '.github/workflows/bootstrap-governance.yml']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  governance:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 40
+    strategy:
+      fail-fast: false
+      matrix:
+        profile: [mintcandy_testnet, mintcandy_mainnet]
+    env:
+      GOWORK: 'off'
+      GOTOOLCHAIN: local
+      GOMAXPROCS: '2'
+    defaults:
+      run:
+        working-directory: network
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e
+        with:
+          go-version: '1.26.11'
+          cache-dependency-path: network/go.sum
+      - name: Exercise bootstrap decisions and governance settlement in memory
+        run: |
+          for tags in "${{ matrix.profile }}" "${{ matrix.profile }},mintcandy_bootstrap_unanimity"; do
+            go test -mod=readonly -p 2 -tags "$tags" -count=1 -timeout 8m -v \
+              -run 'Bootstrap|Unanimous' ./app ./decimal/validator/keeper ./decimal/validator/governance
+          done

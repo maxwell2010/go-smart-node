@@ -176,7 +176,20 @@ func (h nativeGovernanceHooks) AfterProposalVote(ctx context.Context, id uint64,
 	if len(voter) != 20 {
 		return errors.New("native governance voter requires a 20-byte account")
 	}
-	return checkNativeGovernanceProposalLimit(ctx, h.app.GovKeeper.Votes, id, maxNativeGovProposalVotes, "voter")
+	if err := checkNativeGovernanceProposalLimit(ctx, h.app.GovKeeper.Votes, id, maxNativeGovProposalVotes, "voter"); err != nil {
+		return err
+	}
+	s := sdk.UnwrapSDKContext(ctx)
+	if identity.BootstrapUnanimityExecution && s.ExecMode() == sdk.ExecModeFinalize && h.app.usesNativeUpgradeGovernance() {
+		minimum, err := h.app.NativeValidatorKeeper.BootstrapUnanimityMinimumID(s)
+		if err != nil {
+			return err
+		}
+		if minimum != 0 && id >= minimum {
+			s.TransientStore(h.app.tkeys[bootstrapVoteStore]).Set(sdk.Uint64ToBigEndian(id), []byte{1})
+		}
+	}
+	return nil
 }
 
 func (h nativeGovernanceHooks) AfterProposalDeposit(ctx context.Context, id uint64, depositor sdk.AccAddress) error {
