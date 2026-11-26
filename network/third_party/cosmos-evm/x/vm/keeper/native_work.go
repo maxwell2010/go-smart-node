@@ -1,7 +1,9 @@
 package keeper
 
 import (
+	"errors"
 	"fmt"
+	"github.com/cosmos/evm/x/vm/types"
 
 	"cosmossdk.io/math"
 	storetypes "cosmossdk.io/store/types"
@@ -19,6 +21,51 @@ func (k *Keeper) SetTransactionContext(prepare func(sdk.Context, core.Message) s
 		panic("invalid EVM transaction context registration")
 	}
 	k.transactionContext = prepare
+}
+
+// prepareNativeContext meters the application's read-only work before EVM execution
+// against the original transaction budget. Only its context values escape.
+func (k *Keeper) prepareNativeContext(ctx sdk.Context, msg core.Message) (prepared sdk.Context, used uint64, exhausted bool) {
+	if k.transactionContext == nil {
+		return ctx, 0, false
+	}
+	meter := storetypes.NewGasMeter(msg.GasLimit)
+	native := ctx.WithGasMeter(meter).WithKVGasConfig(storetypes.KVGasConfig()).WithTransientKVGasConfig(storetypes.TransientGasConfig())
+	defer func() {
+		used = meter.GasConsumedToLimit()
+		if recovered := recover(); recovered != nil {
+			if _, ok := recovered.(storetypes.ErrorOutOfGas); !ok {
+				panic(recovered)
+			}
+			prepared, used, exhausted = ctx, msg.GasLimit, true
+		}
+	}()
+	prepared = k.transactionContext(native, msg)
+	return prepared.WithGasMeter(ctx.GasMeter()).WithKVGasConfig(ctx.KVGasConfig()).WithTransientKVGasConfig(ctx.TransientKVGasConfig()), 0, false
+}
+
+// applyOuterMessage is shared by signed transactions and disposable gas estimation.
+// A failed or reverted EVM call still pays for the preflight already executed.
+func (k *Keeper) applyOuterMessage(ctx sdk.Context, msg core.Message, commit bool, cfg *statedb.EVMConfig, txConfig statedb.TxConfig) (sdk.Context, *types.MsgEthereumTxResponse, error) {
+	prepared, cost, exhausted := k.prepareNativeContext(ctx, msg)
+	execMsg := msg
+	execMsg.GasLimit -= cost
+	if !exhausted {
+		stateDB := statedb.New(prepared, k, txConfig)
+		res, err := k.ApplyMessageWithConfig(prepared, stateDB, execMsg, nil, commit, false, cfg, txConfig, false, nil)
+		if err == nil {
+			res.GasUsed += cost
+			res.MaxUsedGas += cost
+			return prepared, res, nil
+		}
+		if cost == 0 || (!errors.Is(err, core.ErrIntrinsicGas) && !errors.Is(err, core.ErrFloorDataGas)) {
+			return prepared, nil, err
+		}
+	}
+	// Ante purchased the original gas. Preflight used its share, leaving too
+	// little for an intrinsic charge. Settle exactly once as an EVM failure.
+	return prepared, &types.MsgEthereumTxResponse{GasUsed: msg.GasLimit, MaxUsedGas: msg.GasLimit, VmError: vm.ErrOutOfGas.Error(),
+		Hash: txConfig.TxHash.Hex(), BlockHash: ctx.HeaderHash(), BlockTimestamp: uint64(ctx.BlockTime().Unix())}, nil
 }
 
 // SetInternalCommitGuard installs the application's check for internal EVM

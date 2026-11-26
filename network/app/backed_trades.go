@@ -34,9 +34,12 @@ type reserveBuyCredit struct {
 
 // The keeper supplies a fresh transaction cache after EIP-155 recovery, or a discarded
 // estimation cache. Internal module EVM calls do not pass through this entry point.
-func reserveTradeContext(ctx sdk.Context, msg core.Message) sdk.Context {
+func (c *withdrawalController) reserveTradeContext(ctx sdk.Context, msg core.Message) sdk.Context {
 	if msg.To != nil && msg.Value != nil && msg.Value.Sign() > 0 && len(msg.Data) == 68 && bytes.Equal(msg.Data[:4], buySelector) {
 		return ctx.WithValue(reserveBuyCreditKey{}, reserveBuyCredit{*msg.To, new(big.Int).Set(msg.Value)})
+	}
+	if snap, ok := c.convertSnapshot(ctx, msg); ok {
+		return ctx.WithValue(assetConvertKey{}, snap).WithValue(reserveBuyCreditKey{}, reserveBuyCredit{snap.TokenOut, snap.Middle})
 	}
 	return ctx
 }
@@ -160,5 +163,5 @@ func (app *App) handleReserveMarket(w http.ResponseWriter, r *http.Request) {
 		feeAPIError(w, 409, "reserve projection differs")
 		return
 	}
-	feeAPIJSON(w, 200, map[string]any{"version": 1, "height": ctx.BlockHeight(), "chain_id": ctx.ChainID(), "native_denom": "tmsp", "token": token.Hex(), "symbol": coin.Denom, "crr": coin.CRR, "supply_atoms": stored.Volume.String(), "reserve_atoms": stored.Reserve.String(), "min_supply_atoms": coin.MinVolume.String(), "max_supply_atoms": coin.LimitVolume.String(), "min_reserve_atoms": coinconfig.MinCoinReserve.String()})
+	feeAPIJSON(w, 200, map[string]any{"version": 1, "atomic_convert_version": 1, "token_center": reg.profile.TokenCenter.Hex(), "height": ctx.BlockHeight(), "chain_id": ctx.ChainID(), "native_denom": "tmsp", "token": token.Hex(), "symbol": coin.Denom, "crr": coin.CRR, "supply_atoms": stored.Volume.String(), "reserve_atoms": stored.Reserve.String(), "min_supply_atoms": coin.MinVolume.String(), "max_supply_atoms": coin.LimitVolume.String(), "min_reserve_atoms": coinconfig.MinCoinReserve.String()})
 }

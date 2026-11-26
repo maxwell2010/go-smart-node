@@ -219,7 +219,7 @@ func (app *App) installWithdrawalController(controller *withdrawalController) {
 		app.BankKeeper.AppendSendRestriction(controller.customCollateral.restrictReserveCredit)
 	}
 	if testIssuanceActive(app.chainID) {
-		app.EVMKeeper.SetTransactionContext(reserveTradeContext)
+		app.EVMKeeper.SetTransactionContext(controller.reserveTradeContext)
 	}
 	app.EVMKeeper.SetInternalCommitGuard(controller.guardInternalCommit)
 	app.EVMKeeper.AppendHooks(controller)
