@@ -1,0 +1,47 @@
+{
+  "chainId": "mintcandy_9905401-1",
+  "height": 37995,
+  "blockHash": "0CEA8B0CECE3915C278B91029BA73E340E82E5BAAA885B9B9A96B179F63F8714",
+  "blockTime": "2026-11-26T03:58:09.941361191Z",
+  "inputAppHash": "0E4105EE5A66F8062919EB91CA85165DDB91BB9FC06F2C1BD51DAD5EE6962793",
+  "archiveSha256": "c69fe57509bdbdb44a7c9c6895419adcb7313d0c1670bdb4523c275164dfd781",
+  "harnessSource": "b115b15d8f20f6c67dd348ff53f5ed4105ab08ab",
+  "harnessBuild": "https://github.com/maxwell2010/go-smart-node/actions/runs/45753945411",
+  "harnessSha256": "4d90cc9859500a1d0e9ff897c3ae40b53ac2c2e9b277a24ebf8c26bf8a0f66d6",
+  "testScope": "offline ticker index on two disposable observer application.db copies",
+  "identicalRuns": 2,
+  "replayedHeight": 37996,
+  "canonicalControlAppHash": "24CC83BBE8443F38E201A9D30868F93D9022C1BC258A1DA6F28ADB31A7006AAD",
+  "offlineMigratedAppHash": "50277AADF2F20E3E3071A8DB9F7944F4DCF2DD8930CC36747D48B75079948C46",
+  "unchangedStoresOutsideIndex": 20,
+  "persistedAfterFreshProcess": true,
+  "factory": "0x4526d1f8cba2e043d904d425d1faaca9cef8b0fb",
+  "eventsFrom": 1,
+  "eventsThrough": 37995,
+  "events": [
+    {
+      "height": 29816,
+      "hash": "0x6c5c51cb40490a81b19477e7556860638ce92809b494b8d1283c6bc883c060c4",
+      "contract": "0xdb6e89eb27131c6b0fc226f9a4e241c1a84f7628",
+      "family": "reserveless",
+      "symbol": "test",
+      "totalSupply": "18888"
+    },
+    {
+      "height": 30266,
+      "hash": "0xfecba6db27266b605211ddfbad76147f34e0d07cb4e2972e970d8568116f4ae0",
+      "contract": "0x16c1e12e5f0f338e9521082fd671559845406b96",
+      "family": "reserveless",
+      "symbol": "cusdt",
+      "totalSupply": "5000000000000000000000"
+    },
+    {
+      "height": 37530,
+      "hash": "0x145b4162c1533bf5615c99e518d4bd6c8c53575de29fa7e707792f448f3b5899",
+      "contract": "0x92fe7b1a7558278634154e3972c87c1355a43c27",
+      "family": "reserveless",
+      "symbol": "cdel",
+      "totalSupply": "0"
+    }
+  ]
+}
